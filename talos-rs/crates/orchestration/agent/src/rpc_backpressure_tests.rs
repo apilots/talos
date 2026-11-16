@@ -118,6 +118,7 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
                 agent_id: "agent".into(),
             },
             (
+                adapter.session_owner.pin("session").unwrap(),
                 Box::new(()) as Box<dyn Send>,
                 adapter
                     .session_gate
@@ -240,6 +241,7 @@ async fn reconnect_remains_blocked_after_unconfirmed_disconnected_cleanup() {
             agent_id: "agent".into(),
         },
         (
+            adapter.session_owner.pin("session").unwrap(),
             Box::new(()) as Box<dyn Send>,
             adapter
                 .session_gate

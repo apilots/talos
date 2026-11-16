@@ -127,4 +127,4 @@ uv run --python 3.12 --with harbor==0.25.0 python talos-bench/recheck.py \
 
 Keep the entire run directory, including the original runner job, verifier logs, task outputs, and build and provenance files. The local `complete` flag applies to the selected trials. Official eligibility also depends on the published dataset and coverage, accepted execution settings, and the suite's required artifacts. Check those requirements before running a full set or preparing a submission.
 
-See the [suite reference](../../talos-bench/README.md) for current commands and published submission routes. The [phase two design](../../spec/feat-058-benchmark-execution/design.md) defines execution and coverage. The [artifact contract](../../spec/feat-057-portable-benchmark-runs/design.md) defines per-suite exports and eligibility checks.
+See the [suite reference](../../talos-bench/README.md) for current commands and published submission routes. The [phase two design](../../spec/feat-059-benchmark-execution/design.md) defines execution and coverage. The [artifact contract](../../spec/feat-058-portable-benchmark-runs/design.md) defines per-suite exports and eligibility checks.

@@ -2,15 +2,17 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use talos_agent::AgentResult;
+use talos_agent::{AgentContext, AgentResult};
 use talos_agent_api::AgentContinuationRef;
 use talos_agent_kernel::{
     AgentKernelContinuation, AgentKernelContinuationToolCall, AgentKernelUserActionContinuation,
-    EventAuthor, ExecutionBranch, KernelSessionArtifactStore, KernelTranscriptEvent,
+    DeferredTurnInputs, EventAuthor, ExecutionBranch, KernelTranscriptEvent,
     KernelTranscriptPayload, KernelTranscriptUserActionResponsePayload,
 };
 use talos_error::TalosError;
 use talos_types::{TurnExecutionMetrics, UserActionResponse};
+
+use crate::{execution::prepare_live_input, KernelAgentProvider};
 
 const CONTINUATION_VERSION: u8 = 1;
 
@@ -77,10 +79,9 @@ impl KernelProviderContinuation {
 }
 
 pub(crate) async fn build_kernel_continuation(
-    store: &dyn KernelSessionArtifactStore,
+    provider: &KernelAgentProvider,
+    context: &AgentContext,
     workspace_root: &Path,
-    session_id: &str,
-    turn_id: &str,
     reference: &KernelProviderContinuation,
     action_id: &str,
     response: UserActionResponse,
@@ -91,11 +92,14 @@ pub(crate) async fn build_kernel_continuation(
             "UserAction response does not match Kernel continuation",
         ));
     }
+    let store = provider.session_artifact_store.as_ref();
+    let session_id = &context.session.session_id;
+    let turn_id = &context.turn_id;
     let records = store
         .load_transcript_events(
             workspace_root,
             session_id,
-            None,
+            Some(turn_id),
             Some(ExecutionBranch::ReactiveLoop),
         )
         .await?;
@@ -103,7 +107,7 @@ pub(crate) async fn build_kernel_continuation(
         .into_iter()
         .filter_map(|record| match record.payload {
             KernelTranscriptPayload::UserActionRequest { payload }
-                if record.invocation_id == turn_id
+                if payload.action_id == action_id
                     && payload.call_id == reference.call_id
                     && payload.tool_name == reference.tool_name =>
             {
@@ -139,6 +143,17 @@ pub(crate) async fn build_kernel_continuation(
         )
         .await?;
 
+    let provider = provider.clone();
+    let context = context.clone();
+    let deferred_inputs =
+        DeferredTurnInputs::new(request.deferred_inputs, move |inputs| async move {
+            let mut prepared = Vec::with_capacity(inputs.len());
+            for input in inputs {
+                prepared.push(prepare_live_input(&provider, &context, input).await?);
+            }
+            Ok(prepared)
+        });
+
     Ok(AgentKernelContinuation::UserAction(
         AgentKernelUserActionContinuation {
             call_id: reference.call_id.clone(),
@@ -155,6 +170,7 @@ pub(crate) async fn build_kernel_continuation(
             tool_calls: request.tool_calls,
             tool_messages: request.tool_messages,
             deferred_tool_calls: request.deferred_tool_calls,
+            deferred_inputs,
             replay_dynamic_tool_results: HashMap::new(),
             execution_metrics: reference.execution_metrics.clone(),
         },

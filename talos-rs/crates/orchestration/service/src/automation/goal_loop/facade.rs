@@ -58,6 +58,21 @@ impl TalosService {
             }),
             _ => None,
         };
+        // Pause and Stop remain management of the saved definition. They can
+        // be used from another CLI while the original owner finishes its turn.
+        let _ownership = if start_goal || created_loop {
+            let ownership = self.turns.pin_session(&session.id)?;
+            if self
+                .turns
+                .session_owner()
+                .is_some_and(|owner| owner.hold() == talos_agent::SessionHold::Process)
+            {
+                self.turns.claim_session_open(&session.id)?;
+            }
+            ownership
+        } else {
+            None
+        };
         let cancelled_boundary = if start_goal || created_loop || explicit_target.is_some() {
             automation.cancelled_dispatch_boundary(&session.id).await?
         } else {
@@ -139,23 +154,34 @@ impl TalosService {
         automation.store.list(&actor.user_id, &request).await
     }
 
-    /// Original wake pump: Loop deadlines and never-admitted Goal deadlines.
-    /// Ongoing Goals still use committed completion or known-idle reconciliation.
+    /// Resident runtimes pick up unowned work. Foreground automation and TUI
+    /// only drive their explicitly opened sessions.
     pub async fn scan_session_loops(&self, now: i64) -> ServiceResult<()> {
         let automation = self.turns.automation_service()?;
+        let owner = self.turns.session_owner();
         let loop_sessions = automation.store.active_loop_sessions().await?;
-        let initial_goals = automation.store.initial_goal_sessions(now).await?;
+        let goal_sessions = automation.store.active_goal_sessions().await?;
         let sessions = loop_sessions
             .into_iter()
-            .chain(initial_goals)
+            .chain(goal_sessions)
             .collect::<std::collections::BTreeSet<_>>();
         for id in sessions {
             let result: ServiceResult<()> = async {
-                if let Some(session) = self.sessions.load_record(&id).await? {
-                    automation.scan(&session, now).await?;
-                    self.turns.try_dispatch_next(&id).await?;
-                    self.turns.continue_goal(session, false).await?;
-                }
+                let Some(session) = self.sessions.load_record(&id).await? else {
+                    return Ok(());
+                };
+                let ownership = if let Some(owner) = owner.as_ref() {
+                    let Some(lease) = owner.try_for_scan(&session.id)? else {
+                        return Ok(());
+                    };
+                    self.turns.recover_if_orphan(&session).await?;
+                    Some(lease)
+                } else {
+                    None
+                };
+                automation.scan(&session, now, ownership.as_ref()).await?;
+                self.turns.try_dispatch_next(&id).await?;
+                self.turns.continue_goal(session, false).await?;
                 Ok(())
             }
             .await;

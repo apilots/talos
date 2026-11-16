@@ -35,6 +35,7 @@ pub(super) async fn commit_initial(
         events,
         command,
         automation_origin,
+        subagent_limit,
     } = params;
     let (identity, initial_message_id) = validate_initial_admission(&events)?;
     if let Some(command) = command.as_ref() {
@@ -52,6 +53,37 @@ pub(super) async fn commit_initial(
         .begin_session_transaction(&identity.session_id)
         .await?;
     ensure_registration_retained(transaction.as_mut(), &identity.session_id).await?;
+    if let Some(limit) = subagent_limit {
+        // A settled child can follow up at capacity. Its active row still counts for new children.
+        let rows = transaction
+            .query(
+                r#"
+                SELECT COUNT(*) AS active
+                FROM sessions target
+                JOIN sessions child ON child.tree_root_session_id = target.tree_root_session_id
+                JOIN agent_active_turns turn ON turn.session_id = child.session_key
+                WHERE target.session_key = ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM agent_events
+                      WHERE session_id = target.session_key
+                        AND json_extract(payload_json, '$.type') IN ('turnCompleted', 'turnFailed')
+                  )
+                "#,
+                &[&identity.session_id],
+            )
+            .await?;
+        let active = rows
+            .first()
+            .and_then(|row| row.get_i64("active"))
+            .ok_or_else(|| talos_error::TalosError::internal("Invalid active child Turn count."))?;
+        if active >= i64::from(limit.get()) {
+            transaction.rollback().await?;
+            return Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::SessionBudgetExceeded,
+                format!("This Session has reached the limit of {limit} active child Turns. Wait for an existing child or continue the work directly."),
+            ));
+        }
+    }
     let records = append_events(transaction.as_mut(), events).await?;
     let last_event_seq = records
         .last()

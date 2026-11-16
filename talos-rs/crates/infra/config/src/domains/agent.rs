@@ -1,3 +1,5 @@
+use std::num::{NonZeroU32, NonZeroUsize};
+
 use serde::{Deserialize, Serialize};
 use talos_error::TalosResult;
 
@@ -21,6 +23,25 @@ fn default_timeline_replay_batch_size() -> usize {
 
 fn default_command_idempotency_ttl_hours() -> u32 {
     24
+}
+
+/// Admission limits shared by all descendants of a primary Session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SubagentAdmissionConfig {
+    /// Maximum number of child segments below the primary Agent.
+    pub max_depth: NonZeroUsize,
+    /// Active child Turn count at which a new child can no longer start.
+    pub max_active_turns: NonZeroU32,
+}
+
+impl Default for SubagentAdmissionConfig {
+    fn default() -> Self {
+        Self {
+            max_depth: NonZeroUsize::new(3).unwrap(),
+            max_active_turns: NonZeroU32::new(20).unwrap(),
+        }
+    }
 }
 
 /// Default handling of new composer input while a Session Turn is running.
@@ -133,6 +154,10 @@ pub struct AgentConfig {
     #[serde(default)]
     pub message_queue: MessageQueueConfig,
 
+    /// Admission policy for child Turns, independent of the Agent Provider.
+    #[serde(default)]
+    pub subagent_admission: SubagentAdmissionConfig,
+
     /// Maximum canonical events fetched for one replay page.
     #[serde(default = "default_timeline_replay_batch_size")]
     pub timeline_replay_batch_size: usize,
@@ -161,6 +186,7 @@ impl Default for AgentConfig {
             identity: None,
             inner_model: None,
             message_queue: MessageQueueConfig::default(),
+            subagent_admission: SubagentAdmissionConfig::default(),
             timeline_replay_batch_size: default_timeline_replay_batch_size(),
             command_idempotency_ttl_hours: default_command_idempotency_ttl_hours(),
             kernel: AgentKernelConfig::default(),

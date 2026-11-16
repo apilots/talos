@@ -2,7 +2,7 @@ use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::Utc;
@@ -23,9 +23,9 @@ use talos_agent_kernel::{
 use talos_config::{AgentKernelConfig, EffectiveWorkspace, ProviderModelConfig};
 use talos_error::TalosResult;
 use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelBlockCompleted,
-    ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, ModelOutputPhase,
-    ReasoningOutput, Usage,
+    Attachment, AttachmentUsage, ChatRequest, ChatResponse, ChatStream, LlmProvider,
+    LlmProviderRouter, ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
+    ModelBlockStreamEvent, ModelOutputPhase, ReasoningOutput, Usage,
 };
 use talos_memory::{
     DreamMemoryDate, DreamMemoryDayRevision, DreamMemoryDaySnapshot, DreamMemoryFormationStore,
@@ -40,10 +40,14 @@ use talos_types::{ModelInfo, ModelRef, ModelSelection, UserPermissionMode};
 use super::*;
 use crate::FileKernelSessionArtifactStore;
 
-struct StaticRouter;
+#[path = "persisted_resume_tests.rs"]
+mod persisted_resume_tests;
+
+struct StaticRouter(Arc<dyn LlmProvider>);
 #[derive(Default)]
 struct TextProvider {
     stream_calls: AtomicU64,
+    requests: Option<Mutex<Vec<ChatRequest>>>,
 }
 struct NoopDreamMemoryStore;
 struct MissingUserWorkspaceMemory;
@@ -121,7 +125,20 @@ impl LlmProvider for TextProvider {
         Ok(ChatStream { rx: receiver })
     }
 
-    async fn stream_model_blocks(&self, _request: ChatRequest) -> TalosResult<ModelBlockStream> {
+    fn validate_attachments(
+        &self,
+        _model: &str,
+        attachments: &[Attachment],
+    ) -> TalosResult<AttachmentUsage> {
+        talos_llm_provider::validate_inline_attachments(attachments, |file| {
+            file.media_type == "application/pdf"
+        })
+    }
+
+    async fn stream_model_blocks(&self, request: ChatRequest) -> TalosResult<ModelBlockStream> {
+        if let Some(requests) = &self.requests {
+            requests.lock().unwrap().push(request);
+        }
         let (sender, receiver) = tokio::sync::mpsc::channel(4);
         let stream_call = self.stream_calls.fetch_add(1, Ordering::SeqCst);
         tokio::spawn(async move {
@@ -169,7 +186,7 @@ impl LlmProvider for TextProvider {
 
 impl LlmProviderRouter for StaticRouter {
     fn provider_for(&self, _model_ref: &ModelRef) -> TalosResult<Arc<dyn LlmProvider>> {
-        Ok(Arc::new(TextProvider::default()))
+        Ok(self.0.clone())
     }
 }
 
@@ -429,7 +446,7 @@ fn provider_params(
         agent_id: "agent-1".to_string(),
         name: "Test Agent".to_string(),
         description: "Kernel Provider contract test".to_string(),
-        llm_provider_router: Arc::new(StaticRouter),
+        llm_provider_router: Arc::new(StaticRouter(Arc::new(TextProvider::default()))),
         tool_registry: Arc::new(ToolRegistry::new()),
         kernel_config: AgentKernelConfig {
             workspace_dir: workspace_root.display().to_string(),

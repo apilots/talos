@@ -22,6 +22,10 @@ pub struct WorkerRpcHost {
 }
 
 impl WorkerRpcHost {
+    pub fn session_owner(&self) -> talos_agent::SessionOwner {
+        self.adapter.session_owner()
+    }
+
     /// Binds before returning, so registration cannot publish an unbound listener.
     pub async fn bind(
         config: &WorkerRpcConfig,
@@ -180,6 +184,7 @@ impl crate::TalosWorker {
                 uuid::Uuid::new_v4().simple()
             ),
         };
+        let (session_kind, session_hold) = self.session_policy();
         let adapter = AgentHarnessRpcAdapter::new(
             auth.node_id.clone(),
             self.config(),
@@ -187,6 +192,7 @@ impl crate::TalosWorker {
         )
         .with_environment(self.environment())
         .with_resource_binder(self.resource_binder())
+        .with_session_policy(session_kind, session_hold)
         .with_registration_revocation_hook({
             let plugins = self.plugin_manager();
             Arc::new(move || plugins.cancel_remote_mcp_authorizations())

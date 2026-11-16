@@ -174,9 +174,19 @@ transcript or result JSON. Provider artifacts remain private execution material.
 | Browser refresh while execution is live | Replay through a captured high-water mark, then receive live events; do not resubmit input |
 | Waiting with an unclaimed continuation | Keep the pending input available |
 | Claimed continuation with no subsequent durable progress | Resume the same Turn from the supported continuation and committed response |
+| Another live process holds the session lock | Return `SessionHeld`. Do not settle, interrupt, or retry recovery. History stays readable |
+| Lock acquired with an orphaned Worker marker | Verify the exact Turn and coordinator and persist the cleanup confirmation under the Worker lock. Resume a durable continuation or fail the running Turn once with reason `owner process exited`. Keep the lease through terminal settlement |
 | Claimed continuation already advanced without a safe resume point | Do not replay old side effects; fail once after confirmed cleanup |
 | Orphaned nonterminal execution without continuation | Recover from durable facts and fail after confirmed cleanup |
-| Cleanup cannot be confirmed | Retain active isolation; do not fabricate completion |
+| Cleanup is still in flight in this process | `RunCleanupUnconfirmed`. Retain active isolation; do not fabricate completion |
+
+The Kernel keeps live text and File IDs in the pending tool continuation until
+the original tool batch finishes. Another user action carries the same input
+forward without reading attachments and retains live input queued during the
+replay. The Provider resolves and authorizes the files when the Kernel is ready
+to apply the input. Before the next model call, the budget guard protects the
+latest live input. An unavailable file or exhausted budget fails the Turn with
+the corresponding typed error after the tool result.
 
 Natural completion and cancellation converge through the durable terminal
 commit boundary. Cancellation does not automatically dispatch queued work.
@@ -238,9 +248,32 @@ Re-enter Coordinator -> same AgentHarness -> same AgentProvider implementation
 Child Timeline and result projection
 ```
 
-A subagent does not silently select another Agent definition or bypass normal
-Session and Turn lifecycle rules. Cross-Agent delegation, if introduced, must
-be a separate explicit product capability.
+At creation, the child Session saves the spawning Session's effective model
+selection (including reasoning effort) and permission mode. It uses the same
+Worker, Agent, workspace, project and working directory. The Worker applies its
+existing Sandbox policy for that Agent using the inherited permission mode.
+This applies at every level of the Session tree. Subsequent parent Session
+configuration changes apply to children spawned after the change. Cross-Agent
+delegation, if introduced, must be a separate explicit product capability.
+
+Child Turn admission shares the primary Session's collaboration limits.
+`agent.subagent_admission.max_depth` defaults to three child levels and is
+checked before creating a child Session within the canonical path limit. Set it
+to one to allow direct children only. `max_active_turns` defaults to twenty
+active child Turns per tree. The Turn Store checks capacity for a child's first
+Turn in the same transaction that inserts the active Turn. A child with a
+settled Turn can start a follow-up at capacity. Running, waiting, and cancelling
+child Turns all count against new children until settlement.
+
+Rejected admission returns `sessionBudgetExceeded` without starting execution.
+The spawn admission task owns cleanup of a rejected child even if the request
+is dropped. Repeating an interrupt can confirm cleanup of a cancelling child
+and release the slot. Parent Turns and existing message delivery, waiting, and
+interruption need no child slot. Separate primary Session trees admit
+independently.
+
+See [Subagent Turn admission](../../spec/fix-013-subagent-admission/design.md)
+for the policy and verification contract.
 
 ## Tool capability flow
 

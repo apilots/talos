@@ -20,7 +20,7 @@ impl TuiApp {
             self.clear_message_queue_projection();
             return;
         };
-        if self.connection_status != "connected" {
+        if self.connection_status != "connected" || self.session_read_only {
             self.clear_message_queue_projection();
             return;
         }
@@ -539,6 +539,12 @@ impl TuiApp {
 
     fn handle_message_queue_disconnect(&mut self, error: TalosError) {
         self.clear_message_queue_projection();
+        if error.is_code(ErrorCode::SessionHeld) {
+            self.session_read_only = true;
+            self.message_queue_retry_at = None;
+            self.push_system_notice(format!("Read-only. {}", error.to_api_error().message));
+            return;
+        }
         self.message_queue_retry_at = Some(Instant::now() + QUEUE_SUBSCRIPTION_RETRY_DELAY);
         self.push_right_event(format!(
             "message queue disconnected: {}",

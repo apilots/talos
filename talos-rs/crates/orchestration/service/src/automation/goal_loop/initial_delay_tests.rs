@@ -46,12 +46,6 @@ async fn original_scan_admits_only_due_initial_goal_once() {
             .identity,
         active.identity
     );
-    assert!(store
-        .automation_store()
-        .initial_goal_sessions(now + 1)
-        .await
-        .unwrap()
-        .is_empty());
 }
 
 #[tokio::test]

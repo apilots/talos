@@ -438,6 +438,7 @@ async fn commit_completed_history_turn(
     started_block.completed_at = None;
     let admission = store
         .commit_initial_admission(CommitInitialAdmissionParams {
+            subagent_limit: None,
             automation_origin: None,
             events: vec![
                 AgentEvent {

@@ -6,8 +6,8 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 059 |
-| `fix` | 013 |
+| `feat` | 060 |
+| `fix` | 014 |
 | `refactor` | 045 |
 | `docs` | 001 |
 
@@ -15,12 +15,14 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
-| feat-058 | [Phase two benchmark execution](feat-058-benchmark-execution/design.md) | active |
-| feat-057 | [Portable benchmark runs and official artifacts](feat-057-portable-benchmark-runs/design.md) | active |
+| feat-059 | [Phase two benchmark execution](feat-059-benchmark-execution/design.md) | active |
+| feat-058 | [Portable benchmark runs and official artifacts](feat-058-portable-benchmark-runs/design.md) | active |
+| feat-057 | [Session ownership](feat-057-session-ownership/design.md) | active |
 | feat-056 | [Plugin lifecycle and local packages](feat-056-plugin-lifecycle-and-packages/design.md) | verified |
 | feat-055 | [Local Talos Agent benchmarks](feat-055-local-agent-benchmarks/design.md) | verified |
 | feat-054 | [Talo managed AI assistant](feat-054-managed-talo/design.md) | implemented |
 | feat-053 | [Session Goal and Loop](feat-053-session-goal-loop/design.md) | verified |
+| fix-013 | [Subagent Turn admission](fix-013-subagent-admission/design.md) | implemented |
 | fix-012 | [Capture contention and terminal logging lifetime](fix-012-capture-and-tui-shutdown/design.md) | active |
 | feat-052 | [Turn trajectory and model request inspection](feat-052-turn-trajectory/design.md) | active |
 | fix-011 | [Custom model stream reliability and reasoning controls](fix-011-qwen-stream-reliability/design.md) | implemented |

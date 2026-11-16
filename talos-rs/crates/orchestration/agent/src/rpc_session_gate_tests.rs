@@ -344,3 +344,70 @@ fn stale_maintenance_cannot_take_over_after_another_peer_publishes_a_new_history
     .unwrap();
     assert_eq!(gate.read(&session).unwrap().history_cursor, reset);
 }
+
+#[test]
+fn takeover_confirms_cleanup_only_for_the_bound_turn_and_coordinator() {
+    let root = tempfile::tempdir().unwrap();
+    let context = context("orphan");
+    let turn = AgentTurnRef::new("orphan", "turn");
+    let peer = uuid::Uuid::new_v4().to_string();
+    let original = SessionGate::new(root.path().to_owned());
+    let mut reservation = original
+        .reserve(
+            &context,
+            &turn,
+            &peer,
+            &Default::default(),
+            RunAdmission::NewTurn,
+        )
+        .unwrap();
+    reservation.consuming(&turn).unwrap();
+
+    assert!(original
+        .confirm_orphan_cleanup("kernel", &turn, &peer, || true)
+        .unwrap_err()
+        .is_code(ErrorCode::RunCleanupUnconfirmed));
+    drop(reservation);
+    let restarted = SessionGate::new(root.path().to_owned());
+    assert!(restarted
+        .confirm_orphan_cleanup("kernel", &turn, "wrong", || true)
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
+    assert!(restarted
+        .confirm_orphan_cleanup("kernel", &turn, &peer, || false)
+        .unwrap_err()
+        .is_code(ErrorCode::RunCleanupUnconfirmed));
+    restarted
+        .confirm_orphan_cleanup("kernel", &turn, &peer, || true)
+        .unwrap();
+
+    let terminal = SessionHistoryCursor {
+        completed_turn_id: Some(turn.turn_id.clone()),
+        completed_event_sequence: 5,
+        ..Default::default()
+    };
+    restarted
+        .commit(
+            &context,
+            &peer,
+            Some(&turn),
+            terminal.clone(),
+            SessionStateVisibility::Local,
+            HistoryBootstrap::Forbidden,
+        )
+        .unwrap();
+
+    // The first runtime already had this marker cached before the handoff.
+    let state = original.read(&context).unwrap();
+    assert_eq!(state.history_cursor, terminal);
+    assert_eq!(state.active_turn, None);
+    assert!(original
+        .reserve(
+            &context,
+            &AgentTurnRef::new("orphan", "next"),
+            &peer,
+            &terminal,
+            RunAdmission::NewTurn,
+        )
+        .is_ok());
+}

@@ -51,6 +51,8 @@ pub struct TalosWorker {
     mcp_credentials: McpCredentialStore,
     config_service: talos_service::ConfigService,
     background_tasks: Arc<talos_guard_task::GuardTasks>,
+    session_kind: talos_error::SessionOwnerKind,
+    session_hold: talos_agent::SessionHold,
 }
 
 impl TalosWorker {
@@ -289,7 +291,25 @@ impl TalosWorker {
             browser,
             mcp_credentials,
             config_service,
+            session_kind: talos_error::SessionOwnerKind::Server,
+            session_hold: talos_agent::SessionHold::Turn,
         })
+    }
+
+    /// Names the process in a session-held refusal and selects how long a claim lasts.
+    pub(crate) fn session_policy(
+        &self,
+    ) -> (talos_error::SessionOwnerKind, talos_agent::SessionHold) {
+        (self.session_kind, self.session_hold)
+    }
+
+    pub fn set_session_policy(
+        &mut self,
+        kind: talos_error::SessionOwnerKind,
+        hold: talos_agent::SessionHold,
+    ) {
+        self.session_kind = kind;
+        self.session_hold = hold;
     }
 
     /// The same node-local environment is used by embedded and network hosts.

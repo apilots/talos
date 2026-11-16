@@ -26,15 +26,18 @@ impl AgentHarnessRpcAdapter {
         harness: Arc<dyn AgentHarness>,
         execution: TalosResult<AgentRunExecution>,
         caller: talos_types::AgentCaller,
-        resources: (Box<dyn Send>, super::session_gate::Reservation),
+        resources: (
+            crate::SessionLease,
+            Box<dyn Send>,
+            super::session_gate::Reservation,
+        ),
     ) -> Response<RpcStream<pb::RunResponse>> {
-        let (resource_guard, mut reservation) = resources;
         let identity = caller.turn_ref();
         let agent_id = caller.agent_id;
         let (tx, rx) = mpsc::channel(32);
         let adapter = self.clone();
         tokio::spawn(async move {
-            let _resources = resource_guard;
+            let (ownership, _resource_guard, mut reservation) = resources;
             let mut execution = match execution {
                 Ok(value) => value,
                 Err(error) => {
@@ -72,6 +75,7 @@ impl AgentHarnessRpcAdapter {
                 let _ = lease.send(&tx, Ok(run_failure(error))).await;
                 return;
             }
+            ownership.retain_turn(&identity.turn_id);
             adapter
                 .active
                 .lock()
@@ -160,6 +164,11 @@ impl AgentHarnessRpcAdapter {
                             if !matches!(&settlement, agent_protocol::AgentRunSettlement::Finished { result: Err(error), .. } if error.is_code(ErrorCode::RunCleanupUnconfirmed)) {
                                 adapter.session_gate.cleaned(&identity)?;
                             }
+                            if matches!(settlement, agent_protocol::AgentRunSettlement::WaitingForInput { .. })
+                                && adapter.session_owner.hold() == crate::SessionHold::Attached
+                            {
+                                adapter.session_owner.release_turn(&identity);
+                            }
                             Ok(settlement)
                         });
                         let frame = match result.and_then(|settlement| {
@@ -223,6 +232,17 @@ impl AgentHarnessRpcAdapter {
         let coordinator = self
             .coordinator_id(first.caller.as_ref(), &session_context)
             .map_err(status_from_error)?;
+        let ownership = self
+            .session_owner
+            .pin(&identity.session_id)
+            .map_err(status_from_error)?;
+        if params.continuation.is_some() {
+            self.session_gate
+                .confirm_orphan_cleanup(&agent_id, &identity, coordinator, || {
+                    !self.session_owner.holds_turn(&identity)
+                })
+                .map_err(status_from_error)?;
+        }
         let reservation = self
             .session_gate
             .reserve(
@@ -262,7 +282,7 @@ impl AgentHarnessRpcAdapter {
                 turn_id: identity.turn_id,
                 agent_id,
             },
-            (resource_guard, reservation),
+            (ownership, resource_guard, reservation),
         ))
     }
 
@@ -299,6 +319,10 @@ impl AgentHarnessRpcAdapter {
         let coordinator = self
             .coordinator_id(first.caller.as_ref(), &session_context)
             .map_err(status_from_error)?;
+        let ownership = self
+            .session_owner
+            .pin(&identity.session_id)
+            .map_err(status_from_error)?;
         let reservation = self
             .session_gate
             .reserve(
@@ -334,7 +358,7 @@ impl AgentHarnessRpcAdapter {
                 turn_id: identity.turn_id,
                 agent_id,
             },
-            (resource_guard, reservation),
+            (ownership, resource_guard, reservation),
         ))
     }
 

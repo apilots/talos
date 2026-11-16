@@ -217,6 +217,7 @@ async fn admitted(
     .unwrap();
     let commit = store
         .commit_initial_admission(talos_store::session::CommitInitialAdmissionParams {
+            subagent_limit: None,
             automation_origin: origin,
             events: crate::test_support::canonical_user_admission(
                 identity.clone(),

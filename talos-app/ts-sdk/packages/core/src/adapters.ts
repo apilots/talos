@@ -5,6 +5,7 @@ import {
   type ManagedWorkerResponse,
   type TimelineEvent,
   type ErrorCode as ErrorCodeType,
+  type SessionOwnerKind,
 } from "./generated/app-protocol";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE" | "PUT";
@@ -214,6 +215,26 @@ export function decodeApiError(value: unknown): ApiError {
           throw new Error("Invalid Talos API response.");
         }
         localization = { type: "attachmentCountExceeded", limit, actual };
+        break;
+      }
+      case "sessionHeld": {
+        const { sessionId, ownerKind, pid, host, since } = descriptor;
+        const kinds = ["tui", "exec", "cli", "server", "desktop", "unknown"];
+        if (error.code !== ErrorCode.SessionHeld || typeof sessionId !== "string" || !sessionId.trim() ||
+            [...sessionId].length > 256 || typeof ownerKind !== "string" || !kinds.includes(ownerKind) ||
+            typeof pid !== "number" || !Number.isSafeInteger(pid) || pid < 0 ||
+            typeof host !== "string" || [...host].length > 256 ||
+            typeof since !== "string" || [...since].length > 256) {
+          throw new Error("Invalid Talos API response.");
+        }
+        localization = {
+          type: "sessionHeld",
+          sessionId,
+          ownerKind: ownerKind as SessionOwnerKind,
+          pid,
+          host,
+          since,
+        };
         break;
       }
       default:

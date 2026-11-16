@@ -4,7 +4,7 @@ Status: active
 
 ## Background and goals
 
-[Issue #147](https://github.com/apilots/talos/issues/147) extends the [first benchmark implementation](../feat-055-local-agent-benchmarks/design.md) to native ARM64 and AMD64 Docker, standard model selection, complete usage, and upstream runner compatibility. The [artifact contract](../feat-057-portable-benchmark-runs/design.md) defines the upstream outputs and publication requirements. This specification defines how to select and execute those runs locally.
+[Issue #147](https://github.com/apilots/talos/issues/147) extends the [first benchmark implementation](../feat-055-local-agent-benchmarks/design.md) to native ARM64 and AMD64 Docker, standard model selection, complete usage, and upstream runner compatibility. The [artifact contract](../feat-058-portable-benchmark-runs/design.md) defines the upstream outputs and publication requirements. This specification defines how to select and execute those runs locally.
 
 Keep one Talos CLI invocation and one adapter per runner. Keep Agent Kernel behavior, permission resolution, and sandbox policy outside this work. Keep actual leaderboard publication outside this work.
 

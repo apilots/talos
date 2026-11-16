@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use crate::session::{CreateSessionParams, SessionService};
-use crate::turn::TurnService;
+use crate::turn::{await_admission, TurnService};
 use crate::TimelineEventService;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::SessionSource;
 use talos_types::{
-    AgentTurnRef, AgentUserContent, AgentUserInput, SpawnSubagentRequest, StartTurnRequest,
-    SubagentRef, SubagentSpawnResult,
+    AgentTurnRef, AgentUserContent, AgentUserInput, SessionConf, SpawnSubagentRequest,
+    StartTurnRequest, SubagentRef, SubagentSpawnResult,
 };
 
 const MAX_SUBAGENT_PROMPT_BYTES: usize = 32 * 1024;
@@ -41,9 +41,15 @@ impl SubagentService {
         request: SpawnSubagentRequest,
     ) -> TalosResult<SubagentSpawnResult> {
         Self::validate_request(&request)?;
+        let service = self.clone();
+        await_admission(async move { service.spawn_owned(request).await }).await
+    }
+
+    async fn spawn_owned(&self, request: SpawnSubagentRequest) -> TalosResult<SubagentSpawnResult> {
         let caller = self.authorize_caller(&request.caller).await?;
         let agent_id = caller.agent_id.clone();
         let child_path = caller.path.join(&request.task_name)?;
+        self.turns.validate_subagent_depth(&child_path)?;
         let parent = self
             .sessions
             .load_record(&request.caller.session_id)
@@ -57,6 +63,7 @@ impl SubagentService {
         self.turns
             .validate_subagent_agent(&agent_id, &parent.user_id, &parent.execution_node_id)
             .await?;
+        let parent_info = self.sessions.session_info(&parent).await?;
         let mut child_source = SessionSource::system();
         child_source.environment = parent.environment.clone();
         let child = self
@@ -68,8 +75,11 @@ impl SubagentService {
                     user_id: parent.user_id.clone(),
                     target_agent: agent_id.clone(),
                     execution_node_id: parent.execution_node_id.clone(),
-                    model_selection: parent.conf.model_selection.clone(),
-                    conf: None,
+                    model_selection: Some(parent_info.model_selection),
+                    conf: Some(SessionConf {
+                        user_permission_mode: Some(parent_info.effective_mode),
+                        ..SessionConf::default()
+                    }),
                     workspace_id: parent.workspace_id.clone(),
                     project_id: parent.project_id.clone(),
                     current_directory: parent.current_directory.clone(),
@@ -84,7 +94,7 @@ impl SubagentService {
         let cleanup_session = child.clone();
         let start_result = self
             .turns
-            .submit_subagent_turn(
+            .submit_subagent_turn_owned(
                 child,
                 StartTurnRequest {
                     node_id: None,

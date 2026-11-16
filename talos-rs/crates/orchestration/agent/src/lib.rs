@@ -14,6 +14,7 @@ mod history;
 mod provider;
 mod reducer;
 mod rpc;
+mod session_owner;
 
 use std::sync::Arc;
 
@@ -38,6 +39,7 @@ pub use provider::{
 };
 pub use reducer::AgentEventReducer;
 pub use rpc::{AgentHarnessRpcAdapter, AgentInvocationResourceBinder};
+pub use session_owner::{SessionHold, SessionLease, SessionOwner};
 
 /// Compose one provider-neutral Agent Harness around a concrete Provider.
 ///

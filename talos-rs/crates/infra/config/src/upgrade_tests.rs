@@ -274,6 +274,8 @@ fn managed_profiles_preserve_complete_valid_operator_config() {
                 .max_workspace_bytes = 10737418240;
             config.storage.files.limits.max_metadata_value_bytes = 16384;
             config.storage.files.limits.max_metadata_bytes = 32768;
+            config.agent.subagent_admission.max_depth = std::num::NonZeroUsize::MIN;
+            config.agent.subagent_admission.max_active_turns = std::num::NonZeroU32::MIN;
             config.validate_runtime().unwrap();
 
             let mut saved = serde_yaml::to_value(config).unwrap();

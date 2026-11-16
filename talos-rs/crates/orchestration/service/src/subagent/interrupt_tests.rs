@@ -88,10 +88,12 @@ async fn interrupt_waiting_child_clears_its_durable_continuation() {
 }
 
 #[tokio::test]
-async fn interrupt_keeps_child_cancelling_when_cleanup_is_unconfirmed() {
-    let services = test_services().await;
+async fn interrupt_retries_until_child_cleanup_is_confirmed() {
+    let mut config = test_config();
+    config.agent.subagent_admission.max_active_turns = std::num::NonZeroU32::MIN;
+    let services = test_services_with_config(config).await;
     let parent = create_parent(&services).await;
-    let (child, _) = create_running_child(&services, parent.clone()).await;
+    let (child, turn_id) = create_running_child(&services, parent.clone()).await;
     services
         .coordinator
         .interrupt_outcome
@@ -101,7 +103,7 @@ async fn interrupt_keeps_child_cancelling_when_cleanup_is_unconfirmed() {
     let error = services
         .subagents
         .interrupt(InterruptSubagentRequest {
-            caller: parent,
+            caller: parent.clone(),
             target: target(&child),
         })
         .await
@@ -117,6 +119,34 @@ async fn interrupt_keeps_child_cancelling_when_cleanup_is_unconfirmed() {
             .state,
         talos_agent_api::ActiveTurnState::Cancelling
     );
+    let spawn = || {
+        services.subagents.spawn(SpawnSubagentRequest {
+            caller: parent.clone(),
+            task_name: "next".to_string(),
+            prompt: "Continue".to_string(),
+        })
+    };
+    assert!(spawn()
+        .await
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::SessionBudgetExceeded));
+    services
+        .coordinator
+        .interrupt_outcome
+        .lock()
+        .unwrap()
+        .replace(AgentInterruptOutcome::Cancelled);
+    let result = services
+        .subagents
+        .interrupt(InterruptSubagentRequest {
+            caller: parent.clone(),
+            target: target(&child),
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.outcome, SubagentOutcome::Interrupted { turn_id });
+    assert_eq!(services.coordinator.cancellations.lock().unwrap().len(), 2);
+    spawn().await.unwrap();
 }
 
 #[tokio::test]

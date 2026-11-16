@@ -125,6 +125,7 @@ pub struct AgentHarnessRpcAdapter {
     local_auth: Arc<Mutex<Option<Lease>>>,
     active: Arc<Mutex<HashMap<TurnKey, AuthorizationOwner>>>,
     cleanup_failure: Arc<Mutex<Option<TalosError>>>,
+    session_owner: crate::SessionOwner,
 }
 
 impl AgentHarnessRpcAdapter {
@@ -133,14 +134,19 @@ impl AgentHarnessRpcAdapter {
         config: Arc<std::sync::RwLock<Config>>,
         harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
     ) -> Self {
-        let root = config
+        let data_dir = config
             .read()
             .expect("Worker config lock")
             .talos_paths()
             .data_dir
-            .join("worker/session-heads");
+            .clone();
         Self {
-            session_gate: session_gate::SessionGate::new(root),
+            session_gate: session_gate::SessionGate::new(data_dir.join("worker/session-heads")),
+            session_owner: crate::SessionOwner::new(
+                data_dir.join("worker/session-locks"),
+                talos_error::SessionOwnerKind::Server,
+                crate::SessionHold::Turn,
+            ),
             node_id,
             environment: None,
             resource_binder: None,
@@ -154,6 +160,23 @@ impl AgentHarnessRpcAdapter {
             active: Arc::new(Mutex::new(HashMap::new())),
             cleanup_failure: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Selects who is named in a refusal and how long a successful claim is held.
+    /// Call this before the adapter admits any session.
+    #[must_use]
+    pub fn with_session_policy(
+        mut self,
+        kind: talos_error::SessionOwnerKind,
+        hold: crate::SessionHold,
+    ) -> Self {
+        let root = self.session_owner.root().to_path_buf();
+        self.session_owner = crate::SessionOwner::new(root, kind, hold);
+        self
+    }
+
+    pub fn session_owner(&self) -> crate::SessionOwner {
+        self.session_owner.clone()
     }
 
     /// Bind the Worker-owned ports after Harness reservation and before permit
@@ -445,11 +468,7 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
             .as_ref()
             .map(|caller| caller.coordinator_id.as_str())
             .ok_or_else(|| status_from_error(invalid_request()))?;
-        let cleanup_confirmed = self
-            .session_gate
-            .authorize_active(&params.agent_id, &params.identity, peer)
-            .map_err(status_from_error)?;
-        let result = if self
+        let local = self
             .active
             .lock()
             .expect("Agent active lock poisoned")
@@ -457,32 +476,40 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
                 params.agent_id.clone(),
                 params.identity.session_id.clone(),
                 params.identity.turn_id.clone(),
-            )) {
+            ));
+        let result = if local {
+            let cleanup_confirmed = self
+                .session_gate
+                .authorize_active(&params.agent_id, &params.identity, peer)
+                .map_err(status_from_error)?;
             self.harness(&params.agent_id)
                 .map_err(status_from_error)?
                 .interrupt(params)
                 .await
-        } else if cleanup_confirmed {
-            // Waiting releases the Harness live slot, while the original Gate
-            // retains the exact coordinator/Turn and confirmed cleanup.
-            Ok(talos_agent_api::AgentInterruptOutcome::Cancelled)
+                .map_err(|error| {
+                    if !cleanup_confirmed && error.is_code(ErrorCode::ResourceNotFound) {
+                        TalosError::from_source(
+                            ErrorCode::RunCleanupUnconfirmed,
+                            "Agent Turn cleanup is not confirmed by this node instance",
+                            error,
+                        )
+                    } else {
+                        error
+                    }
+                })
         } else {
-            Err(TalosError::new(
-                ErrorCode::RunCleanupUnconfirmed,
-                "Agent Turn is not known to this node instance",
-            ))
+            (|| {
+                let ownership = self.session_owner.pin(&params.identity.session_id)?;
+                self.session_gate.confirm_orphan_cleanup(
+                    &params.agent_id,
+                    &params.identity,
+                    peer,
+                    || !self.session_owner.holds_turn(&params.identity),
+                )?;
+                ownership.retain_turn(&params.identity.turn_id);
+                Ok(talos_agent_api::AgentInterruptOutcome::Cancelled)
+            })()
         };
-        let result = result.map_err(|error| {
-            if !cleanup_confirmed && error.is_code(ErrorCode::ResourceNotFound) {
-                TalosError::from_source(
-                    ErrorCode::RunCleanupUnconfirmed,
-                    "Agent Turn cleanup is not confirmed by this node instance",
-                    error,
-                )
-            } else {
-                error
-            }
-        });
         Ok(Response::new(pb::InterruptResponse {
             result: Some(match result {
                 Ok(value) => pb::interrupt_response::Result::Interrupted(
@@ -517,6 +544,10 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
             })?,
         )
         .map_err(status_from_error)?;
+        let _ownership = self
+            .session_owner
+            .pin(&params.session_id)
+            .map_err(status_from_error)?;
         let _reservation = self
             .session_gate
             .maintenance(&params, peer, &expected_history_cursor)
@@ -553,6 +584,10 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
             })?,
         )
         .map_err(status_from_error)?;
+        let _ownership = self
+            .session_owner
+            .pin(&params.session_id)
+            .map_err(status_from_error)?;
         let _reservation = self
             .session_gate
             .maintenance(&params, peer, &expected_history_cursor)

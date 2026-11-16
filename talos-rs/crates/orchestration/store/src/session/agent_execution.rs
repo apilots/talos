@@ -136,6 +136,8 @@ pub enum IdempotencyReservation {
 /// Inputs atomically committed for one fresh Agent Turn.
 pub struct CommitInitialAdmissionParams {
     pub automation_origin: Option<talos_types::AutomationTurnOrigin>,
+    /// Bound supplied by Turn policy for child admissions.
+    pub subagent_limit: Option<std::num::NonZeroU32>,
     pub events: Vec<AgentEvent>,
     pub command: Option<CommandLease>,
 }

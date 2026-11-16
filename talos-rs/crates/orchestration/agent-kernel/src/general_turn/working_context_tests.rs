@@ -199,6 +199,35 @@ fn test_working_context_trim_fails_when_latest_group_is_too_large() {
     assert_eq!(state.messages.len(), 1);
 }
 
+#[tokio::test]
+async fn working_context_rejects_over_budget_live_input_without_discarding_it() {
+    let prepared = prepared_with_budget(80);
+    let mut state = GeneralTurnLoopState::new(&prepared);
+    state.messages = vec![
+        ChatMessage::assistant("earlier output ".repeat(300)),
+        ChatMessage::assistant_with_tool_calls(
+            "",
+            vec![FunctionCall::new("pending", "Read", serde_json::json!({}))],
+        ),
+        ChatMessage::tool("pending", "Read", "resolved"),
+        ChatMessage::user("x".repeat(80)),
+        ChatMessage::user("y".repeat(120)),
+    ];
+
+    let error = working_context::enforce_working_context_budget(
+        &prepared,
+        &mut state,
+        &AgentKernelConfig::default(),
+    )
+    .await
+    .expect_err("the original tool exchange and latest inputs do not fit together");
+
+    assert!(error.is_code(talos_error::ErrorCode::ContextWindowExceeded));
+    assert_eq!(state.messages[1].tool_call_id.as_deref(), Some("pending"));
+    assert_eq!(state.messages[2].content, "x".repeat(80));
+    assert_eq!(state.messages[3].content, "y".repeat(120));
+}
+
 #[test]
 fn test_working_context_budget_includes_untrimmed_attachment_tokens() {
     let mut prepared = prepared_with_budget(16);
@@ -415,6 +444,7 @@ async fn resumed_screenshots_share_request_limits_with_user_attachments() {
                 .collect(),
             tool_messages: resumed,
             deferred_tool_calls: vec![],
+            deferred_inputs: None,
             replay_dynamic_tool_results: Default::default(),
             execution_metrics: Default::default(),
         });

@@ -13,7 +13,7 @@ mod types;
 
 pub(crate) use agent_execution::AgentExecutionDriver;
 pub(crate) use agent_message::{completed_agent_user_input, completed_user_action_message};
-pub(crate) use service::TurnService;
+pub(crate) use service::{await_admission, TurnService};
 pub(crate) use types::{PreparedTurnSubmission, StartTurnReservation, TurnRetryParams};
 
 fn validate_user_input(input: &AgentUserInput) -> TalosResult<()> {

@@ -9,7 +9,7 @@ use ts_rs::TS;
 mod api_error;
 pub use api_error::{
     ApiError, AutomationRequestReason, BrowserCapabilityOperation, BrowserCapabilityReason,
-    ErrorLocalization,
+    ErrorLocalization, SessionOwnerKind,
 };
 
 /// Public application error code shared by server and SDKs.
@@ -61,6 +61,7 @@ pub enum ErrorCode {
     ServiceUnavailable,
     RunForcedAbort,
     RunCleanupUnconfirmed,
+    SessionHeld,
     InternalError,
 }
 
@@ -107,6 +108,7 @@ impl ErrorCode {
             Self::ServiceUnavailable => "Service unavailable",
             Self::RunForcedAbort => "Run required forced cancellation",
             Self::RunCleanupUnconfirmed => "Run cleanup could not be confirmed",
+            Self::SessionHeld => "Session is held by another owner",
             Self::InternalError => "An internal error occurred",
         }
     }

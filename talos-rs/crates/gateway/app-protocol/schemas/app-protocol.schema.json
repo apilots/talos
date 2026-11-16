@@ -7024,6 +7024,7 @@
         "serviceUnavailable",
         "runForcedAbort",
         "runCleanupUnconfirmed",
+        "sessionHeld",
         "internalError"
       ],
       "type": "string"
@@ -7157,6 +7158,42 @@
           "required": [
             "actual",
             "limit",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "ownerKind": {
+              "$ref": "#/definitions/SessionOwnerKind"
+            },
+            "pid": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "since": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "sessionHeld"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "host",
+            "ownerKind",
+            "pid",
+            "sessionId",
+            "since",
             "type"
           ],
           "type": "object"
@@ -13188,6 +13225,17 @@
       "enum": [
         "queue",
         "steer"
+      ],
+      "type": "string"
+    },
+    "SessionOwnerKind": {
+      "enum": [
+        "tui",
+        "exec",
+        "cli",
+        "server",
+        "desktop",
+        "unknown"
       ],
       "type": "string"
     },
