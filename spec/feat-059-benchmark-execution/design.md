@@ -33,4 +33,4 @@ Evaluate the pinned local selections on native ARM64 with the configured model. 
 
 ## Verification
 
-Run the FrontierHarness smoke first on native ARM64 Docker. Check its exact Hub source, verifier reward, declared output, ATIF, and usage. Preflight the complete FrontierHarness inventory and the five-case selections before executing them. Record host-dependent gaps and validate native AMD64 separately on an AMD64 daemon. Validate result artifacts with upstream tools and keep actual logs and results under ignored `output/`.
+Run the FrontierHarness smoke first on native ARM64 Docker. Check its exact Hub source, verifier reward, declared output, ATIF, and usage. Preflight the complete FrontierHarness inventory and the five-case selections before executing them. Run the benchmark runner compatibility checks locally on native ARM64, and record host-dependent gaps by case. Validate result artifacts with upstream tools and keep actual logs and results under ignored `output/`.

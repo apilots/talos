@@ -9,12 +9,13 @@ Run the commands from the Talos repository root.
 ./talos-bench/run.sh terminal-bench@2.0
 ./talos-bench/run.sh swe-bench-lite
 ./talos-bench/run.sh mcp-atlas
+./talos-bench/run.sh deep-swe
 TALOS_BENCH_ORACLE=1 ./talos-bench/run.sh terminal-bench@4.1.0
 TALOS_BENCH_ORACLE=1 ./talos-bench/run.sh deep-swe
 TALOS_BENCH_ORACLE=1 ./talos-bench/run.sh frontier-harness@1.1.0
 ```
 
-The first four suite commands run controlled Talos cases without model credentials. Terminal-Bench defaults to 4.1. Its fixture produces placeholder SQL with an expected reward of 0.0. Oracle mode runs the upstream reference solution and skips the Talos build and model setup. Use the Oracle command for DeepSWE without model credentials.
+The five suite commands that omit Oracle mode run controlled Talos cases without model credentials. Terminal-Bench defaults to 4.1. Its fixture produces placeholder SQL with an expected reward of 0.0. Oracle mode runs the upstream reference solution and skips the Talos build and model setup.
 
 To reuse a build, set `TALOS_BENCH_PRODUCT` to a native Linux TUI product directory containing `bin/talos`, `bin/talos-linux-sandbox-launcher`, `conf/talos.yaml`, and `conf/migrations/sqlite/`. Build from a revision that provides the trajectory and MCP import commands used by the suites.
 
@@ -90,24 +91,21 @@ The MCP-Atlas smoke case can use a configured agent with Harbor's provider-only 
 
 ## Check runner compatibility
 
-The Bench runner workflow builds the checked-out product once on native Linux AMD64.
-It runs the Terminal-Bench 4.1 fixture under Harbor 0.22.0 and 0.25.0, the
-DeepSWE fixture under Pier 0.3.1, and the SWE-bench Lite and MCP-Atlas
-fixtures under their pinned Harbor release. The fixtures use loopback models
-and preserve the pinned verifier. The DeepSWE fixture commits a placeholder
-file so Pier exercises its patch collection and original verifier. Its
-expected task reward is zero.
-
-Set the product directory created by `talos-bench/install.sh` to run the
-same controls on a native Docker host.
+Run the compatibility checks locally on native ARM64 Docker. Set the product
+directory created by `talos-bench/install.sh` to reuse the same build for each
+check. The fixtures use loopback models and preserve the pinned verifier. The
+DeepSWE fixture commits a placeholder file so Pier exercises its patch
+collection and original verifier. Its expected task reward is zero.
 
 ```bash
 export TALOS_BENCH_PRODUCT=/path/to/install/product
 TALOS_BENCH_HARBOR_VERSION=0.22.0 ./talos-bench/run.sh terminal-bench@4.1.0
 ./talos-bench/run.sh terminal-bench@4.1.0
+./talos-bench/run.sh terminal-bench@2.0
 ./talos-bench/run.sh deep-swe@1.1
 ./talos-bench/run.sh swe-bench-lite@1.0
 ./talos-bench/run.sh mcp-atlas@2.0.0
+TALOS_BENCH_ORACLE=1 ./talos-bench/run.sh frontier-harness@1.1.0
 ```
 
 ## Repeat and compare runs
