@@ -117,13 +117,7 @@ impl SessionGate {
     /// continuations and recovery markers loaded after a Worker restart.
     pub(super) fn reserve_configuration(&self) -> TalosResult<Reservation> {
         let mut state = self.state.lock().expect("Worker Session gate lock");
-        if state.configuration_reserved
-            || !state.reserved.is_empty()
-            || state
-                .markers
-                .values()
-                .any(|marker| marker.active.is_some() || !marker.cleanup_confirmed)
-        {
+        if state.configuration_reserved || !state.reserved.is_empty() {
             return Err(busy());
         }
         match std::fs::read_dir(&self.root) {
@@ -183,6 +177,40 @@ impl SessionGate {
         Ok(marker.cleanup_confirmed && !state.reserved.contains(&identity.session_id))
     }
 
+    /// The caller holds the Worker session lease. Reconcile only the marker
+    /// authorized for this coordinator and exact Turn.
+    pub(super) fn confirm_orphan_cleanup(
+        &self,
+        agent_id: &str,
+        identity: &AgentTurnRef,
+        peer: &str,
+        can_confirm: impl FnOnce() -> bool,
+    ) -> TalosResult<()> {
+        let mut state = self.state.lock().expect("Worker Session gate lock");
+        if state.reserved.contains(&identity.session_id) {
+            return Err(cleanup_unconfirmed());
+        }
+        let mut marker = self
+            .load(&mut state, &identity.session_id)?
+            .cloned()
+            .ok_or_else(cleanup_unconfirmed)?;
+        if marker.binding.agent_id != agent_id
+            || marker.active.as_ref() != Some(identity)
+            || marker.coordinator_id != peer
+        {
+            return Err(conflict());
+        }
+        if !marker.cleanup_confirmed {
+            if !can_confirm() {
+                return Err(cleanup_unconfirmed());
+            }
+            marker.cleanup_confirmed = true;
+            self.save(&identity.session_id, &marker)?;
+            state.markers.insert(identity.session_id.clone(), marker);
+        }
+        Ok(())
+    }
+
     pub(super) fn new(root: PathBuf) -> Self {
         Self {
             root,
@@ -196,7 +224,9 @@ impl SessionGate {
                 "Session identity is invalid",
             ));
         }
-        if !state.markers.contains_key(session_id) {
+        // Outside a local reservation another process may have owned the lock
+        // and advanced this marker since our last access.
+        if !state.reserved.contains(session_id) {
             match std::fs::read(self.path(session_id)) {
                 Ok(bytes) => {
                     let marker: Marker = serde_json::from_slice(&bytes).map_err(|error| {
@@ -207,7 +237,9 @@ impl SessionGate {
                     })?;
                     state.markers.insert(session_id.into(), marker);
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    state.markers.remove(session_id);
+                }
                 Err(error) => return Err(io_error(error)),
             }
         }
@@ -489,6 +521,13 @@ impl SessionGate {
         })
     }
 }
+fn cleanup_unconfirmed() -> TalosError {
+    TalosError::new(
+        ErrorCode::RunCleanupUnconfirmed,
+        "Agent Turn cleanup is not confirmed by this node instance",
+    )
+}
+
 fn binding(marker: &Marker, context: &AgentSessionContext) -> TalosResult<()> {
     if marker.binding != Binding::from(context) {
         Err(conflict())

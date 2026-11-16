@@ -69,8 +69,8 @@ pub(crate) async fn bind_admission_origin(
                 return Err(conflict());
             }
             tx.execute(
-                "UPDATE session_loops SET latest_turn_id=?,next_due_at=NULL WHERE id=?",
-                &[&turn.turn_id, loop_id],
+                "UPDATE session_loops SET latest_turn_id=?,pending_turn_id=?,next_due_at=NULL WHERE id=?",
+                &[&turn.turn_id, &turn.turn_id, loop_id],
             )
             .await?;
         }

@@ -378,3 +378,93 @@ async fn unrelated_user_failure_preserves_the_active_goal() {
         .unwrap();
     assert_eq!(db.goal(&original.id).await.unwrap(), original);
 }
+
+#[tokio::test]
+async fn restarted_scanner_reconciles_durable_loop_decisions_without_replaying_a_claim() {
+    for decision in [
+        LoopWakeDecision::Stop {
+            reason: "Condition resolved".into(),
+        },
+        LoopWakeDecision::Continue {
+            delay_minutes: 3,
+            reason: "Check again".into(),
+        },
+    ] {
+        let (service, store) = fixture().await;
+        let db = store.automation_store();
+        db.create_loop(&task("dynamic", LoopSchedule::ModelDecided {}))
+            .await
+            .unwrap();
+        let (turn, commit) = admitted(
+            &service,
+            &store,
+            Some(AutomationTurnOrigin::Loop {
+                loop_id: "dynamic".into(),
+                occurrence_id: "occ".into(),
+                config_revision: 1,
+            }),
+            crate::test_support::test_user_input("Observe once"),
+        )
+        .await;
+        model_request(
+            &service,
+            &store,
+            &turn,
+            AutomationAction::Loop {
+                action: LoopAction::Decide {
+                    loop_id: "dynamic".into(),
+                    config_revision: 1,
+                    decision: decision.clone(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+        let terminal = normal_end(&store, turn, commit).await;
+        assert!(db.pending_loop_terminal("dynamic").await.unwrap().is_some());
+
+        let session = store.get_session_record("alice").await.unwrap().unwrap();
+        let scanner = crate::automation::goal_loop::SessionAutomationService::new(
+            db.clone(),
+            store.clone(),
+            crate::SessionMessageQueueService::new(10).unwrap(),
+            Arc::new(TestSkills),
+        );
+        let locks = tempfile::tempdir().unwrap();
+        let owner = talos_agent::SessionOwner::new(
+            locks.path(),
+            talos_error::SessionOwnerKind::Server,
+            talos_agent::SessionHold::Turn,
+        );
+        let permit = owner.try_for_scan("alice").unwrap().unwrap();
+        scanner
+            .scan(&session, terminal.occurred_at, Some(&permit))
+            .await
+            .unwrap();
+        let settled = db.loop_task("dynamic").await.unwrap();
+        assert!(db.pending_loop_terminal("dynamic").await.unwrap().is_none());
+        match decision {
+            LoopWakeDecision::Stop { reason } => {
+                assert_eq!(settled.status, LoopStatus::Stopped);
+                assert_eq!(settled.stop_reason, Some(LoopStopReason::ModelStopped));
+                assert_eq!(settled.reason, Some(reason));
+            }
+            LoopWakeDecision::Continue { reason, .. } => {
+                let due = terminal.occurred_at + 180;
+                assert_eq!(settled.next_due_at, Some(due));
+                assert_eq!(settled.reason, Some(reason));
+                let mut claimed = settled.clone();
+                claimed.next_due_at = None;
+                db.replace_loop(&settled, &claimed).await.unwrap();
+                scanner
+                    .scan(&session, due + 1, Some(&permit))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    db.loop_task("dynamic").await.unwrap().next_due_at,
+                    Some(due + 61)
+                );
+            }
+        }
+    }
+}

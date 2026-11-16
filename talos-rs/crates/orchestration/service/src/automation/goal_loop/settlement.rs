@@ -19,6 +19,15 @@ impl SessionAutomationService {
         metrics: Option<&AgentRunMetrics>,
     ) -> TalosResult<()> {
         let _gate = self.lock(&session.id).await;
+        self.settle_locked(session, event, metrics).await
+    }
+
+    async fn settle_locked(
+        &self,
+        session: &SessionRecord,
+        event: &AgentEvent,
+        metrics: Option<&AgentRunMetrics>,
+    ) -> TalosResult<()> {
         let _changed = SettlementChanged {
             sender: self.changed.clone(),
             session: session.id.clone(),
@@ -184,35 +193,28 @@ impl SessionAutomationService {
                         LoopSchedule::ModelDecided {}
                             if config_revision != task.config_revision =>
                         {
-                            if task.next_due_at.is_none() {
-                                self.enqueue_loop(session, &task).await?;
-                            }
+                            next.next_due_at = Some(now);
+                            self.store.replace_loop(&task, &next).await?;
+                            self.enqueue_loop(session, &next).await?;
                         }
-                        LoopSchedule::ModelDecided {} => match declaration {
-                            Some(Declaration::Loop {
-                                loop_id: id,
-                                revision,
-                                decision,
-                            }) if id == task.id && revision == config_revision => match decision {
-                                LoopWakeDecision::Continue {
-                                    delay_minutes,
-                                    reason,
-                                } => {
-                                    next.next_due_at =
-                                        Some(next_due(event.occurred_at, delay_minutes)?);
-                                    next.reason = Some(reason);
-                                    self.store.replace_loop(&task, &next).await?;
-                                }
-                                LoopWakeDecision::Stop { reason } => {
-                                    self.stop(
-                                        &task,
-                                        LoopStopReason::ModelStopped,
-                                        Some(reason),
-                                        now,
-                                    )
-                                    .await?
-                                }
-                            },
+                        LoopSchedule::ModelDecided {} => match self
+                            .store
+                            .loop_decision(&event.identity)
+                            .await?
+                        {
+                            Some(LoopWakeDecision::Continue {
+                                delay_minutes,
+                                reason,
+                            }) => {
+                                next.next_due_at =
+                                    Some(next_due(event.occurred_at, delay_minutes)?);
+                                next.reason = Some(reason);
+                                self.store.replace_loop(&task, &next).await?;
+                            }
+                            Some(LoopWakeDecision::Stop { reason }) => {
+                                self.stop(&task, LoopStopReason::ModelStopped, Some(reason), now)
+                                    .await?;
+                            }
                             _ if metrics.is_some() => {
                                 self.stop(&task, LoopStopReason::MissingDecision, None, now)
                                     .await?
@@ -262,8 +264,16 @@ impl SessionAutomationService {
         Ok(progressed)
     }
 
-    pub(crate) async fn scan(&self, session: &SessionRecord, now: i64) -> TalosResult<()> {
+    pub(crate) async fn scan(
+        &self,
+        session: &SessionRecord,
+        now: i64,
+        ownership: Option<&talos_agent::SessionLease>,
+    ) -> TalosResult<()> {
         let _gate = self.lock(&session.id).await;
+        if ownership.is_some_and(talos_agent::SessionLease::can_reconcile) {
+            self.heal_stuck_loops(session, now).await?;
+        }
         for task in self
             .store
             .loops(&session.id)
@@ -276,6 +286,61 @@ impl SessionAutomationService {
             }
         }
         Ok(())
+    }
+
+    /// A claimed occurrence that never started is not replayed. The next
+    /// interval is written only while this process holds the session lock.
+    async fn heal_stuck_loops(&self, session: &SessionRecord, now: i64) -> TalosResult<()> {
+        if self
+            .execution
+            .get_agent_active_turn(&session.id)
+            .await?
+            .is_some()
+        {
+            return Ok(());
+        }
+        for task in self.store.loops(&session.id).await? {
+            if task.status != LoopStatus::Active || task.next_due_at.is_some() {
+                continue;
+            }
+            if self.loop_is_queued(&session.id, &task.id)? {
+                continue;
+            }
+            let task = if let Some(terminal) = self.store.pending_loop_terminal(&task.id).await? {
+                self.settle_locked(session, &terminal, None).await?;
+                let settled = self.store.loop_task(&task.id).await?;
+                if settled.status != LoopStatus::Active
+                    || settled.next_due_at.is_some()
+                    || self.loop_is_queued(&session.id, &task.id)?
+                {
+                    continue;
+                }
+                settled
+            } else {
+                task
+            };
+            let minutes = match &task.schedule {
+                LoopSchedule::FixedInterval { minutes } => (*minutes).max(1),
+                LoopSchedule::ModelDecided {} => 1,
+            };
+            let mut next = task.clone();
+            next.next_due_at = Some(next_due(now, minutes)?);
+            match self.store.replace_loop(&task, &next).await {
+                Ok(()) => self.emit(&session.id),
+                Err(error) if error.is_code(ErrorCode::Conflict) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    fn loop_is_queued(&self, session_id: &str, loop_id: &str) -> TalosResult<bool> {
+        Ok(self.queue.list(session_id)?.messages.iter().any(|message| {
+            matches!(
+                &message.source,
+                QueuedMessageSource::Loop { loop_id: id, .. } if id == loop_id
+            )
+        }))
     }
 }
 

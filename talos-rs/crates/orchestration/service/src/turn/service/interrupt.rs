@@ -18,6 +18,7 @@ impl TurnService {
         session: &talos_store::session::SessionRecord,
         turn_id: &str,
     ) -> TalosResult<AgentInterruptOutcome> {
+        let _ownership = self.pin_session(&session.id)?;
         let identity = AgentTurnRef::new(&session.id, turn_id);
         let Some(active) = self
             .execution
@@ -106,6 +107,8 @@ impl TurnService {
             )),
             cleanup,
             recovery_owner.expect("orphan interrupt holds Session ownership"),
+            None,
+            /*dispatch*/ true,
         )
         .await
     }
@@ -118,7 +121,13 @@ impl TurnService {
         session: &talos_store::session::SessionRecord,
         identity: &AgentTurnRef,
         failure: talos_agent::AgentRunFailure,
+        dispatch: bool,
     ) -> TalosResult<AgentInterruptOutcome> {
+        let admission_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .read_owned()
+            .await;
         let ownership = self
             .execution
             .begin_session_maintenance(&identity.session_id)?;
@@ -137,8 +146,15 @@ impl TurnService {
             }
             Err(error) => return Err(error),
         };
-        self.complete_recovered_turn(identity, failure, cleanup, ownership)
-            .await
+        self.complete_recovered_turn(
+            identity,
+            failure,
+            cleanup,
+            ownership,
+            Some(admission_guard),
+            dispatch,
+        )
+        .await
     }
 
     async fn complete_recovered_turn(
@@ -147,6 +163,8 @@ impl TurnService {
         failure: talos_agent::AgentRunFailure,
         cleanup: AgentInterruptOutcome,
         ownership: crate::turn::agent_execution::SessionMaintenanceGuard,
+        admission_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        dispatch: bool,
     ) -> TalosResult<AgentInterruptOutcome> {
         if matches!(cleanup, AgentInterruptOutcome::CleanupUnconfirmed { .. }) {
             return Ok(cleanup);
@@ -177,13 +195,14 @@ impl TurnService {
             .commit_worker_history_cursor(identity, agent_protocol::SessionStateVisibility::Local)
             .await?;
         drop(ownership);
+        drop(admission_guard);
         self.execution
             .sessions
             .schedule_shared_history_cursor(identity.session_id.clone());
         if let Err(error) = result {
             talos_logging::report_error(&error);
         }
-        self.finish_turn(&event, None, None).await?;
+        self.finish_turn(&event, None, None, dispatch).await?;
         Ok(cleanup)
     }
 

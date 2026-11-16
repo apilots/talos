@@ -64,6 +64,24 @@ pub(crate) use application_runtime::build_application_runtime_with_migration_dir
 #[cfg(test)]
 use talos_worker::create_llm_provider;
 
+pub use talos_agent::SessionHold;
+
+/// Who holds a session lock in this process, and for how long.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionOwnershipPolicy {
+    pub kind: talos_error::SessionOwnerKind,
+    pub hold: talos_agent::SessionHold,
+}
+
+impl Default for SessionOwnershipPolicy {
+    fn default() -> Self {
+        Self {
+            kind: talos_error::SessionOwnerKind::Server,
+            hold: talos_agent::SessionHold::Turn,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TalosServerOptions {
     pub host: Option<String>,
@@ -72,6 +90,7 @@ pub struct TalosServerOptions {
     pub auth_disabled: Option<bool>,
     pub enable_channels: Option<bool>,
     pub webui_dir: Option<PathBuf>,
+    pub session_ownership: Option<SessionOwnershipPolicy>,
 }
 
 pub struct TalosServerRuntime {
@@ -276,7 +295,7 @@ pub async fn run_embedded_app_server(
         let config_source = resolve_config_source_path(&config);
         log_config_source(config_source);
         let startup_report = startup::finish_startup(&config)?;
-        build_application_runtime_after_startup(config, &startup_report).await
+        build_application_runtime_after_startup(config, &startup_report, options).await
     }
     .await
     .inspect_err(talos_logging::report_error)?;
@@ -578,7 +597,9 @@ async fn start_server_after_startup(
 ) -> TalosResult<TalosServerRuntime> {
     let config = apply_runtime_options(config, options.as_ref());
     config.validate_runtime()?;
-    let runtime = build_application_runtime_after_startup(config.clone(), startup_report).await?;
+    let runtime =
+        build_application_runtime_after_startup(config.clone(), startup_report, options.as_ref())
+            .await?;
 
     let managed_worker =
         application_managed_worker::configure(&config, &runtime.node_service).await?;
@@ -697,7 +718,12 @@ async fn run_json_rpc_stdio_after_startup(
     if desktop_host_name.is_some() {
         runtime_config.agent_node.runner = None;
     }
-    let runtime = build_application_runtime_after_startup(runtime_config, startup_report).await?;
+    let runtime = build_application_runtime_after_startup(
+        runtime_config,
+        startup_report,
+        desktop_session_options().as_ref(),
+    )
+    .await?;
     let desktop_host_bridge = if desktop_host_name.is_some() {
         let bridge = talos_app_server::DesktopHostBridge::new();
         runtime
@@ -770,12 +796,26 @@ async fn run_json_rpc_stdio_after_startup(
 async fn build_application_runtime_after_startup(
     config: Config,
     startup_report: &startup::FinishStartupReport,
+    options: Option<&TalosServerOptions>,
 ) -> TalosResult<TalosApplicationRuntime> {
-    application_runtime::build_application_runtime_with_migration_dir(
+    application_runtime::build_application_runtime_with_policy(
         config,
         &startup_report.resources.database_migrations.backend_dir,
+        options
+            .and_then(|options| options.session_ownership)
+            .unwrap_or_default(),
     )
     .await
+}
+
+fn desktop_session_options() -> Option<TalosServerOptions> {
+    std::env::var_os("TALOS_DESKTOP_HOSTNAME").map(|_| TalosServerOptions {
+        session_ownership: Some(SessionOwnershipPolicy {
+            kind: talos_error::SessionOwnerKind::Desktop,
+            hold: talos_agent::SessionHold::Turn,
+        }),
+        ..TalosServerOptions::default()
+    })
 }
 
 fn apply_runtime_options(mut config: Config, options: Option<&TalosServerOptions>) -> Config {

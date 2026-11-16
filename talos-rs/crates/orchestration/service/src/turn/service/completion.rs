@@ -36,10 +36,12 @@ impl TurnService {
         profile_context: ProfileTurnContext,
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
         completion: oneshot::Receiver<TalosResult<AgentRunSettlement>>,
+        ownership: Option<talos_agent::SessionLease>,
     ) {
         let profile_store = self.profile_store.clone();
         let turn_service = self.clone();
         tokio::spawn(async move {
+            let _ownership = ownership;
             let settlement = match completion.await {
                 Ok(Ok(settlement)) => settlement,
                 Ok(Err(error)) => {
@@ -93,7 +95,12 @@ impl TurnService {
                     .await;
             }
             if let Err(error) = turn_service
-                .finish_turn(&event, auto_dispatch_ready, Some(&metrics))
+                .finish_turn(
+                    &event,
+                    auto_dispatch_ready,
+                    Some(&metrics),
+                    /*dispatch*/ true,
+                )
                 .await
             {
                 turn_service
@@ -167,6 +174,7 @@ impl TurnService {
         event: &talos_agent_api::AgentEvent,
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
         automation_metrics: Option<&AgentRunMetrics>,
+        dispatch: bool,
     ) -> TalosResult<()> {
         if self.automation.get().is_some()
             || self
@@ -211,6 +219,9 @@ impl TurnService {
         } else {
             Ok(())
         };
+        if !dispatch {
+            return profile_result;
+        }
         if let Some(receiver) = auto_dispatch_ready {
             if receiver.await.is_err() {
                 return profile_result;

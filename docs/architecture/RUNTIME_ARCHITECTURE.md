@@ -174,9 +174,11 @@ transcript or result JSON. Provider artifacts remain private execution material.
 | Browser refresh while execution is live | Replay through a captured high-water mark, then receive live events; do not resubmit input |
 | Waiting with an unclaimed continuation | Keep the pending input available |
 | Claimed continuation with no subsequent durable progress | Resume the same Turn from the supported continuation and committed response |
+| Another live process holds the session lock | Return `SessionHeld`. Do not settle, interrupt, or retry recovery. History stays readable |
+| Lock acquired with an orphaned Worker marker | Verify the exact Turn and coordinator and persist the cleanup confirmation under the Worker lock. Resume a durable continuation or fail the running Turn once with reason `owner process exited`. Keep the lease through terminal settlement |
 | Claimed continuation already advanced without a safe resume point | Do not replay old side effects; fail once after confirmed cleanup |
 | Orphaned nonterminal execution without continuation | Recover from durable facts and fail after confirmed cleanup |
-| Cleanup cannot be confirmed | Retain active isolation; do not fabricate completion |
+| Cleanup is still in flight in this process | `RunCleanupUnconfirmed`. Retain active isolation; do not fabricate completion |
 
 The Kernel keeps live text and File IDs in the pending tool continuation until
 the original tool batch finishes. Another user action carries the same input

@@ -4,12 +4,14 @@
 //! the canonical typed domain values, never exposing row/cursor/transaction data.
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
-use talos_agent_api::{AgentEventPayload, AgentMessageBlockContent, AgentTurnRef, AgentUserInput};
+use talos_agent_api::{
+    AgentEvent, AgentEventPayload, AgentMessageBlockContent, AgentTurnRef, AgentUserInput,
+};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::{Row, Storage, StorageTransaction};
 use talos_types::{
-    AutomationTurnOrigin, GoalStatus, LoopStatus, SessionAutomationSnapshot, SessionGoal,
-    SessionLoop,
+    AutomationTurnOrigin, GoalStatus, LoopStatus, LoopWakeDecision, SessionAutomationSnapshot,
+    SessionGoal, SessionLoop,
 };
 
 mod admission;
@@ -140,13 +142,17 @@ impl DatabaseAutomationStore {
     pub async fn active_loop_sessions(&self) -> TalosResult<Vec<String>> {
         Ok(self.storage.query("SELECT DISTINCT session_id FROM session_loops WHERE status='active' AND cleared_at IS NULL", &[]).await?.iter().filter_map(|r| r.get_string("session_id")).collect())
     }
-    /// Only durable, never-admitted Goals need an initial clock wake. Ongoing
-    /// Goals still progress solely through original settlement/reconciliation.
-    pub async fn initial_goal_sessions(&self, now: i64) -> TalosResult<Vec<String>> {
-        let before = now
-            .saturating_sub(talos_types::AUTOMATION_INITIAL_DELAY_SECONDS)
-            .to_string();
-        Ok(self.storage.query("SELECT DISTINCT session_id FROM session_goals WHERE status='active' AND latest_turn_id IS NULL AND created_at<=?", &[&before]).await?.iter().filter_map(|row| row.get_string("session_id")).collect())
+    pub async fn active_goal_sessions(&self) -> TalosResult<Vec<String>> {
+        Ok(self
+            .storage
+            .query(
+                "SELECT DISTINCT session_id FROM session_goals WHERE status='active'",
+                &[],
+            )
+            .await?
+            .iter()
+            .filter_map(|row| row.get_string("session_id"))
+            .collect())
     }
     pub async fn create_goal(
         &self,
@@ -295,8 +301,67 @@ impl DatabaseAutomationStore {
             .await?;
         }
         write_loop(tx.as_mut(), next, records::Write::Update).await?;
+        if next.next_due_at.is_some() || next.status != LoopStatus::Active {
+            tx.execute(
+                "UPDATE session_loops SET pending_turn_id=NULL WHERE id=?",
+                &[&next.id],
+            )
+            .await?;
+        }
         tx.commit().await
     }
+    /// Record a validated model decision on the original running occurrence.
+    pub async fn record_loop_decision(
+        &self,
+        turn: &AgentTurnRef,
+        decision: &LoopWakeDecision,
+    ) -> TalosResult<()> {
+        let changed = self.storage.execute(
+            "UPDATE agent_events SET automation_loop_decision_json=? WHERE session_id=? AND turn_id=? AND sequence=1 AND EXISTS (SELECT 1 FROM agent_active_turns a WHERE a.session_id=agent_events.session_id AND a.turn_id=agent_events.turn_id AND a.state='running')",
+            &[&encode(decision)?, &turn.session_id, &turn.turn_id],
+        ).await?;
+        if changed != 1 {
+            return Err(conflict());
+        }
+        Ok(())
+    }
+
+    pub async fn loop_decision(
+        &self,
+        turn: &AgentTurnRef,
+    ) -> TalosResult<Option<LoopWakeDecision>> {
+        let rows = self.storage.query(
+            "SELECT automation_loop_decision_json FROM agent_events WHERE session_id=? AND turn_id=? AND sequence=1",
+            &[&turn.session_id, &turn.turn_id],
+        ).await?;
+        rows.first()
+            .and_then(|row| row.get_string("automation_loop_decision_json"))
+            .map(|raw| decode(&raw))
+            .transpose()
+    }
+
+    /// Read the exact terminal fact whose Loop effects are still pending.
+    pub async fn pending_loop_terminal(&self, loop_id: &str) -> TalosResult<Option<AgentEvent>> {
+        let rows = self.storage.query(
+            "SELECT e.event_seq,e.session_id,e.turn_id,e.sequence,e.occurred_at,e.persisted_at,e.payload_json
+             FROM session_loops l JOIN agent_events e ON e.session_id=l.session_id AND e.turn_id=l.pending_turn_id
+             WHERE l.id=? AND json_extract(e.payload_json,'$.type') IN ('turnCompleted','turnFailed')
+             ORDER BY e.event_seq DESC LIMIT 1",
+            &[loop_id],
+        ).await?;
+        rows.first()
+            .map(crate::session::agent_execution::record::parse_event_record)
+            .transpose()
+            .map(|record| {
+                record.map(|record| AgentEvent {
+                    identity: record.identity,
+                    sequence: record.sequence,
+                    occurred_at: record.occurred_at,
+                    payload: record.payload,
+                })
+            })
+    }
+
     pub async fn clear_loop(&self, previous: &SessionLoop) -> TalosResult<()> {
         let mut tx = self.storage.begin_transaction().await?;
         let current = tx

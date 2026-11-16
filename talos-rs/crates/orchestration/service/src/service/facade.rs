@@ -116,6 +116,12 @@ impl TalosService {
         self.sessions.set_coordinator_id(peer_id);
     }
 
+    /// Shares the worker adapter's session-lock table. A second table in this
+    /// process would contend with itself.
+    pub fn set_session_owner(&self, owner: talos_agent::SessionOwner) {
+        self.turns.set_session_owner(owner);
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         coordinator: Arc<dyn AgentCoordinator>,
@@ -256,6 +262,7 @@ impl TalosService {
         patch: SessionPatch,
     ) -> ServiceResult<SessionInfo> {
         let session = self.access.load_session(actor, session_id).await?;
+        let _ownership = self.turns.pin_session(session_id)?;
         let _execution_guard = self
             .execution_gate
             .for_node(&session.execution_node_id)
@@ -355,6 +362,14 @@ impl TalosService {
             Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => None,
             Err(error) => return Err(error),
         };
+        let _ownership = self.turns.pin_session(&session_id)?;
+        if self
+            .turns
+            .session_owner()
+            .is_some_and(|owner| owner.hold() == talos_agent::SessionHold::Process)
+        {
+            self.turns.claim_session_open(&session_id)?;
+        }
         let computer = existing_session
             .as_ref()
             .map(|(_, session)| session.execution_node_id.as_str())
@@ -455,6 +470,9 @@ impl TalosService {
     ) -> ServiceResult<SessionRecord> {
         if patch.conf.is_none() && patch.current_directory.is_none() {
             return Ok(session);
+        }
+        if self.turns.session_owner().is_some() {
+            self.turns.recover_if_orphan(&session).await?;
         }
         self.access.patch_session(session, patch).await
     }
@@ -606,6 +624,7 @@ impl TalosService {
         session_id: &str,
     ) -> ServiceResult<SessionInfo> {
         let session = self.access.load_session(actor, session_id).await?;
+        let _ownership = self.turns.pin_session(session_id)?;
         self.ensure_session_write_allowed(session_id).await?;
         let operation_id = uuid::Uuid::new_v4().simple().to_string();
         self.turns
@@ -623,6 +642,7 @@ impl TalosService {
         session_id: &str,
     ) -> ServiceResult<SessionInfo> {
         let session = self.access.load_session(actor, session_id).await?;
+        let _ownership = self.turns.pin_session(session_id)?;
         let _execution_guard = self
             .execution_gate
             .for_node(&session.execution_node_id)
@@ -634,6 +654,7 @@ impl TalosService {
 
     pub async fn close_session(&self, actor: &Actor, session_id: &str) -> ServiceResult<()> {
         let session = self.access.load_session(actor, session_id).await?;
+        let _ownership = self.turns.pin_session(session_id)?;
         let _execution_guard = self
             .execution_gate
             .for_node(&session.execution_node_id)
@@ -720,6 +741,7 @@ impl TalosService {
         request: SubscribeTimelineRequest,
     ) -> ServiceResult<TimelineSubscription> {
         let session = self.access.load_session(actor, &request.session_id).await?;
+        self.turns.claim_session_open(&request.session_id)?;
         if let Some(active) = self
             .turns
             .canonical_active_turn(&request.session_id)
@@ -765,6 +787,7 @@ impl TalosService {
         request: RecoverTimelineRequest,
     ) -> ServiceResult<talos_agent_api::RecoverTimelineResponse> {
         let session = self.access.load_session(actor, &request.session_id).await?;
+        self.turns.claim_session_open(&request.session_id)?;
         if let Some(active) = self
             .turns
             .canonical_active_turn(&request.session_id)

@@ -308,17 +308,9 @@ impl SessionAutomationService {
                     {
                         return Err(conflict());
                     }
-                    self.declarations
-                        .lock()
-                        .expect("automation declarations")
-                        .insert(
-                            turn_key(&caller.turn_ref()),
-                            Declaration::Loop {
-                                loop_id,
-                                revision: config_revision,
-                                decision,
-                            },
-                        );
+                    self.store
+                        .record_loop_decision(&caller.turn_ref(), &decision)
+                        .await?;
                     effect = AutomationEffect::PendingSettlement;
                 }
                 LoopAction::Edit {

@@ -40,6 +40,7 @@ impl TurnService {
             return self.user_action_state(&identity, &events, &response).await;
         }
 
+        let ownership = self.pin_session(&identity.session_id)?;
         self.canonical_active_turn(&identity.session_id)
             .await?
             .filter(|active| {
@@ -81,19 +82,45 @@ impl TurnService {
                 return Err(error);
             }
         };
-        self.complete_resumed_turn(session, identity, completion);
+        self.complete_resumed_turn(session, identity, completion, ownership);
         Ok(UserActionState::Resuming)
     }
+}
 
+pub(super) fn recover_erased(
+    service: TurnService,
+    session: talos_store::session::SessionRecord,
+    active: AgentActiveTurnRecord,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = TalosResult<()>> + Send>> {
+    Box::pin(async move {
+        service
+            .recover_active_turn_with_dispatch(session, active, /*dispatch*/ false)
+            .await
+    })
+}
+
+impl TurnService {
     pub(crate) async fn recover_active_turn(
         &self,
         session: talos_store::session::SessionRecord,
         active: AgentActiveTurnRecord,
     ) -> TalosResult<()> {
+        self.recover_active_turn_with_dispatch(session, active, /*dispatch*/ true)
+            .await
+    }
+
+    async fn recover_active_turn_with_dispatch(
+        &self,
+        session: talos_store::session::SessionRecord,
+        active: AgentActiveTurnRecord,
+        dispatch: bool,
+    ) -> TalosResult<()> {
         let service = self.clone();
-        super::await_admission(
-            async move { service.recover_active_turn_owned(session, active).await },
-        )
+        super::await_admission(async move {
+            service
+                .recover_active_turn_owned(session, active, dispatch)
+                .await
+        })
         .await
     }
 
@@ -101,12 +128,19 @@ impl TurnService {
         &self,
         session: talos_store::session::SessionRecord,
         active: AgentActiveTurnRecord,
+        dispatch: bool,
     ) -> TalosResult<()> {
-        let _admission_guard = self
-            .execution_gate
-            .for_node(&session.execution_node_id)
-            .read_owned()
-            .await;
+        let ownership = self.pin_session(&session.id)?;
+        let Some(active) = self
+            .canonical_active_turn(&session.id)
+            .await?
+            .filter(|current| current.identity == active.identity)
+        else {
+            return Ok(());
+        };
+        if self.is_turn_execution_active(&active.identity) {
+            return Ok(());
+        }
         let binding = self
             .execution
             .execution_store
@@ -126,6 +160,7 @@ impl TurnService {
                     active,
                     talos_error::ErrorCode::Cancelled,
                     "Agent Turn cancellation recovered after confirmed cleanup",
+                    dispatch,
                 )
                 .await;
         }
@@ -135,7 +170,10 @@ impl TurnService {
                     &session,
                     active,
                     talos_error::ErrorCode::ServiceUnavailable,
-                    "Agent Turn has no durable continuation after Service restart",
+                    self.dead_owner_reason(
+                        "Agent Turn has no durable continuation after Service restart",
+                    ),
+                    dispatch,
                 )
                 .await;
         };
@@ -145,7 +183,10 @@ impl TurnService {
                     &session,
                     active,
                     talos_error::ErrorCode::ServiceUnavailable,
-                    "Agent Turn continuation state cannot resume after Service restart",
+                    self.dead_owner_reason(
+                        "Agent Turn continuation state cannot resume after Service restart",
+                    ),
+                    dispatch,
                 )
                 .await;
         };
@@ -172,7 +213,10 @@ impl TurnService {
                     &session,
                     active,
                     talos_error::ErrorCode::ServiceUnavailable,
-                    "Claimed Agent continuation is missing its canonical User response",
+                    self.dead_owner_reason(
+                        "Claimed Agent continuation is missing its canonical User response",
+                    ),
+                    dispatch,
                 )
                 .await;
         };
@@ -181,9 +225,17 @@ impl TurnService {
                 &session,
                 active,
                 talos_error::ErrorCode::ServiceUnavailable,
-                "Claimed Agent continuation already produced progress and cannot be replayed safely",
+                self.dead_owner_reason(
+                    "Claimed Agent continuation already produced progress and cannot be replayed safely",
+                ),
+                dispatch,
             ).await;
         }
+        let admission_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .read_owned()
+            .await;
         let context = self
             .execution
             .sessions
@@ -195,25 +247,41 @@ impl TurnService {
             .await
         {
             Ok(completion) => {
-                self.complete_resumed_turn(session.clone(), active.identity.clone(), completion);
+                self.complete_resumed_turn(
+                    session.clone(),
+                    active.identity.clone(),
+                    completion,
+                    ownership,
+                );
                 Ok(())
             }
             Err(error) => Err(error),
         };
+        drop(admission_guard);
         match resume {
             Ok(()) => Ok(()),
             Err(error) => {
+                let resumed = format!(
+                    "Agent continuation could not resume after Service restart: {}",
+                    error.diagnostic_message()
+                );
                 self.terminate_recovered_turn(
                     &session,
                     active,
                     error.error_code(),
-                    &format!(
-                        "Agent continuation could not resume after Service restart: {}",
-                        error.diagnostic_message()
-                    ),
+                    self.dead_owner_reason(&resumed),
+                    dispatch,
                 )
                 .await
             }
+        }
+    }
+
+    fn dead_owner_reason<'a>(&self, fallback: &'a str) -> &'a str {
+        if self.session_owner().is_some() {
+            "owner process exited"
+        } else {
+            fallback
         }
     }
 
@@ -223,12 +291,14 @@ impl TurnService {
         active: AgentActiveTurnRecord,
         code: talos_error::ErrorCode,
         message: &str,
+        dispatch: bool,
     ) -> TalosResult<()> {
         let outcome = self
             .recover_terminal_turn(
                 session,
                 &active.identity,
                 talos_agent::AgentRunFailure::from(TalosError::new(code, message)),
+                dispatch,
             )
             .await?;
         match outcome {

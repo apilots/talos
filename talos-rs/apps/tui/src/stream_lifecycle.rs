@@ -32,6 +32,10 @@ impl TuiApp {
         file_ids: Vec<String>,
         reset_retry_state: bool,
     ) -> TalosResult<()> {
+        if self.session_read_only {
+            self.push_system_notice("This session is read-only while another owner holds it.");
+            return Ok(());
+        }
         let Some(client) = self.gateway_client.clone() else {
             self.push_system_notice("Gateway client unavailable.");
             return Ok(());

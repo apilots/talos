@@ -117,6 +117,7 @@ fn apply_runtime_options_updates_gateway_and_logging() {
         auth_disabled: None,
         enable_channels: None,
         webui_dir: None,
+        session_ownership: None,
     };
 
     let updated = apply_runtime_options(config, Some(&options));

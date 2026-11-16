@@ -20,7 +20,7 @@ impl SessionService {
             if let Err(error) = sessions.share_history_cursor(&session_id).await {
                 if !matches!(
                     error.error_code(),
-                    ErrorCode::ServiceUnavailable | ErrorCode::Conflict
+                    ErrorCode::ServiceUnavailable | ErrorCode::Conflict | ErrorCode::SessionHeld
                 ) {
                     talos_logging::report_error(&error);
                 }

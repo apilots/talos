@@ -56,6 +56,7 @@ pub(crate) struct TurnService {
     nodes: Option<crate::AgentNodeService>,
     wake_dispatches:
         Arc<std::sync::Mutex<std::collections::HashSet<(String, managed_wake::WakeCandidate)>>>,
+    session_owner: Arc<std::sync::RwLock<Option<talos_agent::SessionOwner>>>,
 }
 
 struct TurnSubmission {
@@ -83,7 +84,35 @@ impl TurnService {
             execution_gate,
             nodes: None,
             wake_dispatches: Default::default(),
+            session_owner: Default::default(),
         }
+    }
+
+    pub(crate) fn set_session_owner(&self, owner: talos_agent::SessionOwner) {
+        *self.session_owner.write().expect("session owner lock") = Some(owner);
+    }
+
+    pub(crate) fn session_owner(&self) -> Option<talos_agent::SessionOwner> {
+        self.session_owner
+            .read()
+            .expect("session owner lock")
+            .clone()
+    }
+
+    pub(crate) fn claim_session_open(&self, session_id: &str) -> TalosResult<()> {
+        if let Some(owner) = self.session_owner() {
+            owner.claim_open(session_id)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn pin_session(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<talos_agent::SessionLease>> {
+        self.session_owner()
+            .map(|owner| owner.pin(session_id))
+            .transpose()
     }
 
     pub(crate) fn with_managed_workers(mut self, nodes: crate::AgentNodeService) -> Self {
@@ -313,9 +342,28 @@ impl TurnService {
         session: SessionRecord,
         mut submission: TurnSubmission,
         idempotency_key: Option<String>,
-        prepared: Option<PreparedTurnSubmission>,
+        mut prepared: Option<PreparedTurnSubmission>,
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
     ) -> TalosResult<StartTurnResponse> {
+        // Recover before taking the gates used by terminal product settlement.
+        // Keep the same file lock from recovery through new execution.
+        let ownership = async {
+            let ownership = self.pin_session(&session.id)?;
+            if ownership.is_some() && submission.retry_of_message_id.is_none() {
+                self.recover_if_orphan(&session).await?;
+            }
+            Ok(ownership)
+        }
+        .await;
+        let ownership = match ownership {
+            Ok(ownership) => ownership,
+            Err(error) => {
+                if let Some(prepared) = prepared.take() {
+                    self.release_start_turn(prepared).await;
+                }
+                return Err(error);
+            }
+        };
         let automation = self.automation.get().cloned();
         let _automation_guard = if let Some(automation) = automation.as_ref() {
             Some(automation.lock(&session.id).await)
@@ -510,6 +558,7 @@ impl TurnService {
             profile_context,
             auto_dispatch_ready,
             completion,
+            ownership,
         );
 
         Ok(StartTurnResponse {
@@ -620,6 +669,15 @@ impl TurnService {
         }
     }
 
+    pub(crate) async fn recover_if_orphan(&self, session: &SessionRecord) -> TalosResult<()> {
+        if let Some(active) = self.canonical_active_turn(&session.id).await? {
+            if !self.is_turn_execution_active(&active.identity) {
+                user_action_resume::recover_erased(self.clone(), session.clone(), active).await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn reject_active_turn(&self, session_id: &str) -> TalosResult<()> {
         if self.canonical_active_turn(session_id).await?.is_none() {
             return Ok(());
@@ -675,10 +733,11 @@ impl TurnService {
         session: SessionRecord,
         identity: AgentTurnRef,
         completion: oneshot::Receiver<TalosResult<AgentRunSettlement>>,
+        ownership: Option<talos_agent::SessionLease>,
     ) {
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let profile_context = self.profile_turn_context(&session, request_id);
-        self.spawn_turn_completion(identity, profile_context, None, completion);
+        self.spawn_turn_completion(identity, profile_context, None, completion, ownership);
     }
 }
 

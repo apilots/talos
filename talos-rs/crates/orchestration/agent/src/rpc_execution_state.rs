@@ -68,6 +68,7 @@ impl AgentHarnessRpcAdapter {
             Ok(pb::SessionStateVisibility::Shared) => SessionStateVisibility::Shared,
             _ => return Err(invalid_request()),
         };
+        let _ownership = self.session_owner.pin(&session.session_id)?;
         self.session_gate.commit(
             &session,
             peer,
@@ -79,6 +80,12 @@ impl AgentHarnessRpcAdapter {
             } else {
                 super::session_gate::HistoryBootstrap::Forbidden
             },
-        )
+        )?;
+        if visibility == SessionStateVisibility::Local {
+            if let Some(identity) = identity.as_ref() {
+                self.session_owner.release_turn(identity);
+            }
+        }
+        Ok(())
     }
 }
