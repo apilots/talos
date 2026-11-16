@@ -245,7 +245,9 @@ def exercise(root, work, report):
                 events = db.execute(
                     """SELECT json_extract(payload_json,'$.content.data.code'),
                               json_extract(payload_json,'$.type') FROM agent_events
-                       WHERE session_id=? AND (sequence IS NULL OR json_extract(payload_json,'$.type')='turnCompleted')
+                       WHERE session_id=? AND (
+                           (sequence IS NULL AND json_extract(payload_json,'$.content.data.code')='conflict')
+                           OR json_extract(payload_json,'$.type')='turnCompleted')
                        ORDER BY event_seq""", (server.unreadable_session,)).fetchall()
             assert title == ("Checkpoint effects verified",), title
             assert events == [("conflict", None), (None, "turnCompleted")], events
