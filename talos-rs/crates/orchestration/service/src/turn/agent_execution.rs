@@ -339,7 +339,6 @@ impl AgentExecutionDriver {
         let checkpoint = reducer.checkpoint();
         Ok(AgentRunSettlement::Finished {
             event,
-            messages: checkpoint.messages,
             metrics: checkpoint.metrics,
             result: Err(failure.into_error()),
         })

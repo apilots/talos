@@ -55,7 +55,9 @@ message ShutdownRequest { NodeAuth auth = 1; ShutdownParams params = 2; }
 message EmptyResponse { oneof result { Empty completed = 1; Failure failure = 2; } }
 message WaitingSettlement { AgentEvent event = 1; ContinuationRef continuation = 2; RunMetrics metrics = 3; }
 message FinishedSettlement {
-  AgentEvent event = 1; repeated AgentMessage messages = 2; RunMetrics metrics = 3;
+  reserved 2; // Turn messages already travel in canonical progress.
+  reserved "messages";
+  AgentEvent event = 1; RunMetrics metrics = 3;
   oneof result { Empty success = 4; Failure failure = 5; }
 }
 message Settlement {

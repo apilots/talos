@@ -275,15 +275,23 @@ async fn kernel_provider_keeps_streaming_while_live_input_waits_for_a_safe_bound
         })
         .await
         .unwrap();
+    let mut facts = execution.admission.events;
     execution.admission.permit.consume().await.unwrap();
     let mut progress = execution.events;
     loop {
         let event = progress.recv().await.expect("Provider progress must start");
-        if matches!(event.payload, AgentEventPayload::MessageBlockDelta(_)) {
+        let started = matches!(event.payload, AgentEventPayload::MessageBlockDelta(_));
+        facts.push(event);
+        if started {
             break;
         }
     }
-    let progress_drain = tokio::spawn(async move { while progress.recv().await.is_some() {} });
+    let progress_drain = tokio::spawn(async move {
+        while let Some(event) = progress.recv().await {
+            facts.push(event);
+        }
+        facts
+    });
     let admission = harness
         .submit_input(AgentInputParams {
             agent_id: "agent-1".to_string(),
@@ -292,16 +300,30 @@ async fn kernel_provider_keeps_streaming_while_live_input_waits_for_a_safe_bound
         })
         .await
         .unwrap();
-    let (input_result, settlement) = tokio::time::timeout(Duration::from_secs(5), async {
-        tokio::join!(admission.permit.consume(), execution.settlement.recv())
+    let (input_result, settlement, facts) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            admission.permit.consume(),
+            execution.settlement.recv(),
+            progress_drain
+        )
     })
     .await
     .expect("live input and Turn must not deadlock at the event buffer boundary");
     input_result.unwrap();
-    let AgentRunSettlement::Finished { messages, .. } = settlement.unwrap() else {
-        panic!("Kernel Provider Turn must finish");
-    };
-    progress_drain.abort();
+    assert!(matches!(
+        settlement.unwrap(),
+        AgentRunSettlement::Finished { result: Ok(()), .. }
+    ));
+    let mut facts = facts.unwrap();
+    facts.extend(admission.events);
+    facts.sort_by_key(|event| event.sequence);
+    let messages: Vec<_> = facts
+        .into_iter()
+        .filter_map(|event| match event.payload {
+            AgentEventPayload::MessageCompleted(message) => Some(message),
+            _ => None,
+        })
+        .collect();
     let final_text = messages
         .iter()
         .flat_map(|message| &message.blocks)

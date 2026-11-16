@@ -136,7 +136,7 @@ impl std::fmt::Debug for AgentProgressEventReceiver {
     }
 }
 
-/// Unique waiting or terminal delivery of canonical Agent facts and reducer state.
+/// Unique waiting or terminal delivery of canonical Agent facts and invocation outcome.
 /// Harness produces live results; Service recovery reuses the same shape from
 /// a durable checkpoint without invoking a Provider or fabricating snapshots.
 /// Metrics are cumulative for the logical Turn, including earlier invocations.
@@ -149,7 +149,6 @@ pub enum AgentRunSettlement {
     },
     Finished {
         event: AgentEvent,
-        messages: Vec<AgentMessage>,
         metrics: AgentRunMetrics,
         /// Original live outcome; never reconstruct diagnostics from the event.
         result: talos_error::TalosResult<()>,

@@ -27,7 +27,7 @@ pub(super) async fn settle_provider_completion(
             Ok(AgentRunSettlement::WaitingForInput {
                 event,
                 continuation,
-                metrics: pipeline.checkpoint().await.metrics,
+                metrics: pipeline.metrics().await,
             })
         }
     }
@@ -82,11 +82,9 @@ async fn finished_settlement(
     event: AgentEvent,
     result: talos_error::TalosResult<()>,
 ) -> AgentResult<AgentRunSettlement> {
-    let checkpoint = pipeline.checkpoint().await;
     Ok(AgentRunSettlement::Finished {
         event,
-        messages: checkpoint.messages,
-        metrics: checkpoint.metrics,
+        metrics: pipeline.metrics().await,
         result,
     })
 }

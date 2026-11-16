@@ -114,6 +114,41 @@ pub(super) async fn commit_received_settlement(
 }
 
 #[tokio::test]
+async fn rpc_delivers_terminal_settlement_after_large_progress_history() {
+    let provider = FakeProvider::new(FakeMode::LargeHistory);
+    let harness: Arc<dyn AgentHarness> = Arc::new(Harness::new(TEST_AGENT_ID.into(), provider));
+    let (client, _, _, _, stop, server_task) = server(harness).await;
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let mut run = client
+            .start(run_params(
+                AgentTurnRef::new("session-1", "turn-1"),
+                "message-1",
+            ))
+            .await
+            .unwrap();
+        run.admission.permit.consume().await.unwrap();
+        let mut completed = 0;
+        while let Some(event) = run.events.recv().await {
+            if matches!(
+                event.payload,
+                talos_agent_api::AgentEventPayload::MessageCompleted(_)
+            ) {
+                completed += 1;
+            }
+        }
+        assert_eq!(completed, 6);
+        assert!(matches!(
+            run.settlement.recv().await.unwrap(),
+            AgentRunSettlement::Finished { result: Ok(()), .. }
+        ));
+    })
+    .await
+    .unwrap();
+    stop.cancel();
+    server_task.await.unwrap();
+}
+
+#[tokio::test]
 async fn direct_and_tls_rpc_use_the_same_paused_harness_execution() {
     let provider = FakeProvider::new(FakeMode::Release);
     let harness: Arc<dyn AgentHarness> =

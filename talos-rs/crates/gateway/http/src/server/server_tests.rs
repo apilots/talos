@@ -473,7 +473,6 @@ impl AgentCoordinator for TestAgentCoordinator {
                         .send(Ok(AgentRunSettlement::Finished {
                             result: Ok(()),
                             event: terminal,
-                            messages: Vec::new(),
                             metrics: AgentRunMetrics::default(),
                         }))
                         .map_err(|_| {
