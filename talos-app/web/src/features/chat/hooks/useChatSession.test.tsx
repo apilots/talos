@@ -6,7 +6,7 @@ import { contextCompactionStarted } from "../__tests__/streaming-fixtures";
 
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { AppProtocol } from "@talos/sdk-browser";
+import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 
 import { useChatSession } from "./useChatSession";
 import { useAppStore } from "@/shared/store/app-store";
@@ -226,6 +226,23 @@ describe("useChatSession", () => {
     await expect(result.current.sendTurn()).rejects.toBe(failure);
     expect(result.current.draft).toBe("Keep this follow-up");
     expect(mocks.messageQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("rechecks Session ownership on a deliberate send despite stale running state", async () => {
+    const sessionId = "session-1";
+    const held = { code: AppProtocol.ErrorCode.SessionHeld, message: "Session held", localization: null };
+    mocks.isStreaming = true;
+    mocks.send.mockRejectedValueOnce(new TalosApiError(held)).mockResolvedValueOnce(undefined);
+    useAppStore.getState().setStreamError(sessionId, held);
+    const { result } = renderHook(() => useChatSession(sessionId, 1));
+
+    await expect(result.current.sendTurn(undefined, "Retry input")).rejects.toMatchObject({ code: held.code });
+    await expect(result.current.sendTurn(undefined, "Retry input")).resolves.toBeUndefined();
+
+    expect(mocks.send).toHaveBeenCalledTimes(2);
+    expect(mocks.send).toHaveBeenLastCalledWith({ text: "Retry input", request: undefined });
+    expect(mocks.messageQueueAdd).not.toHaveBeenCalled();
+    expect(mocks.submitTurnInput).not.toHaveBeenCalled();
   });
 
   it("rejects sendText during automatic context compaction instead of acknowledging a discarded input", async () => {

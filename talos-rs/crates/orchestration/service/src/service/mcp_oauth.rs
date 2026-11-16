@@ -159,14 +159,6 @@ impl TalosService {
             if !Arc::ptr_eq(&original, &environment) {
                 return Err(unavailable());
             }
-            let _admission = self
-                .execution_gate
-                .for_node(&route.node_id)
-                .write_owned()
-                .await;
-            self.sessions
-                .reject_nonterminal_turns(&route.node_id)
-                .await?;
             environment
                 .complete_mcp_authentication(
                     route.actor.worker_environment_context(),

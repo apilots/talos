@@ -89,7 +89,7 @@ pub(crate) async fn build_application_runtime_with_policy(
         Arc::new(SessionMemoryProgress::new(session_store_impl.clone()));
     let tool_image_store: Arc<dyn ToolImageStore> =
         Arc::new(super::tool_images::ToolImages(file_service.clone()));
-    let mut worker = TalosWorker::build_with_browser_host(
+    let worker = TalosWorker::build_with_browser_host(
         config.clone(),
         TalosWorkerResources {
             session_history_reader: session_history_reader.clone(),
@@ -106,7 +106,6 @@ pub(crate) async fn build_application_runtime_with_policy(
         },
     )
     .await?;
-    worker.set_session_policy(session_ownership.kind, session_ownership.hold);
     let default_model_selection = resolve_default_model_selection(&config.llm)?;
     let default_agent_id = worker
         .deployments()
@@ -143,7 +142,9 @@ pub(crate) async fn build_application_runtime_with_policy(
         session_store.clone(),
         node_store.clone(),
     ));
-    let (worker_rpc, local_auth) = worker.start_local_rpc().await?;
+    let (worker_rpc, local_auth) = worker
+        .start_local_rpc(session_ownership.kind, session_ownership.hold)
+        .await?;
     coordinator
         .register_environment(
             "embedded".into(),

@@ -32,12 +32,8 @@ macro_rules! environment_rpc {
             let result = async {
                 let (lease, context, environment) = self.environment_context(request.auth, request.context)?;
                 let params = wire::$decode(request.params)?;
-                let reserve_configuration = matches!(stringify!($method),
-                    "delete_config" | "reload_config"
-                    | "add_plugin_source" | "refresh_plugin_source" | "remove_plugin_source"
-                    | "install_plugin" | "update_plugin" | "uninstall_plugin" | "enable_plugin" | "disable_plugin"
-                    | "update_mcp_credentials" | "import_mcp_server"
-                ) $(|| ($requires_reload)(&params))?;
+                let reserve_configuration = matches!(stringify!($method), "delete_config" | "reload_config")
+                    $(|| ($requires_reload)(&params))?;
                 let _configuration = if reserve_configuration {
                     Some(self.session_gate.reserve_configuration()?)
                 } else {

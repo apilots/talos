@@ -175,7 +175,11 @@ impl Drop for WorkerRpcHost {
 impl crate::TalosWorker {
     /// Builds one protected loopback entry to these exact Harness instances.
     /// The private process credential is not a cloud lease or a public grant.
-    pub async fn start_local_rpc(&self) -> TalosResult<(Arc<WorkerRpcHost>, NodeAuth)> {
+    pub async fn start_local_rpc(
+        &self,
+        session_kind: talos_error::SessionOwnerKind,
+        session_hold: talos_agent::SessionHold,
+    ) -> TalosResult<(Arc<WorkerRpcHost>, NodeAuth)> {
         let auth = NodeAuth {
             node_id: "embedded".into(),
             token: format!(
@@ -184,7 +188,6 @@ impl crate::TalosWorker {
                 uuid::Uuid::new_v4().simple()
             ),
         };
-        let (session_kind, session_hold) = self.session_policy();
         let adapter = AgentHarnessRpcAdapter::new(
             auth.node_id.clone(),
             self.config(),

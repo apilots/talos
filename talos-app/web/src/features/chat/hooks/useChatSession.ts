@@ -154,14 +154,12 @@ export function useChatSession(
     if (!content && fileIds.length === 0) {
       return Promise.resolve();
     }
-    const held = useAppStore.getState().streams[sessionId]?.error;
-    if (held?.code === AppProtocol.ErrorCode.SessionHeld) {
-      return Promise.reject(new TalosApiError(held));
-    }
-    if (activeContextCompaction(useAppStore.getState().streams[sessionId])) {
+    const stream = useAppStore.getState().streams[sessionId];
+    const retryAdmission = stream?.error?.code === AppProtocol.ErrorCode.SessionHeld;
+    if (!retryAdmission && activeContextCompaction(stream)) {
       return Promise.reject(new TalosApiError({ code: AppProtocol.ErrorCode.Conflict, message: "Context is compacting. Wait for it to finish before sending.", localization: null }));
     }
-    if (activeTurnId || isStreaming) {
+    if (!retryAdmission && (activeTurnId || isStreaming)) {
       return messageQueue.add(buildQueuedInput(content, options)).then(() => undefined);
     }
     const request = options
@@ -193,14 +191,12 @@ export function useChatSession(
       if (!text && fileIds.length === 0) {
         return;
       }
-      const held = useAppStore.getState().streams[sessionId]?.error;
-      if (held?.code === AppProtocol.ErrorCode.SessionHeld) {
-        throw new TalosApiError(held);
-      }
-      if (activeContextCompaction(useAppStore.getState().streams[sessionId])) {
+      const stream = useAppStore.getState().streams[sessionId];
+      const retryAdmission = stream?.error?.code === AppProtocol.ErrorCode.SessionHeld;
+      if (!retryAdmission && activeContextCompaction(stream)) {
         throw new TalosApiError({ code: AppProtocol.ErrorCode.Conflict, message: "Context is compacting. Wait for it to finish before sending.", localization: null });
       }
-      if (activeTurnId || isStreaming) {
+      if (!retryAdmission && (activeTurnId || isStreaming)) {
         const input = buildQueuedInput(text, options);
         if (
           activeTurnId && !isCancelling && !streamState?.pendingUserAction &&

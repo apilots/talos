@@ -397,10 +397,11 @@ fn takeover_confirms_cleanup_only_for_the_bound_turn_and_coordinator() {
         )
         .unwrap();
 
-    // The first runtime already had this marker cached before the handoff.
+    // Without a reservation, reads see the other runtime's durable update.
     let state = original.read(&context).unwrap();
     assert_eq!(state.history_cursor, terminal);
     assert_eq!(state.active_turn, None);
+    assert!(original.state.lock().unwrap().reservations.is_empty());
     assert!(original
         .reserve(
             &context,
