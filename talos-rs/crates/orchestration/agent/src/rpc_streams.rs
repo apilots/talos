@@ -6,11 +6,26 @@ impl AgentHarnessRpcAdapter {
         harness: &Arc<dyn AgentHarness>,
         agent_id: &str,
         identity: &talos_agent_api::AgentTurnRef,
+        settlement: impl Future<Output = TalosResult<agent_protocol::AgentRunSettlement>>,
     ) {
-        if let Err(error) = interrupt_disconnected(harness, agent_id, identity)
-            .await
-            .and_then(|_| self.session_gate.cleaned(identity))
-        {
+        let cleanup = match interrupt_disconnected(harness, agent_id, identity).await {
+            Err(error) if error.is_code(ErrorCode::ResourceNotFound) => {
+                // Harness sends the receipt before removing its live invocation.
+                // A missing invocation alone cannot establish cleanup ownership.
+                let confirmed = tokio::select! {
+                    biased;
+                    receipt = settlement => receipt.is_ok_and(|receipt| confirms_cleanup(&receipt)),
+                    () = std::future::ready(()) => false,
+                };
+                if confirmed {
+                    Ok(())
+                } else {
+                    Err(error)
+                }
+            }
+            outcome => outcome,
+        };
+        if let Err(error) = cleanup.and_then(|_| self.session_gate.cleaned(identity)) {
             talos_logging::report_error(&error);
             self.cleanup_failure
                 .lock()
@@ -115,7 +130,12 @@ impl AgentHarnessRpcAdapter {
                 None => {
                     drop(execution.events);
                     adapter
-                        .finish_disconnected(&harness, &agent_id, &identity)
+                        .finish_disconnected(
+                            &harness,
+                            &agent_id,
+                            &identity,
+                            execution.settlement.recv(),
+                        )
                         .await;
                     adapter
                         .active
@@ -137,7 +157,12 @@ impl AgentHarnessRpcAdapter {
             {
                 drop(execution.events);
                 adapter
-                    .finish_disconnected(&harness, &agent_id, &identity)
+                    .finish_disconnected(
+                        &harness,
+                        &agent_id,
+                        &identity,
+                        execution.settlement.recv(),
+                    )
                     .await;
                 adapter
                     .active
@@ -161,7 +186,7 @@ impl AgentHarnessRpcAdapter {
                     }
                     result = &mut settlement, if !events_open => {
                         let result = result.and_then(|settlement| {
-                            if !matches!(&settlement, agent_protocol::AgentRunSettlement::Finished { result: Err(error), .. } if error.is_code(ErrorCode::RunCleanupUnconfirmed)) {
+                            if confirms_cleanup(&settlement) {
                                 adapter.session_gate.cleaned(&identity)?;
                             }
                             if matches!(settlement, agent_protocol::AgentRunSettlement::WaitingForInput { .. })
@@ -189,7 +214,7 @@ impl AgentHarnessRpcAdapter {
             // business result. The existing Harness owns cancellation cleanup.
             drop(execution.events);
             adapter
-                .finish_disconnected(&harness, &agent_id, &identity)
+                .finish_disconnected(&harness, &agent_id, &identity, settlement.as_mut())
                 .await;
             adapter
                 .active
@@ -456,4 +481,12 @@ impl AgentHarnessRpcAdapter {
         });
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
+}
+
+fn confirms_cleanup(settlement: &agent_protocol::AgentRunSettlement) -> bool {
+    !matches!(
+        settlement,
+        agent_protocol::AgentRunSettlement::Finished { result: Err(error), .. }
+            if error.is_code(ErrorCode::RunCleanupUnconfirmed)
+    )
 }
