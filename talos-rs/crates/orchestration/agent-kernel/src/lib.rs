@@ -24,7 +24,9 @@ pub use general_turn::{
 pub(crate) use general_turn::{
     run_general_turn_with_resume, GeneralTurnOutcome, GeneralTurnResult,
 };
-pub use input::{ActiveTurnInput, ActiveTurnInputDelivery, ResolvedAttachment, UserInput};
+pub use input::{
+    ActiveTurnInput, ActiveTurnInputDelivery, DeferredTurnInputs, ResolvedAttachment, UserInput,
+};
 pub use session::{
     InvocationSession, KernelTranscriptAuthPayload, KernelTranscriptCompactionPayload,
     KernelTranscriptEvent, KernelTranscriptPayload, KernelTranscriptService,

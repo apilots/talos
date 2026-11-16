@@ -170,6 +170,7 @@ fn collect_bounded_tool_batch(
                 tool_calls: calls.to_vec(),
                 tool_messages: Vec::new(),
                 deferred_tool_calls: deferred_tool_calls.clone(),
+                deferred_inputs: Vec::new(),
             };
             if pending_user_action.replace(action).is_some() {
                 return Err(TalosError::internal(

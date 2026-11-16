@@ -134,7 +134,15 @@ pub(super) fn trim_working_context_to_budget(
         }
 
         let groups = group_working_messages(&state.messages);
-        let Some(group_index) = find_removable_group(&groups, preserve_recent_exchanges) else {
+        // Live inputs waiting for their next model request form the trailing User messages.
+        let live_input_start = state
+            .messages
+            .iter()
+            .rposition(|message| message.role != talos_llm_provider::Role::User)
+            .map_or(0, |index| index + 1);
+        let Some(group_index) =
+            find_removable_group(&groups, preserve_recent_exchanges, live_input_start)
+        else {
             return Ok(WorkingContextTrimReport {
                 pre_tokens,
                 post_tokens: current_tokens,
@@ -244,6 +252,7 @@ fn group_working_messages(messages: &[ChatMessage]) -> Vec<MessageGroup> {
 fn find_removable_group(
     groups: &[MessageGroup],
     preserve_recent_exchanges: usize,
+    live_input_start: usize,
 ) -> Option<usize> {
     if groups.len() <= 1 {
         return None;
@@ -251,7 +260,10 @@ fn find_removable_group(
     let preserved_exchange_indexes =
         recent_complete_exchange_indexes(groups, preserve_recent_exchanges);
     groups.iter().enumerate().find_map(|(index, group)| {
-        if group.unresolved_tool_linkage || preserved_exchange_indexes.contains(&index) {
+        if group.end > live_input_start
+            || group.unresolved_tool_linkage
+            || preserved_exchange_indexes.contains(&index)
+        {
             None
         } else {
             Some(index)

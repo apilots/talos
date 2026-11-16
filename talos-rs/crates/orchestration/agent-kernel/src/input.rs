@@ -1,3 +1,6 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use talos_llm_provider::ChatMessage;
@@ -34,6 +37,39 @@ pub struct ActiveTurnInput {
     pub input: UserInput,
     pub message: ChatMessage,
     pub attachment_tokens: usize,
+}
+
+type PrepareTurnInputs = Box<
+    dyn FnOnce(
+            Vec<UserInput>,
+        ) -> Pin<
+            Box<dyn Future<Output = talos_error::TalosResult<Vec<ActiveTurnInput>>> + Send>,
+        > + Send,
+>;
+
+/// Persisted inputs and their invocation-scoped preparation for model use.
+/// The Kernel carries only the normalized inputs across another suspension.
+pub struct DeferredTurnInputs {
+    pub(crate) inputs: Vec<UserInput>,
+    pub(crate) prepare: PrepareTurnInputs,
+}
+
+impl DeferredTurnInputs {
+    pub fn new<F>(
+        inputs: Vec<UserInput>,
+        prepare: impl FnOnce(Vec<UserInput>) -> F + Send + 'static,
+    ) -> Option<Self>
+    where
+        F: Future<Output = talos_error::TalosResult<Vec<ActiveTurnInput>>> + Send + 'static,
+    {
+        if inputs.is_empty() {
+            return None;
+        }
+        Some(Self {
+            inputs,
+            prepare: Box::new(move |inputs| Box::pin(prepare(inputs))),
+        })
+    }
 }
 
 /// Harness-to-Kernel delivery for one active-turn input.

@@ -138,8 +138,10 @@ completion and persisted tool/answer events; resizes the window and exits throug
 maintainers. Run it with `just e2e-case 08_tui/controlled_chat`.
 
 `05_cli/exec_unattended` uses a loopback model to check waiting and failure
-exit codes, Session permission persistence, and token usage on stderr. Run it
-with `just e2e-case 05_cli/exec_unattended`. The native ARM64 Harbor smoke trial
+exit codes, Session permission persistence, and token usage on stderr. It also
+checks that a spawned subagent inherits the parent Session permission and can
+run a tool requiring approval under the default policy. Run it with
+`just e2e-case 05_cli/exec_unattended`. The native ARM64 Harbor smoke trial
 is documented in [Talos Agent benchmarks](../talos-bench/README.md).
 
 Plugin lifecycle has two secretless entry-point cases. Run
