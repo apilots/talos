@@ -39,6 +39,9 @@ REASON_LABELS = {
     "verifierDependencyBootstrap": "Verifier 依赖初始化失败",
     "verifierBrowserDriverUnavailable": "Verifier 无法启动 ChromeDriver",
     "verifierRewardBelowOne": "Verifier 给分低于 1",
+    "missing native trial summary": "缺少匹配的原生运行摘要",
+    "task pin mismatch": "原题指纹与归档不匹配",
+    "missing original scoring evidence": "缺少原版评分、ATIF 或交付物证据",
 }
 EXCLUSION_LABELS = {"metadataOnly": "仅记录元数据", "guestEmulation": "需要架构模拟"}
 ARTIFACT_LABELS = {
@@ -83,14 +86,57 @@ def provenance_path(summary, name, evidence_root):
             or evidence_path(f"provenance/{name.rsplit('/', 1)[-1]}.json", summary.parent, evidence_root))
 
 
+def evidence_json(path):
+    document = optional_json(path) if path and path.is_file() else None
+    return document if isinstance(document, dict) else {}
+
+
+def scoring_problem(task, inventory, summary_path, summary, trial, evidence_root, score, regrade=None):
+    if (not trial or summary.get("datasetRef") != inventory["datasetRef"]
+            or summary.get("platform") != inventory["platform"] or summary.get("mode") != "real"):
+        return "missing native trial summary"
+    name = task["name"]
+    digest = trial.get("taskDigest")
+    if digest != task["digest"]:
+        provenance = evidence_json(provenance_path(summary_path, name, evidence_root))
+        if (provenance.get("upstreamTaskRef", provenance.get("taskRef")) != f"{name}@{task['digest']}"
+                or provenance.get("localTaskDigest") != digest):
+            return "task pin mismatch"
+
+    files = trial.get("artifacts", {})
+    base = summary_path.parent
+    trace = evidence_json(evidence_path(files.get("atif"), base, evidence_root))
+    original = evidence_json(evidence_path(files.get("harborResult"), base, evidence_root))
+    verified = original
+    missing = "missing original scoring evidence"
+    if regrade:
+        verified = evidence_json(evidence_path(str(regrade), base, evidence_root))
+        source = (verified.get("config") or {}).get("source_trial") or {}
+        if not original.get("id") or source.get("action") != "regrade" or source.get("trial_id") != original["id"]:
+            return missing
+    elif not summary.get("complete") or trial.get("exception") or trial.get("score") != score:
+        return missing
+
+    schema = trace.get("schema_version")
+    steps = trace.get("steps")
+    if (not finite_number(score) or not 0 <= score <= 1 or trial.get("cliExitCode") != 0
+            or not isinstance(steps, list) or not steps or not isinstance(schema, str) or not schema.startswith("ATIF-v1.")
+            or not trial.get("trial") or original.get("trial_name") != trial["trial"]
+            or original.get("task_name") != name or verified.get("task_name") != name or verified.get("exception_info")
+            or (verified.get("verifier_result") or {}).get("rewards", {}).get("reward") != score
+            or any(item["status"] != "ok" or not evidence_path(item.get("path"), base, evidence_root)
+                   for item in trial.get("submissions", []))):
+        return missing
+    return None
+
+
 def supplemental_scores(paths, inventory, excluded):
     tasks = {task["name"].rsplit("/", 1)[-1]: task for task in inventory["tasks"]}
     scores = {}
     for path in paths:
         path = path.resolve()
         summary = json.loads(path.read_text())
-        if (summary.get("datasetRef") != inventory["datasetRef"] or summary.get("platform") != inventory["platform"]
-                or summary.get("mode") != "real" or not summary.get("complete") or len(summary.get("trials", [])) != 1):
+        if len(summary.get("trials", [])) != 1:
             raise ValueError(f"Expected a complete native FrontierHarness model trial in {path}")
         trial, = summary["trials"]
         task = tasks.get(trial["task"].rsplit("/", 1)[-1])
@@ -99,31 +145,20 @@ def supplemental_scores(paths, inventory, excluded):
         name = task["name"]
         if name in excluded or name in scores:
             raise ValueError(f"Expected one supplemental trial per eligible task: {name}")
-        digest = trial.get("taskDigest")
-        if digest != task["digest"]:
-            receipt = provenance_path(path, name, path.parent)
-            provenance = (optional_json(receipt) or {}) if receipt else {}
-            if (provenance.get("upstreamTaskRef", provenance.get("taskRef")) != f"{name}@{task['digest']}"
-                    or provenance.get("localTaskDigest") != digest):
-                raise ValueError(f"Supplemental trial task pin mismatch: {path}")
-        files = trial.get("artifacts", {})
-        raw_path = evidence_path(files.get("harborResult"), path.parent, path.parent)
-        atif = evidence_path(files.get("atif"), path.parent, path.parent)
-        raw = optional_json(raw_path) if raw_path and raw_path.is_file() else None
         score = trial.get("score")
-        if (not finite_number(score) or not 0 <= score <= 1 or trial.get("cliExitCode") != 0
-                or trial.get("exception") or not atif or not atif.is_file()
-                or not raw or raw.get("task_name") != name or raw.get("exception_info")
-                or (raw.get("verifier_result") or {}).get("rewards", {}).get("reward") != score
-                or any(item["status"] != "ok" or not evidence_path(item.get("path"), path.parent, path.parent)
-                       for item in trial.get("submissions", []))):
-            raise ValueError(f"Supplemental trial is missing original scoring evidence: {path}")
+        if problem := scoring_problem(task, inventory, path, summary, trial, path.parent, score):
+            raise ValueError(f"Supplemental trial {problem}: {path}")
         scores[name] = {"summaryPath": path, "status": "scored", "reward": score,
                         "elapsedSeconds": trial.get("trialSeconds")}
     return scores
 
 
-def case_result(task, run):
+def case_trial(summary, name):
+    names = {name, name.rsplit("/", 1)[-1]}
+    return next((item for item in summary.get("trials", []) if item.get("task") in names), {})
+
+
+def case_result(task, inventory, run):
     name = task["name"]
     case = run / "cases" / name.rsplit("/", 1)[-1]
     outcome_path = case / "outcome.json"
@@ -139,6 +174,13 @@ def case_result(task, run):
     if status == "modelFailure":
         return status, 0, outcome, case
     if status == "scored" and finite_number(reward) and 0 <= reward <= 1:
+        summary_path = evidence_path(outcome.get("summaryPath") or "summary.json", case, run.parent)
+        summary = evidence_json(summary_path)
+        trial = case_trial(summary, name)
+        regrade = outcome.get("regradeResult")
+        if problem := scoring_problem(task, inventory, summary_path, summary, trial, run.parent, reward,
+                                      case / regrade if regrade else None):
+            return "missing", None, {**outcome, "reason": problem}, case
         return status, reward, outcome, case
     if status in {"infraFailure", "blocked", "unresolved"}:
         return status, None, outcome, case
@@ -187,9 +229,7 @@ def case_evidence(name, outcome, case, run, destination, supplemental):
         if recipe and recipe.is_file():
             paths["补评镜像差异"] = recipe
 
-    summary = optional_json(summary_path) if summary_path and summary_path.is_file() else None
-    names = {name, name.rsplit("/", 1)[-1]}
-    trial = next((item for item in (summary or {}).get("trials", []) if item.get("task") in names), {})
+    trial = case_trial(evidence_json(summary_path), name)
     if trial:
         for key, label in ARTIFACT_LABELS.items():
             path = evidence_path(trial.get("artifacts", {}).get(key), summary_path.parent, evidence_root)
@@ -330,7 +370,7 @@ def render(run, inventory, destination, supplemental_paths):
         if exclusion:
             status, reward, outcome, case = "excluded", None, {}, None
         else:
-            status, reward, outcome, case = case_result(task, run)
+            status, reward, outcome, case = case_result(task, inventory, run)
         supplemental = status != "scored" and name in supplements
         if supplemental:
             outcome = supplements[name]
