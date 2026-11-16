@@ -147,7 +147,8 @@ def render_attempt(attempt, target, evidence_root, notes, require_atif):
         else:
             metrics += " · 根 Turn 缓存读占比不可用"
     if (cost := trial.get("estimatedCostUsd")) is not None:
-        metrics += f" · 根 Turn 估算成本 ${cost:.4f}"
+        basis = "已对账" if trial.get("rootCostReconciled") else "按归档汇总"
+        metrics += f" · 根 Turn 估算成本 ${cost:.4f}（{basis}）"
     if workload := trial.get("workloadUsage"):
         total = workload["descendantTurnsObserved"]
         usage = workload["observedDescendantUsage"] or {}
@@ -164,10 +165,15 @@ def render_attempt(attempt, target, evidence_root, notes, require_atif):
                 metrics += " · " + " · ".join(values)
         if (ratio := workload["cacheReadRatio"]) is not None:
             metrics += f" · Agent Turn 合计缓存读占比 {ratio:.2%}（已对账）"
-        if (cost := workload["estimatedCostUsd"]) is not None:
+        if trial.get("rootCostReconciled") and (cost := workload["estimatedCostUsd"]) is not None:
             metrics += f" · Agent Turn 合计估算成本 ${cost:.4f}"
         elif (cost := workload["reconciledDescendantEstimatedCostUsd"]) is not None:
-            metrics += f" · {workload['pricedDescendantTurns']}/{total} 个子 Turn 估算成本 ${cost:.4f}"
+            basis = "逐调用对账" if "rootCostReconciled" in trial else "按归档汇总"
+            metrics += (f" · {workload['pricedDescendantTurns']}/{total} 个子 Turn"
+                        f"估算成本 ${cost:.4f}（{basis}）")
+        if (cost := workload.get("descendantEstimateFromReportedTotalsUsd")) is not None:
+            metrics += (f" · {workload['descendantTurnsEstimatedFromReportedTotals']}/{total} 个子 Turn"
+                        f"估算成本 ${cost:.4f}（按历史汇总计数，缺少逐调用计费证据）")
     collaboration = "单 Agent 诊断" if trial.get("collaborationTools") is False else None
     label = " · ".join(str(x) for x in (
         run.name, trial.get("model"), trial.get("reasoningEffort"), trial.get("taskDigest"), collaboration,

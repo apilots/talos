@@ -2,7 +2,9 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from summarize import estimate_cost, read_json, root_cache_read, summarize, trial_summary, workload_usage, write_json
+from summarize import (
+    estimate_cost, read_json, root_cache_read, root_estimated_cost, summarize, trial_summary, workload_usage, write_json,
+)
 
 
 class CompletionTest(unittest.TestCase):
@@ -12,6 +14,18 @@ class CompletionTest(unittest.TestCase):
                  "cache_creation_input_tokens": 5}
         self.assertAlmostEqual(estimate_cost(usage, rates), 122 / 1_000_000)
         self.assertIsNone(estimate_cost({**usage, "cache_read_input_tokens": None}, rates))
+
+    def test_root_cost_rejects_partial_cache_totals_even_when_observed_sums_match(self):
+        rates = {"input": 2, "output": 3, "cache_read": 1, "cache_write": 4}
+        first = {"input_tokens": 20, "output_tokens": 2, "cache_read_input_tokens": 3,
+                 "cache_creation_input_tokens": 0}
+        second = {**first, "cache_creation_input_tokens": 1}
+        requests = [{"callRecords": [{"metrics": {"usage": counts}}]} for counts in (first, second)]
+        totals = {"modelRounds": 2, "usage": {key: first[key] + second[key] for key in first}}
+        self.assertAlmostEqual(root_estimated_cost(requests, totals, rates), 88 / 1_000_000)
+        self.assertIsNone(root_estimated_cost(requests, {**totals, "modelRounds": 3}, rates))
+        first["cache_creation_input_tokens"] = None
+        self.assertIsNone(root_estimated_cost(requests, totals, rates))
 
     def test_workload_only_reports_aggregate_when_all_child_turns_reconcile(self):
         root_cache = {"status": "verified", "coveredInputTokens": 100, "observedCacheReadTokens": 50}
@@ -27,7 +41,9 @@ class CompletionTest(unittest.TestCase):
             "observedTurnMetrics": [{**child, "modelRounds": 1, "usage": child_usage}],
             "childUsage": [{**child, "reportedInputTokens": 50, "reportedCacheReadTokens": 20,
                             "observedCalls": 1, "callsWithReportedCacheRead": 1,
-                            "coveredInputTokens": 50, "observedCacheReadTokens": 20}],
+                            "coveredInputTokens": 50, "observedCacheReadTokens": 20,
+                            "observedRequests": 1, "callsWithCompleteUsage": 1,
+                            "observedUsage": child_usage, "reportedUsage": child_usage}],
         }
         whole = workload_usage(snapshot, "root", root_cache, 0.001, root)
         self.assertEqual(whole["observedDescendantUsage"], child_usage)
@@ -35,7 +51,26 @@ class CompletionTest(unittest.TestCase):
         self.assertAlmostEqual(whole["cacheReadRatio"], 70 / 150)
         self.assertAlmostEqual(whole["estimatedCostUsd"], 0.001 + 102 / 1_000_000)
 
+        # An omitted optional cache write can leave the reported totals numerically unchanged.
+        evidence, = snapshot["childUsage"]
+        snapshot["childUsage"] = [{**evidence, "callsWithCompleteUsage": 0}]
+        incomplete = workload_usage(snapshot, "root", root_cache, 0.001, root)
+        self.assertAlmostEqual(incomplete["cacheReadRatio"], 70 / 150)
+        self.assertEqual(incomplete["pricedDescendantTurns"], 0)
+        self.assertIsNone(incomplete["estimatedCostUsd"])
+
+        # Historical input/read evidence can support only an estimate from reported totals.
+        snapshot["childUsage"] = [{name: value for name, value in evidence.items()
+                                   if name not in {"observedRequests", "callsWithCompleteUsage",
+                                                   "observedUsage", "reportedUsage"}}]
+        historical = workload_usage(snapshot, "root", root_cache, 0.001, root)
+        self.assertAlmostEqual(historical["cacheReadRatio"], 70 / 150)
+        self.assertIsNone(historical["estimatedCostUsd"])
+        self.assertEqual(historical["descendantTurnsEstimatedFromReportedTotals"], 1)
+        self.assertAlmostEqual(historical["descendantEstimateFromReportedTotalsUsd"], 102 / 1_000_000)
+
         # A child may settle before its usage becomes available, such as on cancellation.
+        snapshot["childUsage"] = [evidence]
         snapshot["events"].append(["/root/cancelled", "cancelled", "turnStarted"])
         partial = workload_usage(snapshot, "root", root_cache, 0.001, root)
         self.assertEqual(partial["descendantTurnsObserved"], 2)
@@ -173,7 +208,10 @@ class CompletionTest(unittest.TestCase):
                 "identity": {"sessionId": "session", "turnId": "turn"},
                 "clockSegments": [],
                 "data": [{"type": "modelRequest", "request": {
-                    "callRecords": [{"metrics": {"executionDurationMs": 1500}}],
+                    "callRecords": [{"metrics": {"executionDurationMs": 1500, "usage": {
+                        "input_tokens": 20, "output_tokens": 3, "cache_read_input_tokens": 6,
+                        "cache_creation_input_tokens": 7,
+                    }}}],
                 }}],
                 "nextCursor": None,
             })

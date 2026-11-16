@@ -103,12 +103,19 @@ def observed_seconds(metrics, field):
     return sum(samples) / 1000 if samples else None
 
 
+def billing_counts(usage):
+    counts = tuple(usage.get(key) for key in USAGE_COUNTERS)
+    if any(type(count) is not int or count < 0 for count in counts):
+        return None
+    inputs, _, cached, written = counts
+    return counts if cached + written <= inputs else None
+
+
 def estimate_cost(usage, prices):
-    if not usage or not prices:
+    counts = billing_counts(usage or {})
+    if not counts or not prices:
         return None
-    inputs, outputs, cached, written = (usage.get(key) for key in USAGE_COUNTERS)
-    if any(type(count) is not int or count < 0 for count in (inputs, outputs, cached, written)):
-        return None
+    inputs, outputs, cached, written = counts
     input_rate, output_rate, read_rate, write_rate = (
         prices.get(key) for key in ("input", "output", "cache_read", "cache_write")
     )
@@ -116,9 +123,21 @@ def estimate_cost(usage, prices):
            for rate in (input_rate, output_rate, read_rate, write_rate)):
         return None
     uncached = inputs - cached - written
-    if uncached < 0:
-        return None
     return (uncached * input_rate + cached * read_rate + written * write_rate + outputs * output_rate) / 1_000_000
+
+
+def root_estimated_cost(requests, metrics, prices):
+    complete = requests and type(metrics.get("modelRounds")) is int and metrics["modelRounds"] == len(requests)
+    if not complete or any(not request["callRecords"] for request in requests):
+        return None
+    counts = [
+        billing_counts((call.get("metrics") or {}).get("usage") or {})
+        for request in requests for call in request["callRecords"]
+    ]
+    totals = metrics.get("usage") or {}
+    if None in counts or tuple(map(sum, zip(*counts))) != billing_counts(totals):
+        return None
+    return estimate_cost(totals, prices)
 
 
 def root_cache_read(calls, metrics, observed_requests):
@@ -142,7 +161,8 @@ def root_cache_read(calls, metrics, observed_requests):
     totals = metrics.get("usage") or {}
     total_input = totals.get("input_tokens")
     total_cached = totals.get("cache_read_input_tokens")
-    missing_rounds = (metrics.get("modelRounds") or 0) > observed_requests
+    full_coverage = (type(metrics.get("modelRounds")) is int and metrics["modelRounds"] == observed_requests
+                     and measured_calls == len(calls))
     if total_input is not None:
         inconsistent |= observed_input > total_input
         if total_cached is not None:
@@ -152,7 +172,7 @@ def root_cache_read(calls, metrics, observed_requests):
         status = "inconsistent"
     elif not covered_input:
         status = "unavailable"
-    elif covered_input == total_input and cache_read == total_cached and not missing_rounds:
+    elif covered_input == total_input and cache_read == total_cached and full_coverage:
         status = "verified"
     else:
         status = "partial"
@@ -187,6 +207,10 @@ def workload_usage(snapshot, root_turn, root_cache, root_cost, cli):
     calls = {(row["path"], row["turnId"]): row for row in snapshot.get("childUsage", ())}
     descendants = starts | metrics.keys() | calls.keys()
     reconciled = {}
+    priced = []
+    historical_estimates = []
+    # Spawn and follow-up inherit the selected root model in an isolated Bench trial.
+    rates = cli.get("prices_per_million") if cli.get("model") else None
     for key in metrics.keys() & calls.keys():
         reported, evidence = metrics[key], calls[key]
         usage = reported["usage"]
@@ -194,14 +218,19 @@ def workload_usage(snapshot, root_turn, root_cache, root_cost, cli):
         if (type(inputs) is int and type(reads) is int and 0 <= reads <= inputs
                 and type(reported.get("modelRounds")) is int
                 and evidence["observedCalls"] >= reported["modelRounds"]
+                and evidence.get("observedRequests", reported["modelRounds"]) == reported["modelRounds"]
                 and evidence["observedCalls"] == evidence["callsWithReportedCacheRead"]
                 and inputs == evidence["coveredInputTokens"] == evidence["reportedInputTokens"]
                 and reads == evidence["observedCacheReadTokens"] == evidence["reportedCacheReadTokens"]):
             reconciled[key] = usage
-
-    # Spawn and follow-up inherit the selected root model in an isolated Bench trial.
-    rates = cli.get("prices_per_million") if cli.get("model") else None
-    priced = [cost for usage in reconciled.values() if (cost := estimate_cost(usage, rates)) is not None]
+            if (cost := estimate_cost(usage, rates)) is None:
+                continue
+            if "observedUsage" not in evidence:
+                historical_estimates.append(cost)
+            elif (evidence["callsWithCompleteUsage"] == evidence["observedCalls"]
+                  and billing_counts(usage) == billing_counts(evidence["observedUsage"])
+                  == billing_counts(evidence["reportedUsage"])):
+                priced.append(cost)
     observed = {
         key: sum(values) if values and all(type(value) is int and value >= 0 for value in values) else None
         for key in USAGE_COUNTERS
@@ -226,6 +255,8 @@ def workload_usage(snapshot, root_turn, root_cache, root_cost, cli):
         "observedDescendantUsage": observed or None,
         "pricedDescendantTurns": len(priced),
         "reconciledDescendantEstimatedCostUsd": sum(priced) if priced else None,
+        "descendantTurnsEstimatedFromReportedTotals": len(historical_estimates),
+        "descendantEstimateFromReportedTotalsUsd": sum(historical_estimates) if historical_estimates else None,
         "cacheReadRatio": cache_ratio,
         "estimatedCostUsd": root_cost + sum(priced)
         if settled and root_cost is not None and len(priced) == len(descendants) else None,
@@ -316,8 +347,9 @@ def trial_summary(run, directory, entries):
         "verifier": directory / "verifier",
         "submissionManifest": archive / "manifest.json",
     }
-    cache = root_cache_read(calls, metrics, len(requests)) if usage is not None or calls else None
-    root_cost = estimate_cost(usage, cli.get("prices_per_million"))
+    trace_closed = trace.get("nextCursor") is None
+    cache = root_cache_read(calls, metrics, len(requests) if trace_closed else None) if usage is not None or calls else None
+    root_cost = root_estimated_cost(requests, metrics, cli.get("prices_per_million")) if trace_closed else None
     workload = workload_usage(read_json(delegation_events), (trace.get("identity") or {}).get("turnId"),
                               cache, root_cost, cli)
     return {
@@ -343,6 +375,7 @@ def trial_summary(run, directory, entries):
         "usage": usage,
         "rootCacheRead": cache,
         "estimatedCostUsd": root_cost,
+        "rootCostReconciled": root_cost is not None,
         "workloadUsage": workload,
         "modelRounds": metrics.get("modelRounds"),
         "modelCallsObserved": len(calls) if trace.get("data") is not None else None,

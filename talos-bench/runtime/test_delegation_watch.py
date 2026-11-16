@@ -30,9 +30,10 @@ class DelegationWatchTest(unittest.TestCase):
                 db.execute("""
                     CREATE TABLE profile_turn_usage (
                         session_id TEXT, turn_id TEXT, usage_kind TEXT, finalized INTEGER, usage_available INTEGER,
-                        input_tokens INTEGER, cache_read_input_tokens INTEGER)
+                        input_tokens INTEGER, output_tokens INTEGER, cache_read_input_tokens INTEGER,
+                        cache_creation_input_tokens INTEGER)
                 """)
-                db.execute("INSERT INTO profile_turn_usage VALUES ('0', 'child', 'turn', 1, 1, 100, 0)")
+                db.execute("INSERT INTO profile_turn_usage VALUES ('0', 'child', 'turn', 1, 1, 100, 3, 0, 0)")
                 db.execute("CREATE TABLE agent_active_turns (session_id TEXT, turn_id TEXT, "
                            "state TEXT, last_event_seq INTEGER)")
                 db.execute("INSERT INTO agent_active_turns VALUES ('0', 'child', 'running', 4)")
@@ -54,11 +55,17 @@ class DelegationWatchTest(unittest.TestCase):
                 }}}
                 db.execute("INSERT INTO agent_events VALUES ('0', 'child', NULL, 1, ?, 4, NULL)",
                            (json.dumps(warning),))
-                usage = {"input_tokens": 100, "cache_read_input_tokens": 0}
+                usage = {"input_tokens": 100, "output_tokens": 3, "cache_read_input_tokens": 0,
+                         "cache_creation_input_tokens": 0}
                 metrics = {"type": "metricsUpdated", "data": {"modelRounds": 1, "usage": usage}}
                 db.execute("INSERT INTO agent_events VALUES ('0', 'child', 5, 1, ?, 5, NULL)",
                            (json.dumps(metrics),))
-                supplement = {"requests": [{"request": {"callRecords": [{"metrics": {"usage": usage}}]}}]}
+                first_call_usage = {**usage, "input_tokens": 40, "output_tokens": 1}
+                second_call_usage = {**usage, "input_tokens": 60, "output_tokens": 2,
+                                     "cache_creation_input_tokens": None}
+                supplement = {"requests": [{"request": {"callRecords": [
+                    {"metrics": {"usage": first_call_usage}}, {"metrics": {"usage": second_call_usage}},
+                ]}}]}
                 db.execute("UPDATE agent_events SET execution_capture_json = ? WHERE event_seq = 1",
                            (json.dumps(supplement),))
             paths = ["submission"]
@@ -98,9 +105,11 @@ class DelegationWatchTest(unittest.TestCase):
                 "usage": usage,
             }])
             self.assertEqual(snapshot["childUsage"], [{
-                "path": "/root/a/b/c/0", "turnId": "child", "observedCalls": 1,
-                "callsWithReportedCacheRead": 1, "coveredInputTokens": 100, "observedCacheReadTokens": 0,
+                "path": "/root/a/b/c/0", "turnId": "child", "observedCalls": 2,
+                "callsWithReportedCacheRead": 2, "coveredInputTokens": 100, "observedCacheReadTokens": 0,
                 "reportedInputTokens": 100, "reportedCacheReadTokens": 0,
+                "observedRequests": 1, "callsWithCompleteUsage": 1,
+                "observedUsage": usage, "reportedUsage": usage,
             }])
             self.assertEqual(snapshot["events"], [
                 ["/root/a/b/c/0", "child", 1, 1, "messageBlockCompleted", "toolCall", "spawn_agent", "spawn-1", None, None, 1, None, None],

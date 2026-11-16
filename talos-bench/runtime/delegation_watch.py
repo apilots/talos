@@ -122,12 +122,17 @@ def capture_events(database, destination, *, final=False):
             child_usage = [
                 {"path": path, "turnId": turn, "observedCalls": calls, "callsWithReportedCacheRead": measured,
                  "coveredInputTokens": inputs, "observedCacheReadTokens": reads,
-                 "reportedInputTokens": total_inputs, "reportedCacheReadTokens": total_reads}
-                for path, turn, calls, measured, inputs, reads, total_inputs, total_reads in db.execute("""
+                 "reportedInputTokens": total_inputs, "reportedCacheReadTokens": total_reads,
+                 "observedRequests": requests, "callsWithCompleteUsage": complete,
+                 "observedUsage": json.loads(observed), "reportedUsage": json.loads(reported)}
+                for (path, turn, calls, measured, inputs, reads, total_inputs, total_reads,
+                     requests, complete, observed, reported) in db.execute("""
                     WITH calls AS (
-                        SELECT s.agent_path, e.session_id, e.turn_id,
+                        SELECT s.agent_path, e.session_id, e.turn_id, e.event_seq, r.key AS request_index,
                                json_extract(c.value, '$.metrics.usage.input_tokens') AS inputs,
-                               json_extract(c.value, '$.metrics.usage.cache_read_input_tokens') AS cached
+                               json_extract(c.value, '$.metrics.usage.output_tokens') AS outputs,
+                               json_extract(c.value, '$.metrics.usage.cache_read_input_tokens') AS cached,
+                               json_extract(c.value, '$.metrics.usage.cache_creation_input_tokens') AS written
                         FROM agent_events e JOIN sessions s ON e.session_id = s.session_key,
                              json_each(e.execution_capture_json, '$.requests') AS r,
                              json_each(r.value, '$.request.callRecords') AS c
@@ -135,7 +140,16 @@ def capture_events(database, destination, *, final=False):
                     )
                     SELECT agent_path, calls.turn_id, COUNT(*), COUNT(cached),
                            SUM(CASE WHEN cached IS NOT NULL THEN inputs END), SUM(cached),
-                           p.input_tokens, p.cache_read_input_tokens
+                           p.input_tokens, p.cache_read_input_tokens,
+                           COUNT(DISTINCT event_seq || ':' || request_index),
+                           COUNT(CASE WHEN outputs >= 0 AND cached >= 0 AND written >= 0
+                                           AND cached + written <= inputs THEN 1 END),
+                           json_object('input_tokens', SUM(inputs), 'output_tokens', SUM(outputs),
+                                       'cache_read_input_tokens', SUM(cached),
+                                       'cache_creation_input_tokens', SUM(written)),
+                           json_object('input_tokens', p.input_tokens, 'output_tokens', p.output_tokens,
+                                       'cache_read_input_tokens', p.cache_read_input_tokens,
+                                       'cache_creation_input_tokens', p.cache_creation_input_tokens)
                     FROM calls LEFT JOIN profile_turn_usage p ON p.session_id = calls.session_id
                         AND p.turn_id = calls.turn_id AND p.usage_kind = 'turn' AND p.finalized = 1
                         AND p.usage_available = 1

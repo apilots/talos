@@ -31,6 +31,8 @@ Use the original job, trial, verifier, and artifact files as the basis of the ex
 
 Evaluate the pinned local selections on native ARM64 with the configured model. Generate one HTML report per suite from the recorded runs. The report lists all selected tasks, scores and attempts, with links to raw evidence and verified diagnoses. Count a task only when its original verifier produced a score and the required trajectory and submissions are present. Keep controlled runs outside this selection. Official leaderboard profiles and their coverage requirements are documented in the artifact contract.
 
+Record the upstream snapshot, matched tasks and scoring unit for any leaderboard comparison. A partial cohort can support a score comparison on those tasks. Official submissions declare their model and configuration and satisfy the leaderboard's environment, coverage and trial policy. Retain earlier attempts separately when reporting an improved result.
+
 ## Verification
 
 Run the FrontierHarness smoke first on native ARM64 Docker. Check its exact Hub source, verifier reward, declared output, ATIF, and usage. Preflight the complete FrontierHarness inventory and the five-case selections before executing them. Run the benchmark runner compatibility checks locally on native ARM64, and record host-dependent gaps by case. Validate result artifacts with upstream tools and keep actual logs and results under ignored `output/`.
