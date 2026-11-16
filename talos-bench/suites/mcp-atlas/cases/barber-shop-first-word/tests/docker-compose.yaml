@@ -1,4 +1,4 @@
 services:
   main:
-    platform: linux/arm64
+    platform: ${TALOS_BENCH_PLATFORM:?Set the native Docker platform}
     network_mode: none

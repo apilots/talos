@@ -1,5 +1,8 @@
 schema_version = "1.1"
-artifacts = [{ source = "/logs/artifacts/answer.txt", destination = "answer.txt" }]
+artifacts = [
+  { source = "/logs/artifacts/answer.txt", destination = "answer.txt" },
+  { source = "/tmp/atlas-sandbox.log", destination = "atlas-sandbox.log", service = "atlas" },
+]
 
 [task]
 name = "mcp-atlas/barber-shop-first-word"

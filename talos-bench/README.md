@@ -2,6 +2,8 @@
 
 See the [local benchmark guide](../docs/reference/BENCHMARKS.md) for commands, model configuration, and run artifacts.
 
+The [FrontierHarness v1.1 batch guide](suites/frontier-harness/README.md) covers the pinned full inventory, native ARM64 admission, per-task execution, and HTML review.
+
 The suite selects its runner, task registry, container preparation and agent adapter. The shared entry point handles the Talos product, provider configuration, repetitions and result summaries. `runtime/` contains the Talos product Dockerfile and the code shared by the Harbor and Pier agent adapters. Each `suites/<suite>/` directory contains a registry and the runner-specific configuration. Running without a suite argument selects Terminal-Bench.
 
 The default suites pin released frameworks and immutable task inputs so that separate runs can use the same grader. Check the upstream release before refreshing a pin. [Harbor](https://pypi.org/project/harbor/) · [Terminal-Bench](https://github.com/harbor-framework/terminal-bench/releases/latest) · [SWE-bench](https://pypi.org/project/swebench/) · [MCP-Atlas](https://github.com/scaleapi/mcp-atlas/blob/main/CHANGELOG.md) · [Pier](https://pypi.org/project/datacurve-pier/)
@@ -10,7 +12,7 @@ Terminal-Bench uses Harbor 0.25.0 and builds each upstream task Dockerfile nativ
 
 ## Terminal-Bench tasks
 
-The Terminal-Bench suite has versioned registries. `terminal-bench` and `terminal-bench@4.1.0` select the 4.1 source release and currently enroll `production-planning`. Harbor builds the 4.1 agent and separate verifier from the upstream Dockerfiles and transfers the three SQL submissions declared by that task. Use `terminal-bench@2.0` to reproduce the earlier 2.0 cases.
+The Terminal-Bench suite has versioned registries with five representative tasks each. `terminal-bench` and `terminal-bench@4.1.0` select the pinned 4.1 Git source release. Harbor builds the agent and separate verifier from the upstream Dockerfiles and collects the task's declared submissions. Use `terminal-bench@2.0` for the independent 2.0 selection.
 
 The 4.1 fixture writes three placeholder SQL files through Talos and expects a reward of 0.0 from the independent verifier. The separate Oracle command verifies that the same task rewards the upstream solution. Talos runs in 4.1 export `agent/trajectory.json` in ATIF v1.8, validated by Harbor, beside the diagnostic trace.
 
@@ -20,7 +22,12 @@ The 4.1 fixture writes three placeholder SQL files through Talos and expects a r
 | 2.0 | `log-summary-date-ranges` | Aggregate timestamped logs across date ranges |
 | 2.0 | `polyglot-c-py` | Produce a program that runs as both C and Python |
 | 2.0 | `multi-source-data-merger` | Merge structured data into Parquet and report conflicts |
+| 2.0 | `cancel-async-tasks` | Preserve task cleanup during cancellation |
 | 4.1.0 | `production-planning` | Produce a rolling manufacturing plan and SQL writebacks |
+| 4.1.0 | `music-harmony` | Complete and label four-part harmony |
+| 4.1.0 | `session-window-debug` | Repair a streaming session-window processor |
+| 4.1.0 | `batched-eval-parity` | Match single-example and batched model evaluation |
+| 4.1.0 | `cargo-flight-dispatch` | Repair a simulated cargo dispatch planner |
 
 Use the upstream oracle to validate a task's container and scoring before using model tokens. Oracle mode skips the Talos build and provider setup.
 
@@ -41,15 +48,15 @@ Before enrolling more cases:
 
 ## DeepSWE tasks
 
-DeepSWE uses Pier 0.3.1. Its default task is `python-statemachine-state-data-scoping`. Select `anko-typed-variable-bindings` with `TALOS_BENCH_TASKS` to exercise a Go repository. The native agent and separate verifier Dockerfiles are under `suites/deep-swe/cases/`. The preparation step checks their build steps against the pinned upstream recipes, substitutes local ARM64 image references in a disposable task copy, and records both image IDs. Pier removes finished containers and retains these local images for future runs. The grader, test patch, Oracle solution, network policy, and patch collection come from the upstream task at its recorded revision.
+DeepSWE uses Pier 0.3.1. The registry contains five upstream Python, Go, and TypeScript cases. Its default task is `python-statemachine-state-data-scoping`. The preparation step derives the native agent and verifier Dockerfiles from the pinned upstream recipes, substitutes their base images in a disposable task copy, and records both image IDs. Pier removes finished containers and retains these local images for future runs. The grader, test patch, Oracle solution, network policy, and patch collection come from the upstream task at its recorded revision.
 
 To run Talos, use the [configured-model command](../docs/reference/BENCHMARKS.md#run-with-a-configured-model) with `deep-swe` as the suite. The Pier adapter takes the exact provider hostname from its HTTPS base URL. Pier filters agent egress to that host and grades the submitted Git patch in the separate verifier. The result includes DeepSWE's fail-to-pass and pass-to-pass scores. See the [DeepSWE run guide](https://deepswe.datacurve.ai/run) and the [FrontierHarness corpus pin](https://github.com/frontier-harness-eval/eval/blob/main/skills/frontierharness-eval/reference.md#corpus-pin-and-pi-control).
 
 ## SWE-bench Lite and MCP-Atlas
 
-SWE-bench Lite starts Talos in a checkout of the pinned base commit. It collects the resulting Git patch and sends it to the independent verifier, which runs the official SWE-bench 5.0.2 evaluation and report code. See the [SWE-bench Lite suite](suites/swe-bench-lite/README.md).
+SWE-bench Lite starts Talos in checkouts of five pinned SymPy issues from the Lite test split. It collects each Git patch and sends it to the independent verifier, which runs the official SWE-bench 5.0.2 evaluation and report code. See the [SWE-bench Lite suite](suites/swe-bench-lite/README.md).
 
-MCP-Atlas uses the claim scorer from Scale's 2.0.0 harness revision and the published 1.2.7 sandbox. A standard Talos MCP plugin forwards tool calls to that sandbox. Harbor collects the final answer and runs the scorer in a separate verifier with a loopback judge. The bundled CSV case uses the controlled model and judge without external credentials. See the [MCP-Atlas suite](suites/mcp-atlas/README.md).
+MCP-Atlas uses the claim scorer from Scale's 2.0.0 harness revision and the published 1.2.7 sandbox. A standard Talos MCP plugin forwards tool calls to that sandbox. The representative selection contains five pinned public cases. Harbor collects the final answer and runs the upstream scorer in a separate verifier with a configured OpenAI judge. See the [MCP-Atlas suite](suites/mcp-atlas/README.md).
 
 ## Add a suite
 

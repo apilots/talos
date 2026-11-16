@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -68,6 +69,12 @@ def submission_paths(registry, tasks):
         print(source)
 
 
+def artifact_identity(artifact):
+    if isinstance(artifact, str):
+        return "main", artifact
+    return artifact.get("service") or "main", artifact["source"]
+
+
 def record_build(run, repo, binary, source, mode, repeats, tasks):
     def git(*args):
         return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
@@ -80,7 +87,7 @@ def record_build(run, repo, binary, source, mode, repeats, tasks):
         "checkoutDirty": bool(git("status", "--porcelain")),
         "productSource": source,
         "talosBinarySha256": sha256,
-        "platform": "linux/arm64",
+        "platform": os.environ["TALOS_BENCH_PLATFORM"],
         "mode": mode,
         "requestedTasks": selected,
         "requestedTrials": repeats * len(selected),
@@ -90,6 +97,18 @@ def record_build(run, repo, binary, source, mode, repeats, tasks):
 def observed_seconds(metrics, field):
     samples = [metric[field] for metric in metrics if metric and metric.get(field) is not None]
     return sum(samples) / 1000 if samples else None
+
+
+def estimate_cost(usage, prices):
+    if not usage or not prices or not all(field in prices for field in ("input", "output", "cache_read", "cache_write")):
+        return None
+    cached = usage.get("cache_read_input_tokens") or 0
+    written = usage.get("cache_creation_input_tokens") or 0
+    uncached = usage["input_tokens"] - cached - written
+    if uncached < 0:
+        return None
+    return (uncached * prices["input"] + cached * prices["cache_read"]
+            + written * prices["cache_write"] + usage["output_tokens"] * prices["output"]) / 1_000_000
 
 
 def trial_summary(run, directory, entries):
@@ -128,6 +147,12 @@ def trial_summary(run, directory, entries):
                 "cache_read_input_tokens": harbor_usage.get("n_cache_tokens"),
             }
     exception = (result.get("exception_info") or {}).get("exception_type")
+    if exception is None and "exit_code" in cli and cli["exit_code"] is None:
+        exception = "TalosCliTerminationUnrecorded"
+    watch_path = agent / "talos-delegation.jsonl"
+    watch_samples = watch_path.read_text().splitlines() if watch_path.is_file() else []
+    stop_reason = next((reason for line in reversed(watch_samples)
+                        if (reason := json.loads(line).get("stopReason"))), None)
     rewards = (result.get("verifier_result") or {}).get("rewards") or {}
     reward = rewards.get("reward")
     if reward == -1 and exception is None:
@@ -136,19 +161,24 @@ def trial_summary(run, directory, entries):
     if task_name and task_name not in entries:
         task_name = task_name.rsplit("/", 1)[-1]
     entry = entries.get(task_name, {})
+    atlas_provenance = read_json(run / "provenance" / f"{task_name}.json") if "revision" in entry else {}
     archive = directory / "artifacts"
     manifest = read_json(archive / "manifest.json")
-    captured = {entry["source"]: entry for entry in manifest}
+    captured = {artifact_identity(item): item for item in manifest}
     submissions = []
-    for source in entry.get("submission_paths", []):
-        item = captured.get(source, {})
+    for declared in entry.get("submission_paths", []):
+        service, source = artifact_identity(declared)
+        item = captured.get((service, source), {})
         path = directory / item.get("destination", "")
         exists = path.resolve().is_relative_to(archive.resolve()) and path.exists()
-        submissions.append({
+        submission = {
             "source": source,
             "status": item.get("status", "unavailable"),
             "path": str(path.relative_to(run)) if item.get("status") == "ok" and exists else None,
-        })
+        }
+        if service != "main":
+            submission["service"] = service
+        submissions.append(submission)
     paths = {
         "harborResult": directory / "result.json",
         "trialLog": directory / "trial.log",
@@ -156,6 +186,9 @@ def trial_summary(run, directory, entries):
         "trajectory": agent / "talos-trajectory.json",
         "transcript": agent / "talos-transcript.json",
         "atif": agent / "trajectory.json",
+        "usage": agent / "usage.json",
+        "delegationWatch": agent / "talos-delegation.jsonl",
+        "delegationEvents": agent / "talos-delegation-events.json",
         "stdout": agent / "talos.stdout.txt",
         "stderr": agent / "talos.stderr.txt",
         "verifier": directory / "verifier",
@@ -164,17 +197,25 @@ def trial_summary(run, directory, entries):
     return {
         "trial": directory.name,
         "task": task_name,
-        "taskRevision": task.get("git_commit_id") or entry.get("git_commit_id"),
+        "taskRevision": task.get("git_commit_id") or entry.get("git_commit_id") or atlas_provenance.get("datasetRevision"),
         "taskDigest": task.get("digest") or result.get("task_checksum"),
         "model": cli.get("model"),
-        "score": None if exception else reward,
+        "reasoningEffort": cli.get("reasoning_effort"),
+        "collaborationTools": cli.get("collaboration_tools"),
+        "requestIntervalMs": cli.get("request_interval_ms"),
+        "score": None if exception or stop_reason else reward,
         "verifierReward": reward,
         "verifierRewards": rewards,
         "trialSeconds": elapsed(result),
+        "agentSeconds": elapsed(result.get("agent_execution") or {}),
+        "environmentSetupSeconds": elapsed(result.get("environment_setup") or {}),
+        "verifierSeconds": elapsed(result.get("verifier") or {}),
         "cliSeconds": cli.get("elapsed_seconds"),
         "cliExitCode": cli.get("exit_code"),
         "exception": exception,
+        "stopReason": stop_reason,
         "usage": usage,
+        "estimatedCostUsd": estimate_cost(usage, cli.get("prices_per_million")),
         "modelRounds": metrics.get("modelRounds"),
         "modelCallsObserved": len(calls) if trace.get("data") is not None else None,
         "observedModelSeconds": observed_seconds(model_timings, "executionDurationMs"),
@@ -185,7 +226,8 @@ def trial_summary(run, directory, entries):
         "compactions": compactions if metrics or compactions else None,
         "trajectoryError": trace_error,
         "submissions": submissions,
-        "artifacts": {name: str(path.relative_to(run)) for name, path in paths.items() if path.exists()},
+        "artifacts": {name: str(path.relative_to(run)) for name, path in paths.items()
+                      if path.is_dir() or (path.is_file() and path.stat().st_size)},
     }
 
 
@@ -194,12 +236,33 @@ def summarize(run, mode, repeats, runner_exit, require_trace, require_atif,
     selected = split_tasks(tasks)
     expected = len(selected) * repeats
     job = run / job_name
+    build = read_json(run / "build.json")
     result = read_json(job / "result.json")
     lock = read_json(job / "lock.json")
-    entries = task_entries(registry) if registry else {}
+    dataset = read_dataset(registry) if registry else {}
+    entries = {entry["name"]: entry for entry in dataset.get("tasks", [])}
     trials = [trial_summary(run, directory, entries) for directory in sorted(job.glob("*__*"))
               if directory.is_dir()]
+    expected_reward = 1.0 if mode == "oracle" else fixture_reward
+    evidence_failure = None
+    for trial in trials:
+        if trial["score"] is None:
+            continue
+        if require_trace and not trial["modelCallsObserved"]:
+            reason = "missing trajectory metadata"
+        elif require_atif and "atif" not in trial["artifacts"]:
+            reason = "missing ATIF trajectories"
+        elif any(not item["path"] for item in trial["submissions"]):
+            reason = "missing a required submission"
+        else:
+            continue
+        trial["score"] = None
+        evidence_failure = evidence_failure or reason
     scored = [trial for trial in trials if trial["score"] is not None]
+    threshold = dataset.get("pass_threshold", 1.0)
+    passed = sum(trial["score"] >= threshold for trial in scored)
+    costs = [trial["estimatedCostUsd"] for trial in trials if trial["estimatedCostUsd"] is not None]
+    total_cost = sum(costs) if len(costs) == expected else None
     cases = []
     for task in selected:
         attempts = [trial for trial in trials if trial["task"] == task]
@@ -210,30 +273,28 @@ def summarize(run, mode, repeats, runner_exit, require_trace, require_atif,
             "scoredTrials": len(rewards),
             "tracedTrials": sum(bool(trial["modelCallsObserved"]) for trial in attempts),
             "meanScore": sum(rewards) / len(rewards) if rewards else None,
+            "passRate": sum(reward >= threshold for reward in rewards) / len(rewards) if rewards else None,
         })
     all_scored = (runner_exit == 0 and result.get("finished_at") is not None
                   and result.get("n_total_trials") == len(trials) == len(scored) == expected
                   and all(case["scoredTrials"] == repeats for case in cases))
     traced = sum(case["tracedTrials"] for case in cases)
-    expected_reward = 1.0 if mode == "oracle" else fixture_reward
     failure = None
-    if not all_scored:
+    if evidence_failure:
+        failure = f"Talos benchmark job is {evidence_failure}"
+    elif not all_scored:
         failure = "Talos benchmark job did not score every trial"
-    elif require_trace and traced != expected:
-        failure = "Talos benchmark job is missing trajectory metadata"
-    elif require_atif and any("atif" not in trial["artifacts"] for trial in scored):
-        failure = "Talos benchmark job is missing ATIF trajectories"
-    elif any(not item["path"] for trial in scored for item in trial["submissions"]):
-        failure = "Talos benchmark job is missing a required submission"
     elif mode in ("fixture", "oracle") and any(trial["score"] != expected_reward for trial in scored):
         failure = f"Talos {mode} validation failed"
     summary = run / "summary.json"
     write_json(summary, {
         "schemaVersion": 1,
-        "build": read_json(run / "build.json") or None,
+        "build": build or None,
         "mode": mode,
         "suite": suite,
-        "suiteVersion": read_dataset(registry)["version"] if registry else None,
+        "suiteVersion": dataset.get("version"),
+        "datasetRef": f"{dataset['source']}@{dataset['digest']}" if "source" in dataset else None,
+        "platform": build.get("platform") or os.environ.get("TALOS_BENCH_PLATFORM"),
         "runner": runner,
         "runnerExitCode": runner_exit,
         "runnerSeconds": elapsed(result),
@@ -243,7 +304,11 @@ def summarize(run, mode, repeats, runner_exit, require_trace, require_atif,
         "requestedTrials": expected,
         "scoredTrials": len(scored),
         "meanScore": sum(trial["score"] for trial in scored) / len(scored) if scored else None,
+        "passRate": passed / len(scored) if scored else None,
+        "meanEstimatedCostUsd": total_cost / expected if total_cost is not None else None,
+        "estimatedCostPerPassUsd": total_cost / passed if total_cost is not None and passed else None,
         "complete": failure is None,
+        "failure": failure,
         "tracedTrials": traced,
         "cases": cases,
         "trials": trials,
@@ -260,6 +325,8 @@ def main():
     listing.add_argument("suites", type=Path)
     version = subcommands.add_parser("version")
     version.add_argument("registry", type=Path)
+    dataset_ref = subcommands.add_parser("dataset-ref")
+    dataset_ref.add_argument("registry", type=Path)
     select = subcommands.add_parser("select")
     select.add_argument("registry", type=Path)
     select.add_argument("tasks")
@@ -293,6 +360,9 @@ def main():
         list_suites(**args)
     elif command == "version":
         print(read_dataset(args["registry"])["version"])
+    elif command == "dataset-ref":
+        dataset = read_dataset(args["registry"])
+        print(f"{dataset['source']}@{dataset['digest']}")
     elif command == "select":
         select_tasks(**args)
     elif command == "submissions":

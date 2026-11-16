@@ -21,6 +21,33 @@
         "submission_paths": [
           "/logs/artifacts/model.patch"
         ]
+      },
+      {
+        "name": "textual-richlog-follow-state",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/textual-richlog-follow-state",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "superjson-error-stack-serialization",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/superjson-error-stack-serialization",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "termenv-preserve-ansi-resets",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/termenv-preserve-ansi-resets",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
       }
     ]
   }

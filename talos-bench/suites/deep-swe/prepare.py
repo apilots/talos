@@ -1,7 +1,8 @@
-"""Build a native ARM64 agent image and separate verifier for a pinned DeepSWE case."""
+"""Prepare native agent and verifier images for a pinned DeepSWE case."""
 
 import argparse
 import hashlib
+import os
 from pathlib import Path
 import re
 import shutil
@@ -10,6 +11,10 @@ from tempfile import TemporaryDirectory
 import tomllib
 
 from summarize import task_entries, write_json
+
+
+MARS_BASE = "public.ecr.aws/x8v8d7g8/mars-base"
+ARM64_BASE = f"{MARS_BASE}@sha256:8d4d973c993776850e6249f909431040f0f0e694162768b1ed1409ba64162cb2"
 
 
 def checked(*command):
@@ -23,17 +28,21 @@ def replace_once(text, pattern, value):
     return rewritten
 
 
-def build_image(dockerfile, tag):
-    checked("docker", "buildx", "build", "--platform", "linux/arm64", "--load",
-            "--tag", tag, "--file", str(dockerfile), str(dockerfile.parent))
+def inspect_image(tag, expected_platform):
     output = subprocess.check_output(
         ["docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}} {{.Id}}", tag],
         text=True,
     ).strip()
     platform, image_id = output.split()
-    if platform != "linux/arm64":
-        raise ValueError(f"Expected a native linux/arm64 image for {tag}, found {platform}")
+    if platform != expected_platform:
+        raise ValueError(f"Expected a native {expected_platform} image for {tag}, found {platform}")
     return {"tag": tag, "id": image_id, "platform": platform}
+
+
+def build_image(dockerfile, tag, platform):
+    checked("docker", "buildx", "build", "--platform", platform, "--load",
+            "--tag", tag, "--file", str(dockerfile), str(dockerfile.parent))
+    return inspect_image(tag, platform)
 
 
 def prepare(run, task_name, scratch):
@@ -59,36 +68,33 @@ def prepare(run, task_name, scratch):
     upstream_agent = data["environment"]["docker_image"]
     agent_file = task / "environment/Dockerfile"
     verifier_file = task / "tests/Dockerfile"
-    original_agent = agent_file.read_text()
-    original_verifier = verifier_file.read_text()
-    recipes = suite / "cases" / task_name
-    agent_recipe = (recipes / "agent.Dockerfile").read_text()
-    verifier_recipe = (recipes / "verifier.Dockerfile").read_text()
-    base, = re.findall(r"^FROM (\S+@sha256:[a-f0-9]{64})$", agent_recipe, re.MULTILINE)
-    if agent_recipe != replace_once(original_agent, r"^FROM \S+$", f"FROM {base}"):
-        raise ValueError("The local agent Dockerfile differs from the upstream recipe beyond its base")
-    agent_arg = "ARG TALOS_BENCH_AGENT_IMAGE"
-    expected_verifier = agent_arg + "\n" + replace_once(
-        original_verifier, f"^FROM {re.escape(upstream_agent)}$",
-        "FROM ${TALOS_BENCH_AGENT_IMAGE}",
-    )
-    if verifier_recipe != expected_verifier:
-        raise ValueError("The local verifier Dockerfile differs from the upstream recipe beyond its base")
+    platform = os.environ["TALOS_BENCH_PLATFORM"]
     prefix = f"talos-bench-deepswe-{task_name}"
-    tag = f"{revision[:7]}-arm64"
-    agent_tag = f"{prefix}:{tag}"
+    tag = f"{revision[:7]}-{platform.split('/')[1]}"
     verifier_tag = f"{prefix}-verifier:{tag}"
-    agent_file.write_text(agent_recipe)
-    verifier_file.write_text(replace_once(verifier_recipe, f"^{agent_arg}$", f"{agent_arg}={agent_tag}"))
+    base = None
+    if platform == "linux/arm64":
+        base = ARM64_BASE
+        agent_tag = f"{prefix}:{tag}"
+        agent_file.write_text(replace_once(
+            agent_file.read_text(), f"^FROM {re.escape(MARS_BASE)}:latest$", f"FROM {base}",
+        ))
+        verifier_file.write_text(replace_once(
+            verifier_file.read_text(), f"^FROM {re.escape(upstream_agent)}$", f"FROM {agent_tag}",
+        ))
+        agent = build_image(agent_file, agent_tag, platform)
+        original = replace_once(original, f'^docker_image = "{re.escape(upstream_agent)}"$',
+                                f'docker_image = "{agent_tag}"')
+    else:
+        checked("docker", "pull", "--platform", platform, upstream_agent)
+        agent = inspect_image(upstream_agent, platform)
     config.write_text(replace_once(
-        replace_once(original, f'^docker_image = "{re.escape(upstream_agent)}"$',
-                     f'docker_image = "{agent_tag}"'),
+        original,
         r"^\[verifier\.environment\]$",
         f'[verifier.environment]\ndocker_image = "{verifier_tag}"',
     ))
 
-    agent = build_image(agent_file, agent_tag)
-    verifier = build_image(verifier_file, verifier_tag)
+    verifier = build_image(verifier_file, verifier_tag, platform)
     provenance = run / "provenance"
     provenance.mkdir(exist_ok=True)
     write_json(provenance / f"{task_name}.json", {

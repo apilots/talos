@@ -1,0 +1,6 @@
+services:
+  main:
+    platform: ${TALOS_BENCH_PLATFORM:?Set the native Docker platform}
+    build:
+      platforms:
+        - ${TALOS_BENCH_PLATFORM:?Set the native Docker platform}

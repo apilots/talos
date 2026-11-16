@@ -1,0 +1,36 @@
+{
+  "dataset": "ScaleAI/MCP-Atlas",
+  "revision": "8c563b55d7c967755f474299848049834d624617",
+  "tasks": [
+    {
+      "TASK": "686d2c79e1db37ea23ddda26",
+      "PROMPT": "I have a repository of a classic snake game in my computer files, could you look for it and tell me when was the initial commit done?",
+      "ENABLED_TOOLS": "[\"git_git_status\",\"git_git_diff_unstaged\",\"git_git_diff\",\"git_git_diff_staged\",\"git_git_log\",\"git_git_show\",\"filesystem_read_file\",\"filesystem_read_multiple_files\",\"filesystem_list_directory\",\"filesystem_directory_tree\",\"filesystem_list_directory_with_sizes\",\"filesystem_search_files\",\"filesystem_get_file_info\",\"filesystem_list_allowed_directories\"]",
+      "GTFA_CLAIMS": "[\"The initial commit for the snake-game repository is '72539126c678980835973c5cb7d1ce6e7faf594a'.\", \"The commit '72539126c678980835973c5cb7d1ce6e7faf594a' was made on 2022-11-24 11:43:20+05:00.\"]"
+    },
+    {
+      "TASK": "68993ef3cf3e953b8ab83fe3",
+      "PROMPT": "I am reviewing a repository I want to contribute to, which contains a snake game. I need to know who made and what was the commit about that took place one the same day the world taekwondo championships began in the same year the movie oppenheimer, directed by chistopher nolan, was released.",
+      "ENABLED_TOOLS": "[\"ddg-search_search\",\"ddg-search_fetch_content\",\"filesystem_list_directory\",\"filesystem_list_allowed_directories\",\"filesystem_list_directory_with_sizes\",\"filesystem_directory_tree\",\"filesystem_search_files\",\"filesystem_get_file_info\",\"git_git_log\",\"git_git_show\",\"git_git_diff\",\"git_git_diff_staged\",\"git_git_diff_unstaged\",\"git_git_status\"]",
+      "GTFA_CLAIMS": "['Oppenheimer was released in 2023.', 'The World Taekwondo Championships began on May 29, 2023.', 'On May 29, 2023, a commit titled \"Create FUNDING.yml\" was made in the snake-game repository.', 'The commit \"Create FUNDING.yml\" in the snake-game repository was created by Atamyrat.']"
+    },
+    {
+      "TASK": "6863f438a500a4b36aab0f24",
+      "PROMPT": "I'm trying to identify the suspension bridge that was under construction during the 1995 great hanshin earthquake and later became the longest-span suspension bridge in the world at the time it opened. Can you tell me which bridge this is and what its main span length in meters was? Also, which bridge held the world record for longest suspension span just before it, and what was its span length?",
+      "ENABLED_TOOLS": "[\"wikipedia_search_wikipedia\",\"wikipedia_get_article\",\"wikipedia_get_summary\",\"wikipedia_summarize_article_for_query\",\"wikipedia_extract_key_facts\",\"wikipedia_summarize_article_section\",\"wikipedia_get_sections\",\"wikipedia_get_related_topics\",\"wikipedia_get_links\",\"ddg-search_search\",\"ddg-search_fetch_content\",\"osm-mcp-server_geocode_address\",\"fetch_fetch\"]",
+      "GTFA_CLAIMS": "['The bridge under construction during the 1995 Great Hanshin earthquake was the Akashi Kaikyō Bridge.', 'The Akashi Kaikyō Bridge became the longest-span suspension bridge in the world when it opened.', 'The main span of the Akashi Kaikyō Bridge is 1,991 meters.', 'Prior to the completion of the Akashi Kaikyō Bridge in 1998, the longest suspension span was held by the Humber Bridge.', 'The Humber Bridge is located in England.', 'The main span of the Humber Bridge is 1,410 meters.']"
+    },
+    {
+      "TASK": "68a398aa2f58036e8d45ee0c",
+      "PROMPT": "Tell me which santiago commune has a better public transportation score between the one where the same country's national stadium is located and the one containing most of the city's version of manhattan.",
+      "ENABLED_TOOLS": "[\"osm-mcp-server_analyze_neighborhood\",\"wikipedia_search_wikipedia\",\"wikipedia_extract_key_facts\",\"osm-mcp-server_geocode_address\",\"osm-mcp-server_reverse_geocode\",\"osm-mcp-server_find_nearby_places\",\"osm-mcp-server_search_category\",\"osm-mcp-server_get_route_directions\",\"osm-mcp-server_suggest_meeting_point\",\"osm-mcp-server_explore_area\",\"osm-mcp-server_find_schools_nearby\",\"osm-mcp-server_analyze_commute\",\"wikipedia_get_article\",\"wikipedia_summarize_article_for_query\"]",
+      "GTFA_CLAIMS": "['The national stadium in Santiago, Chile, is located in the commune of Ñuñoa.', \"In Chile, Sanhattan (Santiago's version of Manhattan) is located in the commune of Las Condes.\", 'Las Condes commune in Santiago, Chile, has better public transportation than Ñuñoa.', 'Las Condes commune in Santiago, Chile, has a public transportation score of 8.9.', 'Ñuñoa commune in Santiago, Chile, has a public transportation score of 5.9.']"
+    },
+    {
+      "TASK": "68993ef3cf3e953b8ab83fdf",
+      "PROMPT": "Can you give me the walking distance in meters from the location where tomorrowland was held in 2022 to its closest charging station?",
+      "ENABLED_TOOLS": "[\"ddg-search_search\",\"ddg-search_fetch_content\",\"open-library_get_book_by_title\",\"open-library_get_authors_by_name\",\"open-library_get_author_info\",\"open-library_get_author_photo\",\"open-library_get_book_cover\",\"open-library_get_book_by_id\",\"osm-mcp-server_geocode_address\",\"osm-mcp-server_reverse_geocode\",\"osm-mcp-server_find_nearby_places\",\"osm-mcp-server_get_route_directions\",\"osm-mcp-server_search_category\",\"osm-mcp-server_suggest_meeting_point\",\"osm-mcp-server_explore_area\",\"osm-mcp-server_find_schools_nearby\",\"osm-mcp-server_analyze_commute\",\"osm-mcp-server_find_ev_charging_stations\",\"osm-mcp-server_analyze_neighborhood\",\"osm-mcp-server_find_parking_facilities\"]",
+      "GTFA_CLAIMS": "['The festival Tomorrowland 2022 was held in De Schorre, in Boom, Belgium.', 'The closest charging station to De Schorre, in Boom, Belgium, is 1626.4 meters away.']"
+    }
+  ]
+}

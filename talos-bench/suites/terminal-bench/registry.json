@@ -14,6 +14,40 @@
           "/app/output/mes_writeback.sql",
           "/app/output/wms_writeback.sql"
         ]
+      },
+      {
+        "name": "music-harmony",
+        "git_url": "https://github.com/harbor-framework/terminal-bench.git",
+        "git_commit_id": "4070d6cef56a7d20cb5dc98d5e10ada88a6b9440",
+        "path": "tasks/music-harmony",
+        "submission_paths": ["/app/harmony.mxl"]
+      },
+      {
+        "name": "session-window-debug",
+        "git_url": "https://github.com/harbor-framework/terminal-bench.git",
+        "git_commit_id": "4070d6cef56a7d20cb5dc98d5e10ada88a6b9440",
+        "path": "tasks/session-window-debug",
+        "submission_paths": ["/app/app/"]
+      },
+      {
+        "name": "batched-eval-parity",
+        "git_url": "https://github.com/harbor-framework/terminal-bench.git",
+        "git_commit_id": "4070d6cef56a7d20cb5dc98d5e10ada88a6b9440",
+        "path": "tasks/batched-eval-parity",
+        "submission_paths": ["/app/evalbench/"]
+      },
+      {
+        "name": "cargo-flight-dispatch",
+        "git_url": "https://github.com/harbor-framework/terminal-bench.git",
+        "git_commit_id": "4070d6cef56a7d20cb5dc98d5e10ada88a6b9440",
+        "path": "tasks/cargo-flight-dispatch",
+        "submission_paths": [
+          "/app/navigation.py",
+          "/app/aircraft.py",
+          "/app/dispatch.py",
+          "/app/requirements.txt",
+          "/app/apt-packages.txt"
+        ]
       }
     ]
   }

@@ -1,6 +1,22 @@
 # syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 
-FROM rust:bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6 AS builder
+FROM rust:bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6 AS base
+
+FROM base AS ripgrep
+ARG TARGETARCH
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      arm64) target=aarch64-unknown-linux-gnu; sha=2b661c6ef508e902f388e9098d9c4c5aca72c87b55922d94abdba830b4dc885e ;; \
+      amd64) target=x86_64-unknown-linux-musl; sha=1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599 ;; \
+    esac; \
+    asset="ripgrep-15.1.0-$target"; \
+    curl -fsSL "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/$asset.tar.gz" -o /tmp/ripgrep.tar.gz; \
+    echo "$sha  /tmp/ripgrep.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/ripgrep.tar.gz -C / --strip-components=1 "$asset/rg"; \
+    rm /tmp/ripgrep.tar.gz; \
+    /rg --version
+
+FROM base AS builder
 ARG TARGETPLATFORM
 WORKDIR /workspace
 
@@ -22,5 +38,6 @@ RUN --mount=type=cache,id=talos-worker-target-${TARGETPLATFORM},target=/workspac
 
 FROM scratch
 COPY --from=builder /artifacts/ /
+COPY --from=ripgrep /rg /bin/rg
 COPY conf/talos-prod.yaml /conf/talos.yaml
 COPY conf/migrations/ /conf/migrations/

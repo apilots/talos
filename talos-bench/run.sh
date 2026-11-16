@@ -37,7 +37,6 @@ fi
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=suites/terminal-bench/suite.sh
 source "$suite_dir/suite.sh"
-export DOCKER_DEFAULT_PLATFORM=linux/arm64
 export PYTHONPATH="$bench_dir:$bench_dir/runtime:$suite_dir"
 export HARBOR_TELEMETRY=0
 
@@ -61,17 +60,30 @@ case "${TALOS_BENCH_ORACLE:-0}" in
   *) echo 'TALOS_BENCH_ORACLE must be 0 or 1.' >&2; exit 1 ;;
 esac
 if [[ -n "${TALOS_BENCH_MODEL:-}" ]]; then
-  model_config="${TALOS_BENCH_CONFIG:?Set TALOS_BENCH_CONFIG to the existing Talos model configuration.}"
-  model_dotenv="${TALOS_BENCH_DOTENV:?Set TALOS_BENCH_DOTENV to the existing Talos dotenv.}"
-  if [[ ! -r "$model_config" || ! -r "$model_dotenv" ]]; then
-    echo 'The selected Talos config and dotenv must be readable.' >&2
-    exit 1
+  if [[ -n "${TALOS_BENCH_CONFIG:-}${TALOS_BENCH_DOTENV:-}" ]]; then
+    model_config="${TALOS_BENCH_CONFIG:-}"
+    model_dotenv="${TALOS_BENCH_DOTENV:-}"
+    if [[ ! -r "$model_config" || ! -r "$model_dotenv" ]]; then
+      echo 'Provide both a readable TALOS_BENCH_CONFIG and TALOS_BENCH_DOTENV.' >&2
+      exit 1
+    fi
+    set -- --agent-kwarg "talos_model=$TALOS_BENCH_MODEL" \
+      --agent-kwarg "talos_config=$(cd "$(dirname "$model_config")" && pwd)/$(basename "$model_config")" \
+      --agent-kwarg "talos_dotenv=$(cd "$(dirname "$model_dotenv")" && pwd)/$(basename "$model_dotenv")"
+  else
+    set -- --model "${TALOS_BENCH_MODEL%%:*}/${TALOS_BENCH_MODEL#*:}"
   fi
-  set -- --agent-kwarg "talos_model=$TALOS_BENCH_MODEL" \
-    --agent-kwarg "talos_config=$(cd "$(dirname "$model_config")" && pwd)/$(basename "$model_config")" \
-    --agent-kwarg "talos_dotenv=$(cd "$(dirname "$model_dotenv")" && pwd)/$(basename "$model_dotenv")"
   uv_args+=(--with PyYAML==6.0.3)
   mode=real
+fi
+if [[ -n "${TALOS_BENCH_AGENT_ENV:-}" ]]; then
+  while IFS= read -r entry; do
+    if [[ ! "$entry" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      echo 'TALOS_BENCH_AGENT_ENV accepts one KEY=VALUE per line.' >&2
+      exit 1
+    fi
+    set -- "$@" --agent-env "$entry"
+  done <<< "$TALOS_BENCH_AGENT_ENV"
 fi
 
 tasks="${TALOS_BENCH_TASKS:-$default_task}"
@@ -80,13 +92,21 @@ if [[ "$mode" == fixture && "$selection" != "$fixture_task" ]]; then
   echo 'The selected tasks have no controlled fixture. Select an oracle or configured model.' >&2
   exit 1
 fi
-if [[ "$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')" != linux/arm64 ]]; then
-  echo 'A native linux/arm64 Docker daemon is required.' >&2
+native_platform="$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')"
+case "$native_platform" in
+  linux/arm64|linux/amd64) ;;
+  *) echo "Unsupported Docker platform: $native_platform" >&2; exit 1 ;;
+esac
+if [[ "${TALOS_BENCH_PLATFORM:-$native_platform}" != "$native_platform" ]]; then
+  echo "TALOS_BENCH_PLATFORM must match the native Docker platform ($native_platform)." >&2
   exit 1
 fi
+export TALOS_BENCH_PLATFORM="$native_platform"
+export DOCKER_DEFAULT_PLATFORM="$native_platform"
 
 mkdir -p "$repo_root/.tmp" "$repo_root/output/talos-bench"
 run_dir="$(mktemp -d "$repo_root/output/talos-bench/run.XXXXXX")"
+printf 'Talos benchmark run: %s\n' "$run_dir"
 job_name="$suite"
 prepare_suite
 set -- "$@" "${suite_args[@]}"
@@ -100,7 +120,7 @@ else
     product_source=checkout
     product="$(mktemp -d "$repo_root/.tmp/talos-bench-product.XXXXXX")"
     trap 'rm -rf -- "$product"' EXIT
-    docker buildx build --platform linux/arm64 \
+    docker buildx build --platform "$TALOS_BENCH_PLATFORM" \
       -f "$bench_dir/runtime/build.Dockerfile" --output "type=local,dest=$product" "$repo_root"
   fi
   product="$(cd "$product" && pwd)"

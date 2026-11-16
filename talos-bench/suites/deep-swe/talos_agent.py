@@ -1,19 +1,24 @@
 """Run Talos inside Pier's DeepSWE agent environment."""
 
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from pier.agents.base import BaseAgent
 from pier.models.agent.network import NetworkAllowlist
 
-from payload import command, model_configuration, populate_usage, upload_payload
+from payload import command, populate_usage, resolve_model, upload_payload
 
 
 class TalosAgent(BaseAgent):
-    def __init__(self, *, product, talos_model, talos_config, talos_dotenv, model_name=None, **kwargs):
-        super().__init__(model_name=model_name or talos_model.replace(":", "/", 1), **kwargs)
-        self.product = Path(product)
-        self.connection = model_configuration(talos_model, talos_config, talos_dotenv)
+    def __init__(self, *, product=None, model_name=None, talos_model=None, talos_config=None,
+                 talos_dotenv=None, extra_env=None, **kwargs):
+        super().__init__(model_name=model_name or (talos_model and talos_model.replace(":", "/", 1)), **kwargs)
+        self.product = Path(product or os.environ["TALOS_BENCH_PRODUCT"])
+        self.connection = resolve_model(self.product, model_name, talos_model, talos_config, talos_dotenv)
+        self.extra_env = extra_env or {}
+        if not self.connection:
+            raise ValueError("Select a model with -m provider/model")
 
     @staticmethod
     def name():
@@ -43,9 +48,9 @@ class TalosAgent(BaseAgent):
             "GIT_COMMITTER_EMAIL": "talos@local",
         }
         result = await environment.exec(
-            command(logs, "real", instruction),
+            command(logs, "real", instruction, include_content=True),
             cwd="/app",
-            env=environment.agent_process_env(git_identity),
+            env=environment.agent_process_env({**git_identity, **self.extra_env}),
         )
         if not (self.logs_dir / "talos.stderr.txt").exists():
             await environment.download_file(f"{logs}/talos.stderr.txt", self.logs_dir / "talos.stderr.txt")

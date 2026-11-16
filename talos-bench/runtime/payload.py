@@ -1,6 +1,7 @@
 """Talos product, model configuration, and evidence shared by benchmark runners."""
 
 import json
+import os
 from pathlib import Path
 import re
 import shlex
@@ -16,6 +17,7 @@ async def upload_payload(environment, product, *, connection=None, fixture=None,
         raise RuntimeError("Could not create the Talos installation directory")
     await environment.upload_dir(product, REMOTE)
     await environment.upload_file(Path(__file__).with_name("run_talos.py"), f"{REMOTE}/run_talos.py")
+    await environment.upload_file(Path(__file__).with_name("delegation_watch.py"), f"{REMOTE}/delegation_watch.py")
     if mcp_config is not None:
         await environment.upload_file(mcp_config, f"{REMOTE}/mcp.json")
     if fixture is not None:
@@ -42,7 +44,7 @@ def command(logs_dir, mode, instruction, *, include_content=False, capture=None)
     return shlex.join([*args, "--", str(logs_dir), mode, instruction])
 
 
-def model_configuration(selected_model, config, dotenv):
+def model_configuration(selected_model, config, dotenv=None):
     import yaml
 
     provider, separator, model = selected_model.partition(":")
@@ -64,6 +66,16 @@ def model_configuration(selected_model, config, dotenv):
     if placeholder is None:
         raise ValueError(f"Provider {provider} needs a Talos dotenv reference for its API key")
     key = placeholder[1]
+    if dotenv is None:
+        env_key = key.removeprefix("TALOS_LLM_")
+        value = os.environ.get(env_key)
+        if not value:
+            raise ValueError(f"Set {env_key} for the selected Talos provider")
+        base_url = os.environ.get(f"{env_key.removesuffix('_API_KEY')}_BASE_URL")
+        if base_url:
+            connection["base_url"] = base_url
+        quoted_value = json.dumps(value).replace("$", r"\$")
+        return llm, f"{key}={quoted_value}"
     # Transfer only the matching assignment; Talos parses its value.
     credential = next((line for line in reversed(Path(dotenv).read_text().splitlines())
                        if re.fullmatch(rf"\s*(?:export )?{key}\s*=.+", line)), None)
@@ -71,6 +83,14 @@ def model_configuration(selected_model, config, dotenv):
         raise ValueError(f"Missing {key} in the supplied Talos dotenv")
     return llm, credential
 
+
+def resolve_model(product, model_name, talos_model, talos_config, talos_dotenv):
+    if not model_name and not talos_model:
+        return None
+    if bool(talos_config) != bool(talos_dotenv):
+        raise ValueError("Provide both the Talos config and dotenv, or use the provider environment")
+    selected = talos_model or model_name.replace("/", ":", 1)
+    return model_configuration(selected, talos_config or product / "conf/talos.yaml", talos_dotenv)
 
 
 def cli_log_lines(logs_dir):
@@ -92,3 +112,5 @@ def populate_usage(logs_dir, context):
         context.n_input_tokens = usage["input_tokens"]
         context.n_output_tokens = usage["output_tokens"]
         context.n_cache_tokens = usage["cache_read_input_tokens"]
+        # Harbor and Pier have no cache-write field in their current AgentContext.
+        (logs_dir / "usage.json").write_text(json.dumps(usage, indent=2) + "\n")
