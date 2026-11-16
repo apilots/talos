@@ -4,6 +4,43 @@
     "version": "1.1.0",
     "source": "frontier-harness-eval/frontier-harness-eval",
     "digest": "sha256:9236400fc1a6619eb72a663445c580417be9bbbab32f816c7dff76d0a96ab24a",
+    "native_exclusions": {
+      "terminal-bench/bun-sourcemap-leak": {
+        "digest": "sha256:e55ae542f338f50f4468d940c7d7c93a45d34fd418dc6cc5883c1fedc753603a",
+        "kind": "metadataOnly",
+        "reason": "vulnerability reproduction or data-exposure task"
+      },
+      "terminal-bench/dna-assembly": {
+        "digest": "sha256:e41a8e94d86019949b08d3b5f88a85f6d943ba0fd85d5e1d5ebb95cb8f66223f",
+        "kind": "metadataOnly",
+        "reason": "genetic assembly task"
+      },
+      "terminal-bench/dna-insert": {
+        "digest": "sha256:37fc023970e3464c1acc31f43e04a0b4b94758130d340788f261f00764d9e530",
+        "kind": "metadataOnly",
+        "reason": "genetic engineering task"
+      },
+      "terminal-bench/feal-linear-cryptanalysis": {
+        "digest": "sha256:0f3234c5fde85f9dc610d94cfefd4c892afb75c9e571f21f18fee66972b67332",
+        "kind": "metadataOnly",
+        "reason": "cryptanalytic attack task"
+      },
+      "terminal-bench/vulnerable-secret": {
+        "digest": "sha256:d76dfa9e256487c5542905b892156f694137aeef784e1abf3f41e15a8c946eac",
+        "kind": "metadataOnly",
+        "reason": "vulnerability exploitation or secret-extraction task"
+      },
+      "terminal-bench/install-windows-3.11": {
+        "digest": "sha256:1f1361b0012e1ad24054e7cfc039829459e8ab0631b3573d9b93499bf6b3563e",
+        "kind": "guestEmulation",
+        "reason": "requires booting a Windows guest in QEMU"
+      },
+      "terminal-bench/make-doom-for-mips": {
+        "digest": "sha256:2d83dd3dee8e0f055e09973934cf0d7e3169a9cd90704cba5c8940b170be9498",
+        "kind": "guestEmulation",
+        "reason": "requires running a MIPS ELF in the supplied JavaScript VM"
+      }
+    },
     "tasks": [
       {
         "name": "terminal-bench/log-summary-date-ranges",

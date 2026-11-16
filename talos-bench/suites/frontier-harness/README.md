@@ -17,6 +17,16 @@ Rerun preflight with `--retry-unresolved` to retry package and manifest lookups 
 
 Each case directory retains the Harbor job, Talos trajectory, usage, summary, execution log and outcome. An ARM64 verifier rebuild uses a disposable copy with the published verifier image pointer removed and records the original and local digests. The original task verifier code runs unchanged. Archive a failed attempt directory before retrying so the first outcome remains reviewable.
 
+The report writes `index.html` and `coverage.json`. Each JSON row includes the qualified task name, original digest, completion status, and paths to available outcome, summary, and original verifier evidence. Explicit native exclusions come from `registry.json` and match both the qualified task name and its digest. These rows record the reason and have no score. The preflight skips downloading those tasks. Local model failures may carry a local zero without increasing the original-verifier score count. Local acceptance accounts for every row once each eligible case has an original-verifier score and each excluded case has its reason.
+
+To reconcile successful retries stored outside the original batch, pass each archived single-trial summary and direct the report to a new directory. The report checks the original dataset and task pins, native platform, verifier result, ATIF file, and recorded submissions. Scored original batch rows remain in place. The retry and the previous attempt are linked in the report.
+
+```bash
+python3 talos-bench/suites/frontier-harness/report.py output/frontier-local \
+  --output-dir output/frontier-reconciled \
+  --supplemental-summary output/frontier-retry/cases/rstan-to-pystan/summary.json
+```
+
 Harbor Compose tasks can declare artifacts from multiple services. The summary checks each declared service and source path against the collection manifest, even when several services write to the same path. A reward with missing required artifacts remains visible in the raw result and is excluded from the completed score count.
 
 If the cold start reaches the task's environment deadline, inspect the Harbor exception and Docker BuildKit history for the failed phase. Prepare the admitted task's unchanged Dockerfile outside the scored trial.
