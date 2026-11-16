@@ -18,6 +18,31 @@ METRICS_PREFIX = "TALOS_EXEC_METRICS "
 PROVIDER = "chat-protocol-default"
 
 
+DEPTH_CASES = ("admission-root", "admission-child", "admission-grandchild")
+
+
+def admission_chunks(case, history):
+    level = DEPTH_CASES.index(case)
+    target = ("child", "grandchild", "too_deep")[level]
+    next_prompt = (*DEPTH_CASES[1:], "unexpected-beyond-admission")[level]
+    results = [message for message in history if message["role"] == "tool"]
+    if level == 2 and results:
+        response = json.loads(results[-1]["content"])
+        assert response["ok"] is False and "2 child levels" in response["error"]["message"], response
+    if level < 2 and len(results) == 2:
+        outcome = json.loads(results[-1]["content"])["result"]["result"]["outcome"]
+        assert outcome["status"] == "completed" and outcome["output"] == f"PROTOCOL_OK:call_{next_prompt}", outcome
+    done = len(results) == (1 if level == 2 else 2)
+    chunks = chat_chunks("call_" + case, "off", done)
+    if not done:
+        name, args = ("spawn_agent", {"taskName": target, "prompt": next_prompt}) if not results else (
+            "wait_agent", {"target": {"type": "directChild", "name": target}, "timeoutMs": 10000},
+        )
+        tool = chunks[0]["choices"][0]["delta"]["tool_calls"][0]
+        tool.update(id=f"call_{case}_{len(results)}", function={"name": name, "arguments": json.dumps(args)})
+    return chunks
+
+
 class Fixture(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -32,10 +57,13 @@ class Fixture(BaseHTTPRequestHandler):
         if case == "fail":
             self.reply({"error": {"message": "Controlled provider failure", "type": "invalid_request_error"}}, 400)
             return
-        done = case == "seed" or any(message.get("tool_call_id") == call for message in history[user_index:])
-        marker = shlex.quote(str(self.server.workspace / case))
-        command = f"test ! -s {marker} && printf tool-ran > {marker}"
-        chunks = chat_chunks(call, "off", done, command=command)
+        if case in DEPTH_CASES:
+            chunks = admission_chunks(case, history[user_index:])
+        else:
+            done = case == "seed" or any(message.get("tool_call_id") == call for message in history[user_index:])
+            marker = shlex.quote(str(self.server.workspace / case))
+            command = f"test ! -s {marker} && printf tool-ran > {marker}"
+            chunks = chat_chunks(call, "off", done, command=command)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -127,6 +155,13 @@ def exercise(root, work, report):
             run("enable", 0, existing, "--dangerously-skip-permissions")
             run("saved", 0, existing)
             assert (workspace / "enable").read_text() == (workspace / "saved").read_text() == "tool-ran"
+            admission = subprocess.run(
+                [environment["TALOS_E2E_CLI_BIN"], "exec", "--model", f"{PROVIDER}:{MODEL}", DEPTH_CASES[0]],
+                env=environment, cwd=workspace, capture_output=True, text=True, timeout=30)
+            (report / "admission.stderr.txt").write_text(admission.stderr)
+            assert admission.returncode == 0, admission.stderr
+            assert admission.stdout == "PROTOCOL_OK:call_admission-root\n", admission.stdout
+            print("CASE subagent_admission PASS default depth=2 nested result delivered")
             assert config.read_bytes() == original
             print("CASE exec_unattended PASS waiting=3 failure=1 completion=0 usage=stderr permission=session")
         finally:
