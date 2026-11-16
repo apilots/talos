@@ -95,6 +95,7 @@ pub struct TuiApp {
     pub(crate) available_model_info: Vec<ModelInfo>,
     pub(crate) available_models: Vec<String>,
     pub(crate) session_id: Option<String>,
+    pub(crate) session_read_only: bool,
     pub(crate) connection_status: String,
     pub(crate) right_panel_events: Vec<String>,
     pub(crate) rendered_chat_lines: Vec<RenderedChatLine>,

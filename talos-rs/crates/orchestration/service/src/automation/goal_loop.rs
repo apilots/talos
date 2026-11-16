@@ -53,11 +53,6 @@ enum Declaration {
         revision: u64,
         evidence: String,
     },
-    Loop {
-        loop_id: String,
-        revision: u64,
-        decision: LoopWakeDecision,
-    },
 }
 impl SessionAutomationService {
     pub(crate) fn new(
@@ -356,6 +351,7 @@ impl SessionAutomationService {
         )))
     }
 }
+
 fn conflict() -> TalosError {
     TalosError::new(
         ErrorCode::Conflict,
@@ -400,7 +396,10 @@ impl SessionAutomationService {
             self.queue.remove_loop(&task.session_id, &task.id)?;
             return Ok(());
         }
-        if !error.is_code(ErrorCode::Conflict) && !error.is_code(ErrorCode::ActiveTurnRunning) {
+        if !error.is_code(ErrorCode::Conflict)
+            && !error.is_code(ErrorCode::ActiveTurnRunning)
+            && !error.is_code(ErrorCode::SessionHeld)
+        {
             self.stop(
                 &task,
                 LoopStopReason::ExecutionFailed,

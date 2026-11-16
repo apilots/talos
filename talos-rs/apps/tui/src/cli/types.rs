@@ -43,7 +43,7 @@ pub(crate) enum Commands {
 
 #[derive(Args)]
 #[command(
-    after_help = "Exit codes: 0 completed, 1 execution failed, 2 invalid arguments, 3 waiting for input."
+    after_help = "Exit codes: 0 completed, 1 execution failed, 2 invalid arguments, 3 waiting for input, 4 session held by another owner.\n--trajectory stays null while the turn is waiting. Waiting is not a terminal turn, so no partial trajectory is written.\nThe last stdout line is JSON: {\"sessionId\",\"turnId\",\"status\":\"completed\"|\"failed\"|\"waiting\"}."
 )]
 pub(crate) struct ExecCmd {
     /// Session ID to reuse. A new session is created when omitted.
@@ -69,6 +69,10 @@ pub(crate) struct ExecCmd {
     /// Write canonical message blocks, including tool arguments and results, to a new JSON file.
     #[arg(long, value_name = "FILE", requires = "trajectory")]
     pub(crate) transcript: Option<std::path::PathBuf>,
+
+    /// Idempotency key forwarded as client_request_id. A repeat returns the original turn.
+    #[arg(long)]
+    pub(crate) request_id: Option<String>,
 
     /// Message to execute.
     #[arg(required = true, trailing_var_arg = true)]

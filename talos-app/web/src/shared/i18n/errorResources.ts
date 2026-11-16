@@ -7,6 +7,7 @@ export const errorResources = {
       computerDeletionUnverified: "Unable to verify this Computer's tasks. Reconnect it or wait for its access lease to expire, then retry.",
       modelNotConfigured: 'Model "{{model}}" is not configured for provider "{{provider}}".',
       attachmentCountExceeded: "This request contains {{actual}} attachments; the limit is {{limit}}.",
+      sessionHeld: "Read-only. Session {{sessionId}} is held by {{ownerKind}} pid {{pid}} on {{host}} since {{since}}.",
     },
   },
   zh: {
@@ -17,6 +18,7 @@ export const errorResources = {
       computerDeletionUnverified: "暂时无法确认此 Computer 的任务状态，请恢复连接或等待访问租约到期后重试。",
       modelNotConfigured: '提供方“{{provider}}”未配置模型“{{model}}”。',
       attachmentCountExceeded: "本次请求包含 {{actual}} 个附件，上限为 {{limit}} 个。",
+      sessionHeld: "只读。会话 {{sessionId}} 由 {{ownerKind}} 进程 {{pid}} 在 {{host}} 上自 {{since}} 起持有。",
     },
   },
 } as const;

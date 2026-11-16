@@ -175,6 +175,7 @@ pub(super) fn context_compaction_failure_outcome(error: &TalosError) -> ContextC
         | talos_error::ErrorCode::Cancelled
         | talos_error::ErrorCode::RunForcedAbort
         | talos_error::ErrorCode::RunCleanupUnconfirmed
+        | talos_error::ErrorCode::SessionHeld
         | talos_error::ErrorCode::InternalError => ContextCompactionOutcome::FailedInternalError,
     }
 }

@@ -2,9 +2,9 @@
 use crate::automation_e2e_support::*;
 use anyhow::{ensure, Result};
 use serde_json::json;
-use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 use talos_sdk::{
-    AppServerClient, AppServerClientConfig, GatewayClient, LoopAction, LoopStatus,
+    AppServerClient, AppServerClientConfig, GatewayClient, LoopAction, LoopSchedule, LoopStatus,
     MessageQueueAddRequest, MessageQueueListRequest, QueuedMessageSource, SkillScope,
     SkillsListRequest,
 };
@@ -110,16 +110,32 @@ pub(super) async fn run() -> Result<()> {
         "hard restart failed"
     );
     drop(first);
+    let restarted_at = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())?;
     let mut second = connect(&binary).await?;
-    let after = snapshot(&mut second, &session).await?;
+    let after = wait_snapshot(&mut second, &session, |state| {
+        state.loops.iter().any(|current| {
+            current.id == task.id
+                && current.status == LoopStatus::Active
+                && current.next_due_at.is_some()
+        })
+    })
+    .await?;
+    let observed_at = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())?;
     let retained = after
         .loops
         .iter()
         .find(|loop_task| loop_task.id == task.id)
         .expect("restart discarded the durable Loop definition");
+    let interval = match task.schedule {
+        LoopSchedule::FixedInterval { minutes } => i64::from(minutes) * 60,
+        LoopSchedule::ModelDecided {} => 60,
+    };
     ensure!(
-        retained.status == LoopStatus::Active && retained.next_due_at.is_none(),
-        "restart invented a blanket stop or a next time: {retained:?}"
+        retained.latest_turn_id == task.latest_turn_id
+            && retained.next_due_at.is_some_and(|due| {
+                (restarted_at + interval..=observed_at + interval).contains(&due)
+            }),
+        "restart must schedule the next interval without replaying the lost occurrence: {retained:?}"
     );
     ensure!(
         second
@@ -131,18 +147,6 @@ pub(super) async fn run() -> Result<()> {
             .is_empty(),
         "process-local User/Loop queue was replayed after restart"
     );
-    // Let the original real scan tick; null time and lost memory alone cannot fabricate an occurrence.
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    ensure!(
-        snapshot(&mut second, &session)
-            .await?
-            .loops
-            .iter()
-            .any(|loop_task| loop_task.id == task.id
-                && loop_task.status == LoopStatus::Active
-                && loop_task.next_due_at.is_none()),
-        "lost queued occurrence changed the durable definition after restart"
-    );
     std::fs::write(
         root.join("restart-after.json"),
         serde_json::to_vec_pretty(&after)?,
@@ -150,6 +154,6 @@ pub(super) async fn run() -> Result<()> {
     control(&mut second, &session, LoopAction::Stop { loop_id: task.id }).await?;
     release(&registration, "registered")?;
     GatewayClient::shutdown(&mut second).await?;
-    eprintln!("CASE automation_restart PASS durableDefinition=retained queue=memoryOnly nullNext=noInventedOccurrence");
+    eprintln!("CASE automation_restart PASS durableDefinition=retained queue=memoryOnly nextInterval=rescheduled missedOccurrence=notReplayed");
     Ok(())
 }

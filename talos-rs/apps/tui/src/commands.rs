@@ -592,6 +592,7 @@ impl TuiApp {
             self.pending_user_action = None;
         }
         self.session_id = Some(session_id.clone());
+        self.session_read_only = false;
         self.set_current_model_selection(&session.model_selection);
         self.session_usage = session.usage.tokens.clone();
         self.session_context_usage = session.usage.context.clone();
