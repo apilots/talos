@@ -178,6 +178,14 @@ transcript or result JSON. Provider artifacts remain private execution material.
 | Orphaned nonterminal execution without continuation | Recover from durable facts and fail after confirmed cleanup |
 | Cleanup cannot be confirmed | Retain active isolation; do not fabricate completion |
 
+The Kernel keeps live text and File IDs in the pending tool continuation until
+the original tool batch finishes. Another user action carries the same input
+forward without reading attachments and retains live input queued during the
+replay. The Provider resolves and authorizes the files when the Kernel is ready
+to apply the input. Before the next model call, the budget guard protects the
+latest live input. An unavailable file or exhausted budget fails the Turn with
+the corresponding typed error after the tool result.
+
 Natural completion and cancellation converge through the durable terminal
 commit boundary. Cancellation does not automatically dispatch queued work.
 Neither arbitrary-position resume nor exactly-once external tool effects are
@@ -238,9 +246,13 @@ Re-enter Coordinator -> same AgentHarness -> same AgentProvider implementation
 Child Timeline and result projection
 ```
 
-A subagent does not silently select another Agent definition or bypass normal
-Session and Turn lifecycle rules. Cross-Agent delegation, if introduced, must
-be a separate explicit product capability.
+At creation, the child Session saves the spawning Session's effective model
+selection (including reasoning effort) and permission mode. It uses the same
+Worker, Agent, workspace, project and working directory. The Worker applies its
+existing Sandbox policy for that Agent using the inherited permission mode.
+This applies at every level of the Session tree. Subsequent parent Session
+configuration changes apply to children spawned after the change. Cross-Agent
+delegation, if introduced, must be a separate explicit product capability.
 
 Child Turn admission shares the primary Session's collaboration limits.
 `agent.subagent_admission.max_depth` defaults to two child levels and is checked

@@ -59,6 +59,8 @@ class Fixture(BaseHTTPRequestHandler):
             return
         if case in DEPTH_CASES:
             chunks = admission_chunks(case, history[user_index:])
+        elif case == "delegate":
+            chunks = self.delegate_chunks(call, history[user_index:])
         else:
             done = case == "seed" or any(message.get("tool_call_id") == call for message in history[user_index:])
             marker = shlex.quote(str(self.server.workspace / case))
@@ -68,6 +70,26 @@ class Fixture(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         self.wfile.write(("".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n").encode())
+
+    def delegate_chunks(self, call, messages):
+        results = {message.get("tool_call_id"): message for message in messages
+                   if message["role"] == "tool"}
+        if f"{call}_wait" in results:
+            assert (self.server.workspace / "child").read_text() == "tool-ran", results
+            return chat_chunks(call, "off", True)
+        if f"{call}_spawn" in results:
+            name = "wait_agent"
+            arguments = {"target": {"type": "directChild", "name": "inheritance"}, "timeoutMs": 10000}
+            call_id = f"{call}_wait"
+        else:
+            name = "spawn_agent"
+            arguments = {"taskName": "inheritance", "prompt": "child"}
+            call_id = f"{call}_spawn"
+        chunks = chat_chunks(call_id, "off", False)
+        chunks[0]["choices"][0]["delta"]["tool_calls"][0]["function"] = {
+            "name": name, "arguments": json.dumps(arguments),
+        }
+        return chunks
 
     def reply(self, payload, status=200):
         self.send_response(status)
@@ -113,7 +135,7 @@ def exercise(root, work, report):
                            if line.startswith(METRICS_PREFIX)]
                 assert len(records) == 1 and METRICS_PREFIX not in result.stdout, result
                 if case != "fail":
-                    rounds = 2 if case in {"new", "enable", "saved"} else 1
+                    rounds = {"new": 2, "enable": 2, "saved": 2, "delegate": 3, DEPTH_CASES[0]: 3}.get(case, 1)
                     usage = json.loads(records[0])["usage"]
                     assert usage["input_tokens"] == 100 * rounds, usage
                     assert usage["output_tokens"] == 10 * rounds, usage
@@ -155,15 +177,12 @@ def exercise(root, work, report):
             run("enable", 0, existing, "--dangerously-skip-permissions")
             run("saved", 0, existing)
             assert (workspace / "enable").read_text() == (workspace / "saved").read_text() == "tool-ran"
-            admission = subprocess.run(
-                [environment["TALOS_E2E_CLI_BIN"], "exec", "--model", f"{PROVIDER}:{MODEL}", DEPTH_CASES[0]],
-                env=environment, cwd=workspace, capture_output=True, text=True, timeout=30)
-            (report / "admission.stderr.txt").write_text(admission.stderr)
-            assert admission.returncode == 0, admission.stderr
-            assert admission.stdout == "PROTOCOL_OK:call_admission-root\n", admission.stdout
+            run("delegate", 0, str(uuid4()), "--dangerously-skip-permissions")
+            assert (workspace / "child").read_text() == "tool-ran"
+            run(DEPTH_CASES[0], 0, str(uuid4()))
             print("CASE subagent_admission PASS default depth=2 nested result delivered")
             assert config.read_bytes() == original
-            print("CASE exec_unattended PASS waiting=3 failure=1 completion=0 usage=stderr permission=session")
+            print("CASE exec_unattended PASS waiting=3 failure=1 completion=0 usage=stderr permission=session-and-child")
         finally:
             server.shutdown()
             server_thread.join()
