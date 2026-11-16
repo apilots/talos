@@ -22,6 +22,7 @@ pub(super) enum FakeMode {
     ProgressThenRelease,
     FloodProgress,
     BurstProgress,
+    LargeHistory,
     Input,
     PendingInput,
     RejectInput,
@@ -194,6 +195,30 @@ impl AgentSession for FakeSession {
                     FakeMode::BurstProgress => completed(),
                     _ => unreachable!("progress mode"),
                 }
+            }
+            FakeMode::LargeHistory => {
+                for _ in 0..6 {
+                    let message = turn.events.start_message(AgentMessageRole::Agent).await?;
+                    let block = turn
+                        .events
+                        .start_block(
+                            &message,
+                            AgentMessageBlockContent::AssistantText(
+                                talos_agent_api::AgentAssistantText {
+                                    phase: talos_agent_api::AgentAssistantTextPhase::Commentary,
+                                    text: "x".repeat(768 * 1024),
+                                },
+                            ),
+                        )
+                        .await?;
+                    turn.events
+                        .complete_block(&block, talos_agent_api::AgentMessageBlockStatus::Completed)
+                        .await?;
+                    turn.events
+                        .complete_message(&message, talos_agent_api::AgentMessageStatus::Completed)
+                        .await?;
+                }
+                completed()
             }
             FakeMode::ProgressThenRelease => {
                 let message = turn.events.start_message(AgentMessageRole::Agent).await?;

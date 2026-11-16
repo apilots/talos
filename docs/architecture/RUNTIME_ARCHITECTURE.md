@@ -164,8 +164,12 @@ the logical Turn. Input reservations prevent settlement from overtaking an
 uncommitted input. Terminal commits compare the expected durable tail.
 
 `AgentRunSettlement::Finished` retains the original in-process `TalosResult<()>`
-alongside public facts/messages/metrics. Report the original failure at its
-handling boundary; never reconstruct diagnostics from a persisted `ApiError`.
+alongside the terminal event and metrics. Canonical messages travel as progress;
+the terminal receipt stays bounded as history grows. Service reads the committed
+Turn checkpoint for title and memory effects. A disconnect can use a ready
+receipt from that exact invocation to confirm cleanup after Harness removal.
+Report the original failure at its handling boundary; never reconstruct
+diagnostics from a persisted `ApiError`.
 History results are bounded projections of committed facts, not another stored
 transcript or result JSON. Provider artifacts remain private execution material.
 

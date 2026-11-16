@@ -117,6 +117,10 @@ impl AgentEventReducer {
         self.checkpoint.clone()
     }
 
+    pub(crate) fn metrics(&self) -> AgentRunMetrics {
+        self.checkpoint.metrics.clone()
+    }
+
     /// Close every open Provider-owned message lifecycle before abnormal settlement.
     ///
     /// Harness is the only caller allowed to synthesize these status-only

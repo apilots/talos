@@ -174,34 +174,51 @@ impl AgentExecutionDriver {
                     .await
                     .map(|commit| commit.events)
             }
-            AgentRunSettlement::Finished {
-                event,
-                messages,
-                metrics,
-                ..
-            } => {
-                if let (false, Some(reflection)) =
-                    (purpose.is_compaction(), &self.memory_reflection)
+            AgentRunSettlement::Finished { event, metrics, .. } => {
+                if !purpose.is_compaction()
+                    && matches!(event.payload, AgentEventPayload::TurnCompleted(_))
+                    && (self.memory_reflection.is_some() || self.inner_model.is_some())
                 {
-                    if let Err(error) = reflection.reflect(event, messages).await {
-                        self.report_warning(
-                            &event.identity,
-                            error.context("reflect User Workspace Memory"),
-                        )
-                        .await;
-                    }
-                }
-                if let (false, Some(inner_model)) = (purpose.is_compaction(), &self.inner_model) {
-                    if let Err(error) = self
-                        .sessions
-                        .generate_title(inner_model, event, messages)
+                    match self
+                        .event_service
+                        .turn_checkpoint(&event.identity, expected_event_seq)
                         .await
                     {
-                        self.report_warning(
-                            &event.identity,
-                            error.context("generate Session title"),
-                        )
-                        .await;
+                        Ok(checkpoint) => {
+                            if let Some(reflection) = &self.memory_reflection {
+                                if let Err(error) =
+                                    reflection.reflect(event, &checkpoint.messages).await
+                                {
+                                    self.report_warning(
+                                        &event.identity,
+                                        error.context("reflect User Workspace Memory"),
+                                    )
+                                    .await;
+                                }
+                            }
+                            if let Some(inner_model) = &self.inner_model {
+                                if let Err(error) = self
+                                    .sessions
+                                    .generate_title(inner_model, event, &checkpoint.messages)
+                                    .await
+                                {
+                                    self.report_warning(
+                                        &event.identity,
+                                        error.context("generate Session title"),
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            self.report_warning(
+                                &event.identity,
+                                error.context(
+                                    "read committed Agent messages for completion effects",
+                                ),
+                            )
+                            .await
+                        }
                     }
                 }
                 self.execution_store

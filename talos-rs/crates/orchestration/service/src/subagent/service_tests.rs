@@ -198,7 +198,6 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                         .send(Ok(AgentRunSettlement::Finished {
                             result: Ok(()),
                             event: terminal,
-                            messages: vec![assistant],
                             metrics: AgentRunMetrics::default(),
                         }))
                         .map_err(|_| {

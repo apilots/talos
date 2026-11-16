@@ -174,7 +174,16 @@ impl KernelAgentEventMapper {
                     .await
             }
             AgentKernelEventPayload::AssistantTextCompleted(data) => {
-                self.assistant_block_mut(&data.item_key)?.kernel_completed = true;
+                let assistant = self.assistant_block_mut(&data.item_key)?;
+                if assistant.phase == AgentAssistantTextPhase::Pending {
+                    assistant.kernel_completed = true;
+                } else {
+                    let block = assistant.handle.clone();
+                    self.sink
+                        .complete_block(&block, AgentMessageBlockStatus::Completed)
+                        .await?;
+                    self.assistant.remove(&data.item_key);
+                }
                 Ok(())
             }
             AgentKernelEventPayload::AssistantTextCommitted(data) => {
@@ -194,7 +203,9 @@ impl KernelAgentEventMapper {
                         "Kernel committed a conflicting assistant text phase",
                     ));
                 }
-                if self.assistant_block(&data.item_key)?.kernel_completed {
+                let assistant = self.assistant_block_mut(&data.item_key)?;
+                assistant.phase = committed_phase;
+                if assistant.kernel_completed {
                     self.sink
                         .complete_block(&block, AgentMessageBlockStatus::Completed)
                         .await?;

@@ -68,13 +68,15 @@ async fn exercise_resume(attachment_available: bool) {
     reducer.apply(event).unwrap();
 
     reader.0.store(attachment_available, Ordering::Relaxed);
-    let (_, finished) = resume(&provider, &context, reducer.checkpoint(), continuation, 3).await;
-    let AgentRunSettlement::Finished {
-        result, messages, ..
-    } = finished
-    else {
+    let (events, finished) =
+        resume(&provider, &context, reducer.checkpoint(), continuation, 3).await;
+    let AgentRunSettlement::Finished { result, .. } = finished else {
         panic!("the second answer must finish this execution");
     };
+    for event in events {
+        reducer.apply(event).unwrap();
+    }
+    let messages = reducer.checkpoint().messages;
     let resolved_calls: Vec<_> = messages
         .iter()
         .flat_map(|message| &message.blocks)

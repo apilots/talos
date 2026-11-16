@@ -79,6 +79,10 @@ impl AgentEventPipeline {
         self.inner.state.lock().await.reducer.checkpoint()
     }
 
+    pub(crate) async fn metrics(&self) -> AgentRunMetrics {
+        self.inner.state.lock().await.reducer.metrics()
+    }
+
     /// Close open message and block state after abnormal Provider cleanup.
     ///
     /// Closure snapshots are delivered as progress so Service persists every

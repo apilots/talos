@@ -385,7 +385,6 @@ pub(crate) async fn mock_agent_execution(params: AgentRunParams) -> TalosResult<
             .send(Ok(AgentRunSettlement::Finished {
                 result: Ok(()),
                 event: terminal,
-                messages: checkpoint.messages,
                 metrics: checkpoint.metrics,
             }))
             .map_err(|_| {

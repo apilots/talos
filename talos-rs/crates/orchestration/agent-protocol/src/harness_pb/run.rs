@@ -109,15 +109,10 @@ pub fn encode_settlement(value: AgentRunSettlement) -> TalosResult<pb::Settlemen
             }),
             AgentRunSettlement::Finished {
                 event,
-                messages,
                 metrics,
                 result,
             } => pb::settlement::Result::Finished(pb::FinishedSettlement {
                 event: Some(encode_event(event)?),
-                messages: messages
-                    .into_iter()
-                    .map(encode_message)
-                    .collect::<TalosResult<_>>()?,
                 metrics: Some(encode_metrics(metrics)),
                 result: Some(match result {
                     Ok(()) => pb::finished_settlement::Result::Success(pb::Empty {}),
@@ -148,11 +143,6 @@ pub fn decode_settlement(value: pb::Settlement) -> TalosResult<AgentRunSettlemen
             };
             Ok(AgentRunSettlement::Finished {
                 event: decode_event(value.event.ok_or_else(invalid)?)?,
-                messages: value
-                    .messages
-                    .into_iter()
-                    .map(decode_message)
-                    .collect::<TalosResult<_>>()?,
                 metrics: decode_metrics(value.metrics)?,
                 result,
             })

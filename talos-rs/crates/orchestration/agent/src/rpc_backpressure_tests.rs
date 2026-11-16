@@ -11,7 +11,7 @@ use tokio::sync::oneshot;
 struct RunningHarness(
     CancellationToken,
     mpsc::Sender<AgentEvent>,
-    AgentInterruptOutcome,
+    TalosResult<AgentInterruptOutcome>,
 );
 
 impl AgentHarness for RunningHarness {
@@ -50,7 +50,7 @@ impl AgentHarness for RunningHarness {
             // must be closed before interruption waits for cooperative cleanup.
             self.1.closed().await;
             self.0.cancel();
-            Ok(self.2.clone())
+            self.2.clone()
         })
     }
 }
@@ -63,7 +63,7 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
         let harness: Arc<dyn AgentHarness> = Arc::new(RunningHarness(
             stopped.clone(),
             events.clone(),
-            AgentInterruptOutcome::Cancelled,
+            Ok(AgentInterruptOutcome::Cancelled),
         ));
         let home = tempfile::tempdir().unwrap();
         let adapter = AgentHarnessRpcAdapter::new(
@@ -182,13 +182,25 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
 }
 
 #[tokio::test]
-async fn reconnect_remains_blocked_after_unconfirmed_disconnected_cleanup() {
+async fn disconnected_cleanup_uses_only_exact_harness_confirmation() {
+    assert_disconnected_cleanup(false).await;
+    assert_disconnected_cleanup(true).await;
+}
+
+async fn assert_disconnected_cleanup(finished: bool) {
     let (events, receiver) = mpsc::channel(1);
     let stopped = CancellationToken::new();
     let harness: Arc<dyn AgentHarness> = Arc::new(RunningHarness(
         stopped.clone(),
         events,
-        AgentInterruptOutcome::CleanupUnconfirmed { task_count: 1 },
+        if finished {
+            Err(TalosError::new(
+                ErrorCode::ResourceNotFound,
+                "finished Harness Turn was removed",
+            ))
+        } else {
+            Ok(AgentInterruptOutcome::CleanupUnconfirmed { task_count: 1 })
+        },
     ));
     let home = tempfile::tempdir().unwrap();
     let adapter = AgentHarnessRpcAdapter::new(
@@ -218,7 +230,9 @@ async fn reconnect_remains_blocked_after_unconfirmed_disconnected_cleanup() {
             token: "token".into(),
         })
         .unwrap();
-    let (_settle, settlement) = oneshot::channel();
+    let (settle, settlement) = oneshot::channel();
+    let identity = AgentTurnRef::new("session", "turn");
+    let peer = uuid::Uuid::new_v4().to_string();
     let (accepted, did_accept) = oneshot::channel();
     let response = adapter.serve_run(
         Box::pin(async { Ok(()) }),
@@ -256,8 +270,8 @@ async fn reconnect_remains_blocked_after_unconfirmed_disconnected_cleanup() {
                             .resolve_workspace("default", "owner")
                             .unwrap(),
                     },
-                    &AgentTurnRef::new("session", "turn"),
-                    &uuid::Uuid::new_v4().to_string(),
+                    &identity,
+                    &peer,
                     &Default::default(),
                     super::session_gate::RunAdmission::NewTurn,
                 )
@@ -265,11 +279,42 @@ async fn reconnect_remains_blocked_after_unconfirmed_disconnected_cleanup() {
         ),
     );
     did_accept.await.unwrap();
+    if finished {
+        settle
+            .send(Ok(agent_protocol::AgentRunSettlement::Finished {
+                event: AgentEvent {
+                    identity: identity.clone(),
+                    sequence: 2,
+                    occurred_at: 1,
+                    payload: AgentEventPayload::TurnCompleted(
+                        talos_agent_api::AgentTurnCompleted {
+                            stop_reason: talos_agent_api::AgentStopReason::EndTurn,
+                        },
+                    ),
+                },
+                metrics: AgentRunMetrics::default(),
+                result: Ok(()),
+            }))
+            .unwrap();
+    }
     drop(response);
-    let error = tokio::time::timeout(Duration::from_secs(2), adapter.drain_disconnected())
+    let cleanup = tokio::time::timeout(Duration::from_secs(2), adapter.drain_disconnected())
         .await
-        .unwrap()
-        .unwrap_err();
+        .unwrap();
     assert!(stopped.is_cancelled());
-    assert!(error.is_code(ErrorCode::RunCleanupUnconfirmed));
+    if finished {
+        cleanup.unwrap();
+        assert!(adapter
+            .session_gate
+            .authorize_active("agent", &identity, &peer)
+            .unwrap());
+    } else {
+        assert!(cleanup
+            .unwrap_err()
+            .is_code(ErrorCode::RunCleanupUnconfirmed));
+        assert!(!adapter
+            .session_gate
+            .authorize_active("agent", &identity, &peer)
+            .unwrap());
+    }
 }

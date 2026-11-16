@@ -22,6 +22,7 @@ PROVIDER = "chat-protocol-default"
 
 
 DEPTH_CASES = ("admission-root", "admission-child", "admission-grandchild", "admission-great-grandchild")
+CHECKPOINT_CASES = ("checkpoint-effects", "checkpoint-unreadable")
 
 
 def admission_chunks(case, history):
@@ -51,7 +52,19 @@ class Fixture(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if not body.get("stream"):
-            self.reply({"choices": [{"message": {"role": "assistant", "content": "CLI fixture"},
+            content = "CLI fixture"
+            user_input = body["messages"][-1].get("content")
+            if isinstance(user_input, str) and user_input.startswith("{"):
+                prompt = json.loads(user_input)
+                if "userMessage" in prompt:
+                    case, answer, effect = prompt["userMessage"], prompt["assistantResponse"], "memory"
+                else:
+                    case, answer, effect = prompt.get("user_message"), prompt.get("assistant_response"), "title"
+                if case in CHECKPOINT_CASES:
+                    self.server.checkpoint_effects.append((case, effect, answer))
+                    content = '{"operation":"noop"}' if effect == "memory" else "Checkpoint effects verified"
+            self.reply({"model": MODEL,
+                        "choices": [{"message": {"role": "assistant", "content": content},
                                      "finish_reason": "stop"}]})
             return
         history = body["messages"]
@@ -69,6 +82,17 @@ class Fixture(BaseHTTPRequestHandler):
             chunks = admission_chunks(case, history[user_index:])
         elif case == "delegate":
             chunks = self.delegate_chunks(call, history[user_index:])
+        elif case in CHECKPOINT_CASES:
+            if case == "checkpoint-unreadable":
+                # Keep the event decodable, but make its snapshot fail the replay invariant.
+                with sqlite3.connect(self.server.database) as db:
+                    changed = db.execute(
+                        """UPDATE agent_events SET payload_json=json_set(payload_json, '$.data.status', 'inProgress')
+                           WHERE session_id=? AND json_extract(payload_json, '$.type')='messageCompleted'
+                             AND json_extract(payload_json, '$.data.role')='user'""",
+                        (self.server.unreadable_session,))
+                    assert changed.rowcount == 1
+            chunks = chat_chunks(call, "off", True)
         else:
             done = case in {"seed", "recovered", "recovered-again"} or any(
                 message.get("tool_call_id") == call for message in history[user_index:]
@@ -116,6 +140,8 @@ def exercise(root, work, report):
     config.parent.mkdir(parents=True)
     with ThreadingHTTPServer(("127.0.0.1", 0), Fixture) as server:
         server.workspace = workspace
+        server.database = home / "data/talos.db"
+        server.checkpoint_effects = []
         server.holder_started = threading.Event()
         server.release_holder = threading.Event()
         prepare(root / "conf/talos-dev.yaml", config, server.server_port, work / "plan.tsv")
@@ -205,12 +231,33 @@ def exercise(root, work, report):
             assert (workspace / "child").read_text() == "tool-ran"
             run(DEPTH_CASES[0], 0, str(uuid4()))
             print("CASE subagent_admission PASS default depth=3 nested result delivered")
+            readable_session = str(uuid4())
+            server.unreadable_session = str(uuid4())
+            run("checkpoint-effects", 0, readable_session)
+            run("checkpoint-unreadable", 0, server.unreadable_session)
+            assert sorted(server.checkpoint_effects) == [
+                ("checkpoint-effects", "memory", "PROTOCOL_OK:call_checkpoint-effects"),
+                ("checkpoint-effects", "title", "PROTOCOL_OK:call_checkpoint-effects"),
+            ], server.checkpoint_effects
+            with sqlite3.connect(server.database) as db:
+                title = db.execute("SELECT title FROM sessions WHERE session_key=?",
+                                   (readable_session,)).fetchone()
+                events = db.execute(
+                    """SELECT json_extract(payload_json,'$.content.data.code'),
+                              json_extract(payload_json,'$.type') FROM agent_events
+                       WHERE session_id=? AND (
+                           (sequence IS NULL AND json_extract(payload_json,'$.content.data.code')='conflict')
+                           OR json_extract(payload_json,'$.type')='turnCompleted')
+                       ORDER BY event_seq""", (server.unreadable_session,)).fetchall()
+            assert title == ("Checkpoint effects verified",), title
+            assert events == [("conflict", None), (None, "turnCompleted")], events
+            print("CASE checkpoint_completion_effects PASS title and memory received restored text, unreadable history still committed")
             assert config.read_bytes() == original
             # Seed an unowned due Loop in the isolated database. The unrelated
             # exec stays alive across scan ticks while the fixture holds its model.
             loop_id = "unowned-due-loop"
             due = int(time.time()) - 1
-            database = home / "data/talos.db"
+            database = server.database
             with sqlite3.connect(database) as db:
                 db.execute(
                     """INSERT INTO session_loops

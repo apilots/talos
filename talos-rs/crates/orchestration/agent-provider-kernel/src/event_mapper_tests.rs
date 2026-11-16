@@ -113,6 +113,44 @@ async fn assistant_kernel_lifecycle_maps_to_one_canonical_agent_block() {
 }
 
 #[tokio::test]
+async fn live_input_closes_the_message_after_explicit_phase_text_ends() {
+    let (pipeline, sink, _events) = AgentEventPipeline::fresh(AgentTurnRef::new("s", "t"));
+    pipeline
+        .record(AgentEventPayload::TurnStarted(AgentTurnStarted {}))
+        .await
+        .unwrap();
+    let mut mapper = KernelAgentEventMapper::new(sink);
+    let key = KernelStreamItemKey {
+        round: Some(1),
+        local_id: "text-1".into(),
+    };
+    for event in [
+        AgentKernelEventPayload::AssistantTextStarted(AssistantTextStartedStreamData {
+            item_key: key.clone(),
+            phase: AssistantTextPhase::Commentary,
+            round: Some(1),
+        }),
+        AgentKernelEventPayload::AssistantTextDelta(AssistantTextDeltaStreamData {
+            item_key: key.clone(),
+            delta: "Checking the workspace.".into(),
+        }),
+        AgentKernelEventPayload::AssistantTextCompleted(AssistantTextCompletedStreamData {
+            item_key: key,
+        }),
+        AgentKernelEventPayload::UserInput(talos_agent_kernel::UserInput {
+            text: "Continue here.".into(),
+            file_ids: vec![],
+        }),
+    ] {
+        mapper.map(AgentKernelEvent::new(event)).await.unwrap();
+    }
+    let checkpoint = pipeline.checkpoint().await;
+    let message = &checkpoint.messages[0];
+    assert_eq!(message.status, AgentMessageStatus::Completed);
+    assert_eq!(message.blocks[0].status, AgentMessageBlockStatus::Completed);
+}
+
+#[tokio::test]
 async fn waiting_result_reuses_the_tool_block_as_the_pending_action_identity() {
     let (pipeline, sink, _events) =
         AgentEventPipeline::fresh(AgentTurnRef::new("session-1", "turn-1"));

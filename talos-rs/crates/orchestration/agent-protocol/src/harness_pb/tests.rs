@@ -204,7 +204,6 @@ fn waiting_and_failed_settlements_keep_business_result_and_user_action() {
     };
     let finished = AgentRunSettlement::Finished {
         event: failed_event.clone(),
-        messages: Vec::new(),
         metrics: AgentRunMetrics::default(),
         result: Err(failure),
     };
