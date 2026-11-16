@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde_json::Value;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
+use talos_types::talos::TalosContentItem;
 use talos_types::{
     AgentCaller, CollaborationToolResult, FollowUpSubagentRequest, FollowupTaskArguments,
     InterruptAgentArguments, InterruptSubagentRequest, ListAgentsArguments, ListSubagentsRequest,
@@ -201,8 +202,28 @@ impl Tool for InterruptAgentTool {
                 caller: trusted_caller(&context)?,
                 target: input.target,
             })
-            .await?;
-        collaboration_payload(CollaborationToolResult::InterruptAgent(result))
+            .await;
+        match result {
+            Ok(snapshot) => {
+                collaboration_payload(CollaborationToolResult::InterruptAgent(snapshot))
+            }
+            Err(error) if error.is_code(ErrorCode::RunCleanupUnconfirmed) => {
+                // The child still owns its cleanup. The parent's RPC task has returned.
+                let value = serde_json::to_value(error.to_api_error()).map_err(|source| {
+                    TalosError::internal_with_source(
+                        "Could not encode the subagent interrupt error.",
+                        source,
+                    )
+                })?;
+                Ok(ToolOutputPayload::failure_with_content_items(
+                    value.clone(),
+                    vec![TalosContentItem::Json {
+                        value: value.into(),
+                    }],
+                ))
+            }
+            Err(error) => Err(error),
+        }
     }
 }
 
