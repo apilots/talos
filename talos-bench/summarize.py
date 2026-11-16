@@ -111,6 +111,51 @@ def estimate_cost(usage, prices):
             + written * prices["cache_write"] + usage["output_tokens"] * prices["output"]) / 1_000_000
 
 
+def root_cache_read(calls, metrics, observed_requests):
+    """Compare token-weighted cache reads from root call records with CLI totals."""
+    observed_input = covered_input = cache_read = measured_calls = 0
+    inconsistent = False
+    for call in calls:
+        usage = (call.get("metrics") or {}).get("usage") or {}
+        inputs = usage.get("input_tokens")
+        observed_input += inputs or 0
+        cached = usage.get("cache_read_input_tokens")
+        if cached is None:
+            continue
+        if inputs is None or not 0 <= cached <= inputs:
+            inconsistent = True
+            continue
+        covered_input += inputs
+        cache_read += cached
+        measured_calls += 1
+
+    totals = metrics.get("usage") or {}
+    total_input = totals.get("input_tokens")
+    total_cached = totals.get("cache_read_input_tokens")
+    missing_rounds = (metrics.get("modelRounds") or 0) > observed_requests
+    if total_input is not None:
+        inconsistent |= observed_input > total_input
+        if total_cached is not None:
+            inconsistent |= (not cache_read <= total_cached <= total_input
+                             or (covered_input == total_input and cache_read != total_cached))
+    if inconsistent:
+        status = "inconsistent"
+    elif not covered_input:
+        status = "unavailable"
+    elif covered_input == total_input and cache_read == total_cached and not missing_rounds:
+        status = "verified"
+    else:
+        status = "partial"
+    return {
+        "status": status,
+        "ratio": cache_read / covered_input if status == "verified" else None,
+        "observedCalls": len(calls),
+        "callsWithReportedCacheRead": measured_calls,
+        "coveredInputTokens": covered_input,
+        "observedCacheReadTokens": cache_read,
+    }
+
+
 def trial_summary(run, directory, entries):
     result = read_json(directory / "result.json")
     task = read_json(directory / "lock.json").get("task", {})
@@ -123,8 +168,8 @@ def trial_summary(run, directory, entries):
         # Keep the failed trial's other facts even if the CLI was interrupted mid-write.
         trace = {}
         trace_error = "invalidJson"
-    calls = [record for entry in trace.get("data") or [] if entry["type"] == "modelRequest"
-             for record in entry["request"]["callRecords"]]
+    requests = [entry["request"] for entry in trace.get("data") or [] if entry["type"] == "modelRequest"]
+    calls = [record for request in requests for record in request["callRecords"]]
     lines = cli_log_lines(agent)
     metrics = run_metrics(lines) or {}
     model_timings = [call.get("metrics") for call in calls]
@@ -215,6 +260,7 @@ def trial_summary(run, directory, entries):
         "exception": exception,
         "stopReason": stop_reason,
         "usage": usage,
+        "rootCacheRead": root_cache_read(calls, metrics, len(requests)) if usage is not None or calls else None,
         "estimatedCostUsd": estimate_cost(usage, cli.get("prices_per_million")),
         "modelRounds": metrics.get("modelRounds"),
         "modelCallsObserved": len(calls) if trace.get("data") is not None else None,

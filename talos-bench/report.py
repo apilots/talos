@@ -125,13 +125,24 @@ def render_attempt(attempt, target, evidence_root, notes, require_atif):
     )
     durations = [f"{label} {value:.2f} 秒" for label, value in fields if value is not None]
     fields = (
-        ("输入", usage.get("input_tokens")),
+        ("根 Turn 输入", usage.get("input_tokens")),
         ("输出", usage.get("output_tokens")), ("缓存读", usage.get("cache_read_input_tokens")),
         ("缓存写", usage.get("cache_creation_input_tokens")),
         ("模型调用", trial.get("modelCallsObserved")), ("工具调用", trial.get("toolCalls")),
         ("工具错误", trial.get("toolErrors")),
     )
     metrics = " · ".join([*durations, *(f"{label} {value:,}" for label, value in fields if value is not None)])
+    if cache := trial.get("rootCacheRead"):
+        state = cache["status"]
+        if state == "verified":
+            metrics += f" · 根 Turn 缓存读占比 {cache['ratio']:.2%}（已对账）"
+        elif state == "partial":
+            metrics += (f" · 根 Turn 缓存读覆盖 {cache['callsWithReportedCacheRead']}/{cache['observedCalls']} 次可见调用"
+                        f"、{cache['coveredInputTokens']:,} 输入 tokens，无法完整对账")
+        elif state == "inconsistent":
+            metrics += " · 根 Turn 缓存读计数不一致"
+        else:
+            metrics += " · 根 Turn 缓存读占比不可用"
     collaboration = "单 Agent 诊断" if trial.get("collaborationTools") is False else None
     label = " · ".join(str(x) for x in (run.name, trial.get("model"), trial.get("taskDigest"), collaboration) if x)
     raw = trial.get("verifierReward", trial.get("score"))

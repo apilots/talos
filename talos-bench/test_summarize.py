@@ -2,10 +2,38 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from summarize import read_json, summarize, trial_summary, write_json
+from summarize import read_json, root_cache_read, summarize, trial_summary, write_json
 
 
 class CompletionTest(unittest.TestCase):
+    def test_root_cache_share_requires_matching_input_coverage_and_counters(self):
+        calls = [
+            {"metrics": {"usage": {"input_tokens": 90, "cache_read_input_tokens": 0}}},
+            {"metrics": {"usage": {"input_tokens": 10, "cache_read_input_tokens": 10}}},
+        ]
+        totals = {"modelRounds": 2, "usage": {"input_tokens": 100, "cache_read_input_tokens": 10}}
+        self.assertEqual(root_cache_read(calls, totals, 2), {
+            "status": "verified", "ratio": 0.1, "observedCalls": 2, "callsWithReportedCacheRead": 2,
+            "coveredInputTokens": 100, "observedCacheReadTokens": 10,
+        })
+        all_misses = {"modelRounds": 1, "usage": calls[0]["metrics"]["usage"]}
+        self.assertEqual(root_cache_read(calls[:1], all_misses, 1)["ratio"], 0)
+        for label, sample, metrics, observed, status in (
+            ("missing cache counter", [{"metrics": {"usage": {"input_tokens": 90}}}, calls[1]],
+             totals, 2, "partial"),
+            ("truncated trajectory", calls, {**totals, "modelRounds": 3}, 2, "partial"),
+            ("missing CLI usage", calls, {}, 2, "partial"),
+            ("unreported reads still contribute input", [*calls, {"metrics": {"usage": {"input_tokens": 1}}}],
+             totals, 3, "inconsistent"),
+            ("missing trajectory", [], totals, 0, "unavailable"),
+            ("inconsistent totals", calls, {**totals, "usage": {"input_tokens": 100,
+                                                             "cache_read_input_tokens": 11}}, 2, "inconsistent"),
+        ):
+            with self.subTest(label=label):
+                evidence = root_cache_read(sample, metrics, observed)
+                self.assertEqual(evidence["status"], status)
+                self.assertIsNone(evidence["ratio"])
+
     def test_interrupted_cli_preserves_launch_profile_and_runner_duration(self):
         with TemporaryDirectory() as directory:
             run = Path(directory)

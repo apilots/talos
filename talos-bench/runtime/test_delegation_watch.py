@@ -24,19 +24,43 @@ class DelegationWatchTest(unittest.TestCase):
                 db.execute("CREATE TABLE sessions (session_key TEXT, agent_path TEXT)")
                 db.execute("""
                     CREATE TABLE agent_events (session_id TEXT, turn_id TEXT, sequence INTEGER,
-                                               occurred_at INTEGER, payload_json TEXT, event_seq INTEGER)
+                                               occurred_at INTEGER, payload_json TEXT, event_seq INTEGER,
+                                               execution_capture_json TEXT)
                 """)
+                db.execute("""
+                    CREATE TABLE profile_turn_usage (
+                        session_id TEXT, turn_id TEXT, usage_kind TEXT, finalized INTEGER, usage_available INTEGER,
+                        input_tokens INTEGER, cache_read_input_tokens INTEGER)
+                """)
+                db.execute("INSERT INTO profile_turn_usage VALUES ('0', 'child', 'turn', 1, 1, 100, 0)")
+                db.execute("CREATE TABLE agent_active_turns (session_id TEXT, turn_id TEXT, "
+                           "state TEXT, last_event_seq INTEGER)")
+                db.execute("INSERT INTO agent_active_turns VALUES ('0', 'child', 'running', 4)")
                 db.executemany("INSERT INTO sessions VALUES (?, ?)", [(str(i), f"/root/a/b/c/{i}") for i in range(12)])
                 tool_event = {"type": "messageBlockCompleted", "data": {"block": {"content": {
                     "type": "toolCall", "data": {"name": "spawn_agent", "callId": "spawn-1",
                                                 "arguments": "Excluded from diagnostics"},
                 }}}}
-                db.execute("INSERT INTO agent_events VALUES ('0', 'child', 1, 1, ?, 1)", (json.dumps(tool_event),))
+                db.execute("INSERT INTO agent_events VALUES ('0', 'child', 1, 1, ?, 1, NULL)", (json.dumps(tool_event),))
                 result_event = {"type": "messageBlockCompleted", "data": {"block": {"content": {
                     "type": "toolResult", "data": {"callId": "spawn-1", "isError": False,
                                                   "metrics": {"executionDurationMs": 12, "queueDurationMs": 3}},
                 }}}}
-                db.execute("INSERT INTO agent_events VALUES ('0', 'child', 2, 1, ?, 2)", (json.dumps(result_event),))
+                db.execute("INSERT INTO agent_events VALUES ('0', 'child', 2, 1, ?, 2, NULL)", (json.dumps(result_event),))
+                db.execute("INSERT INTO agent_events VALUES ('0', 'child', 3, 1, ?, 3, NULL)",
+                           (json.dumps({"type": "messageCompleted"}),))
+                warning = {"level": "warning", "content": {"type": "error", "data": {
+                    "code": "runCleanupUnconfirmed", "message": "Excluded private warning details",
+                }}}
+                db.execute("INSERT INTO agent_events VALUES ('0', 'child', NULL, 1, ?, 4, NULL)",
+                           (json.dumps(warning),))
+                usage = {"input_tokens": 100, "cache_read_input_tokens": 0}
+                metrics = {"type": "metricsUpdated", "data": {"modelRounds": 1, "usage": usage}}
+                db.execute("INSERT INTO agent_events VALUES ('0', 'child', 5, 1, ?, 5, NULL)",
+                           (json.dumps(metrics),))
+                supplement = {"requests": [{"request": {"callRecords": [{"metrics": {"usage": usage}}]}}]}
+                db.execute("UPDATE agent_events SET execution_capture_json = ? WHERE event_seq = 1",
+                           (json.dumps(supplement),))
             paths = ["submission"]
             submission = home / paths[0] / "output.txt"
             submission.parent.mkdir()
@@ -65,8 +89,24 @@ class DelegationWatchTest(unittest.TestCase):
             self.assertEqual(json.loads(samples[1])["secondsWithoutProgress"], 0)
             self.assertEqual(json.loads(samples[-1])["stopReason"], "recursiveDelegationWithoutProgress")
             capture = (home / "talos-delegation-events.json").read_text()
-            self.assertEqual(json.loads(capture)["events"], [
+            snapshot = json.loads(capture)
+            self.assertEqual(snapshot["activeTurns"], [
+                {"path": "/root/a/b/c/0", "turnId": "child", "state": "running", "lastEventSeq": 4},
+            ])
+            self.assertEqual(snapshot["observedTurnMetrics"], [{
+                "path": "/root/a/b/c/0", "turnId": "child", "eventSeq": 5, "modelRounds": 1,
+                "usage": usage,
+            }])
+            self.assertEqual(snapshot["childUsage"], [{
+                "path": "/root/a/b/c/0", "turnId": "child", "observedCalls": 1,
+                "callsWithReportedCacheRead": 1, "coveredInputTokens": 100, "observedCacheReadTokens": 0,
+                "reportedInputTokens": 100, "reportedCacheReadTokens": 0,
+            }])
+            self.assertEqual(snapshot["events"], [
                 ["/root/a/b/c/0", "child", 1, 1, "messageBlockCompleted", "toolCall", "spawn_agent", "spawn-1", None, None, 1, None, None],
                 ["/root/a/b/c/0", "child", 2, 1, "messageBlockCompleted", "toolResult", None, "spawn-1", 0, None, 2, 12, 3],
+                ["/root/a/b/c/0", "child", 3, 1, "messageCompleted", None, None, None, None, None, 3, None, None],
+                ["/root/a/b/c/0", "child", None, 1, "warning", None, None, None, None, "runCleanupUnconfirmed", 4, None, None],
             ])
             self.assertNotIn("Excluded from diagnostics", capture)
+            self.assertNotIn("Excluded private warning details", capture)

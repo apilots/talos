@@ -190,6 +190,9 @@ def result_row(task, status, reward, outcome, case, run):
     links, trial = case_evidence(name, outcome, case, run)
     usage = trial.get("usage") or {}
     tokens = " / ".join(f"{usage[key]:,}" if finite_number(usage.get(key)) else "—" for key in TOKEN_KEYS)
+    cache = trial.get("rootCacheRead") or {}
+    if cache.get("status") == "verified":
+        tokens += f'<div class="reason">缓存读占比 {cache["ratio"]:.2%}（已对账）</div>'
     seconds = outcome.get("elapsedSeconds")
     elapsed = f"{seconds:,.1f} 秒" if finite_number(seconds) and seconds >= 0 else "—"
     observed = " · ".join(
@@ -326,7 +329,7 @@ def render(run, inventory):
     <span id="visible-tasks" class="meta" aria-live="polite"></span>
   </div>
   <div class="table-wrap" role="region" aria-label="逐题结果" tabindex="0">
-    <table id="results"><thead><tr><th>任务</th><th class="preflight">预检</th><th>结果和原因</th><th>得分</th><th>本次耗时</th><th>Token<br>输入 / 输出 / 缓存读 / 缓存写</th><th>证据</th></tr></thead>
+    <table id="results"><thead><tr><th>任务</th><th class="preflight">预检</th><th>结果和原因</th><th>得分</th><th>本次耗时</th><th>根 Turn Token<br>输入 / 输出 / 缓存读 / 缓存写</th><th>证据</th></tr></thead>
     <tbody>{''.join(rows)}</tbody></table>
   </div>
 </main>
