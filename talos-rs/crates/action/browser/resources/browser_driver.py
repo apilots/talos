@@ -70,6 +70,7 @@ async def observe(request):
             if strings[document["frameId"]] != (await cdp.call("Page.getFrameTree", session=session))["frameTree"]["frame"]["id"]:
                 continue
             rendered=set(document.get("layout", {}).get("nodeIndex", []))
+            clickable = set(nodes.get("isClickable", {}).get("index", []))
             for index, tag_index in enumerate(nodes["nodeName"][:10000]):
                 if index not in rendered:
                     continue
@@ -79,7 +80,8 @@ async def observe(request):
                     text.append(value.strip()[:500])
                 attrs = nodes["attributes"][index]
                 attrs = {strings[attrs[i]]: strings[attrs[i + 1]] for i in range(0, len(attrs), 2)}
-                if len(elements) < 150 and (tag in ("input", "button", "select", "textarea", "a", "summary")
+                if len(elements) < 150 and (index in clickable
+                                            or tag in ("input", "button", "select", "textarea", "a", "summary")
                                             or attrs.get("role") in ("button", "textbox", "link", "checkbox", "combobox")
                                             or "contenteditable" in attrs or "tabindex" in attrs):
                     safe_attrs = {key: value[:500] for key, value in attrs.items()
