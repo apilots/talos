@@ -28,6 +28,21 @@ def capture_patch(destination, baseline, index):
                         baseline, "--"], env=environment, stdout=patch, check=True)
 
 
+def capture_answer(destination, logs):
+    stdout = (logs / "talos.stdout.txt").read_bytes()
+    lines = stdout.splitlines(keepends=True)
+    if lines:
+        try:
+            footer = json.loads(lines[-1])
+        except ValueError:
+            footer = None
+        if isinstance(footer, dict) and footer.keys() == {"sessionId", "turnId", "status"}:
+            identity = json.loads((logs / "talos-trajectory.json").read_text())["identity"]
+            if footer == {**identity, "status": "completed"}:
+                stdout = b"".join(lines[:-1])
+    destination.write_bytes(stdout)
+
+
 def run(options, llm, secret):
     logs = options.logs
     binary = PRODUCT / "bin/talos"
@@ -141,7 +156,7 @@ def run(options, llm, secret):
             if baseline is not None:
                 capture_patch(SUBMISSIONS / "submission.patch", baseline, Path(home) / "capture-index")
             else:
-                shutil.copyfile(logs / "talos.stdout.txt", SUBMISSIONS / "answer.txt")
+                capture_answer(SUBMISSIONS / "answer.txt", logs)
         return exit_code
 
 
