@@ -70,7 +70,7 @@ impl ApplicationSyncHost {
         Ok(token)
     }
 
-    fn credentials(
+    pub(super) fn credentials(
         &self,
         actor: &RequestIdentity,
     ) -> TalosResult<talos_sync_sdk::CredentialCallback> {
@@ -460,7 +460,7 @@ impl ApplicationSyncHost {
             .map(Some)
     }
 
-    async fn stop_account_sync(&self, account_id: &str) -> TalosResult<()> {
+    pub(super) async fn stop_account_sync(&self, account_id: &str) -> TalosResult<()> {
         self.service.remove_sync_handle(account_id);
         let handle = self.sync_stores.remove_handle(account_id).await;
         if let Some(handle) = handle {
