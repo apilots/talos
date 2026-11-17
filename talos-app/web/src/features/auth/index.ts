@@ -1,3 +1,4 @@
+export { useCanUseTalo } from "./hooks/useCanUseTalo";
 export { useAuthBootstrap } from "./hooks/useAuthBootstrap";
 export {
   clearDesktopCloudSession,

@@ -32,6 +32,7 @@ async fn retained_session_reads_do_not_wait_for_a_sync_writer() {
         user_id: "account-1".into(),
         username: None,
         role: UserRole::User,
+        user_type: Default::default(),
         auth_disabled: false,
         access_token: None,
     };

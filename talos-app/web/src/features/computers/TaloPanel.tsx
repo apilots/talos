@@ -4,6 +4,7 @@ import type { AppProtocol } from "@talos/sdk-core";
 import { Bot, Check, Circle, Ellipsis, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useCanUseTalo } from "@/features/auth";
 import { getTalosClient } from "@/shared/api/client";
 import { apiErrorMessage, userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useAppStore } from "@/shared/store/app-store";
@@ -28,10 +29,11 @@ type Confirmation = { kind: "reset" | "delete"; instance: AppProtocol.ManagedWor
 
 export function useManagedWorkerStatus(enabled = true) {
   const scope = useProductScope();
+  const canUseTalo = useCanUseTalo();
   const queryKey = ["talos", scope, "managed-worker"];
   const poll = useRef<{ instanceId: string; generation: number; until: number } | null>(null);
   const status = useQuery({
-    enabled,
+    enabled: enabled && canUseTalo,
     queryKey,
     queryFn: () => getTalosClient().computers.readManagedWorker(),
     retry: false,
@@ -58,10 +60,17 @@ export function taloHasConversation(instance: AppProtocol.ManagedWorkerInfo | nu
   return Boolean(instance?.conversationSessionId && (instance.operation !== "create" || instance.phase === "failed"));
 }
 
-export function TaloPanel({ desktopNodeId, desktopButton = false }: {
+interface TaloPanelProps {
   desktopNodeId?: string;
   desktopButton?: boolean;
-} = {}) {
+}
+
+export function TaloPanel(props: TaloPanelProps) {
+  const canUseTalo = useCanUseTalo();
+  return canUseTalo ? <AuthorizedTaloPanel {...props} /> : null;
+}
+
+function AuthorizedTaloPanel({ desktopNodeId, desktopButton = false }: TaloPanelProps) {
   const { t } = useTranslation(["computers", "common"]);
   const scope = useProductScope();
   const queries = useQueryClient();

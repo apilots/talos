@@ -16,6 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fixture import ACCOUNTS, REPORT, ROOT, TOKEN, configure, data, free_port, http, wait
 from lifecycle import container_args
 from media import media
+from managed_talo_access import configure_accounts, exercise_access
+
+configure_accounts()
 
 SERVER_IMAGE = os.environ.get("TALOS_E2E_SERVER_IMAGE", "talos-server:browser-e2e")
 WORKER_IMAGE = os.environ.get("TALOS_E2E_WORKER_IMAGE", "talos-worker:browser-e2e")
@@ -30,6 +33,9 @@ from threading import Event, Thread
 import os, select, socket, socketserver, subprocess
 import json
 from fixture import Fixture, USER, auxiliary_response
+from managed_talo_access import configure_accounts
+
+configure_accounts()
 
 if os.environ.get("TALOS_E2E_ADMIN_ACCOUNT") == "1":
     USER["role"] = "admin"
@@ -181,8 +187,12 @@ def phase(base, expected):
 
 def exercise(base, instances, worker_model, faults, observed, before_delete=None):
     for token, user in ACCOUNTS.items():
-        assert data(http(base + "/v1/user", token=token))["user"]["user_id"] == user["user_id"]
+        current = data(http(base + "/v1/user", token=token))["user"]
+        assert (current["user_id"], current["role"], current["type"]) == (
+            user["user_id"], user["role"], user["type"],
+        ), current
     bob = next(token for token in ACCOUNTS if token != TOKEN)
+    exercise_access(base)
     assert data(http(base + ASSISTANT)) == {"enabled": True, "instance": None}
     assert http(base + ASSISTANT, {}, token="no-such-fixture-user")["status"] != "success"
     created = data(http(base + ASSISTANT, {}))["instance"]
@@ -302,6 +312,7 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
     assert saved["id"] == session and saved["nodeId"] == node and saved["projectId"] is None
     print("PASS first Turn materializes the bound non-Project Talo Session and resolves the Goal Skill after Wake", flush=True)
 
+    exercise_access(base, ready, session)
     media(base, node, observed.compute(instance), http, data, wait, REPORT, observed.execute)
     if RECOVERY:
         recovery(base, faults, instance, node, ready, action, worker_model, session, start_first_turn, turn, observed)

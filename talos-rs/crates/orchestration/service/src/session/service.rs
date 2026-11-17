@@ -33,6 +33,7 @@ pub(crate) struct SessionService {
     coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
     sync: Arc<RwLock<execution_boundary::SessionSyncState>>,
     embedded_admin_auth: Option<Arc<dyn talos_auth::AuthService>>,
+    managed_nodes: Option<crate::AgentNodeService>,
 }
 
 impl SessionService {
@@ -78,7 +79,13 @@ impl SessionService {
             coordinator,
             sync: Default::default(),
             embedded_admin_auth: None,
+            managed_nodes: None,
         }
+    }
+
+    pub(crate) fn with_managed_nodes(mut self, nodes: crate::AgentNodeService) -> Self {
+        self.managed_nodes = Some(nodes);
+        self
     }
 
     pub(crate) fn with_embedded_admin_auth(

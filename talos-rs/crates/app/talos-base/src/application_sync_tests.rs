@@ -362,6 +362,7 @@ async fn run_topology(scenario: TopologyScenario) {
         user_id: ACCOUNT.into(),
         username: None,
         role: talos_auth::UserRole::User,
+        user_type: Default::default(),
         auth_disabled: false,
         access_token: Some(TOKEN.into()),
     };

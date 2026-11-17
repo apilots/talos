@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use talos_error::TalosResult;
 
-use crate::{AccessTokenLease, RequestIdentity, UserDto, UserType};
+use crate::{AccessTokenLease, RequestIdentity, UserDto};
 
 #[async_trait]
 pub trait AuthService: Send + Sync {
@@ -21,6 +21,11 @@ pub trait AuthService: Send + Sync {
     /// Whether a currently valid authenticated context grants administrator access.
     /// Used for autonomous work where no incoming request carries an Actor.
     fn has_verified_admin(&self, _user_id: &str) -> bool {
+        false
+    }
+
+    /// Whether an autonomous Talo dispatch has a currently verified Cloud account.
+    fn has_verified_managed_worker_access(&self, _user_id: &str) -> bool {
         false
     }
 
@@ -55,7 +60,7 @@ impl UserService for OpenModeUserService {
                 .unwrap_or_else(|| actor.user_id.clone()),
             email: None,
             role: actor.role,
-            r#type: UserType::Free,
+            r#type: actor.user_type,
             disabled: false,
             created_at: 0,
             updated_at: 0,

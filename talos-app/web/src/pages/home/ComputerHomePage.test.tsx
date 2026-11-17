@@ -40,7 +40,7 @@ beforeEach(() => {
   deleteManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: null });
   useAppStore.setState({
     selectedComputers: {}, workspaceWindows: [], workspaceSnapshots: {}, workspaceOwner: null, workspaceOpen: false,
-    connection: { ...useAppStore.getInitialState().connection, authStatus: "authenticated", userId: "alice" },
+    connection: { ...useAppStore.getInitialState().connection, authStatus: "authenticated", accountType: "Max", userId: "alice" },
   });
   setTalosClientFactory(() => ({
     computers: {
@@ -224,4 +224,26 @@ it("requires explicit confirmation for Talo deletion", async () => {
   await waitFor(() => expect(deleteManagedWorker).toHaveBeenCalledExactlyOnceWith({
     instanceId: worker.instanceId, expectedGeneration: worker.generation, confirmDataLoss: true,
   }));
+});
+
+it.each([
+  ["user", "Free"], ["user", "Plus"], ["user", "Pro"],
+] as const)("hides Talo and avoids lifecycle calls for %s %s", async (authRole, accountType) => {
+  useAppStore.getState().setConnection({ authRole, accountType });
+  show("/talo");
+  expect(await screen.findByRole("heading", { name: "Choose a computer" })).toBeVisible();
+  expect(screen.queryByRole("tab", { name: "Talo" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/your AI assistant/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Initialize Talo" })).not.toBeInTheDocument();
+  expect(readManagedWorker).not.toHaveBeenCalled();
+  expect(createManagedWorker).not.toHaveBeenCalled();
+});
+
+it("allows an administrator with a Free type and hides a retained desktop panel after downgrade", async () => {
+  useAppStore.getState().setConnection({ authRole: "admin", accountType: "Free" });
+  readManagedWorker.mockResolvedValue({ enabled: true, instance: { ...worker, phase: "ready", operation: null } });
+  show("/talo", <TaloPanel desktopNodeId={worker.nodeId} />);
+  expect(await screen.findByRole("button", { name: "Manage Talo" })).toBeVisible();
+  act(() => useAppStore.getState().setConnection({ authRole: "user" }));
+  expect(screen.queryByRole("button", { name: "Manage Talo" })).not.toBeInTheDocument();
 });

@@ -30,6 +30,7 @@ impl AuthService for FakeAuthService {
             user_id: "user-1".to_string(),
             username: Some("user-1".to_string()),
             role: UserRole::User,
+            user_type: Default::default(),
             auth_disabled: false,
             access_token: Some(token.to_string()),
         })

@@ -48,7 +48,9 @@ impl AgentResourceRpcHandler for CoordinatorResources {
                 let result = self
                     .service
                     .invoke_active_session_command(
-                        &Actor::regular(identity.user_id),
+                        &Actor::regular(identity.user_id)
+                            .with_role(identity.role)
+                            .with_user_type(identity.user_type),
                         target,
                         command,
                     )

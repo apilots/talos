@@ -3,6 +3,7 @@ import { Laptop } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 
+import { useCanUseTalo } from "@/features/auth";
 import { ComputerPicker, TaloPanel, useComputers } from "@/features/computers";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { Button } from "@/shared/ui/Button";
@@ -13,7 +14,8 @@ export function ComputerHomePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [showConnectHelp, setShowConnectHelp] = useState(false);
-  const tab = location.pathname === "/talo" ? "talo" : "personal";
+  const canUseTalo = useCanUseTalo();
+  const tab = canUseTalo && location.pathname === "/talo" ? "talo" : "personal";
   // A Talo remains in the Computer directory and has a separate chooser tab.
   const personalTotal = total - nodes.filter(node => node.managedWorkerPhase != null).length;
   const empty = list.isSuccess && personalTotal === 0;
@@ -26,6 +28,7 @@ export function ComputerHomePage() {
     <div className="h-full overflow-y-auto px-5 pb-8 pt-10 sm:px-6 sm:pt-16">
       <section className="mx-auto w-full max-w-[512px]" aria-label={t("computers:home.title")}>
         <h1 className="text-[24px] font-semibold tracking-tight text-ink">{t("computers:home.chooser")}</h1>
+        {canUseTalo ? <>
         <p className="mb-4 mt-1 text-sm leading-6 text-muted">{t("computers:talo.intro")}</p>
         <div role="tablist" aria-label={t("computers:home.chooser")} className="flex gap-6 border-b border-border"
           onKeyDown={(event) => {
@@ -46,7 +49,8 @@ export function ComputerHomePage() {
             </button>
           ))}
         </div>
-        <div id="computer-panel-personal" role="tabpanel" aria-labelledby="computer-tab-personal" hidden={tab !== "personal"} tabIndex={0} className="py-6">
+        </> : null}
+        <div id="computer-panel-personal" role={canUseTalo ? "tabpanel" : undefined} aria-labelledby={canUseTalo ? "computer-tab-personal" : undefined} hidden={tab !== "personal"} tabIndex={canUseTalo ? 0 : undefined} className="py-6">
           {tab === "personal" ? (
             list.isPending ? <p role="status" className="text-sm text-muted">{t("common:loading")}</p>
               : list.isError ? <>
@@ -77,9 +81,9 @@ export function ComputerHomePage() {
               </>
           ) : null}
         </div>
-        <div id="computer-panel-talo" role="tabpanel" aria-labelledby="computer-tab-talo" hidden={tab !== "talo"} tabIndex={0}>
+        {canUseTalo ? <div id="computer-panel-talo" role="tabpanel" aria-labelledby="computer-tab-talo" hidden={tab !== "talo"} tabIndex={0}>
           {tab === "talo" ? <TaloPanel /> : null}
-        </div>
+        </div> : null}
       </section>
     </div>
   );
