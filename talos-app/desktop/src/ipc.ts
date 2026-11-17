@@ -1,4 +1,5 @@
 import type { AppProtocol } from "@talos/sdk-core";
+import type { AppIconDesktopBridge } from "../../shared/app-icons";
 
 export const TALOS_IPC = {
   browserRequest: "talos:browser-workspace-request",
@@ -18,13 +19,14 @@ export const TALOS_IPC = {
   previewBrowser: "talos:preview-browser",
   previewBrowserState: "talos:preview-browser-state",
   runtimeState: "talos:runtime-state",
+  setAppIcon: "talos:set-app-icon",
   subscriptionTerminated: "talos:subscription-terminated",
 } as const;
 
 export type { TalosRuntimeStateKind, TalosRuntimeState } from "@talos/sdk-app-server/desktop";
 import type { TalosRuntimeState } from "@talos/sdk-app-server/desktop";
 
-export interface TalosDesktopBridge {
+export interface TalosDesktopBridge extends AppIconDesktopBridge {
   preview: import("@talos/sdk-app-server/desktop").DesktopPreviewBridge;
   browserWorkspace: import("@talos/sdk-app-server/desktop").DesktopBrowserBridge;
   onDesktopFrame(handler:(frame:AppProtocol.DesktopMediaFrame)=>void):()=>void;

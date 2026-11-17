@@ -9,12 +9,14 @@ import { useAuthBootstrap } from "@/features/auth";
 import { router } from "@/app/router";
 import { useAppStore } from "@/shared/store/app-store";
 import { i18n } from "@/shared/i18n/setup";
+import { useAppIconEffects } from "@/shared/app-icons/useAppIconEffects";
 
 export function AppProviders() {
   const uiTheme = useAppStore((state) => state.uiTheme);
   const locale = useAppStore((state) => state.locale);
   useTranslation();
   useAuthBootstrap();
+  useAppIconEffects();
   const [queryClient] = useState(
     () =>
       new QueryClient({

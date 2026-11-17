@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createJSONStorage } from "zustand/middleware";
@@ -92,6 +92,7 @@ describe("AuthPage", () => {
     });
     useAppStore.setState((state) => ({
       ...state,
+      appIconId: "portrait-light",
       connection: {
         ...state.connection,
         authToken: "",
@@ -137,10 +138,14 @@ describe("AuthPage", () => {
     expect(redirectToExternalUrlMock).not.toHaveBeenCalled();
   });
 
-  it("renders the vector Talos logo", () => {
+  it("switches the login mark with the app icon preference", () => {
     renderAuthPage("/auth/login");
 
-    expect(screen.getByAltText("Talos").getAttribute("src")).toBe("/talos-logo.svg");
+    expect(screen.getByAltText("Talos").getAttribute("src")).toBe("/app-icons/portrait-light/icon.png");
+    act(() => useAppStore.getState().setAppIconId("portrait"));
+    expect(screen.getByAltText("Talos").getAttribute("src")).toBe("/app-icons/portrait/icon.png");
+    act(() => useAppStore.getState().setAppIconId("classic"));
+    expect(screen.getByAltText("Talos").getAttribute("src")).toBe("/app-icons/classic/icon.svg");
   });
 
   it("starts device login and opens the Cloud device page after user action", async () => {

@@ -107,8 +107,9 @@ the Worker only through the authenticated media relay. The Server image includes
 these resources for its embedded Worker; native Desktop and Server archives do
 not gain the Linux container desktop.
 
-The static home lives in `talos-app/shared/browser-home/` and is also packaged by
-the native Desktop browser build. Its assets have no credentials or runtime
+The static home lives in `talos-app/shared/browser-home/`. The shared app icon
+catalog supplies its vector logo when the images and native Desktop assemble
+the home bundle. Its assets have no credentials or runtime
 authority. ManagedBrowser supervises a private HTTP child bound to an ephemeral
 `127.0.0.1` port within its existing startup and cleanup lifecycle. This child
 preloads only `home.html`, `home.js` and `talos-logo.svg`, accepts GET/HEAD for

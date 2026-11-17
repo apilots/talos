@@ -4,6 +4,7 @@ import { hostname } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { app, type BaseWindow } from "electron";
+import { DesktopAppIcons } from "./desktop-app-icons";
 import { createDesktopWindow,desktopWindows } from "./desktop-window";
 
 import { resolveAppServerCommand } from "./app-server-binary";
@@ -24,6 +25,7 @@ import { resolveRendererEntryPath } from "./renderer-entry";
 import { resolveAppServerEnvironment } from "./shell-environment";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
+const appIcons = new DesktopAppIcons(dirname);
 const rendererDevUrl = process.env.TALOS_DESKTOP_RENDERER_URL;
 const serverUrl = process.env.TALOS_DESKTOP_SERVER_URL?.trim();
 
@@ -72,6 +74,7 @@ async function createMainWindow(server?: URL): Promise<BaseWindow> {
     minWidth: 960,
     minHeight: 640,
     title: "Talos",
+    icon: appIcons.windowIcon,
   }, {
       contextIsolation: true,
       nodeIntegration: false,
@@ -104,7 +107,7 @@ app.whenReady().then(async () => {
   const server = serverUrl ? managedServerUrl(serverUrl) : undefined;
   if (!server) {
     controller = await createController();
-    registerDesktopIpcHandlers(controller);
+    registerDesktopIpcHandlers(controller, appIcons);
   }
   // The renderer owns initialization so startup failures remain visible through IPC.
   await createMainWindow(server);

@@ -4,6 +4,7 @@ import { normalizeWorkspaceWebpageUrl, workspaceWindowKey, type FilePreviewPosit
 import { emptyWorkspace, snapshotWorkspace, workspaceBelongsToScope, workspaceOwnerKey, type WorkspaceOwner, type WorkspaceSnapshot } from "./workspace-state";
 import { createUuid } from "@/shared/lib/uuid";
 import type { DesktopBrowserState } from "@talos/sdk-app-server/desktop";
+import { DEFAULT_APP_ICON_ID, type AppIconId } from "@/shared/app-icons/catalog";
 
 export type UiTheme = "dark" | "light";
 export type Locale = "en" | "zh-CN";
@@ -38,10 +39,13 @@ export interface UiSlice {
   setWorkspaceOpen: (open: boolean) => void;
   setWorkspaceExpanded: (expanded: boolean) => void;
   uiTheme: UiTheme;
+  appIconId: AppIconId;
+  appIconDesktopFailed: boolean;
   locale: Locale;
   sidebarOpen: boolean;
   activeProjectId: string;
   setUiTheme: (theme: UiTheme) => void;
+  setAppIconId: (id: AppIconId) => void;
   setLocale: (locale: Locale) => void;
   setSidebarOpen: (open: boolean) => void;
   setActiveProjectId: (projectId: string) => void;
@@ -195,10 +199,13 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
     })),
     setWorkspaceExpanded: (expanded) => set((state) => ({ workspaceExpanded: expanded && state.workspaceOpen })),
     uiTheme: "light",
+    appIconId: DEFAULT_APP_ICON_ID,
+    appIconDesktopFailed: false,
     locale: "en",
     sidebarOpen: true,
     activeProjectId: defaultProjects[0].id,
     setUiTheme: (uiTheme) => set(() => ({ uiTheme })),
+    setAppIconId: (appIconId) => set(() => ({ appIconId, appIconDesktopFailed: false })),
     setLocale: (locale) => set(() => ({ locale })),
     setSidebarOpen: (sidebarOpen) => set(() => ({ sidebarOpen })),
     setActiveProjectId: (activeProjectId) => set(() => ({ activeProjectId })),

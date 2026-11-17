@@ -11,6 +11,7 @@ const open = vi.hoisted(() => vi.fn());
 vi.mock("@/shared/lib/open-resource", async importOriginal => ({ ...await importOriginal<object>(), openResource: open }));
 beforeEach(() => {
   open.mockReset().mockResolvedValue(undefined);
+  useAppStore.getState().setAppIconId("portrait");
   useAppStore.setState({ workspaceOwner: null, workspaceSnapshots: {}, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false });
   useAppStore.getState().setWorkspaceContext({ scope: "actor", context: { kind: "session", sessionId: "a" } }, true);
   useAppStore.getState().openWorkspaceWindow({ kind: "file", fileId: "report" });
@@ -35,6 +36,18 @@ it("routes explicit Talos and external actions without changing a global prefere
   await user.click(screen.getByRole("button", { name: "Open in options" }));
   await user.click(screen.getByRole("menuitem", { name: "Open in external browser" }));
   expect(open).toHaveBeenLastCalledWith({ kind: "webpage", url: "https://example.test/", intent: "external" });
+});
+
+it("uses the current app icon in the open-in menu", async () => {
+  const user = userEvent.setup();
+  render(<ResourceOpenMenu resource={{ kind: "file", fileId: "report" }} />);
+  await user.click(screen.getByRole("button", { name: "Open in options" }));
+  const icon = screen.getByRole("menuitem", { name: "Talos" }).querySelector("img");
+  expect(icon).toHaveAttribute("src", "/app-icons/portrait/icon.png");
+  act(() => useAppStore.getState().setAppIconId("portrait-light"));
+  expect(icon).toHaveAttribute("src", "/app-icons/portrait-light/icon.png");
+  act(() => useAppStore.getState().setAppIconId("classic"));
+  expect(icon).toHaveAttribute("src", "/app-icons/classic/icon.svg");
 });
 
 function RetainedMenu() {

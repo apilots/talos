@@ -11,6 +11,7 @@ import {
   storeWebAuthToken,
 } from "@/features/auth";
 import { useConnectionSettings } from "@/features/connection";
+import { AppIcon } from "@/shared/app-icons/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { Panel } from "@/shared/ui/Panel";
 import { accountTypeFromWire } from "@/shared/types/account";
@@ -27,7 +28,6 @@ export function AuthPage() {
   const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const nextPath = sanitizeNextPath(params.get("next"));
   const isLoggedOut = location.pathname === "/auth/logout" || connection.authStatus === "logged_out";
-  const logoSrc = `${import.meta.env.BASE_URL}talos-logo.svg`;
 
   useEffect(() => {
     if (connection.authStatus === "authenticated" || connection.authStatus === "open") {
@@ -127,10 +127,9 @@ export function AuthPage() {
     <div className="flex h-screen items-center justify-center bg-background p-6 text-ink">
       <Panel className="w-full max-w-[360px] rounded-[14px] border-border bg-card p-6 shadow-panel backdrop-blur-none">
         <div className="text-center">
-          <img
+          <AppIcon
             alt="Talos"
             className="mx-auto size-14 rounded-[15px] shadow-panel"
-            src={logoSrc}
           />
           <h1 className="mt-5 text-[22px] font-semibold leading-7 text-ink">
             {isLoggedOut ? "Signed out of Talos" : "Sign in to Talos"}

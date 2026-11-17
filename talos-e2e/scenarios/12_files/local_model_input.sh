@@ -11,7 +11,7 @@ require_command python3
 
 TMP_DIR="$(make_e2e_temp_dir "talos-files-local")"
 CONFIG_TEMPLATE="${TMP_DIR}/talos.yaml"
-FIXTURE_PATH="${REPO_ROOT}/build/desktop/icons/icon.png"
+FIXTURE_PATH="${REPO_ROOT}/talos-e2e/fixtures/file-attachment.png"
 MOCK_LLM_PORT="${TALOS_FILES_E2E_MOCK_PORT:-18982}"
 MOCK_LLM_PID=""
 MOCK_REQUEST_LOG="$(scenario_report_path "mock_llm_requests.jsonl")"

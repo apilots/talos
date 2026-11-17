@@ -14,7 +14,7 @@ require_command python3
 mkdir -p "${SCRIPT_DIR}/.tmp"
 TMP_DIR="$(make_e2e_temp_dir s3)"
 CONFIG_TEMPLATE="${TMP_DIR}/talos.yaml"
-FIXTURE_PATH="${REPO_ROOT}/build/desktop/icons/icon.png"
+FIXTURE_PATH="${REPO_ROOT}/talos-e2e/fixtures/file-attachment.png"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/helpers/s3_gateway.bash"
 

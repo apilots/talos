@@ -8,6 +8,9 @@ ARG PRODUCT_STAGE=source
 FROM ${BROWSER_SUPPLIER_IMAGE} AS browser-supplier
 COPY talos/build/container/prepare-browser.sh /build/container/prepare-browser.sh
 RUN bash /build/container/prepare-browser.sh
+COPY talos/talos-app/shared/app-icons /talos-app/shared/app-icons
+COPY talos/talos-app/shared/browser-home /talos-app/shared/browser-home
+RUN node /talos-app/shared/app-icons/generate.mjs /opt/talos/browser/desktop
 
 FROM ${BROWSER_SUPPLIER_IMAGE} AS official-mcps
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -49,8 +52,6 @@ COPY --from=browser-supplier /opt/talos/browser /opt/talos/browser
 COPY --from=official-mcps /snapshot /opt/talos/plugins/apilots-mcps
 COPY talos/build/worker/browser /opt/talos/browser
 COPY talos/talos-rs/crates/action/browser/resources/browser_driver.py /opt/talos/browser/browser_driver.py
-COPY talos/talos-app/shared/browser-home /opt/talos/browser/desktop
-COPY talos/talos-app/web/public/talos-logo.svg /opt/talos/browser/desktop/talos-logo.svg
 COPY talos/build/container/install-runtime.sh /build/container/install-runtime.sh
 RUN bash /build/container/install-runtime.sh && rm -rf /build/container
 COPY --from=product /artifacts/talos-worker /opt/talos/bin/talos-worker

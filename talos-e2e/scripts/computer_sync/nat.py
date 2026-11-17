@@ -165,7 +165,7 @@ def run(cluster):
         wait_for(lambda: hosts.history('NAT-A', session, second['turnId']) == history, 'NAT origin restart caught up', 90)
         data(hosts.api('NAT-A', '/v1/models?nodeId=' + node))
         from cluster import ROOT
-        body = (ROOT / 'build/desktop/icons/icon.png').read_bytes()
+        body = (ROOT / 'talos-e2e/fixtures/file-attachment.png').read_bytes()
         boundary = 'talos-' + uuid.uuid4().hex
         metadata = json.dumps({'filename': 'nat-source.png', 'scope': {'type': 'personal'}, 'tags': [], 'metadata': {}}).encode()
         multipart = (f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nContent-Type: application/json\r\n\r\n'.encode()

@@ -117,7 +117,7 @@ def abandoned_cross_coordinator_admission(cluster, node, session):
 
 
 def source_files(cluster):
-    body = (ROOT / 'build/desktop/icons/icon.png').read_bytes()
+    body = (ROOT / 'talos-e2e/fixtures/file-attachment.png').read_bytes()
     uploaded = cluster.desktop('Desktop-A', 'file/upload', {
         'request': {'filename': 'source-only.png', 'scope': {'type': 'personal'}, 'tags': [], 'metadata': {}},
         'dataBase64': base64.b64encode(body).decode()})['file']
