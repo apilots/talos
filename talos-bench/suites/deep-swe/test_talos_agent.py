@@ -25,8 +25,10 @@ class AgentEnvironmentTest(unittest.IsolatedAsyncioTestCase):
                 agent_process_env=lambda env: env,
                 exec=AsyncMock(return_value=SimpleNamespace(return_code=0)),
             )
-            with patch("talos_agent.resolve_model", return_value=object()), patch("talos_agent.populate_usage"):
+            connection = ({"provider": "openai", "openai": {"base_url": "https://model.example.test/v1"}}, "")
+            with patch("talos_agent.resolve_model", return_value=connection), patch("talos_agent.populate_usage"):
                 agent = AgentFactory.create_agent_from_config(config, logs)
+                self.assertEqual(agent.network_allowlist().domains, ["model.example.test"])
                 await agent.run("Implement the task.", environment, None)
 
             environment.exec.assert_awaited_once()

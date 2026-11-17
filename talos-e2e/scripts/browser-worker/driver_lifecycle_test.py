@@ -204,7 +204,7 @@ class DriverLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.switches, ['owned-page'])
         self.assertEqual(self.stop_count, 1)
 
-    async def observe(self, action, target, targets):
+    async def observe(self, action, target, targets, snapshot=None):
         """Drive the real CDP framing against a controlled loopback transport."""
         self.cdp_commands = []
 
@@ -217,7 +217,7 @@ class DriverLifecycleTest(unittest.IsolatedAsyncioTestCase):
                     'Target.getTargets': {'targetInfos': targets},
                     'Target.attachToTarget': {'sessionId': 'owned-session'},
                     'Page.getFrameTree': {'frameTree': {'frame': {'id': 'owned-frame', 'loaderId': 'loader'}}},
-                    'DOMSnapshot.captureSnapshot': {'strings': [], 'documents': []},
+                    'DOMSnapshot.captureSnapshot': snapshot or {'strings': [], 'documents': []},
                     'Page.captureScreenshot': {'data': 'owned-image-bytes'},
                 }
                 await socket.send(json.dumps({'id': request['id'], 'result': responses[method]}))
@@ -238,6 +238,28 @@ class DriverLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['page']['targetId'], 'other-page')
         attach = next(call for call in self.cdp_commands if call['method'] == 'Target.attachToTarget')
         self.assertEqual(attach['params']['targetId'], 'other-page')
+
+    async def test_state_returns_rendered_click_targets_without_semantic_tags(self):
+        targets = [{'type': 'page', 'targetId': 'owned-page', 'url': 'http://page.test'}]
+        snapshot = {
+            'strings': ['owned-frame', 'DIV', 'SPAN', '', 'id', 'inbox-entry'],
+            'documents': [{
+                'frameId': 0,
+                'nodes': {
+                    'nodeName': [1, 2, 1],
+                    'nodeValue': [3, 3, 3],
+                    'attributes': [[4, 5], [], []],
+                    'backendNodeId': [11, 12, 13],
+                    'isClickable': {'index': [0, 2]},
+                },
+                'layout': {'nodeIndex': [0, 1]},
+            }],
+        }
+        result = await self.observe('state', 'owned-page', targets, snapshot)
+        self.assertEqual(result['elements'], [{
+            'backendNodeId': 11, 'tag': 'div', 'attributes': {'id': 'inbox-entry'},
+            'targetId': 'owned-page', 'loaderId': 'loader',
+        }])
 
     async def test_screenshot_keeps_selected_target_when_it_is_not_first(self):
         targets = [{'type': 'page', 'targetId': target, 'url': 'http://page.test'}

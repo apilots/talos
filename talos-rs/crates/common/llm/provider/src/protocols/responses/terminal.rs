@@ -81,6 +81,18 @@ pub(super) fn stream_terminal(
 }
 
 pub(super) fn unterminated_stream(request_context: &str) -> TalosError {
+    stream_termination_error(request_context, "stream_termination=eof")
+}
+
+pub(super) fn premature_done(request_context: &str) -> TalosError {
+    stream_termination_error(
+        request_context,
+        "stream_termination=premature_done_sentinel",
+    )
+}
+
+fn stream_termination_error(request_context: &str, reason: &'static str) -> TalosError {
     TalosError::internal("The model response stream ended before a terminal event.")
         .context(request_context)
+        .context(reason)
 }

@@ -65,14 +65,16 @@ def should_stop(sample):
             and sample["childSessions"] >= 12 and sample["maxDepth"] >= 4 and sample["recentChildGrowth"] >= 3)
 
 
-def capture_events(database, destination):
+def capture_events(database, destination, *, final=False):
     with sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True, timeout=1) as db:
         if not db.execute("SELECT 1 FROM sqlite_schema WHERE name = 'agent_events'").fetchone():
             return
+        db.execute("BEGIN")
         events = db.execute("""
             WITH events AS (
                 SELECT s.agent_path, e.turn_id, e.sequence, e.event_seq, e.occurred_at, e.payload_json,
-                       json_extract(e.payload_json, '$.type') AS event_type,
+                       CASE WHEN e.sequence IS NULL AND json_extract(e.payload_json, '$.level') = 'warning'
+                            THEN 'warning' ELSE json_extract(e.payload_json, '$.type') END AS event_type,
                        json_extract(e.payload_json, '$.data.block.content.type') AS block_type
                 FROM agent_events e JOIN sessions s ON e.session_id = s.session_key
             )
@@ -80,27 +82,99 @@ def capture_events(database, destination):
                    json_extract(payload_json, '$.data.block.content.data.name'),
                    json_extract(payload_json, '$.data.block.content.data.callId'),
                    json_extract(payload_json, '$.data.block.content.data.isError'),
-                   json_extract(payload_json, '$.data.error.code'), event_seq,
+                   CASE WHEN event_type = 'warning' THEN json_extract(payload_json, '$.content.data.code')
+                        ELSE json_extract(payload_json, '$.data.error.code') END, event_seq,
                    json_extract(payload_json, '$.data.block.content.data.metrics.executionDurationMs'),
                    json_extract(payload_json, '$.data.block.content.data.metrics.queueDurationMs')
             FROM events
-            WHERE event_type IN ('turnStarted', 'turnCompleted', 'turnFailed', 'waitingForInput')
+            WHERE event_type IN ('turnStarted', 'messageCompleted', 'turnCompleted', 'turnFailed', 'warning', 'waitingForInput')
                OR (event_type = 'messageBlockCompleted' AND block_type IN ('toolCall', 'toolResult'))
             ORDER BY event_seq
         """).fetchall()
-    temporary = destination.with_suffix(".tmp")
-    temporary.write_text(json.dumps({
+        active = [
+            {"path": path, "turnId": turn, "state": state, "lastEventSeq": last_event}
+            for path, turn, state, last_event in db.execute("""
+                SELECT s.agent_path, a.turn_id, a.state, a.last_event_seq
+                FROM agent_active_turns a JOIN sessions s ON a.session_id = s.session_key
+                ORDER BY a.last_event_seq
+            """)
+        ]
+        observed_metrics = [
+            {"path": path, "turnId": turn, "eventSeq": sequence, "modelRounds": rounds,
+             "usage": json.loads(usage) if usage is not None else None}
+            for path, turn, sequence, rounds, usage in db.execute("""
+                WITH latest AS (
+                    SELECT MAX(event_seq) AS event_seq
+                    FROM agent_events
+                    WHERE json_extract(payload_json, '$.type') = 'metricsUpdated'
+                    GROUP BY session_id, turn_id
+                )
+                SELECT s.agent_path, e.turn_id, e.event_seq,
+                       json_extract(e.payload_json, '$.data.modelRounds'),
+                       json_extract(e.payload_json, '$.data.usage')
+                FROM latest JOIN agent_events e ON e.event_seq = latest.event_seq
+                JOIN sessions s ON s.session_key = e.session_id
+                ORDER BY e.event_seq
+            """)
+        ]
+        child_usage = []
+        if final:
+            child_usage = [
+                {"path": path, "turnId": turn, "observedCalls": calls, "callsWithReportedCacheRead": measured,
+                 "coveredInputTokens": inputs, "observedCacheReadTokens": reads,
+                 "reportedInputTokens": total_inputs, "reportedCacheReadTokens": total_reads,
+                 "observedRequests": requests, "callsWithCompleteUsage": complete,
+                 "observedUsage": json.loads(observed), "reportedUsage": json.loads(reported)}
+                for (path, turn, calls, measured, inputs, reads, total_inputs, total_reads,
+                     requests, complete, observed, reported) in db.execute("""
+                    WITH calls AS (
+                        SELECT s.agent_path, e.session_id, e.turn_id, e.event_seq, r.key AS request_index,
+                               json_extract(c.value, '$.metrics.usage.input_tokens') AS inputs,
+                               json_extract(c.value, '$.metrics.usage.output_tokens') AS outputs,
+                               json_extract(c.value, '$.metrics.usage.cache_read_input_tokens') AS cached,
+                               json_extract(c.value, '$.metrics.usage.cache_creation_input_tokens') AS written
+                        FROM agent_events e JOIN sessions s ON e.session_id = s.session_key,
+                             json_each(e.execution_capture_json, '$.requests') AS r,
+                             json_each(r.value, '$.request.callRecords') AS c
+                        WHERE s.agent_path IS NOT NULL
+                    )
+                    SELECT agent_path, calls.turn_id, COUNT(*), COUNT(cached),
+                           SUM(CASE WHEN cached IS NOT NULL THEN inputs END), SUM(cached),
+                           p.input_tokens, p.cache_read_input_tokens,
+                           COUNT(DISTINCT event_seq || ':' || request_index),
+                           COUNT(CASE WHEN outputs >= 0 AND cached >= 0 AND written >= 0
+                                           AND cached + written <= inputs THEN 1 END),
+                           json_object('input_tokens', SUM(inputs), 'output_tokens', SUM(outputs),
+                                       'cache_read_input_tokens', SUM(cached),
+                                       'cache_creation_input_tokens', SUM(written)),
+                           json_object('input_tokens', p.input_tokens, 'output_tokens', p.output_tokens,
+                                       'cache_read_input_tokens', p.cache_read_input_tokens,
+                                       'cache_creation_input_tokens', p.cache_creation_input_tokens)
+                    FROM calls LEFT JOIN profile_turn_usage p ON p.session_id = calls.session_id
+                        AND p.turn_id = calls.turn_id AND p.usage_kind = 'turn' AND p.finalized = 1
+                        AND p.usage_available = 1
+                    GROUP BY calls.session_id, calls.turn_id
+                    ORDER BY agent_path, calls.turn_id
+                """)
+            ]
+    snapshot = {
         "fields": ["path", "turnId", "sequence", "occurredAt", "event", "block", "tool",
                    "callId", "toolError", "errorCode", "eventSeq", "toolExecutionMs", "toolQueueMs"],
         "events": events,
-    }, separators=(",", ":")) + "\n")
+        "activeTurns": active,
+        "observedTurnMetrics": observed_metrics,
+    }
+    if final:
+        snapshot["childUsage"] = child_usage
+    temporary = destination.with_suffix(".tmp")
+    temporary.write_text(json.dumps(snapshot, separators=(",", ":")) + "\n")
     temporary.replace(destination)
 
 
-def record_events(database, destination, evidence):
+def record_events(database, destination, evidence, *, final=False):
     if database.is_file():
         try:
-            capture_events(database, destination)
+            capture_events(database, destination, final=final)
         except sqlite3.OperationalError as error:
             evidence.write(json.dumps({"captureError": error.sqlite_errorname}) + "\n")
         except OSError as error:
@@ -120,7 +194,7 @@ def wait(process, home, logs, workspace, paths, signature):
             except subprocess.TimeoutExpired:
                 pass
             else:
-                record_events(database, events, evidence)
+                record_events(database, events, evidence, final=True)
                 return exit_code
             now = time.monotonic()
             snapshot = collaboration_snapshot(database)
@@ -150,4 +224,5 @@ def wait(process, home, logs, workspace, paths, signature):
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
+                record_events(database, events, evidence, final=True)
                 return 124

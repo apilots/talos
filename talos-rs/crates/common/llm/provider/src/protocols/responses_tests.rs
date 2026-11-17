@@ -359,20 +359,53 @@ async fn responses_streams_deliver_refusals_and_output_limit() {
 
 #[tokio::test]
 async fn responses_streams_preserve_typed_errors_and_reject_early_eof() {
-    for (sse, code) in [
-        ("data: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"private\"}\n\n",
-            talos_error::ErrorCode::UsageLimitExceeded),
-        ("data: {\"type\":\"response.in_progress\"}\n\n", talos_error::ErrorCode::InternalError),
-        ("data: [DONE]\n\n", talos_error::ErrorCode::InternalError),
+    use talos_error::ErrorCode;
+
+    for (sse, code, termination) in [
+        (
+            "data: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"private\"}\n\n",
+            ErrorCode::UsageLimitExceeded,
+            None,
+        ),
+        (
+            "data: {\"type\":\"response.in_progress\"}\n\n",
+            ErrorCode::InternalError,
+            Some("stream_termination=eof"),
+        ),
+        (
+            "data: [DONE]\n\n",
+            ErrorCode::InternalError,
+            Some("stream_termination=premature_done_sentinel"),
+        ),
     ] {
-        let mut text = stream_with_contract(reqwest::Response::from(http::Response::new(sse)), "OpenAI", ResponsesContract::Official);
-        let mut blocks = model_blocks_with_contract(
-            reqwest::Response::from(http::Response::new(sse)), ResponsesModelBlocks::openai(), ResponsesContract::Official,
+        let mut text = stream_with_contract(
+            reqwest::Response::from(http::Response::new(sse)),
+            "OpenAI",
+            ResponsesContract::Official,
         );
-        for error in [text.next().await.unwrap().unwrap_err(), blocks.next().await.unwrap().unwrap_err()] {
-            let error = error.to_api_error();
-            assert_eq!(error.code, code);
-            assert!(!error.message.contains("private"));
+        let mut blocks = model_blocks_with_contract(
+            reqwest::Response::from(http::Response::new(sse)),
+            ResponsesModelBlocks::openai(),
+            ResponsesContract::Official,
+        );
+        for error in [
+            text.next().await.unwrap().unwrap_err(),
+            blocks.next().await.unwrap().unwrap_err(),
+        ] {
+            let api_error = error.to_api_error();
+            assert_eq!(api_error.code, code);
+            assert!(!api_error.message.contains("private"));
+            if let Some(termination) = termination {
+                assert!(
+                    error.diagnostic_message().contains(termination),
+                    "expected {termination}, got {}",
+                    error.diagnostic_message(),
+                );
+                assert_eq!(
+                    api_error.message,
+                    "The model response stream ended before a terminal event."
+                );
+            }
         }
         assert!(text.next().await.is_none());
         assert!(blocks.next().await.is_none());

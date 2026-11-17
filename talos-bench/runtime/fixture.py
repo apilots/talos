@@ -21,12 +21,19 @@ def model_config(model, respond):
                 self.send_error(400, "Unexpected fixture endpoint or model")
                 return
             if not body.get("stream"):
+                # The same fixture model also serves title and memory requests.
+                try:
+                    auxiliary_input = json.loads(body["messages"][-1]["content"])
+                except (TypeError, json.JSONDecodeError):
+                    auxiliary_input = None
+                is_memory_reflection = isinstance(auxiliary_input, dict) and "currentMemory" in auxiliary_input
+                content = json.dumps({"operation": "noop"}) if is_memory_reflection else "Benchmark"
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({
                     "id": "fixture-title", "model": model, "created": 1,
-                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "Benchmark"},
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": content},
                                  "finish_reason": "stop"}], "usage": USAGE,
                 }).encode())
                 return

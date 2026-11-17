@@ -4,11 +4,15 @@ import argparse
 from datetime import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
 
 from runtime.payload import cli_log_lines, run_metrics
+
+
+USAGE_COUNTERS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 
 
 def read_json(path):
@@ -99,16 +103,164 @@ def observed_seconds(metrics, field):
     return sum(samples) / 1000 if samples else None
 
 
+def billing_counts(usage):
+    counts = tuple(usage.get(key) for key in USAGE_COUNTERS)
+    if any(type(count) is not int or count < 0 for count in counts):
+        return None
+    inputs, _, cached, written = counts
+    return counts if cached + written <= inputs else None
+
+
 def estimate_cost(usage, prices):
-    if not usage or not prices or not all(field in prices for field in ("input", "output", "cache_read", "cache_write")):
+    counts = billing_counts(usage or {})
+    if not counts or not prices:
         return None
-    cached = usage.get("cache_read_input_tokens") or 0
-    written = usage.get("cache_creation_input_tokens") or 0
-    uncached = usage["input_tokens"] - cached - written
-    if uncached < 0:
+    inputs, outputs, cached, written = counts
+    input_rate, output_rate, read_rate, write_rate = (
+        prices.get(key) for key in ("input", "output", "cache_read", "cache_write")
+    )
+    if any(type(rate) not in (int, float) or not math.isfinite(rate) or rate < 0
+           for rate in (input_rate, output_rate, read_rate, write_rate)):
         return None
-    return (uncached * prices["input"] + cached * prices["cache_read"]
-            + written * prices["cache_write"] + usage["output_tokens"] * prices["output"]) / 1_000_000
+    uncached = inputs - cached - written
+    return (uncached * input_rate + cached * read_rate + written * write_rate + outputs * output_rate) / 1_000_000
+
+
+def root_estimated_cost(requests, metrics, prices):
+    complete = requests and type(metrics.get("modelRounds")) is int and metrics["modelRounds"] == len(requests)
+    if not complete or any(not request["callRecords"] for request in requests):
+        return None
+    counts = [
+        billing_counts((call.get("metrics") or {}).get("usage") or {})
+        for request in requests for call in request["callRecords"]
+    ]
+    totals = metrics.get("usage") or {}
+    if None in counts or tuple(map(sum, zip(*counts))) != billing_counts(totals):
+        return None
+    return estimate_cost(totals, prices)
+
+
+def root_cache_read(calls, metrics, observed_requests):
+    """Compare token-weighted cache reads from root call records with CLI totals."""
+    observed_input = covered_input = cache_read = measured_calls = 0
+    inconsistent = False
+    for call in calls:
+        usage = (call.get("metrics") or {}).get("usage") or {}
+        inputs = usage.get("input_tokens")
+        observed_input += inputs or 0
+        cached = usage.get("cache_read_input_tokens")
+        if cached is None:
+            continue
+        if inputs is None or not 0 <= cached <= inputs:
+            inconsistent = True
+            continue
+        covered_input += inputs
+        cache_read += cached
+        measured_calls += 1
+
+    totals = metrics.get("usage") or {}
+    total_input = totals.get("input_tokens")
+    total_cached = totals.get("cache_read_input_tokens")
+    full_coverage = (type(metrics.get("modelRounds")) is int and metrics["modelRounds"] == observed_requests
+                     and measured_calls == len(calls))
+    if total_input is not None:
+        inconsistent |= observed_input > total_input
+        if total_cached is not None:
+            inconsistent |= (not cache_read <= total_cached <= total_input
+                             or (covered_input == total_input and cache_read != total_cached))
+    if inconsistent:
+        status = "inconsistent"
+    elif not covered_input:
+        status = "unavailable"
+    elif covered_input == total_input and cache_read == total_cached and full_coverage:
+        status = "verified"
+    else:
+        status = "partial"
+    return {
+        "status": status,
+        "ratio": cache_read / covered_input if status == "verified" else None,
+        "observedCalls": len(calls),
+        "callsWithReportedCacheRead": measured_calls,
+        "coveredInputTokens": covered_input,
+        "observedCacheReadTokens": cache_read,
+    }
+
+
+def workload_usage(snapshot, root_turn, root_cache, root_cost, cli):
+    """Reconcile captured descendant Turns before reporting whole-workload metrics."""
+    if not snapshot and cli.get("collaboration_tools") is not False:
+        return None
+
+    starts = set()
+    root_starts = set()
+    fields = snapshot.get("fields", ())
+    for event in snapshot.get("events", ()):
+        row = dict(zip(fields, event))
+        if row.get("event") == "turnStarted":
+            if row.get("path"):
+                starts.add((row["path"], row["turnId"]))
+            else:
+                root_starts.add(row["turnId"])
+
+    metrics = {(row["path"], row["turnId"]): row
+               for row in snapshot.get("observedTurnMetrics", ()) if row["path"] and row["usage"]}
+    calls = {(row["path"], row["turnId"]): row for row in snapshot.get("childUsage", ())}
+    descendants = starts | metrics.keys() | calls.keys()
+    reconciled = {}
+    priced = []
+    historical_estimates = []
+    # Spawn and follow-up inherit the selected root model in an isolated Bench trial.
+    rates = cli.get("prices_per_million") if cli.get("model") else None
+    for key in metrics.keys() & calls.keys():
+        reported, evidence = metrics[key], calls[key]
+        usage = reported["usage"]
+        inputs, reads = usage.get("input_tokens"), usage.get("cache_read_input_tokens")
+        if (type(inputs) is int and type(reads) is int and 0 <= reads <= inputs
+                and type(reported.get("modelRounds")) is int
+                and evidence["observedCalls"] >= reported["modelRounds"]
+                and evidence.get("observedRequests", reported["modelRounds"]) == reported["modelRounds"]
+                and evidence["observedCalls"] == evidence["callsWithReportedCacheRead"]
+                and inputs == evidence["coveredInputTokens"] == evidence["reportedInputTokens"]
+                and reads == evidence["observedCacheReadTokens"] == evidence["reportedCacheReadTokens"]):
+            reconciled[key] = usage
+            if (cost := estimate_cost(usage, rates)) is None:
+                continue
+            if "observedUsage" not in evidence:
+                historical_estimates.append(cost)
+            elif (evidence["callsWithCompleteUsage"] == evidence["observedCalls"]
+                  and billing_counts(usage) == billing_counts(evidence["observedUsage"])
+                  == billing_counts(evidence["reportedUsage"])):
+                priced.append(cost)
+    observed = {
+        key: sum(values) if values and all(type(value) is int and value >= 0 for value in values) else None
+        for key in USAGE_COUNTERS
+        if (values := [metric["usage"].get(key) for metric in metrics.values()])
+    }
+    descendants_complete = (cli.get("collaboration_tools") is False or (
+        "childUsage" in snapshot and root_turn is not None and root_starts == {root_turn}
+        and snapshot.get("activeTurns") == [] and descendants == starts
+        and reconciled.keys() == descendants
+    ))
+    settled = cli.get("exit_code") == 0 and descendants_complete
+    cache_complete = settled and (root_cache or {}).get("status") == "verified"
+    cache_ratio = None
+    if cache_complete:
+        inputs = root_cache["coveredInputTokens"] + sum(usage["input_tokens"] for usage in reconciled.values())
+        reads = root_cache["observedCacheReadTokens"] + sum(usage["cache_read_input_tokens"] for usage in reconciled.values())
+        cache_ratio = reads / inputs
+    return {
+        "descendantTurnsObserved": len(descendants),
+        "descendantTurnsWithUsage": len(metrics),
+        "descendantTurnsReconciled": len(reconciled),
+        "observedDescendantUsage": observed or None,
+        "pricedDescendantTurns": len(priced),
+        "reconciledDescendantEstimatedCostUsd": sum(priced) if priced else None,
+        "descendantTurnsEstimatedFromReportedTotals": len(historical_estimates),
+        "descendantEstimateFromReportedTotalsUsd": sum(historical_estimates) if historical_estimates else None,
+        "cacheReadRatio": cache_ratio,
+        "estimatedCostUsd": root_cost + sum(priced)
+        if settled and root_cost is not None and len(priced) == len(descendants) else None,
+    }
 
 
 def trial_summary(run, directory, entries):
@@ -123,8 +275,8 @@ def trial_summary(run, directory, entries):
         # Keep the failed trial's other facts even if the CLI was interrupted mid-write.
         trace = {}
         trace_error = "invalidJson"
-    calls = [record for entry in trace.get("data") or [] if entry["type"] == "modelRequest"
-             for record in entry["request"]["callRecords"]]
+    requests = [entry["request"] for entry in trace.get("data") or [] if entry["type"] == "modelRequest"]
+    calls = [record for request in requests for record in request["callRecords"]]
     lines = cli_log_lines(agent)
     metrics = run_metrics(lines) or {}
     model_timings = [call.get("metrics") for call in calls]
@@ -150,6 +302,7 @@ def trial_summary(run, directory, entries):
     if exception is None and "exit_code" in cli and cli["exit_code"] is None:
         exception = "TalosCliTerminationUnrecorded"
     watch_path = agent / "talos-delegation.jsonl"
+    delegation_events = agent / "talos-delegation-events.json"
     watch_samples = watch_path.read_text().splitlines() if watch_path.is_file() else []
     stop_reason = next((reason for line in reversed(watch_samples)
                         if (reason := json.loads(line).get("stopReason"))), None)
@@ -161,7 +314,7 @@ def trial_summary(run, directory, entries):
     if task_name and task_name not in entries:
         task_name = task_name.rsplit("/", 1)[-1]
     entry = entries.get(task_name, {})
-    atlas_provenance = read_json(run / "provenance" / f"{task_name}.json") if "revision" in entry else {}
+    provenance = read_json(run / "provenance" / f"{task_name}.json")
     archive = directory / "artifacts"
     manifest = read_json(archive / "manifest.json")
     captured = {artifact_identity(item): item for item in manifest}
@@ -188,16 +341,21 @@ def trial_summary(run, directory, entries):
         "atif": agent / "trajectory.json",
         "usage": agent / "usage.json",
         "delegationWatch": agent / "talos-delegation.jsonl",
-        "delegationEvents": agent / "talos-delegation-events.json",
+        "delegationEvents": delegation_events,
         "stdout": agent / "talos.stdout.txt",
         "stderr": agent / "talos.stderr.txt",
         "verifier": directory / "verifier",
         "submissionManifest": archive / "manifest.json",
     }
+    trace_closed = trace.get("nextCursor") is None
+    cache = root_cache_read(calls, metrics, len(requests) if trace_closed else None) if usage is not None or calls else None
+    root_cost = root_estimated_cost(requests, metrics, cli.get("prices_per_million")) if trace_closed else None
+    workload = workload_usage(read_json(delegation_events), (trace.get("identity") or {}).get("turnId"),
+                              cache, root_cost, cli)
     return {
         "trial": directory.name,
         "task": task_name,
-        "taskRevision": task.get("git_commit_id") or entry.get("git_commit_id") or atlas_provenance.get("datasetRevision"),
+        "taskRevision": task.get("git_commit_id") or entry.get("git_commit_id") or provenance.get("datasetRevision"),
         "taskDigest": task.get("digest") or result.get("task_checksum"),
         "model": cli.get("model"),
         "reasoningEffort": cli.get("reasoning_effort"),
@@ -215,7 +373,10 @@ def trial_summary(run, directory, entries):
         "exception": exception,
         "stopReason": stop_reason,
         "usage": usage,
-        "estimatedCostUsd": estimate_cost(usage, cli.get("prices_per_million")),
+        "rootCacheRead": cache,
+        "estimatedCostUsd": root_cost,
+        "rootCostReconciled": root_cost is not None,
+        "workloadUsage": workload,
         "modelRounds": metrics.get("modelRounds"),
         "modelCallsObserved": len(calls) if trace.get("data") is not None else None,
         "observedModelSeconds": observed_seconds(model_timings, "executionDurationMs"),

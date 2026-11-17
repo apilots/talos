@@ -4,6 +4,8 @@ See the [local benchmark guide](../docs/reference/BENCHMARKS.md) for commands, m
 
 The [FrontierHarness v1.1 batch guide](suites/frontier-harness/README.md) covers the pinned full inventory, native ARM64 admission, per-task execution, and HTML review.
 
+The [MiniWoB++ browser suite](suites/miniwob/README.md) runs seeded upstream browser tasks through the built-in Browser MCP and scores each original episode.
+
 The suite selects its runner, task registry, container preparation and agent adapter. The shared entry point handles the Talos product, provider configuration, repetitions and result summaries. `runtime/` contains the Talos product Dockerfile and the code shared by the Harbor and Pier agent adapters. Each `suites/<suite>/` directory contains a registry and the runner-specific configuration. Running without a suite argument selects Terminal-Bench.
 
 The default suites pin released frameworks and immutable task inputs so that separate runs can use the same grader. Check the upstream release before refreshing a pin. [Harbor](https://pypi.org/project/harbor/) · [Terminal-Bench](https://github.com/harbor-framework/terminal-bench/releases/latest) · [SWE-bench](https://pypi.org/project/swebench/) · [MCP-Atlas](https://github.com/scaleapi/mcp-atlas/blob/main/CHANGELOG.md) · [Pier](https://pypi.org/project/datacurve-pier/)

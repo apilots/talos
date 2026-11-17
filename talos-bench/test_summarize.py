@@ -2,10 +2,112 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from summarize import read_json, summarize, trial_summary, write_json
+from summarize import (
+    estimate_cost, read_json, root_cache_read, root_estimated_cost, summarize, trial_summary, workload_usage, write_json,
+)
 
 
 class CompletionTest(unittest.TestCase):
+    def test_estimate_cost_uses_reported_zero_values_and_requires_known_counters(self):
+        rates = {"input": 2, "output": 3, "cache_read": 1, "cache_write": 4}
+        usage = {"input_tokens": 50, "output_tokens": 4, "cache_read_input_tokens": 0,
+                 "cache_creation_input_tokens": 5}
+        self.assertAlmostEqual(estimate_cost(usage, rates), 122 / 1_000_000)
+        self.assertIsNone(estimate_cost({**usage, "cache_read_input_tokens": None}, rates))
+
+    def test_root_cost_rejects_partial_cache_totals_even_when_observed_sums_match(self):
+        rates = {"input": 2, "output": 3, "cache_read": 1, "cache_write": 4}
+        first = {"input_tokens": 20, "output_tokens": 2, "cache_read_input_tokens": 3,
+                 "cache_creation_input_tokens": 0}
+        second = {**first, "cache_creation_input_tokens": 1}
+        requests = [{"callRecords": [{"metrics": {"usage": counts}}]} for counts in (first, second)]
+        totals = {"modelRounds": 2, "usage": {key: first[key] + second[key] for key in first}}
+        self.assertAlmostEqual(root_estimated_cost(requests, totals, rates), 88 / 1_000_000)
+        self.assertIsNone(root_estimated_cost(requests, {**totals, "modelRounds": 3}, rates))
+        first["cache_creation_input_tokens"] = None
+        self.assertIsNone(root_estimated_cost(requests, totals, rates))
+
+    def test_workload_only_reports_aggregate_when_all_child_turns_reconcile(self):
+        root_cache = {"status": "verified", "coveredInputTokens": 100, "observedCacheReadTokens": 50}
+        root = {"model": "test:selected", "exit_code": 0,
+                "prices_per_million": {"input": 2, "output": 3, "cache_read": 1, "cache_write": 4}}
+        child = {"path": "/root/check", "turnId": "child"}
+        child_usage = {"input_tokens": 50, "output_tokens": 4, "cache_read_input_tokens": 20,
+                       "cache_creation_input_tokens": 5}
+        snapshot = {
+            "fields": ["path", "turnId", "event"],
+            "events": [[None, "root", "turnStarted"], [child["path"], "child", "turnStarted"]],
+            "activeTurns": [],
+            "observedTurnMetrics": [{**child, "modelRounds": 1, "usage": child_usage}],
+            "childUsage": [{**child, "reportedInputTokens": 50, "reportedCacheReadTokens": 20,
+                            "observedCalls": 1, "callsWithReportedCacheRead": 1,
+                            "coveredInputTokens": 50, "observedCacheReadTokens": 20,
+                            "observedRequests": 1, "callsWithCompleteUsage": 1,
+                            "observedUsage": child_usage, "reportedUsage": child_usage}],
+        }
+        whole = workload_usage(snapshot, "root", root_cache, 0.001, root)
+        self.assertEqual(whole["observedDescendantUsage"], child_usage)
+        self.assertEqual(whole["descendantTurnsReconciled"], 1)
+        self.assertAlmostEqual(whole["cacheReadRatio"], 70 / 150)
+        self.assertAlmostEqual(whole["estimatedCostUsd"], 0.001 + 102 / 1_000_000)
+
+        # An omitted optional cache write can leave the reported totals numerically unchanged.
+        evidence, = snapshot["childUsage"]
+        snapshot["childUsage"] = [{**evidence, "callsWithCompleteUsage": 0}]
+        incomplete = workload_usage(snapshot, "root", root_cache, 0.001, root)
+        self.assertAlmostEqual(incomplete["cacheReadRatio"], 70 / 150)
+        self.assertEqual(incomplete["pricedDescendantTurns"], 0)
+        self.assertIsNone(incomplete["estimatedCostUsd"])
+
+        # Historical input/read evidence can support only an estimate from reported totals.
+        snapshot["childUsage"] = [{name: value for name, value in evidence.items()
+                                   if name not in {"observedRequests", "callsWithCompleteUsage",
+                                                   "observedUsage", "reportedUsage"}}]
+        historical = workload_usage(snapshot, "root", root_cache, 0.001, root)
+        self.assertAlmostEqual(historical["cacheReadRatio"], 70 / 150)
+        self.assertIsNone(historical["estimatedCostUsd"])
+        self.assertEqual(historical["descendantTurnsEstimatedFromReportedTotals"], 1)
+        self.assertAlmostEqual(historical["descendantEstimateFromReportedTotalsUsd"], 102 / 1_000_000)
+
+        # A child may settle before its usage becomes available, such as on cancellation.
+        snapshot["childUsage"] = [evidence]
+        snapshot["events"].append(["/root/cancelled", "cancelled", "turnStarted"])
+        partial = workload_usage(snapshot, "root", root_cache, 0.001, root)
+        self.assertEqual(partial["descendantTurnsObserved"], 2)
+        self.assertEqual(partial["descendantTurnsWithUsage"], 1)
+        self.assertEqual(partial["descendantTurnsReconciled"], 1)
+        self.assertAlmostEqual(partial["reconciledDescendantEstimatedCostUsd"], 102 / 1_000_000)
+        self.assertIsNone(partial["cacheReadRatio"])
+        self.assertIsNone(partial["estimatedCostUsd"])
+
+    def test_root_cache_share_requires_matching_input_coverage_and_counters(self):
+        calls = [
+            {"metrics": {"usage": {"input_tokens": 90, "cache_read_input_tokens": 0}}},
+            {"metrics": {"usage": {"input_tokens": 10, "cache_read_input_tokens": 10}}},
+        ]
+        totals = {"modelRounds": 2, "usage": {"input_tokens": 100, "cache_read_input_tokens": 10}}
+        self.assertEqual(root_cache_read(calls, totals, 2), {
+            "status": "verified", "ratio": 0.1, "observedCalls": 2, "callsWithReportedCacheRead": 2,
+            "coveredInputTokens": 100, "observedCacheReadTokens": 10,
+        })
+        all_misses = {"modelRounds": 1, "usage": calls[0]["metrics"]["usage"]}
+        self.assertEqual(root_cache_read(calls[:1], all_misses, 1)["ratio"], 0)
+        for label, sample, metrics, observed, status in (
+            ("missing cache counter", [{"metrics": {"usage": {"input_tokens": 90}}}, calls[1]],
+             totals, 2, "partial"),
+            ("truncated trajectory", calls, {**totals, "modelRounds": 3}, 2, "partial"),
+            ("missing CLI usage", calls, {}, 2, "partial"),
+            ("unreported reads still contribute input", [*calls, {"metrics": {"usage": {"input_tokens": 1}}}],
+             totals, 3, "inconsistent"),
+            ("missing trajectory", [], totals, 0, "unavailable"),
+            ("inconsistent totals", calls, {**totals, "usage": {"input_tokens": 100,
+                                                             "cache_read_input_tokens": 11}}, 2, "inconsistent"),
+        ):
+            with self.subTest(label=label):
+                evidence = root_cache_read(sample, metrics, observed)
+                self.assertEqual(evidence["status"], status)
+                self.assertIsNone(evidence["ratio"])
+
     def test_interrupted_cli_preserves_launch_profile_and_runner_duration(self):
         with TemporaryDirectory() as directory:
             run = Path(directory)
@@ -106,7 +208,10 @@ class CompletionTest(unittest.TestCase):
                 "identity": {"sessionId": "session", "turnId": "turn"},
                 "clockSegments": [],
                 "data": [{"type": "modelRequest", "request": {
-                    "callRecords": [{"metrics": {"executionDurationMs": 1500}}],
+                    "callRecords": [{"metrics": {"executionDurationMs": 1500, "usage": {
+                        "input_tokens": 20, "output_tokens": 3, "cache_read_input_tokens": 6,
+                        "cache_creation_input_tokens": 7,
+                    }}}],
                 }}],
                 "nextCursor": None,
             })

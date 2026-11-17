@@ -21,17 +21,6 @@ from harbor.tasks.client import TaskClient
 
 PLATFORM = "linux/arm64"
 STATUS_ORDER = {"ready": 0, "needsNativeBuild": 1, "unresolved": 2, "blocked": 3}
-METADATA_ONLY = {
-    "bun-sourcemap-leak": "vulnerability reproduction or data-exposure task",
-    "dna-assembly": "genetic assembly task",
-    "dna-insert": "genetic engineering task",
-    "feal-linear-cryptanalysis": "cryptanalytic attack task",
-    "vulnerable-secret": "vulnerability exploitation or secret-extraction task",
-}
-GUEST_EMULATION = {
-    "install-windows-3.11": "requires booting a Windows guest in QEMU",
-    "make-doom-for-mips": "requires running a MIPS ELF in the supplied JavaScript VM",
-}
 PRIORITY = {
     "log-summary-date-ranges", "music-harmony", "regex-log", "polyglot-c-py",
     "large-scale-text-editing", "schemelike-metacircular-eval", "adaptive-rejection-sampler",
@@ -200,13 +189,10 @@ def inspection_error(error):
     return f"{type(error).__name__}: {message}" if message else type(error).__name__
 
 
-async def inspect_task(task_id, host, images, slots, download_timeout):
+async def inspect_task(task_id, host, images, slots, download_timeout, exclusion):
     row = {"name": task_id.get_name(), "digest": task_id.ref, "taskPath": None, "agent": None, "verifier": None}
-    name = task_id.name
-    if name in METADATA_ONLY:
-        return {**row, "status": "blocked", "reasons": [METADATA_ONLY[name], "metadata only"]}
-    if name in GUEST_EMULATION:
-        return {**row, "status": "blocked", "reasons": [GUEST_EMULATION[name]]}
+    if exclusion:
+        return {**row, "status": "blocked", "reasons": [exclusion["reason"]], "exclusion": exclusion["kind"]}
     try:
         async with slots:
             async with asyncio.timeout(download_timeout):
@@ -252,6 +238,10 @@ async def preflight(output, retry_unresolved):
     task_ids = list(dataset.task_ids)
     if len(task_ids) != 62 or any(not isinstance(task, PackageTaskId) or not (task.ref or "").startswith("sha256:") for task in task_ids):
         raise ValueError("Expected 62 digest-pinned FrontierHarness tasks")
+    exclusions = registry["native_exclusions"]
+    pins = {task.get_name(): task.ref for task in task_ids}
+    if any(pins.get(name) != exclusion["digest"] for name, exclusion in exclusions.items()):
+        raise ValueError("FrontierHarness exclusion does not match the pinned inventory")
     host = docker_host()
     report = {"datasetRef": ref, "platform": PLATFORM, "host": host, "complete": False,
               "tasks": [{"name": task.get_name(), "digest": task.ref, "status": "unresolved",
@@ -271,7 +261,8 @@ async def preflight(output, retry_unresolved):
     download_timeout = 150 if retry_unresolved else 90
 
     async def check(index, task_id):
-        return index, await inspect_task(task_id, host, images, slots, download_timeout)
+        return index, await inspect_task(task_id, host, images, slots, download_timeout,
+                                         exclusions.get(task_id.get_name()))
 
     order = sorted(((index, task_id) for index, task_id in enumerate(task_ids)
                     if report["tasks"][index]["status"] == "unresolved"),

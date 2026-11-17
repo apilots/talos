@@ -1,5 +1,9 @@
 runner=harbor
-package=harbor==0.25.0
+harbor_version="${TALOS_BENCH_HARBOR_VERSION:-0.25.0}"
+case "$harbor_version" in
+  0.22.0|0.25.0) package="harbor==$harbor_version" ;;
+  *) echo "Unsupported Harbor version for Terminal-Bench: $harbor_version" >&2; exit 1 ;;
+esac
 
 case "$suite_version" in
   2.0)

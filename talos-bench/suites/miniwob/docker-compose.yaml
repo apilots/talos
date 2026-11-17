@@ -1,0 +1,10 @@
+services:
+  main:
+    platform: ${TALOS_BENCH_PLATFORM}
+    build:
+      args:
+        TALOS_BROWSER_IMAGE: ${TALOS_BENCH_BROWSER_IMAGE:?Set a local Talos Server or Worker browser image}
+    shm_size: 1gb
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./chromium-seccomp.json

@@ -9,12 +9,13 @@ Run the commands from the Talos repository root.
 ./talos-bench/run.sh terminal-bench@2.0
 ./talos-bench/run.sh swe-bench-lite
 ./talos-bench/run.sh mcp-atlas
+./talos-bench/run.sh deep-swe
 TALOS_BENCH_ORACLE=1 ./talos-bench/run.sh terminal-bench@4.1.0
 TALOS_BENCH_ORACLE=1 ./talos-bench/run.sh deep-swe
 TALOS_BENCH_ORACLE=1 ./talos-bench/run.sh frontier-harness@1.1.0
 ```
 
-The first four suite commands run controlled Talos cases without model credentials. Terminal-Bench defaults to 4.1. Its fixture produces placeholder SQL with an expected reward of 0.0. Oracle mode runs the upstream reference solution and skips the Talos build and model setup. Use the Oracle command for DeepSWE without model credentials.
+The five suite commands that omit Oracle mode run controlled Talos cases without model credentials. Terminal-Bench defaults to 4.1. Its fixture produces placeholder SQL with an expected reward of 0.0. Oracle mode runs the upstream reference solution and skips the Talos build and model setup.
 
 To reuse a build, set `TALOS_BENCH_PRODUCT` to a native Linux TUI product directory containing `bin/talos`, `bin/talos-linux-sandbox-launcher`, `conf/talos.yaml`, and `conf/migrations/sqlite/`. Build from a revision that provides the trajectory and MCP import commands used by the suites.
 
@@ -35,17 +36,18 @@ Use `TALOS_BENCH_AGENT_ENV` with one `KEY=VALUE` per line for non-secret agent r
 
 Set `TALOS_BENCH_AGENT_ENV=TALOS_BENCH_COLLABORATION_TOOLS=0` for a local single-Agent diagnostic. The isolated Talos config disables collaboration tools and records that setting in `agent/talos-run.json` and the summary. Normal benchmark runs enable collaboration tools. Suite reports retain diagnostic scores in the attempt history. Compare runs using the same setting.
 
-Set `TALOS_BENCH_DELEGATION_WATCH=1` through `TALOS_BENCH_AGENT_ENV` to sample delegation and workspace progress every 30 seconds. For tasks without a Git worktree, set watched paths to enable automatic stopping. It stops after 12 minutes without a changed submission, changed Git workspace, or completed child Turn when there are at least 12 child sessions, depth four, and three additional child sessions over the last three minutes. `TALOS_BENCH_WATCH_PATHS` accepts colon-separated submission files and directories. The Bench writes `agent/talos-delegation.jsonl` and publishes the latest `agent/talos-delegation-events.json` at each sample and on exit. The event file records lifecycle, outcomes and tool timings without tool bodies. An external stop can leave up to one sampling interval absent from the event file. The summary records the stop separately from a numeric verifier result. The upstream grader and deadlines remain those of the pinned task.
+Set `TALOS_BENCH_DELEGATION_WATCH=1` through `TALOS_BENCH_AGENT_ENV` to sample delegation and workspace progress every 30 seconds. For tasks without a Git worktree, set watched paths to enable automatic stopping. It stops after 12 minutes without a changed submission, changed Git workspace, or completed child Turn when there are at least 12 child sessions, depth four, and three additional child sessions over the last three minutes. `TALOS_BENCH_WATCH_PATHS` accepts colon-separated submission files and directories. The Bench writes `agent/talos-delegation.jsonl` and publishes the latest `agent/talos-delegation-events.json` at each sample and on exit. The event file records lifecycle, typed warnings, active Turn state, and tool timings without tool bodies. Each snapshot retains the last durable metrics event per Turn, including its input and cache-read counters. These observations remain distinct from final CLI usage. At CLI exit, it also records observed child call usage and any finalized child Turn totals. These separate counters can be incomplete and do not define a workload-wide rate. An external stop can leave up to one sampling interval absent from the event file. The summary records the stop separately from a numeric verifier result. The upstream grader and deadlines remain those of the pinned task.
 
-Use the summary for score and job time, `agent/talos-run.json` for the launch profile and CLI duration, and `agent/usage.json` for cumulative input, output, cache-read, and cache-write tokens. The launch profile is saved before the CLI starts. It retains a null exit code and CLI duration if the runner terminates the process before exit is recorded. The summary records the runner's observed agent phase separately as `agentSeconds`. Per-request usage is in the Talos trajectory. Configured-model software benchmark runs retain the transcript with tool arguments and results for local attribution. With catalog prices, the summary estimates cost by pricing uncached input, cache reads, cache writes, and output separately. Missing cache counters contribute no measured cached tokens. The summary reports pass rate over scored attempts and uses the suite’s declared passing threshold, defaulting to reward 1.0. Aggregate cost is available once every requested attempt has priced usage.
+Use the summary for score and job time, `agent/talos-run.json` for the launch profile and CLI duration, and `agent/usage.json` for cumulative input, output, cache-read, and cache-write tokens. The launch profile is saved before the CLI starts. It retains a null exit code and CLI duration if the runner terminates the process before exit is recorded. The summary records the runner's observed agent phase separately as `agentSeconds`. Per-request usage is in the Talos trajectory. Configured-model software benchmark runs retain the transcript with tool arguments and results for local attribution. The root Turn cost estimate requires complete request coverage, four token counters on every call, matching CLI totals, and catalog rates for uncached input, cache reads, cache writes and output. Unknown counters leave that estimate unavailable. The summary reports pass rate over scored attempts and uses the suite’s declared passing threshold, defaulting to reward 1.0. Aggregate cost is available once every requested attempt has priced usage.
 
 ## Review a representative selection
 
-Generate one HTML report per versioned suite from its registry and saved runs. The report includes every selected task and each archived attempt with the chosen model. It links the original score, verifier logs, trace, token usage, and submissions. A scored zero and an incomplete attempt have separate statuses. Use repeated `--task` arguments when the registry also contains tasks outside the selection.
+Generate one HTML report per versioned suite from its registry and saved runs. The report includes every selected task and each archived attempt with the chosen model. It links the original score, verifier logs, trace, token usage, and submissions. A scored zero and an incomplete attempt have separate statuses. Use `--reasoning-effort` to restrict the report to the exact recorded effort. Use repeated `--task` arguments when the registry also contains tasks outside the selection.
 
 ```bash
 python3 talos-bench/report.py output/terminal-bench-2.0/index.html \
-  talos-bench/suites/terminal-bench/registry-2.0.json --model openai:gpt-6.1-terra
+  talos-bench/suites/terminal-bench/registry-2.0.json \
+  --model openai:gpt-6.1-terra --reasoning-effort light
 ```
 
 Save launcher output for a task in `<task>.log` beside the report to retain evidence when a run fails before writing a summary. Pass `--notes` with a JSON object keyed by `<run-directory-name>/<task>` for an attempt diagnosis or by `<task>` for a case note. Regenerate the report after retries.
@@ -88,6 +90,29 @@ Configure the model first. Each command uses the suite's pinned default case. Ru
 
 The MCP-Atlas smoke case can use a configured agent with Harbor's provider-only network policy. Its independent verifier uses the controlled claim judge. Inspect `summary.json` and the original runner logs after each run before increasing the selection.
 
+## Check runner compatibility
+
+Run the compatibility checks locally on native ARM64 Docker. Set the product
+directory created by `talos-bench/install.sh` to reuse the same build for each
+check. The fixtures use loopback models and preserve the pinned verifier. The
+DeepSWE fixture commits a placeholder file so Pier exercises its patch
+collection and original verifier. Its expected task reward is zero.
+
+```bash
+export TALOS_BENCH_PRODUCT=/path/to/install/product
+TALOS_BENCH_HARBOR_VERSION=0.22.0 ./talos-bench/run.sh terminal-bench@4.1.0
+./talos-bench/run.sh terminal-bench@4.1.0
+./talos-bench/run.sh terminal-bench@2.0
+./talos-bench/run.sh deep-swe@1.1
+./talos-bench/run.sh swe-bench-lite@1.0
+./talos-bench/run.sh mcp-atlas@2.0.0
+TALOS_BENCH_ORACLE=1 ./talos-bench/run.sh frontier-harness@1.1.0
+```
+
+## Benchmark Browser MCP
+
+Use `miniwob@1.1` with a native packaged Talos browser image. Harbor collects the upstream episode outcome and the ATIF trace of Talos's built-in Browser MCP actions. The [MiniWoB++ suite guide](../../talos-bench/suites/miniwob/README.md) covers the five pinned cases, image selection, repeatable seeds and per-model reports.
+
 ## Repeat and compare runs
 
 ```bash
@@ -107,6 +132,8 @@ The runner builds Talos once in agent modes. Each task runs the requested number
 | `<job>/<trial>/agent/trajectory.json` | Terminal-Bench 4.1 ATIF with user and assistant messages, recorded reasoning, tool arguments and observations, and total token usage |
 | `<job>/<trial>/agent/` and `<job>/<trial>/verifier/` | CLI stdout, stderr with cumulative usage and tool and compaction metrics, duration, native architecture, verifier logs and reward |
 | `<job>/<trial>/artifacts/` and `artifacts/manifest.json` | Host copies of the submissions and the runner's collection status |
+
+The per-trial `rootCacheRead` record carries the root Turn coverage and reconciliation status. The verified cache-read share divides provider-reported cached reads by total input tokens, including cache reads and writes. It is weighted by input tokens. A call with an explicit zero contributes its full input to the denominator. Missing counters, truncated trajectory records, or inconsistent totals leave the share unavailable and retain the observed counts for inspection. When delegation capture is available, `workloadUsage` reports observed descendant totals and coverage. A combined priced estimate requires all calls to reconcile with finalized child Turns as well as the root Turn. Older snapshots that contain only input and cache-read evidence can produce a descendant estimate from the reported totals. The summary labels that estimate separately and leaves the combined cost unavailable. These estimates cover Agent Turns. Separate auxiliary requests and external judge charges have their own accounting.
 
 Compare the same task digest, model settings, and platform across builds. CLI wall time includes startup, trajectory export, and shutdown. Observed model and tool times sum individual measured durations. Talos limits detailed request measurements to the first 128 model requests. Use Turn totals for overall token usage and model rounds.
 

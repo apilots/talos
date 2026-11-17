@@ -19,7 +19,7 @@ mod types;
 
 use decode::reasoning_from_item;
 pub use decode::{chat_response, official_chat_response, response_content, usage};
-use terminal::{stream_terminal, unterminated_stream};
+use terminal::{premature_done, stream_terminal, unterminated_stream};
 pub use types::*;
 
 #[derive(Debug, Clone)]
@@ -202,7 +202,7 @@ pub fn stream_with_contract(
                         }
                         if data == "[DONE]" {
                             let result = if official {
-                                Err(unterminated_stream(&request_context))
+                                Err(premature_done(&request_context))
                             } else {
                                 Ok(ChatChunk {
                                     delta: String::new(),
@@ -313,7 +313,7 @@ pub fn model_blocks_with_contract(
                         }
                         if data == "[DONE]" {
                             if official {
-                                let _ = tx.send(Err(unterminated_stream(&request_context))).await;
+                                let _ = tx.send(Err(premature_done(&request_context))).await;
                                 return;
                             }
                             if !complete_open_blocks(&tx, &mut active_blocks).await {
