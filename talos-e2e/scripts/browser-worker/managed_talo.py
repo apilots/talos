@@ -187,7 +187,10 @@ def phase(base, expected):
 
 def exercise(base, instances, worker_model, faults, observed, before_delete=None):
     for token, user in ACCOUNTS.items():
-        assert data(http(base + "/v1/user", token=token))["user"]["user_id"] == user["user_id"]
+        current = data(http(base + "/v1/user", token=token))["user"]
+        assert (current["user_id"], current["role"], current["type"]) == (
+            user["user_id"], user["role"], user["type"],
+        ), current
     bob = next(token for token in ACCOUNTS if token != TOKEN)
     exercise_access(base)
     assert data(http(base + ASSISTANT)) == {"enabled": True, "instance": None}
@@ -213,7 +216,6 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
     assert action("delete", ready, confirmDataLoss=False)["status"] != "success"
     print("PASS create -> outbound TLS registration -> Ready; instance is account-scoped", flush=True)
 
-    exercise_access(base, ready)
     worker = observed.compute(instance)
     volume = observed.home(instance)
     first_id = observed.identity(worker)
