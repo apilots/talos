@@ -278,8 +278,22 @@ async fn call_tool_payload(
 ) -> TalosResult<ToolOutputPayload> {
     let files = images::persist_images(&response.content, context).await?;
     let mut payload = mcp_content_to_payload(&response.content, files)?;
+    let text = payload
+        .content_items
+        .iter()
+        .filter_map(|item| match item {
+            TalosContentItem::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let structured = match response.structured_content {
         Some(value) => {
+            // MCP servers can repeat structured output as a JSON text fallback.
+            payload.content_items.retain(|item| {
+                !matches!(item, TalosContentItem::Text { text }
+                    if serde_json::from_str::<Value>(text).is_ok_and(|parsed| parsed == value))
+            });
             payload.content_items.push(TalosContentItem::Json {
                 value: JsonContentValue::from(value.clone()),
             });
@@ -295,15 +309,6 @@ async fn call_tool_payload(
             value
         }
     };
-    let text = payload
-        .content_items
-        .iter()
-        .filter_map(|item| match item {
-            TalosContentItem::Text { text } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
     Ok(ToolOutputPayload::Mcp {
         content: if text.is_empty() && response.is_error {
             "The MCP tool reported a failure.".into()
