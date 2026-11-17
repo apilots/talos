@@ -21,6 +21,7 @@ async fn retry_accepts_the_exact_initial_message_of_a_failed_canonical_turn() {
 
     let response = service
         .submit_retry(
+            &crate::Actor::regular(test_session().user_id),
             test_session(),
             TurnRetryParams {
                 input: test_user_input("retry"),
@@ -50,6 +51,7 @@ async fn retry_rejects_a_completed_canonical_turn() {
 
     let error = service
         .submit_retry(
+            &crate::Actor::regular(test_session().user_id),
             test_session(),
             TurnRetryParams {
                 input: test_user_input("retry"),

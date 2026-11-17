@@ -137,11 +137,8 @@ async fn managed_worker_read_uses_its_static_route_on_an_unconfigured_server() {
         Value::Null,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        body["data"],
-        serde_json::json!({ "enabled": false, "instance": null })
-    );
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"]["code"], "permissionDenied");
 }
 
 #[tokio::test]
@@ -175,6 +172,7 @@ async fn worker_runtime_settings_require_the_authenticated_server_admin() {
 
     let admin = RequestIdentity {
         role: talos_auth::UserRole::Admin,
+        user_type: Default::default(),
         access_token: Some("admin-token".into()),
         ..test_auth()
     };

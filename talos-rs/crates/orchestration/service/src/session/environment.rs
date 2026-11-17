@@ -28,6 +28,11 @@ impl SessionService {
         {
             return Err(crate::access::embedded_access_denied());
         }
+        if let Some(nodes) = &self.managed_nodes {
+            nodes
+                .ensure_managed_dispatch_access(user_id, node_id)
+                .await?;
+        }
         self.coordinator.worker_environment(node_id, user_id).await
     }
     pub(super) async fn model_info_for_selection(

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Bot } from "lucide-react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { useCanUseTalo } from "@/features/auth";
 import { ComputerRail, useComputers, useSelectedComputerId, useProductScope, taloHasConversation, useManagedWorkerStatus } from "@/features/computers";
 import { SidebarContainer } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
@@ -42,7 +43,8 @@ export function AppLayout() {
   }, [scope, location.pathname, setWorkspaceContext]);
   const standalonePage = location.pathname === "/computers" || location.pathname.startsWith("/settings");
   const taloPage = location.pathname === "/talo";
-  const talo = useManagedWorkerStatus(taloPage && !computerId).status.data?.instance;
+  const canUseTalo = useCanUseTalo();
+  const talo = useManagedWorkerStatus(canUseTalo && taloPage && !computerId).status.data?.instance;
   const choosingComputer = !computerId && !standalonePage && !location.pathname.startsWith("/sessions/") &&
     !(taloPage && taloHasConversation(talo));
   const contentKey = choosingComputer ? "chooser"
@@ -71,14 +73,16 @@ export function AppLayout() {
     // Retain the admitted width so closing the sidebar does not snap the outer boundary.
     if (workspaceVisible && !workspaceModal && workspaceWidth !== Math.round(sizes.workspace)) setWorkspaceWidth(sizes.workspace);
   }, [workspaceVisible, workspaceModal, workspaceWidth, sizes.workspace, setWorkspaceWidth]);
+  if (taloPage && !canUseTalo) return <Navigate replace to="/" />;
+
   const navigation = <AppNavigation sidebarVisible={sidebarVisible} sidebarAvailable={sidebarAvailable} sidebarToggleRef={sidebarToggle} onToggleSidebar={() => wide ? setSidebarOpen(!sidebarOpen) : setSidebarDrawerOpen(open => !open)} />;
   const context = <AppSessionContext />;
   const sidebarExpanded = wide && sidebarVisible;
   const mainHeader = <AppTopBar className="h-full border-b-0 px-6 sm:px-6">{context}{!workspaceVisible ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
   const modalHeader = <AppTopBar>{navigation}{context}{!workspaceVisible ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
-  const taloEntry = <SidebarNavItem icon={<Bot size={16} aria-hidden="true" />} label="Talo" to="/talo" onClick={(event) => {
+  const taloEntry = canUseTalo ? <SidebarNavItem icon={<Bot size={16} aria-hidden="true" />} label="Talo" to="/talo" onClick={(event) => {
     if (!wide && event.button === 0 && !event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey) setSidebarDrawerOpen(false);
-  }} />;
+  }} /> : undefined;
   const sidebarRegion = (wide && sidebarAvailable) || sidebarModal ? <AppSidebar modal={sidebarModal} visible={sidebarVisible} width={wide ? sizes.sidebar : Math.min(sidebarWidth, viewport.width - 56)} resizing={resizing} toggleRef={sidebarToggle} onClose={() => wide ? setSidebarOpen(false) : setSidebarDrawerOpen(false)} topBar={sidebarModal ? modalHeader : undefined}><SidebarContainer computer={computer} computerEntry={taloEntry} /></AppSidebar> : null;
   return <div className="flex h-screen overflow-hidden bg-surface text-ink">
     <div className="h-full w-14 shrink-0"><ComputerRail /></div>

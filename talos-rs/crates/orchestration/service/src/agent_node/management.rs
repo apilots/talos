@@ -146,6 +146,7 @@ impl AgentNodeService {
             .store
             .list(ListNodesParams {
                 exclude_node_id: None,
+                include_managed_workers: actor.can_use_managed_worker(),
                 scope,
                 query: None,
                 cursor: request.cursor,

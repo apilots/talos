@@ -452,6 +452,7 @@ pub(crate) async fn build_application_runtime_with_policy(
         service.resume_account_sync(
             &talos_service::Actor::regular(session.user.user_id)
                 .with_role(session.user.role)
+                .with_user_type(session.user.r#type)
                 .with_access_token(session.access_token),
         );
     }

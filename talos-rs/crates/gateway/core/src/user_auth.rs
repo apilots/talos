@@ -52,6 +52,7 @@ impl ServiceGateway {
             self.service.resume_account_sync_after_login(
                 &Actor::regular(&user.user_id)
                     .with_role(user.role)
+                    .with_user_type(user.r#type)
                     .with_access_token(access_token),
             );
         }

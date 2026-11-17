@@ -372,6 +372,12 @@ impl AuthService for CloudAuthService {
         self.contexts.has_verified_admin(user_id)
     }
 
+    fn has_verified_managed_worker_access(&self, user_id: &str) -> bool {
+        self.contexts.has_verified_user(user_id, |identity| {
+            identity.role.can_use_managed_worker(identity.user_type)
+        })
+    }
+
     fn invalidate_access_token(&self, token: &str) {
         self.contexts.invalidate(token);
     }
@@ -467,6 +473,7 @@ pub(crate) fn map_identity(
         user_id: user.user_id,
         username: user.username,
         role: map_role(user.role),
+        user_type: map_user_type(user.user_type),
         auth_disabled: false,
         access_token: Some(raw_token.to_string()),
     })

@@ -601,8 +601,12 @@ async fn start_server_after_startup(
         build_application_runtime_after_startup(config.clone(), startup_report, options.as_ref())
             .await?;
 
-    let managed_worker =
-        application_managed_worker::configure(&config, &runtime.node_service).await?;
+    let managed_worker = application_managed_worker::configure(
+        &config,
+        &runtime.node_service,
+        runtime.auth_service.clone(),
+    )
+    .await?;
 
     let node_rpc_server = config
         .agent_node

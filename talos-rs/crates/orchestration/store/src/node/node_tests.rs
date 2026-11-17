@@ -235,6 +235,7 @@ async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease(
     assert_eq!(
         nodes
             .list(ListNodesParams {
+                include_managed_workers: true,
                 exclude_node_id: None,
                 scope: NodeListScope::Owner {
                     user_id: "user-2".into(),

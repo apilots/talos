@@ -86,6 +86,7 @@ fn recording_access_service(
         sessions,
         projects,
         false,
+        None,
     )
 }
 

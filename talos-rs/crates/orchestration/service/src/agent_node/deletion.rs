@@ -48,6 +48,8 @@ impl AgentNodeService {
         request: DeleteComputerRequest,
     ) -> TalosResult<DeleteComputerResponse> {
         ensure_management_actor(actor)?;
+        self.ensure_managed_node_access(actor, &request.node_id)
+            .await?;
         let _lifecycle = self.lock_lifecycle(&request.node_id).await;
         let deleted_owner = self.store.deletion_owner(&request.node_id).await?;
         if deleted_owner.as_deref() != Some(&actor.user_id) {

@@ -570,8 +570,9 @@ impl TurnService {
         })
     }
 
-    pub async fn submit_retry(
+    pub(crate) async fn submit_retry(
         &self,
+        actor: &crate::Actor,
         session: SessionRecord,
         request: TurnRetryParams,
     ) -> TalosResult<StartTurnResponse> {
@@ -596,10 +597,7 @@ impl TurnService {
                     self.validate_retry_attempt(&session.id, &request.retry_of_message_id)
                         .await?;
                     nodes
-                        .acquire_managed_worker(
-                            &crate::Actor::regular(&session.user_id),
-                            &session.execution_node_id,
-                        )
+                        .acquire_managed_worker(actor, &session.execution_node_id)
                         .await?;
                     Ok(())
                 }

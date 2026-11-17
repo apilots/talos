@@ -68,6 +68,7 @@ async fn peer(local: bool) -> Peer {
         user_id: "account-1".into(),
         username: None,
         role: UserRole::User,
+        user_type: Default::default(),
         auth_disabled: false,
         access_token: None,
     };

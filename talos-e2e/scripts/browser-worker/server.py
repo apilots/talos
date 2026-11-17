@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import fixture
 from media import Viewer
+from managed_talo_access import ASSISTANT, configure_accounts, exercise_access
 
 REPORT = fixture.REPORT
 URL = 'http://127.0.0.1:8080'
@@ -285,11 +286,25 @@ def run():
         start()
         assert api('/v1/llm?nodeId=embedded')['config'] == llm, 'Model edit/add lost after Server restart'
         desktop_acceptance()
+        denied = fixture.http(URL + ASSISTANT)
+        assert denied["error"]["code"] == "permissionDenied", denied
+        process.terminate()
+        assert process.wait(timeout=30) == 0, "Server did not stop before authenticated acceptance"
+        configure_accounts()
+        document["gateway"]["auth"] = True
+        config.write_text(json.dumps(document))
+        process = subprocess.Popen(["talos-server"], env=env, stdout=log, stderr=subprocess.STDOUT)
+        fixture.wait(lambda: process.poll() is None and fixture.http(URL + "/health"), "Authenticated Server startup")
+        for token, user in fixture.ACCOUNTS.items():
+            current = fixture.data(fixture.http(URL + "/v1/user", token=token))["user"]
+            assert (current["role"], current["type"]) == (user["role"], user["type"]), current
+        exercise_access(URL)
         (REPORT / 'results.json').write_text(json.dumps({
             'status': 'PASS', 'network': 'none', 'anonymous': True,
             'sharedCliAndPtyTui': True, 'modelEditAndAddPersisted': True,
             'restart': 'serverProcess', 'browserToolCalls': 14, 'sandboxDisabled': False,
             'anonymousViewAndControl': True, 'disconnectRecovery': True,
+            'managedTaloCloudAccess': True,
         }, indent=2))
         print('PASS packaged anonymous Server / shared CLI + PTY TUI / model save + restart / sandboxed Browser MCP', flush=True)
     finally:
