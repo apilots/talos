@@ -19,18 +19,26 @@ The five suite commands that omit Oracle mode run controlled Talos cases without
 
 To reuse a build, set `TALOS_BENCH_PRODUCT` to a native Linux TUI product directory containing `bin/talos`, `bin/talos-linux-sandbox-launcher`, `conf/talos.yaml`, and `conf/migrations/sqlite/`. Build from a revision that provides the trajectory and MCP import commands used by the suites.
 
+## Select a Terminal-Bench version
+
+Use `terminal-bench` or `terminal-bench@4.1.0` for Harbor's 66-task 4.1.0 release. It reads [registry.json](../../talos-bench/suites/terminal-bench/registry.json), defaults to `production-planning`, and exports ATIF for Talos runs. Use `terminal-bench@2.0` for the separate 89-task Laude release. It reads [registry-2.0.json](../../talos-bench/suites/terminal-bench/registry-2.0.json) and defaults to `regex-log`.
+
+Set `TALOS_BENCH_TASKS` to a selectable case ID from the chosen version. The 2.0 fixture uses `regex-log`. To run the upstream solution for another case, use `TALOS_BENCH_ORACLE=1 TALOS_BENCH_TASKS=music-harmony ./talos-bench/run.sh terminal-bench@4.1.0`. See the [Terminal-Bench suite guide](../../talos-bench/README.md#terminal-bench-tasks) for release pins, artifact collection, and execution prerequisites.
+
 ## Run with a configured model
 
 Select a catalog key and point the runner at an existing Talos config and dotenv. The provider's API key must use a `${TALOS_...}` reference in that config.
 
 ```bash
-TALOS_BENCH_MODEL=openai:gpt-6.1-terra \
-TALOS_BENCH_CONFIG=/path/to/talos/conf/talos.yaml \
-TALOS_BENCH_DOTENV=/path/to/talos/.env \
+export TALOS_BENCH_MODEL=openai:gpt-6.1-terra
+export TALOS_BENCH_CONFIG=/path/to/talos/conf/talos.yaml
+export TALOS_BENCH_DOTENV=/path/to/talos/.env
 ./talos-bench/run.sh terminal-bench
 ```
 
 The runner transfers the selected provider settings and its single dotenv assignment to the isolated task container. Talos reads them through its usual configuration loader. With the provider key already exported as `OPENAI_API_KEY`, omit the Talos config and dotenv and set `TALOS_BENCH_MODEL=openai:gpt-6.1-terra`. The adapter uses the shipped Talos catalog and its OpenAI Responses connection. `OPENAI_BASE_URL` can override the catalog endpoint.
+
+Pass `--reasoning-effort light|medium|high|xhigh` when the selected model supports that effort. The flag takes precedence over `TALOS_BENCH_REASONING_EFFORT`. With neither setting, the launcher uses the selected model's catalog value. The override applies to the run's model configuration and is recorded in its evidence.
 
 Use `TALOS_BENCH_AGENT_ENV` with one `KEY=VALUE` per line for non-secret agent runtime options. The launcher passes these options through Harbor or Pier's `--agent-env` to the Talos process. Provider credentials use the configured dotenv path.
 
@@ -58,26 +66,43 @@ An optional product file `workspace-AGENTS.md` seeds the temporary Talos workspa
 
 ## Run FrontierHarness v1.1
 
-Use `frontier-harness@1.1.0` in the model command. Harbor resolves the published Hub dataset by its pinned content digest. The default `terminal-bench/log-summary-date-ranges` records the official verifier result, `/app/summary.csv`, and ATIF for model runs. Select the second smoke case with `TALOS_BENCH_TASKS=terminal-bench/music-harmony`. On ARM64 the launcher builds the upstream Dockerfiles natively for the registered cases. The local summary records the dataset ref, task digest, platform, and paths to the original Harbor outputs.
+Use `frontier-harness@1.1.0` in the model command. Harbor resolves the published Hub dataset by its pinned content digest. The launcher lists 57 selectable IDs and five inventory entries with notes. Set `TALOS_BENCH_TASKS` to a comma-separated list of full IDs from the selectable entries. The default is `terminal-bench/log-summary-date-ranges` and records the official verifier result, `/app/summary.csv`, and ATIF for model runs. On ARM64 the launcher builds the upstream Dockerfiles natively. The local summary records the dataset ref, task digest, platform, and paths to the original Harbor outputs.
 
-The published `music-harmony` verifier image is AMD64. On ARM64 the launcher verifies the published task digest, makes a disposable copy, and removes its verifier image pointer so Harbor builds the original verifier Dockerfile. `provenance/music-harmony.json` links the local adaptation to the original task. Use the published environment when an upstream comparison requires the exact task package.
+For a verifier with a published AMD64-only image, the ARM64 launcher verifies the task digest and removes its verifier image pointer in a disposable copy so Harbor builds the original verifier Dockerfile. Each `provenance/<task>.json` file links the adaptation to its upstream task. The two guest workloads use native AMD64 Docker, including the Runta backend. Use the [batch guide](../../talos-bench/suites/frontier-harness/README.md) for cases that need prepared native images.
 
-Resolve the full pinned dataset without launching trials or pulling task images.
+Check that Harbor resolves the pinned dataset and default task without starting a trial or pulling an image.
 
 ```bash
 dataset=$(uv run --python 3.12 python talos-bench/summarize.py dataset-ref \
   talos-bench/suites/frontier-harness/registry.json)
 uvx --from harbor==0.25.0 harbor run --dataset "$dataset" --env docker \
-  --agent oracle --dry-run --yes
+  --include-task-name terminal-bench/log-summary-date-ranges --agent oracle --dry-run --yes
 ```
 
 The dry run checks dataset resolution. Full local execution also requires a native environment and verifier for each task. Keep the declared task selection and report any cases that need a different host.
+
+Use `--backend local` to select the default Docker backend. Select `--backend runta` to execute the registered FrontierHarness v1.1 cases with an OpenAI catalog model on a prepared Runta runtime:
+
+```bash
+export TALOS_BENCH_RUNTA_CHECKPOINT=my-frontier-checkpoint
+export TALOS_BENCH_RUNTA_SECRET=my-openai-secret
+unset TALOS_BENCH_CONFIG TALOS_BENCH_DOTENV TALOS_BENCH_PRODUCT
+TALOS_BENCH_MODEL=openai:gpt-6.1-sol \
+TALOS_BENCH_TASKS=terminal-bench/regex-log \
+./talos-bench/run.sh frontier-harness@1.1.0 --backend runta --reasoning-effort medium
+```
+
+Authenticate the Runta CLI and put it on `PATH`, or set `TALOS_BENCH_RUNTA_CLI` to its executable path. The Runta secret must already contain the OpenAI provider key. The launcher uses the checkpoint's model catalog and a scoped authorization stub. Local model files and product paths apply to the local backend.
+
+Prepare the checkpoint on a native Linux AMD64 Runta runtime with systemd, Docker Buildx, and uv. Put the Talos checkout at `/work/talos-pilot/source` and run `./talos-bench/install.sh HEAD /work/talos-pilot/install` from that checkout. The installed product must match the checkpoint checkout's revision. The invocation uses that product and overlays the calling checkout's tracked Bench files, including any working-tree edits. Put the Runta CA Compose override at `/work/talos-pilot/runta-ca.yaml`. Mount the host CA bundle read-only for the main task container and set the container's `SSL_CERT_FILE` to that mount. Save a cold checkpoint before any jobs run.
+
+The launcher restores a fresh runtime and runs the selected task and attempt set with the shared Docker launcher. It downloads the original job and evidence to `output/talos-bench/run.*/`. Each cloud invocation creates a fresh result directory. If the job archive cannot be retrieved or verified, use the printed Runta runtime name to inspect the retained job.
 
 For direct Harbor use, run `./talos-bench/install.sh <Talos-revision> <install-dir>`. This builds the pinned Talos product and installs the current benchmark adapter. Export `TALOS_BENCH_PRODUCT=<install-dir>/product`, add `<install-dir>/adapter` to `PYTHONPATH`, and export the provider key. Run `uvx --with PyYAML==6.0.3 --from harbor==0.25.0 harbor run -a harbor_talos:AtifTalosAgent -m openai/gpt-6.1-terra` with the target dataset and environment options. Harbor 0.22.0 uses the same adapter and selects its own ATIF schema version. The installer includes the native Compose file for local rebuilds.
 
 ## Run the representative cases
 
-Configure the model first. Each command uses the suite's pinned default case. Run them individually so each framework has its own job, verifier, and summary. The local evaluation accounts for the full pinned FrontierHarness v1.1 inventory and uses five pinned real cases each for Terminal-Bench 2.0, Terminal-Bench 4.1, SWE-bench Lite, DeepSWE, and MCP-Atlas. The official submission requirements are documented separately.
+Export the model settings from [Run with a configured model](#run-with-a-configured-model) in the same shell. Each command uses the suite's pinned default case. Each invocation creates its own job, verifier result, and summary. The [suite reference](../../talos-bench/README.md) documents task selection, host requirements, sandbox coverage, and official submission routes.
 
 ```bash
 ./talos-bench/run.sh frontier-harness@1.1.0
@@ -99,6 +124,7 @@ DeepSWE fixture commits a placeholder file so Pier exercises its patch
 collection and original verifier. Its expected task reward is zero.
 
 ```bash
+unset TALOS_BENCH_MODEL TALOS_BENCH_CONFIG TALOS_BENCH_DOTENV TALOS_BENCH_TASKS
 export TALOS_BENCH_PRODUCT=/path/to/install/product
 TALOS_BENCH_HARBOR_VERSION=0.22.0 ./talos-bench/run.sh terminal-bench@4.1.0
 ./talos-bench/run.sh terminal-bench@4.1.0
@@ -111,7 +137,7 @@ TALOS_BENCH_ORACLE=1 ./talos-bench/run.sh frontier-harness@1.1.0
 
 ## Benchmark Browser MCP
 
-Use `miniwob@1.1` with a native packaged Talos browser image. Harbor collects the upstream episode outcome and the ATIF trace of Talos's built-in Browser MCP actions. The [MiniWoB++ suite guide](../../talos-bench/suites/miniwob/README.md) covers the five pinned cases, image selection, repeatable seeds and per-model reports.
+Use `miniwob@1.1` with a native packaged Talos browser image. Harbor collects the upstream episode outcome and the ATIF trace of Talos's built-in Browser MCP actions. The [MiniWoB++ suite guide](../../talos-bench/suites/miniwob/README.md) covers the 125 registered environments, image selection, repeatable seeds and per-model reports.
 
 ## Repeat and compare runs
 

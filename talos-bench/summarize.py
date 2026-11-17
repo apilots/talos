@@ -39,10 +39,17 @@ def split_tasks(value):
     return tasks
 
 
+def catalog_notes(dataset):
+    return {
+        **dataset.get("metadata_only", {}),
+        **{name: entry["reason"] for name, entry in dataset.get("native_exclusions", {}).items()
+           if entry["kind"] == "metadataOnly"},
+    }
+
+
 def select_tasks(registry, tasks):
     selected = split_tasks(tasks)
-    entries = task_entries(registry)
-    unknown = set(selected) - entries.keys()
+    unknown = set(selected) - task_entries(registry).keys()
     if unknown:
         raise SystemExit(f"Unknown Talos benchmark task(s): {', '.join(sorted(unknown))}")
     print("\n".join(selected))
@@ -64,12 +71,15 @@ def list_suites(suites):
         print(f"{dataset['name']}@{dataset['version']}")
         for task in dataset["tasks"]:
             print(f"  {task['name']}")
+        for name, reason in catalog_notes(dataset).items():
+            print(f"  {name} ({reason})")
 
 
-def submission_paths(registry, tasks):
+def submission_paths(registry, tasks, extra_only=False):
     entries = task_entries(registry)
-    for source in dict.fromkeys(path for name in split_tasks(tasks)
-                                for path in entries[name]["submission_paths"]):
+    key = "extra_artifacts" if extra_only else "submission_paths"
+    for source in dict.fromkeys(artifact_identity(path)[1] for name in split_tasks(tasks)
+                                for path in entries[name].get(key, [])):
         print(source)
 
 
@@ -494,6 +504,7 @@ def main():
     submissions = subcommands.add_parser("submissions")
     submissions.add_argument("registry", type=Path)
     submissions.add_argument("tasks")
+    submissions.add_argument("--extra-only", action="store_true")
     build = subcommands.add_parser("build")
     build.add_argument("run", type=Path)
     build.add_argument("repo", type=Path)

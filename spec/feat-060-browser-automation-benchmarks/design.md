@@ -22,4 +22,4 @@ The local score uses 1 for a completed upstream raw success and 0 for a complete
 
 ## Verification
 
-Run a controlled real Browser MCP sequence before the configured-model trials. Verify native ARM64, the managed browser version, the exact task manifest, the original episode outcome, Harbor scoring and the retained browser trace. Repeat against a fresh profile with the same seed. Run all five registered tasks with the chosen model profile and report completion, success and failure reasons. Compare matching tasks and protocols when relating a local result to a published reference.
+Run a controlled real Browser MCP sequence before the configured-model trials. Verify native ARM64, the managed browser version, the exact task manifest, the original episode outcome, Harbor scoring and the retained browser trace. Repeat against a fresh profile with the same seed. Run the five representative tasks with the chosen model profile and report completion, success and failure reasons. Compare matching tasks and protocols when relating a local result to a published reference.

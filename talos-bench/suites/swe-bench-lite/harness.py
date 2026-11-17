@@ -29,10 +29,8 @@ def fetch_case(entry, *, include_gold=False):
     if (
         row["instance_id"] != entry["name"]
         or row["base_commit"] != entry["base_commit"]
-        or row["repo"] != "sympy/sympy"
-        or row["version"] != "1.7"
         or "SWE-bench/SWE-bench_Lite" not in row["datasets"]
-        or row["image"].removesuffix(":latest") != entry["amd64_image"].split("@", 1)[0]
+        or row["image"].rsplit(":", 1)[0] != entry["amd64_image"].split("@", 1)[0]
     ):
         raise RuntimeError(f"The pinned task does not match the selected SWE-bench Lite case {entry['name']}.")
     row = {

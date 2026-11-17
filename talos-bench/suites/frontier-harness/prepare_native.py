@@ -1,4 +1,4 @@
-"""Materialize the pinned music-harmony verifier for native ARM64 Docker."""
+"""Materialize pinned verifiers that require a native ARM64 build."""
 
 import asyncio
 import json
@@ -13,9 +13,6 @@ from harbor.publisher.packager import Packager
 from harbor.tasks.client import TaskClient
 
 from summarize import read_dataset, split_tasks, write_json
-
-
-MUSIC_TASK = "terminal-bench/music-harmony"
 
 
 def copy_with_prepared_images(source, task, images):
@@ -65,41 +62,46 @@ def copy_for_native_verifier(source, task, verifier_image):
 
 def prepare(registry, run_dir, requested):
     dataset = read_dataset(registry)
-    entry = next(task for task in dataset["tasks"] if task["name"] == MUSIC_TASK)
-    org, name = MUSIC_TASK.split("/")
-    task_id = PackageTaskId(org=org, name=name, ref=entry["digest"])
-    source = task_id.get_local_path()
-    if not source.is_dir():
-        downloaded = asyncio.run(TaskClient().download_tasks([task_id]))
-        source, = downloaded.paths
-    digest, _ = Packager.compute_content_hash(source)
-    if f"sha256:{digest}" != entry["digest"]:
-        raise ValueError(f"The downloaded task differs from the {MUSIC_TASK} pin")
-
-    task = run_dir / "native-task" / name
-    verifier_image = tomllib.loads((source / "task.toml").read_text())["verifier"]["environment"]["docker_image"]
-    adapted_digest = copy_for_native_verifier(source, task, verifier_image)
+    selected = split_tasks(requested)
+    entries = {task["name"]: task for task in dataset["tasks"]}
+    rebuild = [name for name in selected if entries[name].get("arm64_rebuild_verifier")]
+    if not rebuild:
+        return
+    targets = {}
     provenance = run_dir / "provenance"
     provenance.mkdir()
-    write_json(provenance / f"{name}.json", {
-        "upstreamDatasetRef": f"{dataset['source']}@{dataset['digest']}",
-        "upstreamTaskRef": f"{MUSIC_TASK}@{entry['digest']}",
-        "localTaskDigest": adapted_digest,
-        "upstreamVerifierImage": verifier_image,
-        "adaptation": "Build the unmodified upstream tests/Dockerfile on linux/arm64",
-    })
+    for qualified in rebuild:
+        entry = entries[qualified]
+        org, name = qualified.split("/")
+        task_id = PackageTaskId(org=org, name=name, ref=entry["digest"])
+        source = task_id.get_local_path()
+        if not source.is_dir():
+            downloaded = asyncio.run(TaskClient().download_tasks([task_id]))
+            source, = downloaded.paths
+        digest, _ = Packager.compute_content_hash(source)
+        if f"sha256:{digest}" != entry["digest"]:
+            raise ValueError(f"The downloaded task differs from the {qualified} pin")
+        task = run_dir / "native-task" / name
+        verifier_image = tomllib.loads((source / "task.toml").read_text())["verifier"]["environment"]["docker_image"]
+        adapted_digest = copy_for_native_verifier(source, task, verifier_image)
+        write_json(provenance / f"{name}.json", {
+            "upstreamDatasetRef": f"{dataset['source']}@{dataset['digest']}",
+            "upstreamTaskRef": f"{qualified}@{entry['digest']}",
+            "localTaskDigest": adapted_digest,
+            "upstreamVerifierImage": verifier_image,
+            "adaptation": "Build the unmodified upstream tests/Dockerfile on linux/arm64",
+        })
+        targets[qualified] = {"path": str(task)}
+        entry["name"] = name
 
-    selected = split_tasks(requested)
-    remaining = [task_name for task_name in selected if task_name != MUSIC_TASK]
-    job = {"tasks": [{"path": str(task)}]}
+    remaining = [name for name in selected if name not in targets]
+    job = {"tasks": list(targets.values()),
+           "artifacts": list(dict.fromkeys(path for name in selected for path in entries[name].get("extra_artifacts", [])))}
     if remaining:
         job["datasets"] = [{"name": dataset["source"], "ref": dataset["digest"], "task_names": remaining}]
-        job["artifacts"] = [path for task in dataset["tasks"] if task["name"] in remaining
-                            for path in task["submission_paths"]]
     write_json(run_dir / "native-job.json", job)
-    entry["name"] = name
     write_json(run_dir / "native-registry.json", [dataset])
-    print(",".join(name if task_name == MUSIC_TASK else task_name for task_name in selected))
+    print(",".join(entries[name]["name"] for name in selected))
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ def command(logs_dir, mode, instruction, *, include_content=False, capture=None)
     return shlex.join([*args, "--", str(logs_dir), mode, instruction])
 
 
-def model_configuration(selected_model, config, dotenv=None):
+def model_configuration(selected_model, config, dotenv=None, *, reasoning_effort=None):
     import yaml
 
     provider, separator, model = selected_model.partition(":")
@@ -60,8 +60,14 @@ def model_configuration(selected_model, config, dotenv=None):
         if not isinstance(connection, dict):
             raise ValueError(f"Provider {provider} is missing from the Talos configuration")
         llm[provider] = connection
-    if not any(entry["id"] == model for entry in connection["models"]):
+    model_entry = next((entry for entry in connection["models"] if entry["id"] == model), None)
+    if model_entry is None:
         raise ValueError(f"Model {selected_model} is missing from the Talos configuration")
+    if reasoning_effort:
+        allowed = model_entry.get("reasoning_efforts")
+        if not model_entry.get("reasoning") or (allowed is not None and reasoning_effort not in allowed):
+            raise ValueError(f"Model {selected_model} does not support reasoning effort {reasoning_effort}")
+        model_entry["reasoning_effort"] = reasoning_effort
     placeholder = re.fullmatch(r"\$\{(TALOS_[A-Z0-9_]+)\}", connection.get("api_key") or "")
     if placeholder is None:
         raise ValueError(f"Provider {provider} needs a Talos dotenv reference for its API key")
@@ -90,7 +96,8 @@ def resolve_model(product, model_name, talos_model, talos_config, talos_dotenv):
     if bool(talos_config) != bool(talos_dotenv):
         raise ValueError("Provide both the Talos config and dotenv, or use the provider environment")
     selected = talos_model or model_name.replace("/", ":", 1)
-    return model_configuration(selected, talos_config or product / "conf/talos.yaml", talos_dotenv)
+    return model_configuration(selected, talos_config or product / "conf/talos.yaml", talos_dotenv,
+                               reasoning_effort=os.environ.get("TALOS_BENCH_REASONING_EFFORT"))
 
 
 def cli_log_lines(logs_dir):

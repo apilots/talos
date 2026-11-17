@@ -2,16 +2,3010 @@
   {
     "name": "swe-bench-lite",
     "version": "1.0",
-    "description": "Five pinned SymPy 1.7 cases from the SWE-bench Lite test split",
+    "description": "Complete pinned SWE-bench Lite test split",
     "tasks": [
       {
-        "name": "sympy__sympy-20590",
+        "name": "astropy__astropy-12907",
         "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
         "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
-        "path": "tasks/sympy__sympy-20590",
-        "base_commit": "cffd4e0f86fefd4802349a9f9b19ed70934ea354",
-        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20590@sha256:bcdff110a35d19a6838fde5f678d1b5103610234bd034e5703df46878aad3b63",
-        "submission_paths": ["/logs/artifacts/submission.patch"]
+        "path": "tasks/astropy__astropy-12907",
+        "base_commit": "d16bfe05a744909de4b27f5875fe0d4ed41ce607",
+        "amd64_image": "swebench/sweb.eval.x86_64.astropy_1776_astropy-12907@sha256:e082963099ed7d5a5f75a0be46e338be36faae33b2cba5289a9ddbd505997f1f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "astropy__astropy-14182",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/astropy__astropy-14182",
+        "base_commit": "a5917978be39d13cd90b517e1de4e7a539ffaa48",
+        "amd64_image": "swebench/sweb.eval.x86_64.astropy_1776_astropy-14182@sha256:d25559050ee0b046e072ed31d2a1c8943a928d9d842462a50234118156888a0c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "astropy__astropy-14365",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/astropy__astropy-14365",
+        "base_commit": "7269fa3e33e8d02485a647da91a5a2a60a06af61",
+        "amd64_image": "swebench/sweb.eval.x86_64.astropy_1776_astropy-14365@sha256:70da5c0d4fcbbc2cbc46bbccf8d9ac2dfd4453cf7a19f9fa150b30bb7346f2f4",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "astropy__astropy-14995",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/astropy__astropy-14995",
+        "base_commit": "b16c7d12ccbc7b2d20364b89fb44285bcbfede54",
+        "amd64_image": "swebench/sweb.eval.x86_64.astropy_1776_astropy-14995@sha256:e1c746371f8f7132c29768bea9cc1380871c87f6e4404a2282d8d3c582786874",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "astropy__astropy-6938",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/astropy__astropy-6938",
+        "base_commit": "c76af9ed6bb89bfba45b9f5bc1e635188278e2fa",
+        "amd64_image": "swebench/sweb.eval.x86_64.astropy_1776_astropy-6938@sha256:00cb659e4042696f82d4ab703cf6966e33c7d539689df572e1278d38a7ba7bbb",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "astropy__astropy-7746",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/astropy__astropy-7746",
+        "base_commit": "d5bd3f68bb6d5ce3a61bdce9883ee750d1afade5",
+        "amd64_image": "swebench/sweb.eval.x86_64.astropy_1776_astropy-7746@sha256:8b0a5d3e7a868fb494f1bf1f4d82f7ecca662a5fe9094de4950de921163138fb",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-10914",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-10914",
+        "base_commit": "e7fd69d051eaa67cb17f172a39b57253e9cb831a",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-10914@sha256:f26f0db931c6c1e785ab8287e1ea4f5f948846267db159deaf90b3fe7adea4e9",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-10924",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-10924",
+        "base_commit": "bceadd2788dc2dad53eba0caae172bd8522fd483",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-10924@sha256:d41b289ea27a92ef6346702388e5ea0b8c8f48c41d83466a72c2dffb934007a1",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11001",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11001",
+        "base_commit": "ef082ebb84f00e38af4e8880d04e8365c2766d34",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11001@sha256:68c61032db48a5eef2175532d3555e20acdd426aa5b426ba3acfe34a0ddd83b7",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11019",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11019",
+        "base_commit": "93e892bb645b16ebaf287beb5fe7f3ffe8d10408",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11019@sha256:507a4ada244710df906c65194d1ef67e55348d1eefb79b48ed6eb86a42c05d18",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11039",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11039",
+        "base_commit": "d5276398046ce4a102776a1e67dcac2884d80dfe",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11039@sha256:895cb9b96a9ba3a7236514c6c6ecc21814b68c3ede142d2bb10df31a3645d496",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11049",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11049",
+        "base_commit": "17455e924e243e7a55e8a38f45966d8cbb27c273",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11049@sha256:c5700017c1dfcca5ee0d2b68bbce2f2e2a69933089f0afa4cd0d888d4f1617f7",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11099",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11099",
+        "base_commit": "d26b2424437dabeeca94d7900b37d2df4410da0c",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11099@sha256:cca302934edd881cc4f1e4647a389a25cdaa3c02bfa33667a4204934a09c4fb1",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11133",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11133",
+        "base_commit": "879cc3da6249e920b8d54518a0ae06de835d7373",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11133@sha256:914093363dbe12def92c5d36e9bdc5270cce5ed0aa6f3daad8bc4ef0389c29bf",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11179",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11179",
+        "base_commit": "19fc6376ce67d01ca37a91ef2f55ef769f50513a",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11179@sha256:23e061f0071647d4c459b2c3aa84081011080f57a4580727c16997cf01e0d477",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11283",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11283",
+        "base_commit": "08a4ee06510ae45562c228eefbdcaac84bd38c7a",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11283@sha256:2ca0c1500292dd3c12c146efef8d1d7d3b25e0553b393b0495b3cf18bd6f4ed0",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11422",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11422",
+        "base_commit": "df46b329e0900e9e4dc1d60816c1dce6dfc1094e",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11422@sha256:d8703d50c49fae62753520403c3d4cd8a1048b7e554159aa4f46bb5f778f0ed3",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11564",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11564",
+        "base_commit": "580e644f24f1c5ae5b94784fb73a9953a178fd26",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11564@sha256:a565e9f99ade187a4fafee6ec7f977abd7b4ed1c96e77d13833a8fe71081aee4",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11583",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11583",
+        "base_commit": "60dc957a825232fdda9138e2f8878b2ca407a7c9",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11583@sha256:f2ac03fe870177231ba0e72452b3617ebc54cbe62318deef41c7949397337d2e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11620",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11620",
+        "base_commit": "514efa3129792ec2abb2444f3e7aeb3f21a38386",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11620@sha256:6c99f08e757436b33640c2a68bfa4572aad8dcdfe78adf77905dc7e25945aa47",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11630",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11630",
+        "base_commit": "65e86948b80262574058a94ccaae3a9b59c3faea",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11630@sha256:86c81bee2d2a1c35e37df6a84ee6b929264822d31657bbe87b1aca59c7fde111",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11742",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11742",
+        "base_commit": "fee75d2aed4e58ada6567c464cfd22e89dc65f4a",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11742@sha256:64c26c94843c2885714c57bfe0a98849be19cebea3fee7b6f54394554a98a8a5",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11797",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11797",
+        "base_commit": "3346b78a8a872286a245d1e77ef4718fc5e6be1a",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11797@sha256:2d3c56fb0a332d8f393607d3ea6bf4581bcd41a78c17118ae76f5a4df00ee90f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11815",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11815",
+        "base_commit": "e02f67ef2d03d48128e7a118bf75f0418e24e8ac",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11815@sha256:19b66392c9872e6d07b331b0ed59466c3e6c3588bc4cdd89f56f8767dc774f8a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11848",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11848",
+        "base_commit": "f0adf3b9b7a19cdee05368ff0c0c2d087f011180",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11848@sha256:08eac9219e5d4b15b445fde26c587157a0ad8a2d9209e4b1e266259edf51bb4b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11905",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11905",
+        "base_commit": "2f72480fbd27896c986c45193e1603e35c0b19a7",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11905@sha256:3df74a2f17ce873f814bb6109f3f3bf0f8191fa2e2ae26be01a676ac62ac5aa1",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11910",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11910",
+        "base_commit": "d232fd76a85870daf345fd8f8d617fe7802ae194",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11910@sha256:1b7d3771528b12af143276c9b57be675401ca31c7f7acf3f8ea6b9cbb31f9373",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11964",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11964",
+        "base_commit": "fc2b1cc926e34041953738e58fa6ad3053059b22",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11964@sha256:098474801410af7303f0814d0d8557791ca2f55e455e5db766c3b3d0a9826df2",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-11999",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-11999",
+        "base_commit": "84633905273fc916e3d17883810d9969c03f73c2",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-11999@sha256:3c7e7f035f611b17f2093ee6409364bc28cce8b9bac266b9590db762d197607e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12113",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12113",
+        "base_commit": "62254c5202e80a68f4fe6572a2be46a3d953de1a",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12113@sha256:aa903e0c1056165cde593f55770c833e5bfa37f4150a0ce2556fadc86690f5b0",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12125",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12125",
+        "base_commit": "89d41cba392b759732ba9f1db4ff29ed47da6a56",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12125@sha256:4345ad65eec0da8a32063c2c9a32df380e10b4fb4ccebfcfed9c4be9a185e5ff",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12184",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12184",
+        "base_commit": "5d674eac871a306405b0fbbaeb17bbeba9c68bf3",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12184@sha256:c28686e155d0dd367dca0608074c62d28e5255629127d58a615594be24f20cbf",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12284",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12284",
+        "base_commit": "c5e373d48cbdd923575956fed477b63d66d9603f",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12284@sha256:f6566d6750acadc4315c9bd1150506cc1be2dc1eadb55bff57561e3d6b872fe9",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12286",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12286",
+        "base_commit": "979f61abd322507aafced9627702362e541ec34e",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12286@sha256:90c377f8c5ea3844a549520f78a2f1f0dfa5e92663f3c7a4d8e53beda4d4b158",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12308",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12308",
+        "base_commit": "2e0f04507b17362239ba49830d26fec504d46978",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12308@sha256:6250d2a608d52b82cd4eb03eb33082bb9927397c01876025499430b782cce9a6",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12453",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12453",
+        "base_commit": "b330b918e979ea39a21d47b61172d112caf432c3",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12453@sha256:a4ddc630adffc7e64d7f090bb3c486d4dac0fc2426ff5b5f73c2f6961a775c7a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12470",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12470",
+        "base_commit": "142ab6846ac09d6d401e26fc8b6b988a583ac0f5",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12470@sha256:6bcd06ce3f41aba5572391bb23e74cd84dabefce4deaa90c28211501bb9e759c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12497",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12497",
+        "base_commit": "a4881f5e5d7ee38b7e83301331a0b4962845ef8a",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12497@sha256:8fb1142fc9cece8def906efb3322a40430b3b29ea11cdb5e1f697c9332d93620",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12589",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12589",
+        "base_commit": "895f28f9cbed817c00ab68770433170d83132d90",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12589@sha256:91c4b9e6b044f038a8f9969c95208bf03431a1ed61e5527bf08a40ee6b18bbe8",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12700",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12700",
+        "base_commit": "d51c50d836c5cf8db5566da17963f871be554615",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12700@sha256:be0fbf89e9add2c0ca43199a4485e943d17f61bb80691a70719ff6618c27dcc8",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12708",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12708",
+        "base_commit": "447980e72ac01da1594dd3373a03ba40b7ee6f80",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12708@sha256:3722a130f618602e5636c8c7ddd821550e2c2462b569907c4140fc162e24671e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12747",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12747",
+        "base_commit": "c86201b6ed4f8256b0a0520c08aa674f623d4127",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12747@sha256:c123a35429aa06d0bac81cb71288e01389d816d6e461e9695684dedb30de941c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12856",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12856",
+        "base_commit": "8328811f048fed0dd22573224def8c65410c9f2e",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12856@sha256:d53de59169fc601caa9cc2392610aa78d11045e7ec2b61595f93667dc1db5a90",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12908",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12908",
+        "base_commit": "49ae7ce50a874f8a04cd910882fb9571ff3a0d7a",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12908@sha256:9996265e18eda60bea7c51a6f2356cb3b89917f611b69365534fd208e75a4ade",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12915",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12915",
+        "base_commit": "4652f1f0aa459a7b980441d629648707c32e36bf",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12915@sha256:cb8a11360b096bcd0ca966751371b7d83479127afcdd69bc4522456a9ce97451",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-12983",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-12983",
+        "base_commit": "3bc4240d979812bd11365ede04c028ea13fdc8c6",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-12983@sha256:f89a493dc687475e9f309b2bcb838ea6722faef9878f49b9ee6dfdd3eaa19c80",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13028",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13028",
+        "base_commit": "78ad4b4b0201003792bfdbf1a7781cbc9ee03539",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13028@sha256:4250631872579b9eb6731a16a489ba31be1efff3e0c1e0eb2a7feb24215ce92b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13033",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13033",
+        "base_commit": "a59de6e89e8dc1f3e71c9a5a5bbceb373ea5247e",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13033@sha256:1acb49e9389a6df0df9fe52bc0c87ced013e323015b4313b7397857b41166138",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13158",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13158",
+        "base_commit": "7af8f4127397279d19ef7c7899e93018274e2f9b",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13158@sha256:b05beccc82fc00cbc3a3090ebe207b122dd31585aefcf7d9c1fc0c4147c664b6",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13220",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13220",
+        "base_commit": "16218c20606d8cd89c5393970c83da04598a3e04",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13220@sha256:af8ad26c52a4104afbb44c606682e29248702f47eb00e8d176b187f3753a1293",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13230",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13230",
+        "base_commit": "184a6eebb0ef56d5f1b1315a8e666830e37f3f81",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13230@sha256:fcaa86354a33a1547d31e90b76146f66def486e4e26d48c64058f3f53e681c2b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13265",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13265",
+        "base_commit": "b2b0711b555fa292751763c2df4fe577c396f265",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13265@sha256:c83c172fe50ee16dd32695265e979e6a8473973fd7f8a79b1f21957db44653ba",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13315",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13315",
+        "base_commit": "36bc47069ce071e80c8129500de3b8664d2058a7",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13315@sha256:eee8a0db006bce8a160fd6bda1ac181edd1dedcd95c6a4e040e7aea0aed30bd8",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13321",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13321",
+        "base_commit": "35b03788b0607c1f8d2b64e4fa9e1669b0907ea4",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13321@sha256:3db1624f81fb97d05a4af23bf64059ec55b194bf2601e2eecf1bd6f7cc56913f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13401",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13401",
+        "base_commit": "453967477e3ddae704cd739eac2449c0e13d464c",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13401@sha256:9c0e1dba61d9382534caa48011231df377f6f313428e689b70ae13b3a48675b2",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13447",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13447",
+        "base_commit": "0456d3e42795481a186db05719300691fe2a1029",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13447@sha256:438961b7e55161f67770d51b6bdf579d5a44b17725950fdb64fd72c6d8d79af2",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13448",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13448",
+        "base_commit": "7b9596b974fb0ad1868b10c8c2174e10b72be403",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13448@sha256:2df440d37ad5e6bfa5d0803ab92184c99eddd8ec837115aea458a8183406439a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13551",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13551",
+        "base_commit": "7f9e4524d6b23424cf44fbe1bf1f4e70f6bb066e",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13551@sha256:6a26656fa15981ec1e6ab64a2a2f6cb7378d957b3e63385507c1728a01b619f8",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13590",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13590",
+        "base_commit": "755dbf39fcdc491fe9b588358303e259c7750be4",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13590@sha256:981974f9ed75972ce502a3c9b805513b509031ba3d5a41d93e5f95db9e3dadf8",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13658",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13658",
+        "base_commit": "0773837e15bb632afffb6848a58c59a791008fa1",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13658@sha256:eb867897d1362f64efd96d65ec1decc1d3783f433a59e74885bb5e92f6737cd9",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13660",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13660",
+        "base_commit": "50c3ac6fa9b7c8a94a6d1dc87edf775e3bc4d575",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13660@sha256:57c1708a601939237732c60bacb9db0e65698cab90c8ff08a9d51a6ee9b61a8f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13710",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13710",
+        "base_commit": "1bd6a7a0acc11e249fca11c017505ad39f15ebf6",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13710@sha256:c6a3b9a997b2ff929be10ee355bf28a4ab22de943ab2aa47fe2bb83750c39388",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13757",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13757",
+        "base_commit": "3f140dde51c0fe6c350acb7727bbe489a99f0632",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13757@sha256:dd528b63c859179d98439027610c5c741dba0085c7dc2a9e79bd899afbe7ebef",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13768",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13768",
+        "base_commit": "965d2d95c630939b53eb60d9c169f5dfc77ee0c6",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13768@sha256:e7b3a277b6b46b1a4dfb8410fec12781defbd678d00114ebc9553c068de5182b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13925",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13925",
+        "base_commit": "0c42cdf0d2422f4c080e93594d5d15381d6e955e",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13925@sha256:358f31f2359647c4a2bbfa511c40337fe98119364441b5d2c7acaf5422e4e4dc",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13933",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13933",
+        "base_commit": "42e8cf47c7ee2db238bf91197ea398126c546741",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13933@sha256:0f3b43fc1c71e443ccaac6c84253a158a37026f8d4bb192e2e81da36f0a3abbc",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-13964",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-13964",
+        "base_commit": "f39634ff229887bf7790c069d0c411b38494ca38",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-13964@sha256:3bd826784556cee19b7d056d48ca3c7d793a77eac9fb311cdc460455f5d005ef",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14016",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14016",
+        "base_commit": "1710cdbe79c90665046034fe1700933d038d90ad",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14016@sha256:d6d8f40d585bc6457cc483ff62f29219388713b24454e0a6aa7c21ffc15f5ff6",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14017",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14017",
+        "base_commit": "466920f6d726eee90d5566e0a9948e92b33a122e",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14017@sha256:ab40fe86d24dbe0296a4ea9a82969b0c86824274242b208764d2aee227ce9ee6",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14155",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14155",
+        "base_commit": "2f13c476abe4ba787b6cb71131818341911f43cc",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14155@sha256:df566a06348c488d15869f8c8745a9f6c19eeb3ebd66a823dd7f91ed92058a7e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14238",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14238",
+        "base_commit": "30e123ed351317b7527f632b3b7dc4e81e850449",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14238@sha256:ce30418a2b0599fa84ce4541450586010fab2d23a5da4cfe70770f304d289780",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14382",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14382",
+        "base_commit": "29345aecf6e8d53ccb3577a3762bb0c263f7558d",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14382@sha256:32c0c680a8460ed1df6e329bb3e671e25b33e54ba2fea780d853e9557cdf286f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14411",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14411",
+        "base_commit": "fa4e963ee7e6876581b5432363603571839ba00c",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14411@sha256:17ae1646a47f2b2bdf1ae9a60225e43405d7fc5f30500cc4ccddcece51dd3fa8",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14534",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14534",
+        "base_commit": "910ecd1b8df7678f45c3d507dde6bcb1faafa243",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14534@sha256:a82af598c0a980d8dc6b6a81f6893074c4610d83d8cbf7cb97482c81d0c16913",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14580",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14580",
+        "base_commit": "36fa071d6ebd18a61c4d7f1b5c9d17106134bd44",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14580@sha256:34f0b2435968031cc19f39e942843c395128c10b0a73f4107742e06944aeb338",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14608",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14608",
+        "base_commit": "7f33c1e22dbc34a7afae7967783725b10f1f13b1",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14608@sha256:a8978401269f0ef58e8ddc42dae1ad21547a74d94551241c1754627dbc0d79b9",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14667",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14667",
+        "base_commit": "6a970a8b4600eb91be25f38caed0a52269d6303d",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14667@sha256:0f5936871cfbdb05a2ffc9bdacd9623d3e68f203c9be28afeab8c094277eb1a7",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14672",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14672",
+        "base_commit": "00ea883ef56fb5e092cbe4a6f7ff2e7470886ac4",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14672@sha256:6900fe10a2c481ffb016364ed17041f8f51af554b9ee0f9ac3340e97434362c6",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14730",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14730",
+        "base_commit": "4fe3774c729f3fd5105b3001fe69a70bdca95ac3",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14730@sha256:565d4717a9d164996ff90e706383c01385f580b80d3ac19b29f4ff80346f840b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14752",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14752",
+        "base_commit": "b64db05b9cedd96905d637a2d824cbbf428e40e7",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14752@sha256:743b7bd1ab48273b53cc92635f21a5f2697d2a7bd4af7a2a17c399d0d24ebecd",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14787",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14787",
+        "base_commit": "004b4620f6f4ad87261e149898940f2dcd5757ef",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14787@sha256:036744f84b6f7323ef6c4cd39aac71778ef8d0ac44ce961cbe19277e529e6626",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14855",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14855",
+        "base_commit": "475cffd1d64c690cdad16ede4d5e81985738ceb4",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14855@sha256:11c07ee9d97e0d9d7ed2766de8bd3f961825ffa9113bd154a7e8780b459d41cc",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14915",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14915",
+        "base_commit": "903aaa35e5ceaa33bfc9b19b7f6da65ce5a91dd4",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14915@sha256:a677be35326049cb42933368d879f3ecfe408c4da1fb8842b70b556e22245b6b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14997",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14997",
+        "base_commit": "0d4e575c96d408e0efb4dfd0cbfc864219776950",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14997@sha256:3472ddee294ea3d3fd4762c28a29c16afef9301b0cc0b0ae4cd5609bf4f23c97",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-14999",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-14999",
+        "base_commit": "a754b82dac511475b6276039471ccd17cc64aeb8",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-14999@sha256:1ca2b627c38a7299c6d0972837ccb260aa9d81c44a7d95effbac1df17f596748",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15061",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15061",
+        "base_commit": "2c01ebb4be5d53cbf6450f356c10e436025d6d07",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15061@sha256:71a0e13503f11d5940103dc14b4e8e8ddb033c58736e1e88c1876e62ebb78bb1",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15202",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15202",
+        "base_commit": "4fd3044ca0135da903a70dfb66992293f529ecf1",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15202@sha256:e34780f574d53ae81a47dd998185e18f6eb64bf474081335d7cf13dcf70b98bf",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15213",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15213",
+        "base_commit": "03cadb912c78b769d6bf4a943a2a35fc1d952960",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15213@sha256:8bf6324c2a1d9a40b9cc62571948e2b86f366d30b95f76e96e7f8aac51b1cf70",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15252",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15252",
+        "base_commit": "361bb8f786f112ee275be136795c0b1ecefff928",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15252@sha256:98b640f30877340d9f3fb681e6613c99b9661f33e294023d4d9ce697ecd128e7",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15320",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15320",
+        "base_commit": "b55ebe32417e0884b6b8b3e1bc0379033aa221af",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15320@sha256:dc4760a6acfa699a65ed39eaa297c86d24560e467548a5ef3c54a79469ab2429",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15347",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15347",
+        "base_commit": "7c4f3965098baad2396e24501e09237425a7bd6f",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15347@sha256:c90ab7fcf5ac73b92a57c5385514f6997ccf8cb3baf938b820421b11092a7eb2",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15388",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15388",
+        "base_commit": "c5cd8783825b5f6384417dac5f3889b4210b7d08",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15388@sha256:0ff89a14849f2b8a614c2f3ad17b398ef49af83cda88cc650f5cbf642ca7105e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15400",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15400",
+        "base_commit": "4c76ffc2d6c77c850b4bef8d9acc197d11c47937",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15400@sha256:e91a8c4d0fe261a474724be9453c6ea2a81b582f643aba6c180cfacfb3ce26f6",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15498",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15498",
+        "base_commit": "d90e34c61b27fba2527834806639eebbcfab9631",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15498@sha256:2b50b34ebde11f7b1bda64f19152fae88f7f11500b3d283c04cff144e0f62e70",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15695",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15695",
+        "base_commit": "647480166bfe7532e8c471fef0146e3a17e6c0c9",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15695@sha256:c7697fff17b1d0580146de04672f7e71d2ab19b3a42a0cc08168c5920385bd69",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15738",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15738",
+        "base_commit": "6f73eb9d90cfec684529aab48d517e3d6449ba8c",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15738@sha256:742ae07ee02b657cac7f3c34d2ad79864de3a2c5627c4d7e84ba7e793f79776d",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15781",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15781",
+        "base_commit": "8d160f154f0240a423e83ffe0690e472f837373c",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15781@sha256:dda7183344f3efdc83278acb901f30bb7c0d6be1ef8e87b60dd938d027b7a716",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15789",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15789",
+        "base_commit": "d4d5427571b4bf3a21c902276c2a00215c2a37cc",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15789@sha256:e08d90536d0f391eac2c2afdbe5280ae12bebd00f04140c415b0378886c2ae5b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15790",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15790",
+        "base_commit": "c627226d05dd52aef59447dcfb29cec2c2b11b8a",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15790@sha256:fc3c1db326d79f4643817c54940effcc4345a441a6d4bcf1850ebb87bb82d348",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15814",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15814",
+        "base_commit": "5eb6a2b33d70b9889e1cafa12594ad6f80773d3a",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15814@sha256:56da9705f6ffdcd965e4226d8bfaf81fa6f2aac5ed9d2e2b796d1b0f3d200871",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15819",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15819",
+        "base_commit": "877c800f255ccaa7abde1fb944de45d1616f5cc9",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15819@sha256:0aaa6f14f9f5c42778366d83b85b1736641ef32c26c1d132ec3d848f6233891c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15851",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15851",
+        "base_commit": "b4817d20b9e55df30be0b1b2ca8c8bb6d61aab07",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15851@sha256:aa80884e053cf1a238df7c4ceec43e4e07929547f658278bd3c3154f0ef8bc90",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15902",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15902",
+        "base_commit": "44c24bf02835323d5418512ebe8e76166739ebf8",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15902@sha256:5d948ffe2fa519b5ce8d3d068a3689f0f735fdcbd437d7ce31962b6c2dec06cc",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-15996",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-15996",
+        "base_commit": "b30c0081d4d8a31ab7dc7f72a4c7099af606ef29",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-15996@sha256:a668a52a07bf8ca7b4f8626ec7295e7d4d224ae59a5c92e5a840d6da1f47561a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16041",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16041",
+        "base_commit": "6df9398cce063874ae4d59db126d4adacb0fa8d3",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16041@sha256:02bf0d9ff07608b9aea501380f294e5330ae6ffec2bc2c611503654bfa0fa7a0",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16046",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16046",
+        "base_commit": "ec13e801b820614ff374cb0046092caab8d67249",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16046@sha256:8ee2baa8d203c23b3d0c1cb984a37aaacf1b850aac0ef011db5e4b0eccc09991",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16139",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16139",
+        "base_commit": "d559cb02da30f74debbb1fc3a46de0df134d2d80",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16139@sha256:6fa17bb4def5d77bc724e285673f3763ebb58c8560a52b454fb984912be9e4a5",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16229",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16229",
+        "base_commit": "04b15022e8d1f49af69d8a1e6cd678f31f1280ff",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16229@sha256:9883b126e9ea6b24aeb30e04893fc0588edee83e88392637b811db109eab0547",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16255",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16255",
+        "base_commit": "444b6da7cc229a58a2c476a52e45233001dc7073",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16255@sha256:32b922f258d8a318319caee863c0c6cbe6122dd8efe5642ad9ab7359975ed45b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16379",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16379",
+        "base_commit": "1d0fa848e084cad62d0bb6bde3b51e4862558e57",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16379@sha256:fda8360d05bd3691a88c9edb2aca5199e47129bb6d53fd5a128c46a6692de81a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16400",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16400",
+        "base_commit": "0bd2c0c9015b53c41394a1c0989afbfd94dc2830",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16400@sha256:9e4f75e9480eb7d96895e1fbc2f6c0bdc2fe3d4567a142319c2f04b4a794216e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16408",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16408",
+        "base_commit": "ef85b6bf0bc5a8b194f0724cf5bbedbcee402b96",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16408@sha256:2cc46ad9d9d190aadb8b4b7616c2cc4b71bc202c864ce8c7e8655f9eb9771557",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16527",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16527",
+        "base_commit": "bd366ca2aeffa869b7dbc0b0aa01caea75e6dc31",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16527@sha256:53bc8d6c86cf2387eeea115aa16f98840c22911c5e24eaa42a061ebeccd19331",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16595",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16595",
+        "base_commit": "f9fe062de5fc0896d6bbbf3f260b5c44473b3c77",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16595@sha256:b67a9f061115dad809d38dcd6e2bac714dd222302fd59506b303606f582d36f7",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16816",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16816",
+        "base_commit": "191f6a9a4586b5e5f79f4f42f190e7ad4bbacc84",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16816@sha256:45bd3de75747af8b30605aaf8a8db688f4ed5da3eb154a382db060771b8813e5",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16820",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16820",
+        "base_commit": "c61219a7ae051d2baab53f041e00592011fc550c",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16820@sha256:64e3c27f3adcc1d93145edc1c461539cabfe22479c1024c619d31d78d3fc2e79",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16873",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16873",
+        "base_commit": "fce90950bef348803fa7cc3e6bc65f4bce429b82",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16873@sha256:645d3646665978560f5f5add4e32b4e90cac9e098b7fdcf5e415cbd7004ecd0b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-16910",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-16910",
+        "base_commit": "4142739af1cda53581af4169dbe16d6cd5e26948",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-16910@sha256:698b80ebefdb9972f421a4dcafaaff5b8f3374961393e491cef4627c28f07910",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-17051",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-17051",
+        "base_commit": "b7a17b0ea0a2061bae752a3a2292007d41825814",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-17051@sha256:95d0d5d46cc226220f5bec3842114ae144eaa32f3cacde4d520e713216aad835",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "django__django-17087",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/django__django-17087",
+        "base_commit": "4a72da71001f154ea60906a2f74898d32b7322a7",
+        "amd64_image": "swebench/sweb.eval.x86_64.django_1776_django-17087@sha256:fef77b052bf6729f7b6326b3b485b8a63ac1dc39b6e1c7040242aa2d3b2dc656",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-18869",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-18869",
+        "base_commit": "b7d05919865fc0c37a0164cf467d5d5513bd0ede",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-18869@sha256:b336640dcab0603d825bae6c20f7acbd6cd37f4aa5c88cc47d126b8756303754",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-22711",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-22711",
+        "base_commit": "f670fe78795b18eb1118707721852209cd77ad51",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22711@sha256:e3ee4ea844fb22b77350006405bf0d0c7283b3f88e10205ccc79b785d72363de",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-22835",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-22835",
+        "base_commit": "c33557d120eefe3148ebfcf2e758ff2357966000",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835@sha256:ffe240330bab2ef382e4aba3e09fd624dccef459312defe3c815a58c4a0edd47",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-23299",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-23299",
+        "base_commit": "3eadeacc06c9f2ddcdac6ae39819faa9fbee9e39",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-23299@sha256:1f27ebe052c091ba64a9ac0dcafe15ff402a1e5eddf3b41d429b284385e7028f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-23314",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-23314",
+        "base_commit": "97fc1154992f64cfb2f86321155a7404efeb2d8a",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-23314@sha256:f88a00b6cfc878eb62965e836134dd9425b0188bfa2b8154d439bda001ed604c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-23476",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-23476",
+        "base_commit": "33a0599711d26dc2b79f851c6daed4947df7c167",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-23476@sha256:10230151c40fbb30c572497c0d2cc6bebead75042568f9223c3266043e6fc249",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-23562",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-23562",
+        "base_commit": "29a86636a9c45ab5ac4d80ac76eaee497f460dce",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-23562@sha256:d8ba2d2009b5db4ef8afce6e79bb676051481ba453045095af46465d120363bf",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-23563",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-23563",
+        "base_commit": "149a0398b391cfc4eddb5e659f50b3c66f32ea65",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-23563@sha256:a34e45f320187a07dbf6b21c38a859949cf1dc7f2eb060344ee8aafdb65d46c0",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-23913",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-23913",
+        "base_commit": "5c4595267ccd3daf78f5fd05693b7ecbcd575c1e",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-23913@sha256:120ede7d6c997ba6c5ed2f0dba1f2d541d429bf0c6541962b08da51d0d412665",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-23964",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-23964",
+        "base_commit": "269c0b94b4fcf8b1135011c1556eac29dc09de15",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-23964@sha256:1268aa88cfc19ec17849e353b12a69189e20820e1937cac82b5773fb227b80f2",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-23987",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-23987",
+        "base_commit": "e98d8d085e8f53ec0467422b326f7738a2dd695e",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-23987@sha256:a0f064917dac3bcb3a9e34d4e7e2a0eaf5b5b6cfe91fc9048a6a5de06dd7aa5f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-24149",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-24149",
+        "base_commit": "af39f1edffcd828f05cfdd04f2e59506bb4a27bc",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-24149@sha256:e80913d242481321c20b8ed0b5bd1513e89fcaff6eb84b5f6d39e748128b7c19",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-24265",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-24265",
+        "base_commit": "e148998d9bed9d1b53a91587ad48f9bb43c7737f",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-24265@sha256:a8bf2e42811e4fc7ab9a837f2178640ac83b18fd0eaaf7ed9aea8d3362769057",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-24334",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-24334",
+        "base_commit": "332937997d03e0c173be6d9fc1841e9186e857df",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-24334@sha256:d794a9d8b1b33630cb7828ec0ed585fe4ea7cf3bea294fe6668f9eb0b8f4a6b2",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-24970",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-24970",
+        "base_commit": "a3011dfd1aaa2487cce8aa7369475533133ef777",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-24970@sha256:c5d99048ceeb6b0c3157dde39bb122174e494b557fb7dd3c6d4bd8dba70a1bfa",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-25079",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-25079",
+        "base_commit": "66f7956984cbfc3647e867c6e5fde889a89c64ef",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-25079@sha256:2d73277bb5ab5305b3eca34585792467231e394cc1c3557bfe81a852fe45d731",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-25311",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-25311",
+        "base_commit": "430fb1db88843300fb4baae3edc499bbfe073b0c",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-25311@sha256:3e08e93c4788b52c21ed959dc401e62e5dd6d95f52b92a389018a36b8f1e3142",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-25332",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-25332",
+        "base_commit": "66ba515e671638971bd11a34cff12c107a437e0b",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-25332@sha256:e730789910800c84441072e81399d623440a0b03838867d203e54a5f65058cb3",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-25433",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-25433",
+        "base_commit": "7eafdd8af3c523c1c77b027d378fb337dd489f18",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-25433@sha256:5feb21fe4c80bd1045f6a0605abde486bd54fc041976fe05123ba2e19da97dcd",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-25442",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-25442",
+        "base_commit": "73394f2b11321e03a5df199ec0196f27a728b0b0",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-25442@sha256:f8f904f19aed221ef52fe7408132cf2b52834c4e5766313c590b2f667fcf0a4c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-25498",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-25498",
+        "base_commit": "78bf53caacbb5ce0dc7aa73f07a74c99f1ed919b",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-25498@sha256:8d06579eade2be0cde2c0ccab60756a6f9c0c4bf523f22f8eb95de71f30f252e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-26011",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-26011",
+        "base_commit": "00afcc0c6d4d2e4390338127f05b8f4fdb4e7087",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-26011@sha256:bc25341eaddec909d1c4ca7beaed8f65fcc7c4eedd2e423a841a78dec1ffb06a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "matplotlib__matplotlib-26020",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/matplotlib__matplotlib-26020",
+        "base_commit": "f6a781f77f5ddf1204c60ca7c544809407d4a807",
+        "amd64_image": "swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-26020@sha256:e095802920d7f6e282832fc436a36699adda9f6da08b86a13058d8393b79246f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "mwaskom__seaborn-2848",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/mwaskom__seaborn-2848",
+        "base_commit": "94621cef29f80282436d73e8d2c0aa76dab81273",
+        "amd64_image": "swebench/sweb.eval.x86_64.mwaskom_1776_seaborn-2848@sha256:d719470351e66623e532a4f23cdedfe8fb737147fe108e4b5829aa273528389d",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "mwaskom__seaborn-3010",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/mwaskom__seaborn-3010",
+        "base_commit": "0f5a013e2cf43562deec3b879458e59a73853813",
+        "amd64_image": "swebench/sweb.eval.x86_64.mwaskom_1776_seaborn-3010@sha256:22fef36e8b9655fb1642d976de669e3f2426df0186a09d6d788fc6215cfa1bc0",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "mwaskom__seaborn-3190",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/mwaskom__seaborn-3190",
+        "base_commit": "4a9e54962a29c12a8b103d75f838e0e795a6974d",
+        "amd64_image": "swebench/sweb.eval.x86_64.mwaskom_1776_seaborn-3190@sha256:5ce876a52439385a2638f21617febf25a333c24b0db555cb9e37230b4db2cdcc",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "mwaskom__seaborn-3407",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/mwaskom__seaborn-3407",
+        "base_commit": "515286e02be3e4c0ff2ef4addb34a53c4a676ee4",
+        "amd64_image": "swebench/sweb.eval.x86_64.mwaskom_1776_seaborn-3407@sha256:bd81f082cba400f12fc48d9e93a8a9c1a5323fa84caa57ebb7469f3fe1ffa8d1",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pallets__flask-4045",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pallets__flask-4045",
+        "base_commit": "d8c37f43724cd9fb0870f77877b7c4c7e38a19e0",
+        "amd64_image": "swebench/sweb.eval.x86_64.pallets_1776_flask-4045@sha256:1425b0801ddf4b2607e552e56516cce3d389bab0a3ce06f58e6fa6a7835c703c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pallets__flask-4992",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pallets__flask-4992",
+        "base_commit": "4c288bc97ea371817199908d0d9b12de9dae327e",
+        "amd64_image": "swebench/sweb.eval.x86_64.pallets_1776_flask-4992@sha256:bb1460876a7bc667f71b46aac744dd6f6d7f5f66e79902461cf76c6f8c4f7150",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pallets__flask-5063",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pallets__flask-5063",
+        "base_commit": "182ce3dd15dfa3537391c3efaf9c3ff407d134d4",
+        "amd64_image": "swebench/sweb.eval.x86_64.pallets_1776_flask-5063@sha256:05369549db34553599f6f96d65ee9c75173c02d9285d283422f6b6e49f0b8df2",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "psf__requests-1963",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/psf__requests-1963",
+        "base_commit": "110048f9837f8441ea536804115e80b69f400277",
+        "amd64_image": "swebench/sweb.eval.x86_64.psf_1776_requests-1963@sha256:5ca751c160affa98d160831608fffe3e2c4fb61c4fb2dad2b147ef2a885088e4",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "psf__requests-2148",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/psf__requests-2148",
+        "base_commit": "fe693c492242ae532211e0c173324f09ca8cf227",
+        "amd64_image": "swebench/sweb.eval.x86_64.psf_1776_requests-2148@sha256:ada704cd7cd3d1325dc7d148d3dd473fb2a0ba75a8e703aec7ae485cabc6106a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "psf__requests-2317",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/psf__requests-2317",
+        "base_commit": "091991be0da19de9108dbe5e3752917fea3d7fdc",
+        "amd64_image": "swebench/sweb.eval.x86_64.psf_1776_requests-2317@sha256:c6b5c8846507b5e48e307decca28dbdfa4f5ef17070c1087aacde765e8c4b178",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "psf__requests-2674",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/psf__requests-2674",
+        "base_commit": "0be38a0c37c59c4b66ce908731da15b401655113",
+        "amd64_image": "swebench/sweb.eval.x86_64.psf_1776_requests-2674@sha256:0b80f823b65adecd8d8e26c139d636260de360e4676db18030925650dc22cca8",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "psf__requests-3362",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/psf__requests-3362",
+        "base_commit": "36453b95b13079296776d11b09cab2567ea3e703",
+        "amd64_image": "swebench/sweb.eval.x86_64.psf_1776_requests-3362@sha256:c5dc4ba64a2d97d6cff6b82fe9c0561589df13f23df6883d05e99b630942bbd1",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "psf__requests-863",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/psf__requests-863",
+        "base_commit": "a0df2cbb10419037d11d04352b3175405ab52941",
+        "amd64_image": "swebench/sweb.eval.x86_64.psf_1776_requests-863@sha256:4dcddfdcbc2bcba96327de327f411c671e695366f4e7d09781f64c1758053b18",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pydata__xarray-3364",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pydata__xarray-3364",
+        "base_commit": "863e49066ca4d61c9adfe62aca3bf21b90e1af8c",
+        "amd64_image": "swebench/sweb.eval.x86_64.pydata_1776_xarray-3364@sha256:8591047f512d8d26b4d0e121d2d04eb6b95fa6ad41e13d92fe64f5ef66244c27",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pydata__xarray-4094",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pydata__xarray-4094",
+        "base_commit": "a64cf2d5476e7bbda099b34c40b7be1880dbd39a",
+        "amd64_image": "swebench/sweb.eval.x86_64.pydata_1776_xarray-4094@sha256:6bcd1fe581af0796691ac3527b940d43e5e1bfd6539adeecebb12f3e4b25dc2c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pydata__xarray-4248",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pydata__xarray-4248",
+        "base_commit": "98dc1f4ea18738492e074e9e51ddfed5cd30ab94",
+        "amd64_image": "swebench/sweb.eval.x86_64.pydata_1776_xarray-4248@sha256:d16aca15c86b2ef8a698600711bfde3559f794154a0edd4ac4213edf6b6fdf73",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pydata__xarray-4493",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pydata__xarray-4493",
+        "base_commit": "a5f53e203c52a7605d5db799864046471115d04f",
+        "amd64_image": "swebench/sweb.eval.x86_64.pydata_1776_xarray-4493@sha256:5c94544db403737d9f88cfb75afeb9444226072860af86e830ebbc7478287c20",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pydata__xarray-5131",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pydata__xarray-5131",
+        "base_commit": "e56905889c836c736152b11a7e6117a229715975",
+        "amd64_image": "swebench/sweb.eval.x86_64.pydata_1776_xarray-5131@sha256:7b6dd2169e0c110950f3dd3e7a76ebc35e1f2d9afc83aaef53766785dfb1234d",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pylint-dev__pylint-5859",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pylint-dev__pylint-5859",
+        "base_commit": "182cc539b8154c0710fcea7e522267e42eba8899",
+        "amd64_image": "swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-5859@sha256:12412d9d1d7a06b8fa30dd0ff14ae67177fffee77d1e6ac277606fb7334837cf",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pylint-dev__pylint-6506",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pylint-dev__pylint-6506",
+        "base_commit": "0a4204fd7555cfedd43f43017c94d24ef48244a5",
+        "amd64_image": "swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-6506@sha256:f2304d2a6461bc098bc872efc4474b34b54eec72f5a87bacc0509a88ba52fb2d",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pylint-dev__pylint-7080",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pylint-dev__pylint-7080",
+        "base_commit": "3c5eca2ded3dd2b59ebaf23eb289453b5d2930f0",
+        "amd64_image": "swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-7080@sha256:3389f0d1319ca611d04a209fc30990c131e0bae9acfeb2163938c75ad23479fe",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pylint-dev__pylint-7114",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pylint-dev__pylint-7114",
+        "base_commit": "397c1703e8ae6349d33f7b99f45b2ccaf581e666",
+        "amd64_image": "swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-7114@sha256:6bf0ee60d9e1bb2772f3287f54df0875884ec8aa1e24e6fad14beec46aad70b0",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pylint-dev__pylint-7228",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pylint-dev__pylint-7228",
+        "base_commit": "d597f252915ddcaaa15ccdfcb35670152cb83587",
+        "amd64_image": "swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-7228@sha256:b3a905a9b866c0155cfd5af9ba55e19f1884b69eaf5b09ab4d82c1cce8b46088",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pylint-dev__pylint-7993",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pylint-dev__pylint-7993",
+        "base_commit": "e90702074e68e20dc8e5df5013ee3ecf22139c3e",
+        "amd64_image": "swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-7993@sha256:1a89517dea5a3371295b65dd312102c4782472586158ce82b65449100c55f8a4",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-11143",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-11143",
+        "base_commit": "6995257cf470d2143ad1683824962de4071c0eb7",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-11143@sha256:e08ce142adec5ec985e867e910045734ec3c58fe174fc054c5f83855bed78fd4",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-11148",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-11148",
+        "base_commit": "2f7415cfbc4b6ca62f9013f1abd27136f46b9653",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-11148@sha256:b8eef9af40c714067a5455e8d88620439b536a5455fed96c5646b4ed37028442",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-5103",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-5103",
+        "base_commit": "10ca84ffc56c2dd2d9dc4bd71b7b898e083500cd",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-5103@sha256:1648c614485c81d9e08bcf9ec8014fb38cd2f20fad6bea782552d923a35ce714",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-5221",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-5221",
+        "base_commit": "4a2fdce62b73944030cff9b3e52862868ca9584d",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-5221@sha256:547472f1933751a67623599dae697188232c9712a46ab66fb69330f88b911e5a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-5227",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-5227",
+        "base_commit": "2051e30b9b596e944524ccb787ed20f9f5be93e3",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-5227@sha256:c91459f86ed261ab81871b086d7ca2d9fe16abd2ddf374bf172edd5d991fd28b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-5413",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-5413",
+        "base_commit": "450d2646233c670654744d3d24330b69895bb9d2",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-5413@sha256:75700210c9eb925d1abde2cb95b7dfffc2c409376ae434854375bacaa193864f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-5495",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-5495",
+        "base_commit": "1aefb24b37c30fba8fd79a744829ca16e252f340",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-5495@sha256:86b356cf05ac9a623ba8943849e25ce2d0bcebc506753b1361595e5ad488a9b3",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-5692",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-5692",
+        "base_commit": "29e336bd9bf87eaef8e2683196ee1975f1ad4088",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-5692@sha256:5b0e6b914a49855cc4e4de597800c95e40c7991fb76313862a7b2b4ca6ec9a00",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-6116",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-6116",
+        "base_commit": "e670ff76cbad80108bde9bab616b66771b8653cf",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-6116@sha256:5fb21e0b90b8df4b1da5876db062a0be7f601d12bce36ac6ae5c8a72b0005be9",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-7168",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-7168",
+        "base_commit": "4787fd64a4ca0dba5528b5651bddd254102fe9f3",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-7168@sha256:9eef4ab057f209925aaf40a4f644f82c2aa3b525e02e341d800a9794225fa68e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-7220",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-7220",
+        "base_commit": "56bf819c2f4eaf8b36bd8c42c06bb59d5a3bfc0f",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-7220@sha256:3a9400e85df17442bbeec61d93aa3290b700c3ae26c15c8b069ef994b660a3ed",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-7373",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-7373",
+        "base_commit": "7b77fc086aab8b3a8ebc890200371884555eea1e",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-7373@sha256:f54aca361060d4daad66263a4233589286af074725785be8c893b7f30b697190",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-7432",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-7432",
+        "base_commit": "e6e300e729dd33956e5448d8be9a0b1540b4e53a",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-7432@sha256:5ec7065f9477542610ea5137247539d8f1c9762112803b0690d5ccb2e64d2f07",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-7490",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-7490",
+        "base_commit": "7f7a36478abe7dd1fa993b115d22606aa0e35e88",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-7490@sha256:9e10d2e75d41e6f6325949d19d6a8a033d1f5d5fd6d4ce53ad483eb8951a417f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-8365",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-8365",
+        "base_commit": "4964b468c83c06971eb743fbc57cc404f760c573",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-8365@sha256:ad963610bf29e6d0df24f5eab20df20ada6db050f21434f2dd329075286c4044",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-8906",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-8906",
+        "base_commit": "69356d20cfee9a81972dcbf93d8caf9eabe113e8",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-8906@sha256:53dd43167ba7e232e1964e8be0d5bc72652f2dddffe4d7741ea7b531a46e5ef1",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "pytest-dev__pytest-9359",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/pytest-dev__pytest-9359",
+        "base_commit": "e2ee3144ed6e241dea8d96215fcdca18b3892551",
+        "amd64_image": "swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-9359@sha256:2e02a2ef0319324258f44b86e78e1a6a3da4ecc939449dc35b025ce8c6629c39",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-10297",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-10297",
+        "base_commit": "b90661d6a46aa3619d3eec94d5281f5888add501",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-10297@sha256:58b80e9100f9d107291b5ea37c76583ed4851d8e18ec07aef197f1803a290986",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-10508",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-10508",
+        "base_commit": "c753b77ac49e72ebc0fe5e3c2369fe628f975017",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-10508@sha256:4c25a7511f252ed93ce8555f6bb84ffb8d56baa46151e3df5b4338cb2f228677",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-10949",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-10949",
+        "base_commit": "3b5abf76597ce6aff76192869f92647c1b5259e7",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-10949@sha256:e0cc1b968460023cfd99ab5f830f5bfa45444fab00d9e05b7ece491be0e0bd0e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-11040",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-11040",
+        "base_commit": "96a02f3934952d486589dddd3f00b40d5a5ab5f2",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-11040@sha256:cab6b76525c41a66adee15e6ff56e3af6c6ef89a1bfa90f3ae57e18ba503f4b7",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-11281",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-11281",
+        "base_commit": "4143356c3c51831300789e4fdf795d83716dbab6",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-11281@sha256:7dcd4bbcd034344e7bceb977ec95152a336cdeb1038872b3953f417438d9b537",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-12471",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-12471",
+        "base_commit": "02dc9ed680e7f53f1b0d410dcdd37341c7958eb1",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-12471@sha256:57ac1dbdfb6e37c3ab6f8ec5d4a5374369f0b32dc4ffe895e49141e0a7901f5c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-13142",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-13142",
+        "base_commit": "1c8668b0a021832386470ddf740d834e02c66f69",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-13142@sha256:4c8ca46bcd30baef533c24ebbabe64158d2936e563be493b8a3224da52d17c84",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-13241",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-13241",
+        "base_commit": "f8b108d0c6f2f82b2dc4e32a6793f9d9ac9cf2f4",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-13241@sha256:c0642266b18a43d23c5264936b3bd775e43d12a781709b2f2e834d96b3ac544c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-13439",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-13439",
+        "base_commit": "a62775e99f2a5ea3d51db7160fad783f6cd8a4c5",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-13439@sha256:0c61d64ae4c3b8a215ecc4f8efbde87dd6bb9d2583579a82b24ecc7780631775",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-13496",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-13496",
+        "base_commit": "3aefc834dce72e850bff48689bea3c7dff5f3fad",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-13496@sha256:adee9f4911a853e64f9ae4ebd7b1bf32615cbf52c3210873e9a752fb5fb975e6",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-13497",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-13497",
+        "base_commit": "26f690961a52946dd2f53bf0fdd4264b2ae5be90",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-13497@sha256:7e942cb7210537da252f3949da8faae36f516c9f1d51492e931c5908a70f62b0",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-13584",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-13584",
+        "base_commit": "0e3c1879b06d839171b7d0a607d71bbb19a966a9",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-13584@sha256:5ca83e8c588bfede26f650da0d725c7093d3e57105586522f9d2829e30117b8c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-13779",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-13779",
+        "base_commit": "b34751b7ed02b2cfcc36037fb729d4360480a299",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-13779@sha256:f7188477fd1e48e0e9bb1efa8a47068979127e1995fbab4c9eb3b04eaadf0618",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-14087",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-14087",
+        "base_commit": "a5743ed36fbd3fbc8e351bdab16561fbfca7dfa1",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-14087@sha256:b0e9f68baa5df7a97e08f89cfc3c185597b640fff66b9b7dce4664ea884251ea",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-14092",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-14092",
+        "base_commit": "df7dd8391148a873d157328a4f0328528a0c4ed9",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-14092@sha256:f578f100f3ded6c71827d2d116554486e50c4e67fca393b615d2a568bd5a16a3",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-14894",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-14894",
+        "base_commit": "fdbaa58acbead5a254f2e6d597dc1ab3b947f4c6",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-14894@sha256:3b94dd629c4719b4983860c1e488c2fe8b6550f5e825c23d08c8888862810d2b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-14983",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-14983",
+        "base_commit": "06632c0d185128a53c57ccc73b25b6408e90bb89",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-14983@sha256:96e1896b74d100457d8d82f3683ea4c6f807235755f89cc61862f0da7f5f5836",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-15512",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-15512",
+        "base_commit": "b8a4da8baa1137f173e7035f104067c7d2ffde22",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-15512@sha256:b2854e68b923a7e27d3776a4041f8a861c1b5004f0c4bd3aa06dd0d4c40d8d0c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-15535",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-15535",
+        "base_commit": "70b0ddea992c01df1a41588fa9e2d130fb6b13f8",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-15535@sha256:65cf79c7c9e89c316c11acdda5f276285fb67970f0ff865e1e783f801eec7e53",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-25500",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-25500",
+        "base_commit": "4db04923a754b6a2defa1b172f55d492b85d165e",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-25500@sha256:df7a2e1ab0044c940c73e9ceb13d28da43ed4a6f2c76135e10e66d1e670e8591",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-25570",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-25570",
+        "base_commit": "cd25abee0ad0ac95225d4a9be8948eff69f49690",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-25570@sha256:1695a8bffe628d4c20c41b56f656908116024d846290da6597b4e603889dfa62",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-25638",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-25638",
+        "base_commit": "6adb209acd63825affc884abcd85381f148fb1b0",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-25638@sha256:c3ebacdb13d733bbe46f2f852fa60a17931910ae4338b461dd863e38293b82f0",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "scikit-learn__scikit-learn-25747",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/scikit-learn__scikit-learn-25747",
+        "base_commit": "2c867b8f822eb7a684f0d5c4359e4426e1c9cfe0",
+        "amd64_image": "swebench/sweb.eval.x86_64.scikit-learn_1776_scikit-learn-25747@sha256:557967b5382d23ea1842e6dc9ba11e4816756c6bde57243523a64f8a404141fa",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-10325",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-10325",
+        "base_commit": "7bdc11e87c7d86dcc2a087eccb7a7c129a473415",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-10325@sha256:32e0fe0fa8f3c0b48fc50cee82b94da766d5f876b94a4468143c06628fdd77c7",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-10451",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-10451",
+        "base_commit": "195e911f1dab04b8ddeacbe04b7d214aaf81bb0b",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-10451@sha256:244c5794ef548982322d967e0c3d9f15e311d27b980636645f41a58b0f2f92c4",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-11445",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-11445",
+        "base_commit": "71db08c05197545944949d5aa76cd340e7143627",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-11445@sha256:fec58c84a7ccc38fdceb65528bfb6fb923f038cb1dc95de1f79c0a85e2dde4f2",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-7686",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-7686",
+        "base_commit": "752d3285d250bbaf673cff25e83f03f247502021",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-7686@sha256:8e1b3f5800601fd6166d51cf58a9f49d60fb5cf63401458c0890c5fae8f3011d",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-7738",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-7738",
+        "base_commit": "c087d717f6ed183dd422359bf91210dc59689d63",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-7738@sha256:908d80e3f2cb27da3fa10152c4da53d3be5389d39468339aad5563fda8f8e65d",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-7975",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-7975",
+        "base_commit": "4ec6cbe341fd84468c448e20082c778043bbea4b",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-7975@sha256:6599f73068049dd8fe352bc84b617b8fa2d5b376083160f8f3c1e9a47e6751f2",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-8273",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-8273",
+        "base_commit": "88b81a06eb635a1596617f8971fa97a84c069e93",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8273@sha256:1a24d35093ca84da7e202e76c38859438281b3808936ad87d78404ad9114c739",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-8282",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-8282",
+        "base_commit": "2c2335bbb8af99fa132e1573bbf45dc91584d5a2",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8282@sha256:ed33c4edb0f6e40c6ddc450cfacfd216e74ca2076ed17425df4786c89c09dd7b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-8435",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-8435",
+        "base_commit": "5d8d6275a54f2c5fb72b82383b5712c22d337634",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8435@sha256:cbac452bf082c557820b78763d145c74780eab9ec7d58bec138e200f3289b772",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-8474",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-8474",
+        "base_commit": "3ea1ec84cc610f7a9f4f6b354e264565254923ff",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8474@sha256:d43c7c58edc9f70a23b5b4d7a039d0cf0bbde72fbf667590b79772f3677f44f4",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-8506",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-8506",
+        "base_commit": "e4bd3bd3ddd42c6642ff779a4f7381f219655c2c",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8506@sha256:63dfc9e06aecd26d6b76eb4bda169638e26976d4318fb1baf20d6977dc6e1def",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-8595",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-8595",
+        "base_commit": "b19bce971e82f2497d67fdacdeca8db08ae0ba56",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8595@sha256:d24f9894d781546578028592ad7630cb40973b69af4705582b5e274afc573628",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-8627",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-8627",
+        "base_commit": "332d80ba8433aea41c3709fa52737ede4405072b",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8627@sha256:04021b2c427e043e32f595a6de6c91e0f575eec3b23fbe50a42fc7c9249f0498",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-8713",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-8713",
+        "base_commit": "3ed7590ed411bd93b26098faab4f23619cdb2267",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8713@sha256:7ba9df7ec272f679584db9aede948951ff220b69c55076f0ca54e2777cd80f8e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-8721",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-8721",
+        "base_commit": "82ef497a8c88f0f6e50d84520e7276bfbf65025d",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8721@sha256:8f02afdb324767a2e56b7940569ea822cfa58c3c1f0ef9a910162d21cf52c3f5",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sphinx-doc__sphinx-8801",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sphinx-doc__sphinx-8801",
+        "base_commit": "7ca279e33aebb60168d35e6be4ed059f4a68f2c1",
+        "amd64_image": "swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8801@sha256:713ff4129c270f8a2e3db383a1090077c758dfcdd45c53ce3bcb86e1ae7ddae4",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-11400",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-11400",
+        "base_commit": "8dcb12a6cf500e8738d6729ab954a261758f49ca",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-11400@sha256:a9127c8893792545a1534e34773cbe1049ec2e39dbb5d7808bb1ceff76b84273",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-11870",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-11870",
+        "base_commit": "5c2e1f96a7ff562d4a778f4ca9ffc9c81557197e",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-11870@sha256:fbab7ed8fd0f31af2f041edaba8ddbc0f5571f7d021e789b8bc0057d165ccfd6",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-11897",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-11897",
+        "base_commit": "e2918c1205c47345eb73c9be68b14c0f15fdeb17",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-11897@sha256:a799499d74a36201d21b2dbb1f8f14fb9a2a6dae16ceb32debcc485e9df7289d",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-12171",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-12171",
+        "base_commit": "ca6ef27272be31c9dc3753ede9232c39df9a75d8",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-12171@sha256:4e20c984fd96241e91cfd507845bb53aac38b2b9cdf4c5a00f8c25ae94e2a2e3",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-12236",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-12236",
+        "base_commit": "d60497958f6dea7f5e25bc41e9107a6a63694d01",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-12236@sha256:d767f3ac506efa1e75534b2e16cd6faae0b8b0184d9cf86fe8e3e09ad8609482",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-12419",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-12419",
+        "base_commit": "479939f8c65c8c2908bbedc959549a257a7c0b0b",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-12419@sha256:f78a02916b66645a5325eb515192081890cfc77a103202d5b611d3b2d4b77893",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-12454",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-12454",
+        "base_commit": "d3fcdb72bfcbb560eb45264ac1c03f359436edef",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-12454@sha256:2eea525d4f7b0399e7b9de20458e0499ab364d4780f51c6a8252d32190716640",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-12481",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-12481",
+        "base_commit": "c807dfe7569692cad24f02a08477b70c1679a4dd",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-12481@sha256:bb526b7d1c4a160d96d3ab925a6b382194a19bf77a72df71e220ce19fe924e7f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13031",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13031",
+        "base_commit": "2dfa7457f20ee187fbb09b5b6a1631da4458388c",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13031@sha256:067e63442eb90f260defbdd2ecb27bb8389449ba889cc7f98fbb1c7585e37b49",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13043",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13043",
+        "base_commit": "a3389a25ec84d36f5cf04a4f2562d820f131db64",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13043@sha256:1a43ce8aba21d1a05164e5ea83759963e3ce896a54ebb3db77988eaeaf51d9a3",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13146",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13146",
+        "base_commit": "b678d8103e48fdb1af335dbf0080b3d5366f2d17",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13146@sha256:61178d021a450d1d088c05a40c50039f1d8f93795f47825dd5d3a35c5514cb73",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13177",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13177",
+        "base_commit": "662cfb818e865f580e18b59efbb3540c34232beb",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13177@sha256:0100df10c6ec45b8e681b4f5b42ada91574d7b2120d8fe09e8705ab9c465f14e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13437",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13437",
+        "base_commit": "674afc619d7f5c519b6a5393a8b0532a131e57e0",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13437@sha256:f706d9c0f73fd8e26f94db6cac32863a074f2a887eab3be9895242e398d261fb",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13471",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13471",
+        "base_commit": "3546ac7ed78e1780c1a76929864bb33330055740",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13471@sha256:d482a35ef87139eb383967e8a9c5d869c897a6ee3308cdf6570fd247a8374750",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13480",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13480",
+        "base_commit": "f57fe3f4b3f2cab225749e1b3b38ae1bf80b62f0",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13480@sha256:98270682f9052def68c8c42f78fb6ce6573f2dc7b8cb7fe741139a0543b30e21",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13647",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13647",
+        "base_commit": "67e3c956083d0128a621f65ee86a7dacd4f9f19f",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13647@sha256:dfa0b51faf18208c3b9fdb505eafc2db866fed25c158d211617d23606c3539fe",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13773",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13773",
+        "base_commit": "7121bdf1facdd90d05b6994b4c2e5b2865a4638a",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13773@sha256:be304d53edad108e694710cd6605256c905f0255ff97af932f600d1f226ef692",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13895",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13895",
+        "base_commit": "4da0b64558e9551a11a99bccc63557ba34f50c58",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13895@sha256:9e2d542b7e4b9c0b710a2fd793836100391c0d7a7697da228723ce53234006a7",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13915",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13915",
+        "base_commit": "5c1644ff85e15752f9f8721bc142bfbf975e7805",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13915@sha256:8826acc7413f8e7e55bb488d2fcb4a9da3cd3dd73c7abda821e5496804383175",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-13971",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-13971",
+        "base_commit": "84c125972ad535b2dfb245f8d311d347b45e5b8a",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-13971@sha256:cc0369f168735cf7b9add74f5d3a50cf3c51a03549b798fa853181633ed2921a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-14024",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-14024",
+        "base_commit": "b17abcb09cbcee80a90f6750e0f9b53f0247656c",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-14024@sha256:ccf87c58654145571ca4be1725cfe40667a462b7efb4a25b51b94004e48d80d8",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-14308",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-14308",
+        "base_commit": "fb536869fb7aa28b2695ad7a3b70949926b291c4",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-14308@sha256:df074e8d710af0dd9b9ebe856211c83ec13759699d0854e390ab794e355494ea",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-14317",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-14317",
+        "base_commit": "fb536869fb7aa28b2695ad7a3b70949926b291c4",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-14317@sha256:48e2b73efef7565d3d0d010683e1df539b11823099a212a37fb4d0a62abc37c7",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-14396",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-14396",
+        "base_commit": "f35ad6411f86a15dd78db39c29d1e5291f66f9b5",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-14396@sha256:2d294ae08deefc25918bacf8376662b88a639a22a63b1a0f62badb2c89d85973",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-14774",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-14774",
+        "base_commit": "8fc63c2d71752389a44367b8ef4aba8a91af6a45",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-14774@sha256:1c3e7e826b3d32c7f2dc155470ace96063278ed78af91b9f0c8268824053779e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-14817",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-14817",
+        "base_commit": "0dbdc0ea83d339936da175f8c3a97d0d6bafb9f8",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-14817@sha256:5bd1a67d6f489b2dc4d55720fccef8fe9cafbfdfbce7fc55ad138afa27b8a9de",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-15011",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-15011",
+        "base_commit": "b7c5ba2bf3ffd5cf453b25af7c8ddd9a639800cb",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-15011@sha256:f8d13e691a2572c008fd0abadd1b95aab12c06aec9180b815d2781076ec87a8b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-15308",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-15308",
+        "base_commit": "fb59d703e6863ed803c98177b59197b5513332e9",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-15308@sha256:680c0996a3017e221a5c45aa535faf1dab9b0ef38a6ee1863ef894d079f94934",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-15345",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-15345",
+        "base_commit": "9ef28fba5b4d6d0168237c9c005a550e6dc27d81",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-15345@sha256:49fa46483cdfdc4d806eadfb39f7cb50ef608fb5037ccb6d38687984f3e9fa34",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-15346",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-15346",
+        "base_commit": "9ef28fba5b4d6d0168237c9c005a550e6dc27d81",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-15346@sha256:543331a88d9bae6df0eb50f0167c32b07648dc106d1fd815ed62a0ad5e5fa046",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-15609",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-15609",
+        "base_commit": "15f56f3b0006d2ed2c29bde3c43e91618012c849",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-15609@sha256:5aa1d44fd0312946e22f025db97af815c2df83c4280dd9ca0ef7577fa7df5db6",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-15678",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-15678",
+        "base_commit": "31c68eef3ffef39e2e792b0ec92cd92b7010eb2a",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-15678@sha256:9a5060c90f70de5db6c58046ecd7d6143422877e2b468cf3ac3e7edce885b01d",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-16106",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-16106",
+        "base_commit": "0e987498b00167fdd4a08a41c852a97cb70ce8f2",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-16106@sha256:1e22b088a32a673ddbecc61b629eff6c26cdd31a51d259e12149f7fd1cd7b4f0",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-16281",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-16281",
+        "base_commit": "41490b75f3621408e0468b0e7b6dc409601fc6ff",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-16281@sha256:14d08bac387bf3925f71e4292087142f1f540481413ec82531a4da92fb99faed",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-16503",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-16503",
+        "base_commit": "a7e6f093c98a3c4783848a19fce646e32b6e0161",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-16503@sha256:bdba4e9a27fbe911d14a0819f193c8416353c70849ec85984d0849f900a2afee",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-16792",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-16792",
+        "base_commit": "09786a173e7a0a488f46dd6000177c23e5d24eed",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-16792@sha256:2cb71c3fea9be968b204a39cb1af5d178f32af3cf916b0383f51c65f9c3181ab",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-16988",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-16988",
+        "base_commit": "e727339af6dc22321b00f52d971cda39e4ce89fb",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-16988@sha256:7f1d58f4177d0a0eebaceb69a8bfb901e7961da3d83cd3913cb9ed8f69dd4509",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-17022",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-17022",
+        "base_commit": "f91de695585c1fbc7d4f49ee061f64fcb1c2c4d8",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-17022@sha256:4556e06dcd1fdb5b01a597a2de8e118ddc8849dc4430f12b2655582f4efe93f4",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-17139",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-17139",
+        "base_commit": "1d3327b8e90a186df6972991963a5ae87053259d",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-17139@sha256:9a8111742e0548816d920a27ba259ebde7647f4e46e7522c61647990dd35713c",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-17630",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-17630",
+        "base_commit": "58e78209c8577b9890e957b624466e5beed7eb08",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-17630@sha256:9b839af473048e347a0f435e920bfa5206e588b59a5187bef826352ac05ae73a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-17655",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-17655",
+        "base_commit": "f5e965947af2410ded92cfad987aaf45262ea434",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-17655@sha256:2c0112dbc185b0d0da1030ceffdb92b7730208caadb2cfbaac8af6ed9fcbddcf",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-18057",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-18057",
+        "base_commit": "62000f37b8821573ba00280524ffb4ac4a380875",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-18057@sha256:a56d5da6faf39f1529ea4acb09a37aaaad1798d9a1298e3ae5ead6d7b8b58cad",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-18087",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-18087",
+        "base_commit": "9da013ad0ddc3cd96fe505f2e47c63e372040916",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-18087@sha256:7366161345db427a35b5c64a93b106072481023a24b17a42ed83589c4cdfdde1",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-18189",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-18189",
+        "base_commit": "1923822ddf8265199dbd9ef9ce09641d3fd042b9",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-18189@sha256:7f3118533e22d47a19b9784ab86c7b0251cd6fec0acc71f7fe8805809f052724",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-18199",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-18199",
+        "base_commit": "ba80d1e493f21431b4bf729b3e0452cd47eb9566",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-18199@sha256:3fbc4ff81609eecb1f26540433cbc24b8f6e5454472545e19180137e51883e3e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-18532",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-18532",
+        "base_commit": "74227f900b05009d4eed62e34a166228788a32ca",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-18532@sha256:c2c4bbb1fa8a6b6a18dff5455cfbb57dceb6dbb446c74529c92bde20220d3c32",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-18621",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-18621",
+        "base_commit": "b17ef6effe278d5b861d65896cc53442a6370d8f",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-18621@sha256:6ceb7424d50163dbea48b63200bb124317e530dd314cb29e1d98d8cafdc1b411",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-18698",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-18698",
+        "base_commit": "3dff1b98a78f28c953ae2140b69356b8391e399c",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-18698@sha256:9b8ce19f9470ecbe3390699d06db56a5bf92b49cd41e687a468156fd5d3e947f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-18835",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-18835",
+        "base_commit": "516fa83e69caf1e68306cfc912a13f36c434d51c",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-18835@sha256:33a6cf4afdb3257f284e3ca39cfa6ddaef96a3c5ae1e3b9e54e267c9f08d06d9",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-19007",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-19007",
+        "base_commit": "f9e030b57623bebdc2efa7f297c1b5ede08fcebf",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-19007@sha256:a65aaf0982578a7d2d81665c0845d9ad76d69ffd62c8ba8867c0ab3d9da28863",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
       },
       {
         "name": "sympy__sympy-19254",
@@ -20,7 +3014,9 @@
         "path": "tasks/sympy__sympy-19254",
         "base_commit": "e0ef1da13e2ab2a77866c05246f73c871ca9388c",
         "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-19254@sha256:b0fa5c116818a60cfb71ccfb48d1620b50cdf161f6bc9e6b4db2825fb0db5224",
-        "submission_paths": ["/logs/artifacts/submission.patch"]
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
       },
       {
         "name": "sympy__sympy-19487",
@@ -29,7 +3025,9 @@
         "path": "tasks/sympy__sympy-19487",
         "base_commit": "25fbcce5b1a4c7e3956e6062930f4a44ce95a632",
         "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-19487@sha256:3289b9f407aee8220ef6156268ea4c909eb9f50b0c69238688cf28ce74fa585c",
-        "submission_paths": ["/logs/artifacts/submission.patch"]
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
       },
       {
         "name": "sympy__sympy-20049",
@@ -38,7 +3036,9 @@
         "path": "tasks/sympy__sympy-20049",
         "base_commit": "d57aaf064041fe52c0fa357639b069100f8b28e1",
         "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20049@sha256:c1fea871185f0ae6437a238804b9274a7150eca843567ed88eddfa020c567ea3",
-        "submission_paths": ["/logs/artifacts/submission.patch"]
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
       },
       {
         "name": "sympy__sympy-20154",
@@ -47,8 +3047,268 @@
         "path": "tasks/sympy__sympy-20154",
         "base_commit": "bdb49c4abfb35554a3c8ce761696ffff3bb837fe",
         "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20154@sha256:4cd606cd10023eb7df7faa8b7affcef72750cd25fb4f8bf29d491c46bcd52f4b",
-        "submission_paths": ["/logs/artifacts/submission.patch"]
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-20212",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-20212",
+        "base_commit": "a106f4782a9dbe7f8fd16030f15401d977e03ae9",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20212@sha256:10acbbc49c1905919809c0d8ca6305ee0d5e546fa541246c18fca3e222f79626",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-20322",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-20322",
+        "base_commit": "ab864967e71c950a15771bb6c3723636026ba876",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20322@sha256:cb516304be73d7edcb40b14e5f3113331bd70bd12287481f03e9a6071e4e3299",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-20442",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-20442",
+        "base_commit": "1abbc0ac3e552cb184317194e5d5c5b9dd8fb640",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20442@sha256:74f959bc28c3b74c0e9998d1f347342dedd4982faa7600bfda60319896dcf9ad",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-20590",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-20590",
+        "base_commit": "cffd4e0f86fefd4802349a9f9b19ed70934ea354",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20590@sha256:bcdff110a35d19a6838fde5f678d1b5103610234bd034e5703df46878aad3b63",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-20639",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-20639",
+        "base_commit": "eb926a1d0c1158bf43f01eaf673dc84416b5ebb1",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20639@sha256:08d37b0bda210b9a1bc94e0ed0d783937a2d91c3d87a6726352bc3637a55cd4d",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-21055",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-21055",
+        "base_commit": "748ce73479ee2cd5c861431091001cc18943c735",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21055@sha256:bcbe5fa3063483ae43e0fa3d2d026075ac15b756d8f390e9e53c549542663f3e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-21171",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-21171",
+        "base_commit": "aa22709cb7df2d7503803d4b2c0baa7aa21440b6",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21171@sha256:3db19d1ac31cf2c71e841d8c2a3db7341f829402a408e4fa2a22e2e021450303",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-21379",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-21379",
+        "base_commit": "624217179aaf8d094e6ff75b7493ad1ee47599b0",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21379@sha256:5a10d273b1b5ae6e4d70c0242dc9c9ecb2e111945e6aa8093b7d1e4160b4dc3b",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-21612",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-21612",
+        "base_commit": "b4777fdcef467b7132c055f8ac2c9a5059e6a145",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21612@sha256:437a3dfe3b51447b629262879d8dec70c613fd9a1ef9e475454546c7fa740e9a",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-21614",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-21614",
+        "base_commit": "b4777fdcef467b7132c055f8ac2c9a5059e6a145",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21614@sha256:1ecde513410482e3926c7816b74cbbbb7997ac03041b7daed6c82f5758265861",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-21627",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-21627",
+        "base_commit": "126f80578140e752ad5135aac77b8ff887eede3e",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21627@sha256:0bad099620683e7874598d3cb8ccf648d99baca443564175cec30c875baefd41",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-21847",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-21847",
+        "base_commit": "d9b18c518d64d0ebe8e35a98c2fb519938b9b151",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-21847@sha256:9a45ffe20cac4243930e8c5b2b065adbc08f476c880d7465ca0fbfb9f98c6456",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-22005",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-22005",
+        "base_commit": "2c83657ff1c62fc2761b639469fdac7f7561a72a",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-22005@sha256:0e2364114c7af581e48fd4643c695848de4176f5f6cef805bb0a479f17c85fd1",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-22714",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-22714",
+        "base_commit": "3ff4717b6aef6086e78f01cdfa06f64ae23aed7e",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-22714@sha256:85c5000278d19e07ccbfc130861bb3407d4e5494ecbe6ca4cfff0b5e58f25815",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-22840",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-22840",
+        "base_commit": "d822fcba181155b85ff2b29fe525adbafb22b448",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-22840@sha256:d1f49043c4927485fa02a3ddb2d37963def4b9d53bea9bafd2eeca17eaa7293f",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-23117",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-23117",
+        "base_commit": "c5cef2499d6eed024b0db5c792d6ec7c53baa470",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-23117@sha256:11a7f758334794eaa43a728a31ccead1e86a31243793a219d9b755bfb904ebf7",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-23191",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-23191",
+        "base_commit": "fa9b4b140ec0eaf75a62c1111131626ef0f6f524",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-23191@sha256:d3d81e4ab31f3344cd53fd11e6ccf4348446748ec89dc271460661f1c1b37af5",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-23262",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-23262",
+        "base_commit": "fdc707f73a65a429935c01532cd3970d3355eab6",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-23262@sha256:c29e2fbcef442fa9833021bc492ea4c39bc71a0fb606e61fc5521a841ae88b2e",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-24066",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-24066",
+        "base_commit": "514579c655bf22e2af14f0743376ae1d7befe345",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24066@sha256:ec5b2dae801e4f826626498228a2579a6bf1600fc4b7bf9091670b5dca3343bf",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-24102",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-24102",
+        "base_commit": "58598660a3f6ab3d918781c4988c2e4b2bdd9297",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24102@sha256:30d60cd1b06ef9866de480ece91dd69cc63d73954664c1e963da28a000d0b086",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-24152",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-24152",
+        "base_commit": "b9af885473ad7e34b5b0826cb424dd26d8934670",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24152@sha256:93355b3cd26ea77272c3dfbefde63b68a78620dff9376dcba286d614a008a6d1",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-24213",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-24213",
+        "base_commit": "e8c22f6eac7314be8d92590bfff92ced79ee03e2",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24213@sha256:a458bae7d95f469fa8e438da0a39a2d168e93f70239155dbd833934948f2b296",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
+      },
+      {
+        "name": "sympy__sympy-24909",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-24909",
+        "base_commit": "d3b4158dea271485e3daa11bf82e69b8dab348ce",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-24909@sha256:e3ffa354fe1a6e35ad8f41658ffee2bb876c099cad96901b1adbed48d8d757bc",
+        "submission_paths": [
+          "/logs/artifacts/submission.patch"
+        ]
       }
-    ]
+    ],
+    "upstream": {
+      "dataset": "SWE-bench/SWE-bench_Lite",
+      "revision": "b0dde1093fe417d83b7184254edf8199c1f0dff5",
+      "split": "test"
+    }
   }
 ]

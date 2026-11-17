@@ -88,6 +88,8 @@ def prepare(suite, destination, catalog, selection):
     dataset = read_json(suite / "public-cases.json")
     records = {record["TASK"]: record for record in dataset["tasks"]}
     for task_id in selection:
+        if task_id != SMOKE and task_id not in records:
+            raise ValueError(f"Atlas task {task_id} has no prepared case record for the bundled sandbox")
         case_dir = destination / task_id
         shutil.copytree(suite / "cases" / SMOKE, case_dir, ignore=shutil.ignore_patterns("__pycache__"))
         hosts = {endpoint.hostname}
