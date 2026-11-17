@@ -13,8 +13,7 @@ from payload import cli_log_lines, run_metrics
 
 def export_atif(logs):
     run = json.loads((logs / "talos-run.json").read_text())
-    if run["exit_code"] != 0:
-        return
+    failed = run["exit_code"] != 0
     trace = json.loads((logs / "talos-trajectory.json").read_text())
     transcript = json.loads((logs / "talos-transcript.json").read_text())
     steps = []
@@ -63,13 +62,20 @@ def export_atif(logs):
             current.tool_calls.append(call)
             calls[data["callId"]] = current
 
-    if not steps or steps[0].source != "user" or not any(step.source == "agent" for step in steps):
-        raise ValueError("The Talos transcript must contain user and agent content")
+    if not steps or steps[0].source != "user" or (
+        not failed and not any(step.source == "agent" for step in steps)
+    ):
+        raise ValueError(
+            "The Talos transcript must start with user content and include agent content on success"
+        )
     usage = (run_metrics(cli_log_lines(logs)) or {}).get("usage", {})
     trajectory = Trajectory(
         session_id=trace["identity"]["sessionId"],
         agent=Agent(name="talos", version=run["version"], model_name=run["model"].replace(":", "/", 1)),
         steps=steps,
+        extra={"talos_exit_code": run["exit_code"],
+               "talos_execution_status": "interrupted" if run["exit_code"] is None else "failed"}
+        if failed else None,
         final_metrics=FinalMetrics(
             total_steps=len(steps),
             total_prompt_tokens=usage.get("input_tokens"),
