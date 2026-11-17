@@ -563,6 +563,127 @@ async fn unconfirmed_tool_cleanup_is_preserved_in_run_settlement() {
 }
 
 #[tokio::test]
+async fn forced_child_interrupt_does_not_block_parent_settlement() {
+    use talos_error::{ApiError, ErrorCode};
+    use talos_run_control::{
+        ActiveRunControl, CancellationMode, CancellationPolicy, CleanupReport, RunTaskCompletion,
+        RunTermination, SettlementKind,
+    };
+    use talos_tools::{register_subagent_tools, AgentControl, AgentControlFuture};
+    use talos_types::{
+        AgentTreeSnapshot, AgentTurnRef, FollowUpSubagentRequest, InterruptSubagentRequest,
+        ListSubagentsRequest, SendMessageResult, SendSubagentMessageRequest, SpawnSubagentRequest,
+        SubagentSnapshot, SubagentSpawnResult, WaitSubagentRequest,
+    };
+
+    struct ChildControl(Arc<ActiveRunControl>);
+
+    impl AgentControl for ChildControl {
+        fn interrupt(
+            &self,
+            _request: InterruptSubagentRequest,
+        ) -> AgentControlFuture<'_, SubagentSnapshot> {
+            Box::pin(async move {
+                let child = self
+                    .0
+                    .settle(RunTermination::Cancelled {
+                        policy: CancellationPolicy {
+                            grace: Duration::ZERO,
+                        },
+                    })
+                    .await;
+                assert_eq!(
+                    child.kind,
+                    SettlementKind::Cancelled(CancellationMode::Forced)
+                );
+                assert!(matches!(
+                    child.cleanup,
+                    CleanupReport::Unconfirmed { count: 1, .. }
+                ));
+                Err(TalosError::new(
+                    ErrorCode::RunCleanupUnconfirmed,
+                    "Subagent cleanup is unconfirmed for 1 task(s)",
+                ))
+            })
+        }
+
+        fn spawn(&self, _: SpawnSubagentRequest) -> AgentControlFuture<'_, SubagentSpawnResult> {
+            unreachable!()
+        }
+
+        fn send_message(
+            &self,
+            _: SendSubagentMessageRequest,
+        ) -> AgentControlFuture<'_, SendMessageResult> {
+            unreachable!()
+        }
+
+        fn wait(&self, _: WaitSubagentRequest) -> AgentControlFuture<'_, SubagentSnapshot> {
+            unreachable!()
+        }
+
+        fn follow_up(
+            &self,
+            _: FollowUpSubagentRequest,
+        ) -> AgentControlFuture<'_, SubagentSnapshot> {
+            unreachable!()
+        }
+
+        fn list(&self, _: ListSubagentsRequest) -> AgentControlFuture<'_, AgentTreeSnapshot> {
+            unreachable!()
+        }
+    }
+
+    let child = Arc::new(ChildControl(Arc::new(ActiveRunControl::new(
+        AgentTurnRef::new("child-session", "child-turn"),
+    ))));
+    let child_task = child
+        .0
+        .tasks()
+        .spawn(|_| std::future::pending::<RunTaskCompletion<()>>())
+        .unwrap();
+    let parent = Arc::new(ActiveRunControl::new(AgentTurnRef::new("s1", "turn-1")));
+    let mut execution_context = test_execution_context();
+    execution_context.run_tasks = parent.tasks();
+    let registry = Arc::new(ToolRegistry::new());
+    register_subagent_tools(&registry);
+    registry.set_agent_control(child);
+    let outputs = SequentialToolExecutor
+        .execute(
+            &execution_context,
+            registry,
+            &[ToolExecutionInput {
+                call_id: "interrupt-child".to_string(),
+                tool_name: "interrupt_agent".to_string(),
+                arguments: json!({ "target": { "type": "directChild", "name": "child" } }),
+            }],
+        )
+        .await
+        .unwrap();
+    let [output] = outputs.as_slice() else {
+        panic!("expected one interrupt result");
+    };
+    assert!(child_task.await.unwrap_err().is_cancelled());
+    let parent_result = parent
+        .settle(RunTermination::Completed {
+            timeout: Duration::from_secs(1),
+        })
+        .await;
+    assert_eq!(parent_result.cleanup, CleanupReport::Confirmed);
+    assert!(output.is_error);
+    let payload = output.outcome.payload().unwrap();
+    let value = payload.structured_content().unwrap();
+    let error = serde_json::from_value::<ApiError>(value.clone()).unwrap();
+    assert_eq!(error.code, ErrorCode::RunCleanupUnconfirmed);
+    assert_eq!(
+        payload.envelope().content_items,
+        [talos_types::talos::TalosContentItem::Json {
+            value: value.clone().into()
+        }]
+    );
+}
+
+#[tokio::test]
 async fn runtime_carries_session_workspace_and_project_into_sandbox_environment() {
     let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
     let session_workspace = root.join("session-workspace");

@@ -272,9 +272,11 @@ child Turns all count against new children until settlement.
 Rejected admission returns `sessionBudgetExceeded` without starting execution.
 The spawn admission task owns cleanup of a rejected child even if the request
 is dropped. Repeating an interrupt can confirm cleanup of a cancelling child
-and release the slot. Parent Turns and existing message delivery, waiting, and
-interruption need no child slot. Separate primary Session trees admit
-independently.
+and release the slot. When a child reports unconfirmed cleanup, the interrupt
+tool returns the typed failure in its result. The child retains its cleanup
+ownership and slot. The calling Turn settles using cleanup of its own tasks.
+Parent Turns and existing message delivery, waiting, and interruption need no
+child slot. Separate primary Session trees admit independently.
 
 See [Subagent Turn admission](../../spec/fix-013-subagent-admission/design.md)
 for the policy and verification contract.
