@@ -207,6 +207,13 @@ claims; do not claim runtime behavior was tested by a Markdown check.
 
 ## Model connection acceptance
 
+The native OpenAI adapter retries HTTP 502, 503 and 504 gateway rejections
+before returning a response, with at most three total requests and one- then
+two-second backoff. It preserves the serialized request and final typed error.
+Accepted responses, transport failures, rate-limit rejections and interrupted
+streams retain their existing behavior; emitted model/tool blocks are never
+replayed by this policy.
+
 Native and custom model connections share HTTP defaults: 10 seconds to connect,
 120 seconds for a non-streaming response, 90 seconds of streaming read inactivity,
 and 900 seconds total for a stream. Explicit `http_timeouts` overrides take

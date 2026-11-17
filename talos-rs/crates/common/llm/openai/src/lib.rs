@@ -221,6 +221,37 @@ impl OpenAIProvider {
             })
     }
 
+    /// Retry rejected gateway requests before any response can reach the caller.
+    /// Accepted responses, transport failures and stream decoding retain their
+    /// original error behavior; retries never replay emitted model/tool blocks.
+    async fn send_request(mut request: reqwest::RequestBuilder) -> TalosResult<reqwest::Response> {
+        for attempt in 1..=3 {
+            let next = request.try_clone();
+            let response = request.send().await.map_err(|error| {
+                talos_llm_provider::transport_error("OpenAI HTTP request", error)
+            })?;
+            let status = response.status();
+            if attempt < 3 && matches!(status.as_u16(), 502..=504) {
+                if let Some(next) = next {
+                    tracing::warn!(
+                        attempt,
+                        http_status = status.as_u16(),
+                        "Retrying an OpenAI gateway rejection before response output"
+                    );
+                    drop(response);
+                    tokio::time::sleep(std::time::Duration::from_secs(attempt)).await;
+                    request = next;
+                    continue;
+                }
+            }
+            if !status.is_success() {
+                return Err(talos_llm_provider::http_rejection_error("OpenAI", response).await);
+            }
+            return Ok(response);
+        }
+        unreachable!("the final request returns its response or error")
+    }
+
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         self.validate_request_attachments(&request)?;
         match self.config.protocol {
@@ -239,23 +270,17 @@ impl OpenAIProvider {
         debug!("Request URL: {}", url);
         debug!("Request model: {}", openai_req.model);
 
-        let response = self
-            .clients
-            .for_request(false)
-            .post(&url)
-            .headers(headers)
-            .json(&talos_llm_provider::serialize_with_parameters(
-                &openai_req,
-                &request_parameters,
-            )?)
-            .send()
-            .await
-            .map_err(|e| talos_llm_provider::transport_error("OpenAI HTTP request", e))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            return Err(talos_llm_provider::http_rejection_error("OpenAI", response).await);
-        }
+        let response = Self::send_request(
+            self.clients
+                .for_request(false)
+                .post(&url)
+                .headers(headers)
+                .json(&talos_llm_provider::serialize_with_parameters(
+                    &openai_req,
+                    &request_parameters,
+                )?),
+        )
+        .await?;
 
         let openai_resp: chat_protocol::ChatCompletionResponse = response
             .json()
@@ -275,23 +300,17 @@ impl OpenAIProvider {
         debug!("Request URL: {}", url);
         debug!("Request model: {}", openai_req.model);
 
-        let response = self
-            .clients
-            .for_request(false)
-            .post(&url)
-            .headers(headers)
-            .json(&talos_llm_provider::serialize_with_parameters(
-                &openai_req,
-                &request_parameters,
-            )?)
-            .send()
-            .await
-            .map_err(|e| talos_llm_provider::transport_error("OpenAI HTTP request", e))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            return Err(talos_llm_provider::http_rejection_error("OpenAI", response).await);
-        }
+        let response = Self::send_request(
+            self.clients
+                .for_request(false)
+                .post(&url)
+                .headers(headers)
+                .json(&talos_llm_provider::serialize_with_parameters(
+                    &openai_req,
+                    &request_parameters,
+                )?),
+        )
+        .await?;
 
         let decode_error =
             |error| talos_llm_provider::transport_error("OpenAI response decoding", error);
@@ -334,23 +353,17 @@ impl OpenAIProvider {
         };
         let headers = self.build_headers();
 
-        let response = self
-            .clients
-            .for_request(true)
-            .post(&url)
-            .headers(headers)
-            .json(&talos_llm_provider::serialize_with_parameters(
-                &body,
-                &request_parameters,
-            )?)
-            .send()
-            .await
-            .map_err(|e| talos_llm_provider::transport_error("OpenAI HTTP request", e))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            return Err(talos_llm_provider::http_rejection_error("OpenAI", response).await);
-        }
+        let response = Self::send_request(
+            self.clients
+                .for_request(true)
+                .post(&url)
+                .headers(headers)
+                .json(&talos_llm_provider::serialize_with_parameters(
+                    &body,
+                    &request_parameters,
+                )?),
+        )
+        .await?;
 
         Ok(response)
     }
