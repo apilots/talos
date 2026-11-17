@@ -168,6 +168,13 @@ pub struct CommitTerminalSettlementParams {
 /// Narrow atomic Store commands for canonical Agent execution facts.
 #[async_trait]
 pub trait AgentExecutionStore: Send + Sync {
+    /// Observe the Session reset generation around multi-query canonical history reads.
+    /// Stores without destructive resets may leave this unsupported. Persistent
+    /// implementations must advance it atomically with removal of canonical facts.
+    async fn history_generation(&self, _session_id: &str) -> TalosResult<Option<u64>> {
+        Ok(None)
+    }
+
     /// Read exact original Input metadata for at most 1,000 Turn identities.
     /// No rows means those Turns have no automation binding; never infer from prompts.
     async fn read_automation_input_origins(
