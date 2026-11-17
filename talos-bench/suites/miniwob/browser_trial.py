@@ -57,7 +57,7 @@ def observe_episode(home, episode, stop, receipt):
         while not evaluate(connection, READY):
             if stop.wait(0.05):
                 return
-        evaluate(connection, f"Math.seedrandom({episode['seed']}); core.setDataMode('test'); core.startEpisodeReal();")
+        evaluate(connection, f"Math.seedrandom({episode['seed']}); core.startEpisodeReal();")
         if not evaluate(connection, "WOB_TASK_READY"):
             raise RuntimeError("The upstream MiniWoB++ page did not initialize")
         with urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1) as response:

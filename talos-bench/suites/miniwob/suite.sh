@@ -16,7 +16,4 @@ prepare_suite() {
   while IFS= read -r task; do selected+=("$task"); done <<< "$selection"
   uv run --python 3.12 python "$suite_dir/prepare.py" "$run_dir" "$repo_root/.tmp" "${selected[@]}"
   suite_args=(--path "$run_dir/task" --force-build)
-  if [[ ${#selected[@]} == 1 ]]; then
-    suite_args=(--path "$run_dir/task/$selection" --force-build)
-  fi
 }

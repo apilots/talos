@@ -424,9 +424,6 @@ def summarize(run, mode, repeats, runner_exit, require_trace, require_atif,
     passed = sum(trial["score"] >= threshold for trial in scored)
     costs = [trial["estimatedCostUsd"] for trial in trials if trial["estimatedCostUsd"] is not None]
     total_cost = sum(costs) if len(costs) == expected else None
-    workload_costs = [cost for trial in trials
-                      if (cost := (trial["workloadUsage"] or {}).get("estimatedCostUsd")) is not None]
-    workload_total = sum(workload_costs) if len(workload_costs) == expected else None
     cases = []
     for task in selected:
         attempts = [trial for trial in trials if trial["task"] == task]
@@ -471,9 +468,6 @@ def summarize(run, mode, repeats, runner_exit, require_trace, require_atif,
         "passRate": passed / len(scored) if scored else None,
         "meanEstimatedCostUsd": total_cost / expected if total_cost is not None else None,
         "estimatedCostPerPassUsd": total_cost / passed if total_cost is not None and passed else None,
-        "workloadCostCoveredTrials": len(workload_costs),
-        "meanWorkloadEstimatedCostUsd": workload_total / expected if workload_total is not None else None,
-        "workloadEstimatedCostPerPassUsd": workload_total / passed if workload_total is not None and passed else None,
         "complete": failure is None,
         "failure": failure,
         "tracedTrials": traced,
