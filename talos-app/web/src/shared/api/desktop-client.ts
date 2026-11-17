@@ -22,12 +22,15 @@ import type {
 } from "@talos/sdk-core";
 
 import type { TalosWebClient } from "./client";
+import type { AppIconDesktopBridge } from "@/shared/app-icons/catalog";
+
+type ProductDesktopBridge = DesktopRendererBridge & Partial<AppIconDesktopBridge>;
 
 interface DesktopWindow {
-  talos?: DesktopRendererBridge;
+  talos?: ProductDesktopBridge;
 }
 
-export function getDesktopBridge(): DesktopRendererBridge | undefined {
+export function getDesktopBridge(): ProductDesktopBridge | undefined {
   if (typeof window === "undefined") {
     return undefined;
   }

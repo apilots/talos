@@ -14,6 +14,7 @@ import {
   type UiSlice,
 } from "@/shared/store/ui-slice";
 import { createPersistStorage } from "@/shared/store/persist-storage";
+import { resolveAppIconId } from "@/shared/app-icons/catalog";
 
 import { createComputerSlice, type ComputerSlice } from "@/features/computers/store";
 
@@ -46,6 +47,8 @@ export const useAppStore = create<AppState>()(
           sessionAliasesByScope: typedState?.sessionAliasesByScope ?? currentState.sessionAliasesByScope,
           sidebarOpen: typedState?.sidebarOpen ?? currentState.sidebarOpen,
           uiTheme: typedState?.uiTheme ?? currentState.uiTheme,
+          appIconId: resolveAppIconId(typedState?.appIconId),
+          appIconDesktopFailed: false,
           locale: typedState?.locale ?? currentState.locale,
           workspaceSnapshots: restoreWorkspaces(typedState?.workspaceSnapshots),
           activeProjectId: currentState.activeProjectId,
@@ -60,6 +63,7 @@ export const useAppStore = create<AppState>()(
         selectedComputers: state.selectedComputers,
         composerDrafts: state.composerDrafts,
         uiTheme: state.uiTheme,
+        appIconId: state.appIconId,
         locale: state.locale,
         sidebarOpen: state.sidebarOpen,
         workspaceSnapshots: state.workspaceSnapshots,

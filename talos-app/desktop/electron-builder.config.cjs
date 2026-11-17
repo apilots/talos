@@ -5,6 +5,7 @@ const packageTarget = process.env.TALOS_DESKTOP_PACKAGE_TARGET ?? "desktop-mac";
 const outputDir = process.env.TALOS_DESKTOP_PACKAGE_DIR ?? path.join(repoRoot, `dist/products/dev/${packageTarget}`);
 const releaseBuild = process.env.TALOS_DESKTOP_RELEASE === "1";
 const macEntitlements = path.join(repoRoot, "build/desktop/mac/entitlements.mac.plist");
+const appIcon = path.join(repoRoot, "build/desktop/icons/portrait-light.png");
 const dmgBackground = path.join(repoRoot, "build/desktop/dmg/background.png");
 const packageArch = process.env.TALOS_PACKAGE_ARCH ?? (process.arch === "arm64" ? "arm64" : "amd64");
 const electronBuilderArch = packageArch === "arm64" ? "arm64" : "x64";
@@ -58,7 +59,7 @@ module.exports = {
   // Native application tools execute package resources and require a real cwd.
   asarUnpack: ["node_modules/**/*"],
   mac: {
-    icon: path.join(repoRoot, "build/desktop/icons/icon.icns"),
+    icon: appIcon,
     category: "public.app-category.productivity",
     hardenedRuntime: releaseBuild,
     gatekeeperAssess: false,
@@ -101,7 +102,7 @@ module.exports = {
     },
   },
   linux: {
-    icon: path.join(repoRoot, "build/desktop/icons/icon.png"),
+    icon: appIcon,
     category: "Utility",
     artifactName: `Talos-Desktop-\${version}-linux-${packageArch}.\${ext}`,
     target: [

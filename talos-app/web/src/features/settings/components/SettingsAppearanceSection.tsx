@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { SettingsPageState } from "../hooks/useSettingsPage";
 import { Panel } from "@/shared/ui/Panel";
 import { SectionHeader } from "./SectionPrimitives";
+import { SettingsAppIcons } from "./SettingsAppIcons";
 
 export function SettingsAppearanceSection({
   uiTheme,
@@ -36,6 +37,7 @@ export function SettingsAppearanceSection({
             <option value="light">{t("common:themeWhite")}</option>
           </select>
         </div>
+        <SettingsAppIcons />
         <button
           className="flex w-full items-center justify-between gap-6 py-4 text-left"
           onClick={() => setDesktopNotifications((current) => !current)}

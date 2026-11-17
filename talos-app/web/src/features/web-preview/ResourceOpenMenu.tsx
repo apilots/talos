@@ -1,6 +1,7 @@
 import type { FilePreviewDescriptor } from "@talos/sdk-core";
 import type { PreviewOpenTarget, PreviewOpenResource } from "@talos/sdk-app-server/desktop";
 import { getDesktopBridge } from "@/shared/api/desktop-client";
+import { AppIcon } from "@/shared/app-icons/AppIcon";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ExternalLink, Link2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -50,7 +51,7 @@ export function ResourceOpenMenu({ resource, preview: prepared }: { resource: Pr
       <DropdownMenu modal={false} open={menuOpen} onOpenChange={open => { setMenuOpen(open); if (open) setContainer(trigger.current?.closest("dialog") ?? null); }}>
         <DropdownMenuTrigger asChild><button ref={trigger} type="button" aria-label={t("openOptions")} className="flex h-full w-6 items-center justify-center rounded-r-lg border-l border-divider bg-hover/40 text-muted hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><ChevronDown aria-hidden="true" size={13} /></button></DropdownMenuTrigger>
         <DropdownMenuContent container={container} align="end" className="min-w-44" onCloseAutoFocus={event => { if (trigger.current?.closest("[hidden], [inert]")) event.preventDefault(); }}>
-          <DropdownMenuItem onSelect={preview}><img src={`${import.meta.env.BASE_URL}app-icon.svg`} alt="" className="size-4" />Talos</DropdownMenuItem>
+          <DropdownMenuItem onSelect={preview}><AppIcon alt="" className="size-4" />Talos</DropdownMenuItem>
           {native && nativeResource ? targets.map(target => <DropdownMenuItem key={target.id} onSelect={() => run(() => native.open({ resource: nativeResource, targetId: target.id }))}>
             {target.icon ? <img src={target.icon} alt="" className="size-4" /> : <ExternalLink aria-hidden="true" size={15} />}{target.id === "system" ? t(resource.kind === "webpage" ? "openExternal" : "openSystemApplication") : target.label}
           </DropdownMenuItem>) : resource.kind === "webpage" ? <DropdownMenuItem onSelect={() => run(() => openResource({ ...resource, intent: "external" }))}><ExternalLink aria-hidden="true" size={15} />{t("openExternal")}</DropdownMenuItem> : null}

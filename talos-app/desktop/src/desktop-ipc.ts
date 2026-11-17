@@ -1,6 +1,7 @@
 import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 import { ipcMain, shell } from "electron";
 
+import { isAppIconId } from "../../shared/app-icons";
 import { PreviewBrowserHost } from "./preview-browser";
 import { FilePreviewProtocol } from "./file-preview-protocol";
 import {desktopWindows,isDesktopRenderer} from "./desktop-window";
@@ -8,10 +9,14 @@ import {desktopMediaHost} from "./desktop-media";
 import {desktopBrowserHost} from "./browser-host";
 import type { DesktopBrowserRequest } from "@talos/sdk-app-server/desktop";
 import type { DesktopAppServerController } from "./app-server-controller";
+import type { DesktopAppIcons } from "./desktop-app-icons";
 import { assertDesktopRendererInvoke } from "./ipc-guard";
 import { TALOS_IPC, type TalosRuntimeState } from "./ipc";
 
-export function registerDesktopIpcHandlers(runtime: DesktopAppServerController): void {
+export function registerDesktopIpcHandlers(
+  runtime: DesktopAppServerController,
+  appIcons: Pick<DesktopAppIcons, "setAppIcon">,
+): void {
   const browserPreviews = new PreviewBrowserHost(session => filePreviews.installSession(session), TALOS_IPC.previewBrowserState);
   const filePreviews = new FilePreviewProtocol(runtime, () => browserPreviews.clear());
   filePreviews.install();
@@ -24,6 +29,18 @@ export function registerDesktopIpcHandlers(runtime: DesktopAppServerController):
   ipcMain.handle(TALOS_IPC.previewOpen, (event, request: unknown) => ipcResponse(async () => {
     assertProductRenderer(event); await filePreviews.open(request, event.sender);
   }));
+  ipcMain.handle(TALOS_IPC.setAppIcon, (event, id: unknown) => ipcResponse(async () => {
+    assertProductRenderer(event);
+    if (!isAppIconId(id)) {
+      throw new TalosApiError({
+        code: AppProtocol.ErrorCode.InvalidRequest,
+        message: "Choose a built-in desktop app icon.",
+        localization: null,
+      });
+    }
+    appIcons.setAppIcon(id);
+    return null;
+  }, "The desktop app icon could not be applied; technical details are available in the desktop log."));
   ipcMain.handle(TALOS_IPC.browserRequest, (event,request:DesktopBrowserRequest) => ipcResponse(async()=>{
     const workspace=desktopBrowserHost.workspace;
     if(event.senderFrame!==event.sender.mainFrame || !workspace.accepts(event.sender))throw new Error("Only the product renderer may present browser targets.");
@@ -76,7 +93,10 @@ function assertProductRenderer(event: Electron.IpcMainInvokeEvent): void {
 }
 
 /** Preserve the public envelope across IPC; native Error properties do not survive it. */
-async function ipcResponse<T>(operation: () => Promise<T>): Promise<AppProtocol.ApiResponse<T>> {
+async function ipcResponse<T>(
+  operation: () => Promise<T>,
+  failureMessage = "The desktop backend connection failed; technical details are available in the desktop log.",
+): Promise<AppProtocol.ApiResponse<T>> {
   try {
     return { status: "success", data: await operation() };
   } catch (error) {
@@ -86,7 +106,7 @@ async function ipcResponse<T>(operation: () => Promise<T>): Promise<AppProtocol.
     console.error("Desktop IPC operation failed", error);
     return { status: "error", error: {
       code: AppProtocol.ErrorCode.InternalError,
-      message: "The desktop backend connection failed; technical details are available in the desktop log.",
+      message: failureMessage,
       localization: null,
     } };
   }

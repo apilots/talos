@@ -66,18 +66,6 @@ render_app_icon_png() {
     "$app_icon_svg"
 }
 
-render_touch_icon_png() {
-  local size="$1"
-  local output="$2"
-  rsvg-convert \
-    --background-color "#ffffff" \
-    --keep-aspect-ratio \
-    --width "$size" \
-    --height "$size" \
-    --output "$output" \
-    "$app_icon_svg"
-}
-
 cp "$source_svg" "$web_public/talos-logo.svg"
 cp "$app_icon_svg" "$web_public/app-icon.svg"
 cp "$app_icon_svg" "$desktop_icons/talos-icon.svg"
@@ -85,7 +73,7 @@ cp "$app_icon_svg" "$desktop_icons/talos-icon.svg"
 render_png 1254 "$repo_root/build/brand/talos-logo.png"
 render_png 1254 "$web_public/logo.png"
 render_app_icon_png 96 "$web_public/favicon.png"
-render_touch_icon_png 180 "$web_public/apple-touch-icon.png"
+render_app_icon_png 180 "$web_public/apple-touch-icon.png"
 render_app_icon_png 1024 "$desktop_icons/icon.png"
 
 iconset_dir="$(mktemp -d /tmp/talos-logo-iconset.XXXXXX)/Talos.iconset"

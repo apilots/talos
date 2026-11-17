@@ -20,8 +20,9 @@ beforeEach(() => {
 });
 afterEach(() => {desktopWindows.clear();vi.restoreAllMocks();});
 function setup(invoke=vi.fn(async()=>({ user: { user_id: "verified-alice" } }))) {
-  registerDesktopIpcHandlers({ invoke } as unknown as DesktopAppServerController);
-  return { invoke, request: fixture.handlers.get(TALOS_IPC.browserRequest)! };
+  const setAppIcon = vi.fn();
+  registerDesktopIpcHandlers({ invoke } as unknown as DesktopAppServerController, { setAppIcon });
+  return { invoke, request: fixture.handlers.get(TALOS_IPC.browserRequest)!, setAppIcon };
 }
 it("resolves browser ownership through the authenticated service instead of a supplied user ID",async()=>{
   const { invoke, request } = setup();
@@ -53,4 +54,34 @@ it("routes shared Desktop APIs only for registered product views",async()=>{
  desktopWindows.add({window:{} as BaseWindow,view:{webContents:sender} as unknown as WebContentsView});
  expect(await handler(event,"user/current",{},{})).toMatchObject({status:"success"});expect(invoke).toHaveBeenCalledOnce();
  expect(await handler({...event,senderFrame:{}},"user/current",{},{})).toMatchObject({status:"error"});expect(invoke).toHaveBeenCalledOnce();
+});
+
+it("applies only built-in icon IDs from a trusted product main frame", async () => {
+  const { setAppIcon } = setup();
+  const handler = fixture.handlers.get(TALOS_IPC.setAppIcon)!;
+  expect(await handler(event, "portrait-light")).toMatchObject({ status: "error" });
+  desktopWindows.add({ window: {} as BaseWindow, view: { webContents: sender } as unknown as WebContentsView });
+  expect(await handler({ ...event, senderFrame: {} }, "portrait-light")).toMatchObject({ status: "error" });
+  expect(await handler(event, "../portrait.png")).toMatchObject({
+    status: "error", error: { code: "invalidRequest" },
+  });
+  expect(setAppIcon).not.toHaveBeenCalled();
+
+  expect(await handler(event, "portrait")).toEqual({ status: "success", data: null });
+  expect(await handler(event, "portrait-light")).toEqual({ status: "success", data: null });
+  expect(await handler(event, "classic")).toEqual({ status: "success", data: null });
+  expect(setAppIcon.mock.calls).toEqual([["portrait"], ["portrait-light"], ["classic"]]);
+});
+
+it("returns a typed error when Electron cannot apply the icon", async () => {
+  const { setAppIcon } = setup();
+  const failure = new Error("Native image error");
+  setAppIcon.mockImplementation(() => { throw failure; });
+  desktopWindows.add({ window: {} as BaseWindow, view: { webContents: sender } as unknown as WebContentsView });
+  const handler = fixture.handlers.get(TALOS_IPC.setAppIcon)!;
+
+  expect(await handler(event, "portrait")).toMatchObject({
+    status: "error", error: { code: "internalError", message: expect.stringContaining("app icon") },
+  });
+  expect(console.error).toHaveBeenCalledExactlyOnceWith("Desktop IPC operation failed", failure);
 });
