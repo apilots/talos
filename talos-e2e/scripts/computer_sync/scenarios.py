@@ -122,8 +122,8 @@ def recovery(cluster):
     cold_path.write_text(yaml.safe_dump(document, sort_keys=False))
     cold = Desktop(cluster, cold_home, 'Desktop-Cold')
     token = cold.login('alice')['access_token']
-    offline = cluster.call(cold, token, 'sync/status')
-    require(offline['connection'] == 'disconnected', 'Initial Sync outage was not visible')
+    wait_for(lambda: cluster.call(cold, token, 'sync/status')['connection'] == 'disconnected',
+             'Initial Sync outage became visible')
     require(not cluster.database(cold_home, 'SELECT account_id FROM sync_bindings'), 'Failed discovery created a fake binding')
     cold_config = cold_path.read_bytes()
     disabled = cluster.call(cold, token, 'sync/disable')
@@ -132,6 +132,8 @@ def recovery(cluster):
     cold.close()
     cold = Desktop(cluster, cold_home, 'Desktop-Cold')
     token = cold.call('auth/session/read', {})['session']['access_token']
+    user = cluster.call(cold, token, 'user/current')['user']
+    require(user['user_id'] == cluster.users['alice']['user']['user_id'], 'Restarted cold Desktop restored the wrong account')
     require(cluster.call(cold, token, 'sync/status')['configuredEnabled'] is False, 'Unbound opt-out was lost on restart')
     subprocess.run(['docker', 'start', cluster.hub_container], check=True, capture_output=True)
     wait_for(lambda: cluster.desktop('Desktop-B', 'sync/status')['connection'] == 'connected', 'Other host recovered its enabled account')
@@ -153,6 +155,8 @@ def recovery(cluster):
     def g_status(user):
         return data(http(cluster.url + '/v1/sync/status', token=cluster.users[user]['access_token']))
     for user in ('alice', 'bob', 'admin'):
+        verified = data(http(cluster.url + '/v1/user', token=cluster.users[user]['access_token']))['user']
+        require(verified['user_id'] == cluster.users[user]['user']['user_id'], user + ' center restored the wrong account')
         wait_for(lambda user=user: g_status(user)['connection'] == 'connected', user + ' center sync connected')
     before_g = Path(cluster.server_env['TALOS_CONFIG']).read_bytes()
     require(data(http(cluster.url + '/v1/sync/disable', {}, cluster.users['admin']['access_token']))['configuredEnabled'] is False,
@@ -196,6 +200,8 @@ def recovery(cluster):
     cache = desktop['host'].call('auth/session/read', {})['session']
     require(cache['user']['user_id'] == cluster.users['alice']['user']['user_id'], 'Saved verified account was lost')
     desktop['token'] = cache['access_token']
+    user = cluster.desktop(name, 'user/current')['user']
+    require(user['user_id'] == cluster.users['alice']['user']['user_id'], 'Restarted Desktop restored the wrong account')
     status = cluster.desktop(name, 'sync/status')
     require(status['localComputerId'] == local_id and status['configuredEnabled'] is False, 'Restart changed UUID or opt-out')
     cluster.desktop(name, 'sync/enable', {'claimLocalHistory': False})

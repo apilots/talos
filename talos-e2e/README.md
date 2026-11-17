@@ -348,7 +348,7 @@ execution acceptance has resumed after provider funding. See the
 [scenario contract](scenarios/18_computer_workspace/README.md) for scope and evidence.
 
 Multi-control-plane synchronization uses `just e2e-group 19_computer_sync` on a
-Mac with Docker, the pinned public Sync v0.1.3 image, a Cloud fixture executable,
+Mac with Docker, the pinned public Sync v0.1.6 image, a Cloud fixture executable,
 and the same protobuf/Python/Node prerequisites. The group builds the current Worker
 image and pulls the immutable Sync Release digest without a sibling source checkout.
 It starts isolated real services and checks owner isolation, hardware

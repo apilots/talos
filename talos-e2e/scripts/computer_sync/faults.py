@@ -1,7 +1,7 @@
 """Real independent cloud outages and durable same-Worker history cursor recovery."""
 import subprocess
 import uuid
-from cluster import Cluster, Desktop, require, wait_for
+from cluster import Cluster, Desktop, data, http, require, wait_for
 from turn_helpers import submit, settled
 from interactions import shared
 
@@ -41,7 +41,17 @@ def clouds(cluster):
     require(cluster.desktop('Desktop-A', 'sync/status')['pendingChanges'] > 0, 'Both-cloud outage lost local outbox')
     # Restart the existing G only; keep the H container stopped and DB unchanged.
     Cluster.start_server(cluster)
-    wait_for(lambda: all(n.get('available') for n in cluster.list_nodes('alice')), 'Worker Connect leases recovered', 90)
+    alice = cluster.users['alice']
+    user = data(http(cluster.url + '/v1/user', token=alice['access_token']))['user']
+    require(user['user_id'] == alice['user']['user_id'], 'Restarted Gateway restored the wrong account')
+    expected = {desktop['node'] for desktop in cluster.desktops.values()}
+    expected.update(worker['node_id'] for worker in cluster.nodes.values() if worker['owner'] == 'alice')
+
+    def leases_recovered():
+        nodes = cluster.list_nodes('alice')
+        return {node['nodeId'] for node in nodes if node['available']} == expected and len(nodes) == len(expected)
+
+    wait_for(leases_recovered, 'Worker Connect leases recovered', 90)
     subprocess.run(['docker', 'start', cluster.hub_container], check=True, capture_output=True)
     wait_for(lambda: settled(cluster, 'Desktop-B', session, ack['turnId']), 'Both-cloud recovery caught up', 90)
     print('CASE sync_gateway_and_hub_outages_are_independent_of_local_execution PASS', flush=True)

@@ -65,6 +65,8 @@ def run(cluster):
     a['host'].close()
     a['host'] = Desktop(cluster, a['home'], 'Desktop-A')
     a['token'] = a['host'].call('auth/session/read', {})['session']['access_token']
+    user = cluster.desktop('Desktop-A', 'user/current')['user']
+    require(user['user_id'] == owner, 'Restarted Desktop-A restored the wrong account')
     require(cluster.desktop('Desktop-A', 'desktop/workerIdentity')['nodeId'] == 'embedded', 'Restart resurrected imported removed UUID')
     for host in ('Desktop-A', 'Desktop-B', 'Desktop-C'):
         ids = {node['nodeId'] for node in cluster.desktop(host, 'computer/list', {'limit': 100})['data']}

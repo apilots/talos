@@ -4,6 +4,24 @@ import { evaluate } from "./desktop-smoke-evaluate.mjs";
 
 const toggle = 'document.querySelector(`button[aria-controls="talos-sidebar"]`)';
 
+function visibleIndicators(button) {
+  const style = getComputedStyle(button);
+  const visibleColor = color => color !== "transparent"
+    && !/^rgba\([^)]*,\s*0(?:\.0+)?\)$/.test(color)
+    && !/\/\s*0(?:\.0+)?%?\)$/.test(color);
+  const indicators = [];
+  if (style.outlineStyle !== "none" && parseFloat(style.outlineWidth) > 0 && visibleColor(style.outlineColor)) {
+    indicators.push(`outline: ${style.outlineWidth} ${style.outlineStyle} ${style.outlineColor}`);
+  }
+  // Chromium serializes each shadow as a color followed by its geometry.
+  // A ring has a positive spread. Tailwind's transparent placeholder shadows do not count.
+  for (const [shadow, color, geometry] of style.boxShadow.matchAll(/([\w-]+\([^)]*\)) ([^,]+)/g)) {
+    const [, , , spread] = geometry.trim().split(/\s+/);
+    if (parseFloat(spread) > 0 && visibleColor(color)) indicators.push(shadow.trim());
+  }
+  return indicators;
+}
+
 /** Verify passive loads, keyboard focus and pointer drawer recovery separately. */
 export async function verifySidebarFocus(cdp, capture) {
   assert(await evaluate(cdp, `${toggle} !== null && document.activeElement !== ${toggle}`), "Initial load focused the sidebar toggle.");
@@ -11,6 +29,8 @@ export async function verifySidebarFocus(cdp, capture) {
   await waitForExpression(cdp, 'Boolean(document.querySelector("[data-smoke=chat-composer-input]"))', 30_000);
   assert(await evaluate(cdp, `${toggle} !== null && document.activeElement !== ${toggle}`), "Refresh focused the sidebar toggle.");
   const initiallyExpanded = await evaluate(cdp, `${toggle}.getAttribute("aria-expanded")==="true"`);
+  const readIndicators = `(${visibleIndicators})(${toggle})`;
+  const unfocusedIndicators = await evaluate(cdp, readIndicators);
   await capture("sidebar-default.png");
   await cdp.call("Page.bringToFront");
   for (let step = 0; step < 32 && !await evaluate(cdp, `document.activeElement === ${toggle}`); step += 1) {
@@ -18,7 +38,8 @@ export async function verifySidebarFocus(cdp, capture) {
       await cdp.call("Input.dispatchKeyEvent", { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
     }
   }
-  assert(await evaluate(cdp, `(()=>{const button=${toggle};const style=getComputedStyle(button);return document.activeElement===button && button.matches(":focus-visible") && style.outlineStyle!=="none" && parseFloat(style.outlineWidth)>0 && style.outlineColor!=="rgba(0, 0, 0, 0)";})()`), "Keyboard navigation did not expose a visible sidebar focus indicator.");
+  assert(await evaluate(cdp, `document.activeElement===${toggle} && ${toggle}.matches(":focus-visible")`), "Keyboard navigation did not focus the sidebar toggle.");
+  await waitForExpression(cdp, `${readIndicators}.some(indicator => !${JSON.stringify(unfocusedIndicators)}.includes(indicator))`, 5_000);
   await capture("sidebar-focus.png");
   // Start the pointer journey independently: Chromium can retain :focus-visible
   // when a pointer clicks the same element that already owns keyboard focus.
@@ -32,6 +53,7 @@ export async function verifySidebarFocus(cdp, capture) {
     await pointerClick(cdp, position);
     await waitForExpression(cdp, `${toggle}?.getAttribute("aria-expanded")==="${expanded}"`, 5_000);
     assert(await evaluate(cdp, `document.activeElement===${toggle} && !${toggle}.matches(":focus-visible")`), "Pointer drawer action lost focus or retained keyboard-only focus styling.");
+    await waitForExpression(cdp, `${readIndicators}.every(indicator => ${JSON.stringify(unfocusedIndicators)}.includes(indicator))`, 5_000);
   }
   await capture("sidebar-pointer.png");
   await evaluate(cdp, "document.activeElement.blur()");

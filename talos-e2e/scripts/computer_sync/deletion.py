@@ -66,17 +66,33 @@ def run(cluster):
         require(identity['nodeId'] == node and identity['projectId'] == project['project_id'],
                 host + ' reassigned an immutable historical binding')
         saved = cluster.desktop(host, 'project/read', {'project_id': project['project_id']})['project']
-        require(saved['nodeId'] == node and saved['directory'] == directory,
+        retained_fields = ('project_id', 'nodeId', 'name', 'directory', 'created_at', 'updated_at')
+        require(all(saved[field] == project[field] for field in retained_fields),
                 host + ' lost the retained Project')
-        require(saved['status']['state'] == 'nodeUnavailable', host + ' retained Project claims executable access')
         projects = cluster.desktop(host, 'project/list', {'nodeId': node})['projects']
-        require(any(p['project_id'] == project['project_id'] for p in projects),
-                host + ' could not list Projects bound to the removed Computer')
+        listed = [p for p in projects if p['project_id'] == project['project_id']]
+        require(listed == [saved], host + ' Project list diverged from retained metadata')
         sessions = cluster.desktop(host, 'session/list', {'nodeId': node})
         require(any(s['id'] == session for s in sessions['sessions']),
                 host + ' could not list Sessions bound to the removed Computer')
         require(node not in {n['nodeId'] for n in cluster.desktop(host, 'computer/list', {'limit': 100})['data']},
                 host + ' exposed the removed execution Computer')
+        desktop = cluster.desktops[host]
+        # Owner-visible registration tombstones map ComputerRegistrationRemoved to resourceExpired.
+        denied_read = desktop['host'].request('fs/directory/read', {'nodeId': node}, desktop['token'])
+        require('result' not in denied_read and denied_read.get('error', {}).get('code') == 'resourceExpired',
+                f'{host} removed Worker directory read returned {denied_read!r}')
+        denied_turn = desktop['host'].request('turn/start', {
+            'nodeId': node, 'sessionId': session, 'projectId': project['project_id'],
+            'input': {'content': [{'type': 'text', 'text': 'Reply REMOVED_COMPUTER_MUST_NOT_EXECUTE.'}]},
+            'modelSelection': {'modelRef': {'provider': cluster.model['provider'], 'id': cluster.model['id']},
+                               'reasoningEffort': None},
+            'userPermissionMode': 'fullAccess',
+        }, desktop['token'])
+        require('result' not in denied_turn and denied_turn.get('error', {}).get('code') == 'resourceExpired',
+                f'{host} removed Worker execution returned {denied_turn!r}')
+        require(cluster.history(host, session)['data'] == history,
+                host + ' rejected execution changed retained Session history')
 
     for host in ('Desktop-A', 'Desktop-B'):
         assert_retained(host)
