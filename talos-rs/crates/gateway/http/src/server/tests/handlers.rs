@@ -236,6 +236,7 @@ async fn test_config_handler_allows_authorized_regular_worker_user() {
 fn admin_auth() -> RequestIdentity {
     RequestIdentity {
         role: talos_auth::UserRole::Admin,
+        user_type: Default::default(),
         ..test_auth()
     }
 }

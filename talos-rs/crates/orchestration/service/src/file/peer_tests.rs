@@ -89,6 +89,7 @@ async fn imported_attachment_uses_source_fileservice_and_never_deletes_a_local_o
                 user_id: actor.user_id.clone(),
                 username: None,
                 role: talos_auth::UserRole::User,
+                user_type: Default::default(),
                 auth_disabled: false,
                 access_token: None,
             },

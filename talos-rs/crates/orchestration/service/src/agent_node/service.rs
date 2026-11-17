@@ -306,6 +306,18 @@ impl AgentNodeService {
         Ok(node)
     }
 
+    /// Read metadata for a machine's current lease during registration publication.
+    /// The transport holds this node's lifecycle guard through publication.
+    pub async fn read_registered_computer(&self, auth: &NodeAuth) -> TalosResult<NodeInfo> {
+        self.authenticate_lease(auth).await?;
+        let node = self
+            .store
+            .get(&auth.node_id)
+            .await?
+            .ok_or_else(unauthenticated)?;
+        Ok(self.node_info(node).await)
+    }
+
     /// The transport must hold this node's lifecycle guard through publication.
     pub async fn register(
         &self,
@@ -487,6 +499,7 @@ impl AgentNodeService {
         {
             return Err(not_found());
         }
+        self.ensure_managed_node_access(actor, node_id).await?;
         Ok(record)
     }
 }

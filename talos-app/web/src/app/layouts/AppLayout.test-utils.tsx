@@ -34,6 +34,7 @@ beforeEach(() => {
   HTMLElement.prototype.setPointerCapture=vi.fn();HTMLElement.prototype.hasPointerCapture=vi.fn(()=>true);HTMLElement.prototype.releasePointerCapture=vi.fn();
   HTMLDialogElement.prototype.showModal = function () { this.open = true;this.querySelector<HTMLElement>("button,input,[tabindex]")?.focus(); };
   HTMLDialogElement.prototype.close = function () { this.open = false;if(this.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); };
+  useAppStore.getState().setConnection({ authStatus: "authenticated", authRole: "user", accountType: "Max" });
   useAppStore.setState({ workspaceOwner: null, workspaceSnapshots: {}, sidebarOpen: false, desktopBrowser: null, workspaceFocusRevision: 0, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false,sidebarWidth:296,workspaceWidth:null,resizingPane:null });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals();vi.restoreAllMocks(); });

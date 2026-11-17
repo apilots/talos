@@ -28,6 +28,11 @@ pub enum UserRole {
 }
 
 impl UserRole {
+    /// Cloud account eligibility for a managed Talo Worker.
+    pub fn can_use_managed_worker(self, user_type: UserType) -> bool {
+        self == Self::Admin || user_type == UserType::Max
+    }
+
     pub fn as_storage_value(self) -> &'static str {
         match self {
             Self::User => "user",
@@ -51,6 +56,7 @@ pub struct RequestIdentity {
     pub user_id: String,
     pub username: Option<String>,
     pub role: UserRole,
+    pub user_type: UserType,
     pub auth_disabled: bool,
     pub access_token: Option<String>,
 }
@@ -70,6 +76,7 @@ impl RequestIdentity {
             user_id: "anonymous".to_string(),
             username: Some("anonymous".to_string()),
             role: UserRole::User,
+            user_type: UserType::Free,
             auth_disabled: true,
             access_token: None,
         }

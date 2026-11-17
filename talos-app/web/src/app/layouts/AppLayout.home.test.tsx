@@ -44,3 +44,11 @@ it.each(["/settings/models", "/computers", "/sessions/history"])("keeps %s acces
   expect(screen.getByText("Page content")).toBeVisible();
   expect(screen.queryByRole("heading", { name: "Choose a computer" })).not.toBeInTheDocument();
 });
+
+it("hides the sidebar Talo link and redirects direct navigation for an ordinary account", () => {
+  useAppStore.getState().setConnection({ authStatus: "authenticated", authRole: "user", accountType: "Pro" });
+  useAppStore.setState({ sidebarOpen: true });
+  show("/talo");
+  expect(screen.queryByRole("link", { name: "Talo" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Talo page" })).not.toBeInTheDocument();
+});

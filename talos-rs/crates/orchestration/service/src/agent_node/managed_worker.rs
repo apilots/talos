@@ -3,6 +3,14 @@
 #[path = "managed_worker/reconcile.rs"]
 mod reconcile;
 
+#[path = "managed_worker/access.rs"]
+mod access;
+use access::{ensure_managed_worker_actor, ManagedCaller};
+
+#[cfg(test)]
+#[path = "managed_worker/access_tests.rs"]
+mod access_tests;
+
 use super::*;
 use std::time::Duration;
 use talos_config::{
@@ -32,6 +40,7 @@ pub(crate) enum ManagedDispatch {
 }
 
 pub(super) struct ManagedWorkers {
+    auth: Arc<dyn talos_auth::AuthService>,
     runtime: Arc<dyn ManagedWorkerRuntime>,
     config: WorkerRuntimeConfig,
     connection: WorkerConnectionConfig,
@@ -87,12 +96,14 @@ impl AgentNodeService {
     pub fn install_managed_worker_runtime(
         &self,
         runtime: Arc<dyn ManagedWorkerRuntime>,
+        auth: Arc<dyn talos_auth::AuthService>,
         config: WorkerRuntimeConfig,
         policy: ServerRuntimePolicy,
         trusted_ca: Option<Vec<u8>>,
     ) -> TalosResult<()> {
         self.managed
             .set(ManagedWorkers {
+                auth,
                 runtime,
                 connection: config.connection(config.kind),
                 config,
@@ -113,24 +124,20 @@ impl AgentNodeService {
 
     /// Reads the single lifecycle record scoped to the signed-in account.
     pub async fn read_managed_worker(&self, actor: &Actor) -> TalosResult<ManagedWorkerResponse> {
-        let instance = if actor.auth_disabled {
-            None
-        } else {
-            ensure_management_actor(actor)?;
-            match self.store.managed_worker(&actor.user_id).await? {
-                Some(record) => Some(self.managed_worker_info(&record).await?),
-                None => None,
-            }
+        ensure_managed_worker_actor(actor)?;
+        let instance = match self.store.managed_worker(&actor.user_id).await? {
+            Some(record) => Some(self.managed_worker_info(&record).await?),
+            None => None,
         };
         Ok(ManagedWorkerResponse {
-            enabled: self.managed_worker_enabled() && !actor.auth_disabled,
+            enabled: self.managed_worker_enabled(),
             instance,
         })
     }
 
     /// Reserves the original node and Home identity atomically before any host action.
     pub async fn create_managed_worker(&self, actor: &Actor) -> TalosResult<ManagedWorkerInfo> {
-        ensure_management_actor(actor)?;
+        ensure_managed_worker_actor(actor)?;
         let managed = self.managed_runtime()?;
         let _intent = self.lock_managed_intent(&actor.user_id).await;
         let pending = self.managed_runtime_update.lock().await;
@@ -200,6 +207,7 @@ impl AgentNodeService {
         actor: &Actor,
         request: DeleteManagedWorkerRequest,
     ) -> TalosResult<ManagedWorkerInfo> {
+        ensure_managed_worker_actor(actor)?;
         if !request.confirm_data_loss {
             return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
@@ -223,7 +231,7 @@ impl AgentNodeService {
         request: ManagedWorkerActionRequest,
         action: Action,
     ) -> TalosResult<ManagedWorkerInfo> {
-        ensure_management_actor(actor)?;
+        ensure_managed_worker_actor(actor)?;
         let service = self.clone();
         let actor = actor.clone();
         // Once remote admission is changed, the commit or rollback must survive
@@ -458,36 +466,6 @@ impl AgentNodeService {
         }
     }
 
-    pub(crate) async fn managed_conversation_node(
-        &self,
-        actor: &Actor,
-        request: &talos_types::StartTurnRequest,
-    ) -> TalosResult<Option<String>> {
-        let Some(record) = self
-            .store
-            .managed_worker_by_conversation(&request.session_id)
-            .await?
-        else {
-            return Ok(None);
-        };
-        ensure_management_actor(actor)?;
-        if record.owner_user_id != actor.user_id {
-            return Err(not_found());
-        }
-        if request.project_id.is_some()
-            || request
-                .node_id
-                .as_deref()
-                .is_some_and(|node| node != record.node_id)
-        {
-            return Err(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "The Talo conversation belongs to its Talo and cannot use a Project.",
-            ));
-        }
-        Ok(Some(record.node_id))
-    }
-
     pub(crate) async fn managed_request_wait(&self, node_id: &str) -> TalosResult<Duration> {
         if self.managed_worker_enabled()
             && node_id != "embedded"
@@ -506,17 +484,17 @@ impl AgentNodeService {
         actor: &Actor,
         node_id: &str,
     ) -> TalosResult<Option<tokio::sync::OwnedRwLockReadGuard<()>>> {
-        if !self.managed_worker_enabled() || node_id == "embedded" {
+        if node_id == "embedded" {
             return Ok(None);
         }
         let Some(record) = self.store.managed_worker_by_node(node_id).await? else {
             return Ok(None);
         };
-        ensure_management_actor(actor)?;
+        ensure_managed_worker_actor(actor)?;
         ensure_owner(&record, &actor.user_id)?;
         let generation = self
             .wait_managed_worker(
-                &actor.user_id,
+                ManagedCaller::Request(actor),
                 node_id,
                 Duration::from_secs(self.managed_runtime()?.policy.request_wait_seconds.into()),
             )
@@ -547,12 +525,24 @@ impl AgentNodeService {
         owner: &str,
         node_id: &str,
     ) -> TalosResult<ManagedDispatch> {
-        let Some(managed) = self.managed.get().filter(|_| node_id != "embedded") else {
+        self.wake_managed_worker(ManagedCaller::Dispatch(owner), node_id)
+            .await
+    }
+
+    async fn wake_managed_worker(
+        &self,
+        caller: ManagedCaller<'_>,
+        node_id: &str,
+    ) -> TalosResult<ManagedDispatch> {
+        if node_id == "embedded" {
             return Ok(ManagedDispatch::Proceed);
-        };
+        }
         let Some(record) = self.store.managed_worker_by_node(node_id).await? else {
             return Ok(ManagedDispatch::Proceed);
         };
+        let managed = self.managed_runtime()?;
+        caller.authorize(managed)?;
+        let owner = caller.owner();
         ensure_owner(&record, owner)?;
         if record.desired != Desired::IdleSleep {
             return Ok(
@@ -611,7 +601,7 @@ impl AgentNodeService {
         node_id: &str,
     ) -> TalosResult<()> {
         self.wait_managed_worker(
-            owner,
+            ManagedCaller::Dispatch(owner),
             node_id,
             Duration::from_secs(self.managed_runtime()?.policy.start_timeout_seconds.into()),
         )
@@ -622,7 +612,7 @@ impl AgentNodeService {
     /// A successful return names the checked operation generation.
     async fn wait_managed_worker(
         &self,
-        owner: &str,
+        caller: ManagedCaller<'_>,
         node_id: &str,
         timeout: Duration,
     ) -> TalosResult<u32> {
@@ -630,13 +620,13 @@ impl AgentNodeService {
         let result = tokio::time::timeout(timeout, async {
             let mut wake_generation = None;
             loop {
-                let dispatch = self.wake_for_managed_dispatch(owner, node_id).await?;
+                let dispatch = self.wake_managed_worker(caller, node_id).await?;
                 let record = self
                     .store
                     .managed_worker_by_node(node_id)
                     .await?
                     .ok_or_else(not_found)?;
-                ensure_owner(&record, owner)?;
+                ensure_owner(&record, caller.owner())?;
                 if wake_generation.is_some_and(|generation| generation != record.generation) {
                     return Err(unavailable());
                 }

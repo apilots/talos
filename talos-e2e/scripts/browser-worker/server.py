@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import fixture
 from media import Viewer
+from managed_talo_access import ASSISTANT
 
 REPORT = fixture.REPORT
 URL = 'http://127.0.0.1:8080'
@@ -285,11 +286,14 @@ def run():
         start()
         assert api('/v1/llm?nodeId=embedded')['config'] == llm, 'Model edit/add lost after Server restart'
         desktop_acceptance()
+        denied = fixture.http(URL + ASSISTANT)
+        assert denied["error"]["code"] == "permissionDenied", denied
         (REPORT / 'results.json').write_text(json.dumps({
             'status': 'PASS', 'network': 'none', 'anonymous': True,
             'sharedCliAndPtyTui': True, 'modelEditAndAddPersisted': True,
             'restart': 'serverProcess', 'browserToolCalls': 14, 'sandboxDisabled': False,
             'anonymousViewAndControl': True, 'disconnectRecovery': True,
+            'managedTaloOpenModeDenied': True,
         }, indent=2))
         print('PASS packaged anonymous Server / shared CLI + PTY TUI / model save + restart / sandboxed Browser MCP', flush=True)
     finally:

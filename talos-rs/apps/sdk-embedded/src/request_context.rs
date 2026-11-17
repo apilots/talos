@@ -29,7 +29,8 @@ pub(super) async fn resolve_cached_actor(
 fn actor_from_identity(identity: &RequestIdentity) -> Actor {
     let actor = Actor::regular(identity.user_id.clone())
         .with_username(identity.username.clone())
-        .with_role(identity.role);
+        .with_role(identity.role)
+        .with_user_type(identity.user_type);
     match identity.access_token.clone() {
         Some(token) => actor.with_access_token(token),
         None => actor,

@@ -96,6 +96,7 @@ pub enum NodeListScope {
 
 pub struct ListNodesParams {
     pub exclude_node_id: Option<String>,
+    pub include_managed_workers: bool,
     pub scope: NodeListScope,
     pub query: Option<String>,
     pub cursor: Option<String>,

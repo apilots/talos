@@ -5,6 +5,7 @@ pub(super) fn shared_actor(actor: &RequestIdentity) -> Actor {
     let shared = Actor::regular(actor.user_id.clone())
         .with_username(actor.username.clone())
         .with_role(actor.role)
+        .with_user_type(actor.user_type)
         .with_auth_disabled(actor.auth_disabled);
     match actor.access_token.clone() {
         Some(token) => shared.with_access_token(token),

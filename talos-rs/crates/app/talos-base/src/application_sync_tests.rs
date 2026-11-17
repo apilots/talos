@@ -354,6 +354,7 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
         user_id: ACCOUNT.into(),
         username: None,
         role: talos_auth::UserRole::User,
+        user_type: Default::default(),
         auth_disabled: false,
         access_token: Some(TOKEN.into()),
     };

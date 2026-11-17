@@ -77,7 +77,7 @@ export function useComputers() {
   const clear = useAppStore((state) => state.clearComputer);
   useEffect(() => {
     if (selectedId && selected.error instanceof TalosApiError &&
-      (selected.error.code === AppProtocol.ErrorCode.ResourceNotFound || selected.error.code === AppProtocol.ErrorCode.ResourceExpired)) {
+      (selected.error.code === AppProtocol.ErrorCode.ResourceNotFound || selected.error.code === AppProtocol.ErrorCode.ResourceExpired || selected.error.code === AppProtocol.ErrorCode.PermissionDenied)) {
       clear(scope, selectedId);
     }
   }, [clear, scope, selected.error, selectedId]);

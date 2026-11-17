@@ -252,12 +252,10 @@ impl RemoteNodePublisher {
     ) -> TalosResult<()> {
         let node = self
             .nodes
-            .get_node(
-                &Actor::regular(&registration.owner_user_id),
-                agent_protocol::GetNodeRequest {
-                    node_id: node_id.to_owned(),
-                },
-            )
+            .read_registered_computer(&NodeAuth {
+                node_id: node_id.to_owned(),
+                token: registration.lease_token.clone(),
+            })
             .await?;
         let Some(endpoint) = node.endpoint else {
             // Registration alone is not evidence of an outbound execution connection.
@@ -511,6 +509,7 @@ impl NodeManagementRpc {
         }
         Ok(Actor::regular(identity.user_id)
             .with_role(identity.role)
+            .with_user_type(identity.user_type)
             .with_username(identity.username)
             .with_access_token(token))
     }

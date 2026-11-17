@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 #[derive(Clone, Default)]
 struct Issuer {
     calls: Arc<AtomicUsize>,
+    claims: Arc<Mutex<(crate::UserRole, crate::UserType)>>,
     blocked: Arc<AtomicBool>,
     revoked: Arc<AtomicBool>,
     fail_next: Arc<AtomicBool>,
@@ -23,8 +24,9 @@ async fn issuer() -> (Arc<AuthContexts>, TalosCloudClient, Issuer, JoinHandle<()
             resumed.await;
         }
         if issuer.fail_next.swap(false, Ordering::SeqCst) { return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response(); }
+        let (role, user_type) = *issuer.claims.lock().unwrap();
         Json(serde_json::json!({"active": !issuer.revoked.load(Ordering::SeqCst),
-            "user":{"user_id":"account-a","username":"test","email":"test@example.invalid","role":"user","type":"free","status":"active"},
+            "user":{"user_id":"account-a","username":"test","email":"test@example.invalid","role":role,"type":user_type,"status":"active"},
             "capabilities":{"is_admin":false,"role":"user","scopes":[]},
             "entitlement":{"can_use":true,"plan":"free","reason":null},"expires_at_ms":null})).into_response()
     })).with_state(issuer.clone());
@@ -302,5 +304,62 @@ async fn transient_outage_preserves_classification_and_recovers_after_the_proof_
     assert!(context.state.borrow().as_ref().unwrap().verified_at > original);
     assert!(service.identity(token).is_ok());
     service.shutdown().await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn managed_worker_access_uses_cloud_role_and_type_and_expires_with_its_proof() {
+    use crate::{UserRole, UserType};
+    let (contexts, client, issuer, server) = issuer().await;
+    let allowed =
+        |identity: &RequestIdentity| identity.role.can_use_managed_worker(identity.user_type);
+    for (role, user_type, expected) in [
+        (UserRole::User, UserType::Free, false),
+        (UserRole::User, UserType::Plus, false),
+        (UserRole::User, UserType::Pro, false),
+        (UserRole::User, UserType::Max, true),
+        (UserRole::Admin, UserType::Free, true),
+    ] {
+        *issuer.claims.lock().unwrap() = (role, user_type);
+        let identity = contexts.verify(&client, "token").await.unwrap();
+        assert_eq!((identity.role, identity.user_type), (role, user_type));
+        assert_eq!(contexts.has_verified_user("account-a", allowed), expected);
+        assert!(!contexts.has_verified_user("other-account", allowed));
+        if expected {
+            let context = contexts.sessions.lock().unwrap()[&fingerprint("token")].clone();
+            context.state.send_modify(|state| {
+                state.as_mut().unwrap().verified_at = Instant::now() - VALIDITY;
+            });
+            assert!(!contexts.has_verified_user("account-a", allowed));
+        }
+        contexts.invalidate("token");
+        assert!(!contexts.has_verified_user("account-a", allowed));
+    }
+    contexts.shutdown().await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn cloud_refresh_removes_managed_worker_access_after_account_downgrade() {
+    use crate::{UserRole, UserType};
+    let (contexts, client, issuer, server) = issuer().await;
+    *issuer.claims.lock().unwrap() = (UserRole::User, UserType::Max);
+    contexts.verify(&client, "token").await.unwrap();
+    let context = contexts.sessions.lock().unwrap()[&fingerprint("token")].clone();
+    let mut changes = context.state.subscribe();
+    *issuer.claims.lock().unwrap() = (UserRole::User, UserType::Free);
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(70)).await;
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(1), changes.changed())
+        .await
+        .unwrap()
+        .unwrap();
+    let identity = contexts.identity("token").unwrap();
+    assert_eq!(identity.user_type, UserType::Free);
+    assert!(!contexts.has_verified_user("account-a", |identity| {
+        identity.role.can_use_managed_worker(identity.user_type)
+    }));
+    contexts.shutdown().await;
     server.abort();
 }

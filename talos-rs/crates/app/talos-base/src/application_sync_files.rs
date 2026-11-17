@@ -159,6 +159,7 @@ impl talos_service::ComputerManagement for GatewayPeerAccess {
                         user_id: actor.user_id.clone(),
                         username: None,
                         role: actor.role,
+                        user_type: actor.user_type,
                         auth_disabled: actor.auth_disabled,
                         access_token: actor.access_token.clone(),
                     })

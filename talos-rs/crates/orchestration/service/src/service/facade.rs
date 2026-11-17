@@ -171,7 +171,8 @@ impl TalosService {
             project_store.clone(),
             base_config.clone(),
             coordinator.clone(),
-        );
+        )
+        .with_managed_nodes(nodes.clone());
         let sessions = Arc::new(if restrict_embedded {
             sessions.with_embedded_admin_auth(auth_service.clone())
         } else {
@@ -214,12 +215,13 @@ impl TalosService {
             oauth_capacity: Arc::new(tokio::sync::Semaphore::new(32)),
             desktop_ingress: Default::default(),
             desktop_routes: Default::default(),
-            nodes,
+            nodes: nodes.clone(),
             access: ResourceAccessService::with_services(
                 coordinator.clone(),
                 sessions.clone(),
                 projects,
                 restrict_embedded,
+                Some(nodes),
             ),
             sessions,
             account: AccountService::new(
@@ -597,7 +599,7 @@ impl TalosService {
         request: TurnRetryParams,
     ) -> ServiceResult<StartTurnResponse> {
         let session = self.access.load_session(actor, session_id).await?;
-        self.turns.submit_retry(session, request).await
+        self.turns.submit_retry(actor, session, request).await
     }
 
     pub async fn retry_turn(

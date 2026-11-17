@@ -12,6 +12,14 @@ Talos 是产品名，Talo 是 Talos 提供的托管 AI 助手。未选电脑时�
 
 **Docker Engine 和 Kubernetes 均已实现。每套启用 Talo 的部署使用一个管理 Server 和一个生效的托管 Runtime。** Docker 模式通过现有 Compose 部署，Server 与 Talo Worker 共用一台 Linux 主机的 Docker Engine。Kubernetes 模式通过独立清单部署，Server 使用 Kubernetes API 管理同一 Namespace 的 Talo 工作负载与 PVC。两个模式沿用相同的控制台、远程桌面和 AI Turn 执行权限链。
 
+### Cloud account access
+
+Managed Talo is available to authenticated Cloud accounts whose verified `role` is `admin` or whose `type` is `max`. Cloud introspection owns these claims. Talos retains both in the verified identity across HTTP, App Server and node-management RPC. Open mode, Free, Plus and Pro accounts have no Talo entry in the chooser or sidebar, and direct Talo navigation returns to the personal Computer page.
+
+The Server independently returns `permissionDenied` for ineligible lifecycle, managed Computer, resource, desktop, Project creation and Turn admission requests. Existing managed Session and Project bindings receive the same check. Directory filtering precedes pagination and counting. Personal Computer eligibility continues to use its existing ownership checks.
+
+Automatic queue, Goal, Loop and subagent work must have a currently verified eligible Cloud account at managed Worker dispatch and environment resolution. Cached identity expiry, invalidation and Cloud refresh govern this proof through the existing Auth owner. The current Auth policy refreshes every 60 seconds and accepts a verified proof for at most 120 seconds. A downgrade applies when the existing refresh observes it. An unreachable Cloud cannot issue a new proof, and expired proofs deny requests and dispatch. A lower-tier credential cannot borrow request permissions from another eligible credential. The existing resource-owner checks still apply to Admin and Max callers. The desktop media watchdog uses the newly verified claims when rechecking a live stream. Worker registration publication reads machine metadata through its current node lease, preserving the distinction between machine registration and user access.
+
 ## 2. 架构与职责
 
 | 共用机制 | Talo 接入 |

@@ -201,7 +201,7 @@ class Fixture:
         self.rollout(SERVICE)
 
     def add_fixture(self, overlay, server_image, preflight):
-        for source in ("fixture.py", "../lifecycle.py"):
+        for source in ("fixture.py", "../lifecycle.py", "managed_talo_access.py"):
             source = Path(__file__).parent / source
             shutil.copyfile(source, overlay / source.name)
         (overlay / "fixture_program.py").write_text(FIXTURE_PROGRAM)
@@ -210,7 +210,9 @@ class Fixture:
         repository, digest = server_image.split("@")
         doc["images"] = [{"name": "ghcr.io/apilots/talos-server", "newName": repository, "digest": digest}]
         doc["configMapGenerator"] = [{
-            "name": "talos-e2e-fixture", "files": ["fixture.py", "fixture_program.py", "lifecycle.py"],
+            "name": "talos-e2e-fixture", "files": [
+                "fixture.py", "fixture_program.py", "lifecycle.py", "managed_talo_access.py",
+            ],
         }]
         doc["generatorOptions"] = {"disableNameSuffixHash": True}
         doc["namespace"] = "talos"
@@ -461,6 +463,7 @@ def run_preflight(fixture):
 
 
 def run(files, preflight):
+    ACCOUNTS[TOKEN]["role"] = "admin"
     fixture = Fixture(files)
     try:
         fixture.deploy(preflight)

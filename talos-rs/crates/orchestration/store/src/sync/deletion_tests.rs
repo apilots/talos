@@ -182,6 +182,7 @@ async fn local_registration_retirement_freezes_history_and_new_enrollment_uses_a
         user_id: "account-1".into(),
         username: None,
         role: UserRole::User,
+        user_type: Default::default(),
         auth_disabled: false,
         access_token: None,
     };

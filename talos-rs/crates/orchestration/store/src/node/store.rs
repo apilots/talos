@@ -403,7 +403,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
             } => (false, Some(user_id), include_embedded),
             NodeListScope::Embedded => (false, None, true),
         };
-        let filter = "(? OR owner_user_id = ? OR (? AND mode = 'embedded')) AND (? IS NULL OR node_id <> ?) AND (? IS NULL OR instr(lower(display_name), lower(?)) > 0)";
+        let filter = "(? OR owner_user_id = ? OR (? AND mode = 'embedded')) AND (? IS NULL OR node_id <> ?) AND (? IS NULL OR instr(lower(display_name), lower(?)) > 0) AND (? OR NOT EXISTS (SELECT 1 FROM managed_workers WHERE managed_workers.node_id = agent_nodes.node_id))";
         let mut transaction = self
             .pool
             .begin()
@@ -419,6 +419,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .bind(params.exclude_node_id.as_deref())
         .bind(params.query.as_deref())
         .bind(params.query.as_deref())
+        .bind(params.include_managed_workers)
         .bind(params.cursor.as_deref())
         .bind(params.cursor.as_deref())
         .bind(limit)
@@ -434,6 +435,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
                 .bind(params.exclude_node_id.as_deref())
                 .bind(params.query.as_deref())
                 .bind(params.query.as_deref())
+                .bind(params.include_managed_workers)
                 .fetch_one(&mut *transaction)
                 .await
                 .map_err(|error| database_error("count Agent nodes", error))?;

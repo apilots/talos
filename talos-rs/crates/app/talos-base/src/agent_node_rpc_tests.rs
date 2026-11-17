@@ -200,6 +200,7 @@ impl AuthService for TestAuth {
             user_id: user_id.into(),
             username: None,
             role,
+            user_type: Default::default(),
             auth_disabled: false,
             access_token: Some(token.into()),
         })
