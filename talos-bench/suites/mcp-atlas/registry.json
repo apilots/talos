@@ -2,7 +2,7 @@
   {
     "name": "mcp-atlas",
     "version": "2.0.0",
-    "description": "MCP-Atlas 2.0 documentation smoke and pinned public cases",
+    "description": "Complete pinned MCP-Atlas public split and the Talos controlled case",
     "pass_threshold": 0.75,
     "tasks": [
       {
@@ -13,12 +13,676 @@
         ]
       },
       {
+        "name": "6863f438a500a4b36aab0f24",
+        "revision": "8c563b55d7c967755f474299848049834d624617",
+        "submission_paths": [
+          "/logs/artifacts/answer.txt"
+        ],
+        "description": "Research two historical suspension-bridge records"
+      },
+      {
+        "name": "6866d4d2eea665b355a8f884"
+      },
+      {
+        "name": "6866d4d2eea665b355a8f885"
+      },
+      {
+        "name": "6866d4d2eea665b355a8f8ab"
+      },
+      {
+        "name": "6866d4d2eea665b355a8f8bc"
+      },
+      {
+        "name": "686bdf0ca7f3bf48518a172b"
+      },
+      {
+        "name": "686bdf0ca7f3bf48518a1738"
+      },
+      {
+        "name": "686bdf0ca7f3bf48518a1769"
+      },
+      {
+        "name": "686d2c79e1db37ea23ddd9f5"
+      },
+      {
+        "name": "686d2c79e1db37ea23ddd9fa"
+      },
+      {
+        "name": "686d2c79e1db37ea23ddda08"
+      },
+      {
+        "name": "686d2c79e1db37ea23ddda15"
+      },
+      {
         "name": "686d2c79e1db37ea23ddda26",
         "revision": "8c563b55d7c967755f474299848049834d624617",
         "submission_paths": [
           "/logs/artifacts/answer.txt"
         ],
         "description": "Find the initial commit in a local Snake game repository"
+      },
+      {
+        "name": "6876c6678fb597ff004a6afa"
+      },
+      {
+        "name": "6876c6678fb597ff004a6b03"
+      },
+      {
+        "name": "687b3f4e721b0fdbc8d0a79b"
+      },
+      {
+        "name": "687ebf5ff5a578e0055a455e"
+      },
+      {
+        "name": "687ebf5ff5a578e0055a4560"
+      },
+      {
+        "name": "6880e844943a73a8c5e412c1"
+      },
+      {
+        "name": "6880e844943a73a8c5e412c3"
+      },
+      {
+        "name": "68824c643e6ff020bc339906"
+      },
+      {
+        "name": "68824c643e6ff020bc33990b"
+      },
+      {
+        "name": "68824c643e6ff020bc339914"
+      },
+      {
+        "name": "68824c643e6ff020bc339928"
+      },
+      {
+        "name": "68824c643e6ff020bc33994b"
+      },
+      {
+        "name": "68834223448b8fe04df2a592"
+      },
+      {
+        "name": "68834223448b8fe04df2a595"
+      },
+      {
+        "name": "68834223448b8fe04df2a5b1"
+      },
+      {
+        "name": "6884fb199c7308aa9d1185d8"
+      },
+      {
+        "name": "6884fb199c7308aa9d1185dc"
+      },
+      {
+        "name": "6884fb199c7308aa9d1185e5"
+      },
+      {
+        "name": "6886306b5ed4da6b2c381170"
+      },
+      {
+        "name": "6886306b5ed4da6b2c381175"
+      },
+      {
+        "name": "6886306b5ed4da6b2c38117c"
+      },
+      {
+        "name": "6886306b5ed4da6b2c381182"
+      },
+      {
+        "name": "6886306b5ed4da6b2c381189"
+      },
+      {
+        "name": "6886306b5ed4da6b2c38118b"
+      },
+      {
+        "name": "6886306b5ed4da6b2c381199"
+      },
+      {
+        "name": "6886306b5ed4da6b2c3811a0"
+      },
+      {
+        "name": "6886306b5ed4da6b2c3811aa"
+      },
+      {
+        "name": "688706e2ca6b3308497106ec"
+      },
+      {
+        "name": "688706e2ca6b3308497106fc"
+      },
+      {
+        "name": "688706e2ca6b330849710721"
+      },
+      {
+        "name": "6887c6d4614f06dc73af240c"
+      },
+      {
+        "name": "6887c6d4614f06dc73af240d"
+      },
+      {
+        "name": "6887c6d4614f06dc73af2411"
+      },
+      {
+        "name": "6887c6d4614f06dc73af243e"
+      },
+      {
+        "name": "6887c6d4614f06dc73af245f"
+      },
+      {
+        "name": "6888e207a34beb25cfedda3b"
+      },
+      {
+        "name": "6888e207a34beb25cfedda46"
+      },
+      {
+        "name": "6888e207a34beb25cfedda6a"
+      },
+      {
+        "name": "6888e207a34beb25cfedda70"
+      },
+      {
+        "name": "6888e207a34beb25cfedda86"
+      },
+      {
+        "name": "6888e207a34beb25cfedda89"
+      },
+      {
+        "name": "6888e207a34beb25cfedda8b"
+      },
+      {
+        "name": "6888e207a34beb25cfedda95"
+      },
+      {
+        "name": "688a441c1a0d2e5c93853e4f"
+      },
+      {
+        "name": "688a441c1a0d2e5c93853e5a"
+      },
+      {
+        "name": "688a441c1a0d2e5c93853e76"
+      },
+      {
+        "name": "688a441c1a0d2e5c93853e93"
+      },
+      {
+        "name": "688a441c1a0d2e5c93853e99"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93e87"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93e8a"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93e8d"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93e8e"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93e92"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93e9c"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93e9f"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93ea2"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93eaf"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93ebb"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93ecb"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93ed3"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93ed9"
+      },
+      {
+        "name": "688ba1b3e95696e72dd93ee0"
+      },
+      {
+        "name": "688fb11183792b921381bd0d"
+      },
+      {
+        "name": "688fb11183792b921381bd10"
+      },
+      {
+        "name": "688fb11183792b921381bd14"
+      },
+      {
+        "name": "688fb11183792b921381bd1e"
+      },
+      {
+        "name": "688fb11183792b921381bd21"
+      },
+      {
+        "name": "688fb11183792b921381bd25"
+      },
+      {
+        "name": "688fb11183792b921381bd27"
+      },
+      {
+        "name": "688fb11183792b921381bd36"
+      },
+      {
+        "name": "688fb11183792b921381bd38"
+      },
+      {
+        "name": "688fb11183792b921381bd44"
+      },
+      {
+        "name": "688fb11183792b921381bd52"
+      },
+      {
+        "name": "688fb11183792b921381bd55"
+      },
+      {
+        "name": "688fb11183792b921381bd59"
+      },
+      {
+        "name": "688fb11183792b921381bd66"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e27"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e30"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e32"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e35"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e3a"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e3e"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e40"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e5d"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e5f"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e68"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e6f"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e7c"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e7e"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e82"
+      },
+      {
+        "name": "6890e7fd2516f66b0a628e88"
+      },
+      {
+        "name": "68925f01db31fe35560e3e70"
+      },
+      {
+        "name": "68925f01db31fe35560e3e77"
+      },
+      {
+        "name": "68925f01db31fe35560e3e78"
+      },
+      {
+        "name": "68925f01db31fe35560e3e85"
+      },
+      {
+        "name": "68925f01db31fe35560e3e87"
+      },
+      {
+        "name": "68925f01db31fe35560e3e8a"
+      },
+      {
+        "name": "68925f01db31fe35560e3e8c"
+      },
+      {
+        "name": "68925f01db31fe35560e3e92"
+      },
+      {
+        "name": "68925f01db31fe35560e3e97"
+      },
+      {
+        "name": "68925f01db31fe35560e3e9d"
+      },
+      {
+        "name": "68925f01db31fe35560e3e9f"
+      },
+      {
+        "name": "68925f01db31fe35560e3ea2"
+      },
+      {
+        "name": "68925f01db31fe35560e3ea8"
+      },
+      {
+        "name": "68925f01db31fe35560e3eaf"
+      },
+      {
+        "name": "68925f01db31fe35560e3eb1"
+      },
+      {
+        "name": "68925f01db31fe35560e3eb5"
+      },
+      {
+        "name": "68925f01db31fe35560e3eb8"
+      },
+      {
+        "name": "68925f01db31fe35560e3ebb"
+      },
+      {
+        "name": "68925f01db31fe35560e3ebf"
+      },
+      {
+        "name": "68925f01db31fe35560e3ec1"
+      },
+      {
+        "name": "68925f01db31fe35560e3ec2"
+      },
+      {
+        "name": "68925f01db31fe35560e3ec5"
+      },
+      {
+        "name": "68925f01db31fe35560e3ecc"
+      },
+      {
+        "name": "68940d8355faa0b720f0b478"
+      },
+      {
+        "name": "68940d8355faa0b720f0b481"
+      },
+      {
+        "name": "68940d8355faa0b720f0b482"
+      },
+      {
+        "name": "68940d8355faa0b720f0b485"
+      },
+      {
+        "name": "68940d8355faa0b720f0b499"
+      },
+      {
+        "name": "68940d8355faa0b720f0b4a9"
+      },
+      {
+        "name": "68940d8355faa0b720f0b4aa"
+      },
+      {
+        "name": "68940d8355faa0b720f0b4b2"
+      },
+      {
+        "name": "68940d8355faa0b720f0b4b4"
+      },
+      {
+        "name": "68940d8355faa0b720f0b4b7"
+      },
+      {
+        "name": "68940d8355faa0b720f0b4ba"
+      },
+      {
+        "name": "68940d8355faa0b720f0b4bb"
+      },
+      {
+        "name": "68940d8355faa0b720f0b4c2"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db36"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db37"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db3a"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db40"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db51"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db5b"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db6e"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db74"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db77"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db79"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db7d"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db84"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db8f"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db91"
+      },
+      {
+        "name": "68952adeba1c2ad4e6a5db96"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8b4"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8b9"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8be"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8bf"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8c2"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8c6"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8c7"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8d6"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8dd"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8e0"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8e2"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8e5"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8f0"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8f3"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8f7"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8f8"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c8fc"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c901"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c902"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c909"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c90a"
+      },
+      {
+        "name": "6896416f7b30e5d8ccd7c913"
+      },
+      {
+        "name": "6897a6002b64a8c831efa2e7"
+      },
+      {
+        "name": "6897a6002b64a8c831efa2e9"
+      },
+      {
+        "name": "6897a6002b64a8c831efa2f6"
+      },
+      {
+        "name": "6897a6002b64a8c831efa2fa"
+      },
+      {
+        "name": "6897a6002b64a8c831efa2fb"
+      },
+      {
+        "name": "6897a6002b64a8c831efa2ff"
+      },
+      {
+        "name": "6897a6002b64a8c831efa301"
+      },
+      {
+        "name": "6897a6002b64a8c831efa304"
+      },
+      {
+        "name": "6897a6002b64a8c831efa30c"
+      },
+      {
+        "name": "6897a6002b64a8c831efa312"
+      },
+      {
+        "name": "6897a6002b64a8c831efa314"
+      },
+      {
+        "name": "6897a6002b64a8c831efa317"
+      },
+      {
+        "name": "6897a6002b64a8c831efa32f"
+      },
+      {
+        "name": "6897a6002b64a8c831efa335"
+      },
+      {
+        "name": "6897a6002b64a8c831efa336"
+      },
+      {
+        "name": "6897a6002b64a8c831efa338"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83f88"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83f8b"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83f90"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fa0"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fa3"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fa4"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fa9"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83faf"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fb0"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fb1"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fbb"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fbc"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fbd"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fc4"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fca"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fcc"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fcd"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fd1"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fd2"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fd3"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fd5"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fd7"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fd8"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fd9"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fdb"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fdf",
+        "revision": "8c563b55d7c967755f474299848049834d624617",
+        "submission_paths": [
+          "/logs/artifacts/answer.txt"
+        ],
+        "description": "Find a walking route to a charging station near Tomorrowland"
       },
       {
         "name": "68993ef3cf3e953b8ab83fe3",
@@ -29,12 +693,802 @@
         "description": "Combine a historical event date with local Git history"
       },
       {
-        "name": "6863f438a500a4b36aab0f24",
-        "revision": "8c563b55d7c967755f474299848049834d624617",
-        "submission_paths": [
-          "/logs/artifacts/answer.txt"
-        ],
-        "description": "Research two historical suspension-bridge records"
+        "name": "689a373e148a49f91233dfca"
+      },
+      {
+        "name": "689a373e148a49f91233dfcb"
+      },
+      {
+        "name": "689a373e148a49f91233dfcd"
+      },
+      {
+        "name": "689a373e148a49f91233dfce"
+      },
+      {
+        "name": "689a373e148a49f91233dfcf"
+      },
+      {
+        "name": "689a373e148a49f91233dfd3"
+      },
+      {
+        "name": "689a373e148a49f91233dfd6"
+      },
+      {
+        "name": "689a373e148a49f91233dfdb"
+      },
+      {
+        "name": "689a373e148a49f91233dfdc"
+      },
+      {
+        "name": "689a373e148a49f91233dfe4"
+      },
+      {
+        "name": "689a373e148a49f91233dfe6"
+      },
+      {
+        "name": "689a373e148a49f91233dfe8"
+      },
+      {
+        "name": "689a373e148a49f91233dfec"
+      },
+      {
+        "name": "689a373e148a49f91233dfed"
+      },
+      {
+        "name": "689a373e148a49f91233dff0"
+      },
+      {
+        "name": "689a373e148a49f91233dff1"
+      },
+      {
+        "name": "689a373e148a49f91233dff7"
+      },
+      {
+        "name": "689a373e148a49f91233dffa"
+      },
+      {
+        "name": "689a373e148a49f91233e000"
+      },
+      {
+        "name": "689a373e148a49f91233e001"
+      },
+      {
+        "name": "689a373e148a49f91233e002"
+      },
+      {
+        "name": "689a373e148a49f91233e003"
+      },
+      {
+        "name": "689a373e148a49f91233e004"
+      },
+      {
+        "name": "689a373e148a49f91233e006"
+      },
+      {
+        "name": "689a373e148a49f91233e00c"
+      },
+      {
+        "name": "689a373e148a49f91233e00d"
+      },
+      {
+        "name": "689a373e148a49f91233e016"
+      },
+      {
+        "name": "689a373e148a49f91233e018"
+      },
+      {
+        "name": "689a373e148a49f91233e01a"
+      },
+      {
+        "name": "689a373e148a49f91233e01d"
+      },
+      {
+        "name": "689a373e148a49f91233e021"
+      },
+      {
+        "name": "689a373e148a49f91233e023"
+      },
+      {
+        "name": "689a373e148a49f91233e024"
+      },
+      {
+        "name": "689a373e148a49f91233e027"
+      },
+      {
+        "name": "689a373e148a49f91233e028"
+      },
+      {
+        "name": "689a373e148a49f91233e029"
+      },
+      {
+        "name": "689a373e148a49f91233e02b"
+      },
+      {
+        "name": "689af4e653c3905e7b5b2568"
+      },
+      {
+        "name": "689af4e653c3905e7b5b2572"
+      },
+      {
+        "name": "689af4e653c3905e7b5b2576"
+      },
+      {
+        "name": "689af4e653c3905e7b5b2578"
+      },
+      {
+        "name": "689af4e653c3905e7b5b2579"
+      },
+      {
+        "name": "689af4e653c3905e7b5b257a"
+      },
+      {
+        "name": "689af4e653c3905e7b5b257d"
+      },
+      {
+        "name": "689af4e653c3905e7b5b257f"
+      },
+      {
+        "name": "689af4e653c3905e7b5b2581"
+      },
+      {
+        "name": "689af4e653c3905e7b5b2582"
+      },
+      {
+        "name": "689af4e653c3905e7b5b2588"
+      },
+      {
+        "name": "689af4e653c3905e7b5b258a"
+      },
+      {
+        "name": "689af4e653c3905e7b5b258b"
+      },
+      {
+        "name": "689af4e653c3905e7b5b258e"
+      },
+      {
+        "name": "689af4e653c3905e7b5b2593"
+      },
+      {
+        "name": "689af4e653c3905e7b5b2596"
+      },
+      {
+        "name": "689af4e653c3905e7b5b259a"
+      },
+      {
+        "name": "689af4e653c3905e7b5b259b"
+      },
+      {
+        "name": "689af4e653c3905e7b5b259c"
+      },
+      {
+        "name": "689af4e653c3905e7b5b259f"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25a0"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25a1"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25a3"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25a4"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25a5"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25b0"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25b6"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25b8"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25b9"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25bd"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25c1"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25c2"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25c3"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25c4"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25c8"
+      },
+      {
+        "name": "689af4e653c3905e7b5b25ca"
+      },
+      {
+        "name": "689bd255c0422b257e7dfca5"
+      },
+      {
+        "name": "689bd255c0422b257e7dfca8"
+      },
+      {
+        "name": "689bd255c0422b257e7dfca9"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcad"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcae"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcaf"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcb0"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcb1"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcb2"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcb5"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcb6"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcb8"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcb9"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcbb"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcbc"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcbd"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcbe"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcc1"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcc2"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcc4"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcc5"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcc6"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcc7"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcc9"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcca"
+      },
+      {
+        "name": "689bd255c0422b257e7dfccb"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcce"
+      },
+      {
+        "name": "689bd255c0422b257e7dfccf"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcd0"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcd4"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcd5"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcd7"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcd9"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcda"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcdc"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcde"
+      },
+      {
+        "name": "689bd255c0422b257e7dfce1"
+      },
+      {
+        "name": "689bd255c0422b257e7dfce2"
+      },
+      {
+        "name": "689bd255c0422b257e7dfce4"
+      },
+      {
+        "name": "689bd255c0422b257e7dfce6"
+      },
+      {
+        "name": "689bd255c0422b257e7dfce7"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcec"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcef"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcf3"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcf4"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcf7"
+      },
+      {
+        "name": "689bd255c0422b257e7dfcfd"
+      },
+      {
+        "name": "689bd255c0422b257e7dfd00"
+      },
+      {
+        "name": "689bd255c0422b257e7dfd04"
+      },
+      {
+        "name": "689bd255c0422b257e7dfd05"
+      },
+      {
+        "name": "689bd255c0422b257e7dfd07"
+      },
+      {
+        "name": "689bd255c0422b257e7dfd08"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fdb"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fdc"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fdd"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fe0"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fe1"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fe2"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fe3"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fe4"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fe5"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fe6"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fe7"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fe8"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1feb"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fee"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1ff0"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1ff1"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1ff4"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1ff7"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1ff9"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1ffd"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b1fff"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2003"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2005"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2007"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2008"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b200a"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b200c"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b200d"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b200e"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2012"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2013"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2014"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2015"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2016"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2017"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b201e"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2020"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2024"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2026"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b202a"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b202c"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b202f"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2030"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2034"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2036"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2037"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b2039"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b203a"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b203c"
+      },
+      {
+        "name": "689cd6f8522029b7ad7b203e"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f1fe"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f1ff"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f200"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f201"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f202"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f204"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f206"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f208"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f20c"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f20e"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f20f"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f211"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f214"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f21b"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f220"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f225"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f228"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f229"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f237"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f238"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f23a"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f23b"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f240"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f242"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f245"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f248"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f249"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f24b"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f24c"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f24d"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f24e"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f254"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f257"
+      },
+      {
+        "name": "689e0b1d9c8e2ac413c1f25c"
+      },
+      {
+        "name": "689f4d693e212e8ef33906e5"
+      },
+      {
+        "name": "689f4d693e212e8ef33906f6"
+      },
+      {
+        "name": "689f4d693e212e8ef33906f7"
+      },
+      {
+        "name": "689f4d693e212e8ef33906f8"
+      },
+      {
+        "name": "689f4d693e212e8ef3390701"
+      },
+      {
+        "name": "689f4d693e212e8ef3390707"
+      },
+      {
+        "name": "689f4d693e212e8ef3390708"
+      },
+      {
+        "name": "689f4d693e212e8ef339070a"
+      },
+      {
+        "name": "689f4d693e212e8ef3390710"
+      },
+      {
+        "name": "689f4d693e212e8ef3390716"
+      },
+      {
+        "name": "689f4d693e212e8ef339071d"
+      },
+      {
+        "name": "689f4d693e212e8ef339071f"
+      },
+      {
+        "name": "689f4d693e212e8ef3390720"
+      },
+      {
+        "name": "689f4d693e212e8ef3390724"
+      },
+      {
+        "name": "689f4d693e212e8ef3390728"
+      },
+      {
+        "name": "689f4d693e212e8ef339072a"
+      },
+      {
+        "name": "689f4d693e212e8ef3390731"
+      },
+      {
+        "name": "689f4d693e212e8ef3390733"
+      },
+      {
+        "name": "689f4d693e212e8ef3390736"
+      },
+      {
+        "name": "689f4d693e212e8ef3390737"
+      },
+      {
+        "name": "689f4d693e212e8ef339073a"
+      },
+      {
+        "name": "689f4d693e212e8ef339073e"
+      },
+      {
+        "name": "689f4d693e212e8ef339073f"
+      },
+      {
+        "name": "689f4d693e212e8ef3390740"
+      },
+      {
+        "name": "689f4d693e212e8ef3390744"
+      },
+      {
+        "name": "689f4d693e212e8ef3390748"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edce"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edcf"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edd1"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edd2"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edd3"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edd4"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edd7"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edda"
+      },
+      {
+        "name": "68a398aa2f58036e8d45eddb"
+      },
+      {
+        "name": "68a398aa2f58036e8d45eddc"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edde"
+      },
+      {
+        "name": "68a398aa2f58036e8d45eddf"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ede0"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ede2"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ede3"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ede8"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edeb"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edec"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edee"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edf4"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edf6"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edf7"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edfb"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edfc"
+      },
+      {
+        "name": "68a398aa2f58036e8d45edfd"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee00"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee01"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee03"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee05"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee08"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee09"
       },
       {
         "name": "68a398aa2f58036e8d45ee0c",
@@ -45,13 +1499,48 @@
         "description": "Compare public transportation in two Santiago communes"
       },
       {
-        "name": "68993ef3cf3e953b8ab83fdf",
-        "revision": "8c563b55d7c967755f474299848049834d624617",
-        "submission_paths": [
-          "/logs/artifacts/answer.txt"
-        ],
-        "description": "Find a walking route to a charging station near Tomorrowland"
+        "name": "68a398aa2f58036e8d45ee11"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee13"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee15"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee16"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee19"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee1c"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee1f"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee20"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee21"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee23"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee26"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee28"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee2e"
       }
-    ]
+    ],
+    "upstream": {
+      "dataset": "ScaleAI/MCP-Atlas",
+      "revision": "8c563b55d7c967755f474299848049834d624617"
+    }
   }
 ]

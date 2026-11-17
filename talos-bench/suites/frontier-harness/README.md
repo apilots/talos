@@ -1,5 +1,7 @@
 # FrontierHarness v1.1 local batch
 
+Use the [shared Bench launcher](../../../docs/reference/BENCHMARKS.md#run-frontierharness-v11) to select the local or Runta backend for registered tasks and set a model reasoning effort.
+
 Run from the repository root with native Linux ARM64 Docker and `uv`. The inventory resolves the exact Hub dataset pin from `registry.json`. It records all 62 task digests, environment requirements and admission decisions before a batch starts. Package inspection and image manifest checks do not execute a task.
 
 ```bash

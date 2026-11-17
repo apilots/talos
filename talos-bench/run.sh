@@ -6,11 +6,56 @@ repo_root="$(cd "$bench_dir/.." && pwd)"
 if [[ $# -eq 1 && "$1" == --list ]]; then
   exec uv run --python 3.12 python "$bench_dir/summarize.py" list "$bench_dir/suites"
 fi
-if [[ $# -gt 1 ]]; then
-  echo 'Usage: talos-bench/run.sh [suite[@version] | --list]' >&2
+usage() {
+  echo 'Usage: talos-bench/run.sh [suite[@version]] [--backend local|runta] [--reasoning-effort light|medium|high|xhigh]'
+  echo '       talos-bench/run.sh --list'
+}
+selector=
+backend=local
+reasoning_effort="${TALOS_BENCH_REASONING_EFFORT:-}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h) usage; exit 0 ;;
+    --backend|--reasoning-effort)
+      if [[ $# -lt 2 || -z "$2" || "$2" == -* ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      if [[ "$1" == --backend ]]; then
+        backend="$2"
+      else
+        reasoning_effort="$2"
+      fi
+      shift
+      ;;
+    -*)
+      usage >&2
+      exit 1
+      ;;
+    *)
+      if [[ -n "$selector" ]]; then
+        usage >&2
+        exit 1
+      fi
+      selector="$1"
+      ;;
+  esac
+  shift
+done
+case "$backend" in
+  local|runta) ;;
+  *) echo "Unknown benchmark backend: $backend" >&2; exit 1 ;;
+esac
+case "$reasoning_effort" in
+  ''|light|medium|high|xhigh) ;;
+  *) echo "Unknown Talos reasoning effort: $reasoning_effort" >&2; exit 1 ;;
+esac
+if [[ -n "$reasoning_effort" && -z "${TALOS_BENCH_MODEL:-}" ]]; then
+  echo 'Select TALOS_BENCH_MODEL to override reasoning effort.' >&2
   exit 1
 fi
-selector="${1:-${TALOS_BENCH_SUITE:-terminal-bench}}"
+export TALOS_BENCH_REASONING_EFFORT="$reasoning_effort"
+selector="${selector:-${TALOS_BENCH_SUITE:-terminal-bench}}"
 suite="${selector%%@*}"
 suite_dir="$bench_dir/suites/$suite"
 if [[ ! "$suite" =~ ^[a-z0-9][a-z0-9-]*$ || ! -r "$suite_dir/suite.sh" ]]; then
@@ -88,6 +133,21 @@ fi
 
 tasks="${TALOS_BENCH_TASKS:-$default_task}"
 selection="$(uv run --python 3.12 python "$bench_dir/summarize.py" select "$registry" "$tasks")"
+if [[ "$backend" == runta ]]; then
+  if [[ "$suite@$suite_version" != frontier-harness@1.1.0 ]]; then
+    echo 'The Runta backend supports frontier-harness@1.1.0.' >&2
+    exit 1
+  fi
+  if [[ "${TALOS_BENCH_MODEL:-}" != openai:* ]]; then
+    echo 'Select an OpenAI catalog model with TALOS_BENCH_MODEL for Runta.' >&2
+    exit 1
+  fi
+  if [[ -n "${TALOS_BENCH_CONFIG:-}${TALOS_BENCH_DOTENV:-}${TALOS_BENCH_PRODUCT:-}" ]]; then
+    echo 'Runta uses the checkpoint product catalog and a named Runta secret.' >&2
+    exit 1
+  fi
+  exec uv run --python 3.12 python "$suite_dir/runta.py" "$repo_root" "$tasks" "$repeats"
+fi
 if [[ "$mode" == fixture && "$selection" != "$fixture_task" ]]; then
   echo 'The selected tasks have no controlled fixture. Select an oracle or configured model.' >&2
   exit 1

@@ -17,14 +17,12 @@ For a live-model smoke, use the [configured-model command](../../../docs/referen
 
 ## Published cases
 
-`public-cases.json` contains five exact task records from the [pinned public split](https://huggingface.co/datasets/ScaleAI/MCP-Atlas/tree/8c563b55d7c967755f474299848049834d624617). Use `TALOS_BENCH_TASKS` with the configured OpenAI model, config, and dotenv to select one or more IDs.
+`registry.json` indexes all 500 IDs from the [pinned public split](https://huggingface.co/datasets/ScaleAI/MCP-Atlas/tree/8c563b55d7c967755f474299848049834d624617). `public-cases.json` supplies the prompts, tool menus, and official scoring claims for the five cases listed below. Other public IDs require a case record and support for their tool menus in the sandbox before task preparation can succeed.
 
-Set the configured-model variables and pass the saved selection to the launcher.
+Export the [configured OpenAI model settings](../../../docs/reference/BENCHMARKS.md#run-with-a-configured-model), then select a prepared case. The agent and the independent judge both use OpenAI calls.
 
 ```bash
-TALOS_BENCH_TASKS="$(python3 -c 'import json; print(",".join(
-    task["TASK"] for task in json.load(open("talos-bench/suites/mcp-atlas/public-cases.json"))["tasks"]
-))')" ./talos-bench/run.sh mcp-atlas@2.0.0
+TALOS_BENCH_TASKS=686d2c79e1db37ea23ddda26 ./talos-bench/run.sh mcp-atlas@2.0.0
 ```
 
 | Task ID | Workflow |
@@ -37,7 +35,7 @@ TALOS_BENCH_TASKS="$(python3 -c 'import json; print(",".join(
 
 These tasks expose their original tool menus through the pinned sandbox. The agent and sandbox share a per-task allowlist for the OpenAI endpoint and the selected public data services. Live data and rate limits can affect tool results. Harbor collects the sandbox log with the trial artifacts.
 
-The separate verifier sends the published claims and final answer to the upstream scorer using the OpenAI judge `gpt-4.1-2025-04-14`. The judge receives the OpenAI credential from the configured Talos dotenv. Set `TALOS_BENCH_ATLAS_JUDGE_MODEL` to use another Chat Completions model that supports structured outputs and temperature zero. Harbor records the coverage reward, per-claim verdicts, raw result, Talos transcript, and captured answer. A judge failure leaves the trial unscored. The report treats coverage of at least 0.75 as passing and records full coverage separately. The scores identify the OpenAI judge and this five-case selection. [Upstream scoring metrics](https://github.com/scaleapi/mcp-atlas/blob/e3dfef3ce93287c3d7b9e765c3a021f252eefbff/README.md#6-score)
+The separate verifier sends the published claims and final answer to the upstream scorer using the OpenAI judge `gpt-4.1-2025-04-14`. The judge receives the OpenAI credential from the configured Talos dotenv. Set `TALOS_BENCH_ATLAS_JUDGE_MODEL` to use another Chat Completions model that supports structured outputs and temperature zero. Harbor records the coverage reward, per-claim verdicts, raw result, Talos transcript, and captured answer. A judge failure leaves the trial unscored. The report treats coverage of at least 0.75 as passing and records full coverage separately. The scores identify the OpenAI judge and the selected cases. [Upstream scoring metrics](https://github.com/scaleapi/mcp-atlas/blob/e3dfef3ce93287c3d7b9e765c3a021f252eefbff/README.md#6-score)
 
 ## Export
 

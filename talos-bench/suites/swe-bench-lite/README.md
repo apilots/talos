@@ -9,13 +9,13 @@ TALOS_BENCH_ORACLE=1 talos-bench/run.sh swe-bench-lite
 
 The first command uses a controlled local Chat Completions provider. Talos edits the pinned SymPy checkout, Harbor archives its Git patch, and the separate verifier applies that patch to a clean checkout. SWE-bench 5.0.2 loads the upstream task script and computes the official report. The oracle submits the upstream gold patch through the same verifier. The agent image contains a single-commit checkout. The test inputs are built into the verifier image.
 
-## Five-case evaluation
+## Select test instances
 
-The suite registry pins five tasks from the [SWE-bench Lite test split](https://huggingface.co/datasets/SWE-bench/SWE-bench_Lite/tree/b0dde1093fe417d83b7184254edf8199c1f0dff5). They cover symbolic object layout, polynomial factorization, complex sign rewriting, reference-frame mechanics, and integer partition iteration. The upstream tasks share the SymPy 1.7 dependency setup, so a native ARM64 run builds the shared environment once and keeps separate checkouts and verifiers for each base commit. Each task uses the original evaluation script and test expectations.
+The registry contains all 300 instances from the [pinned SWE-bench Lite test split](https://huggingface.co/datasets/SWE-bench/SWE-bench_Lite/tree/b0dde1093fe417d83b7184254edf8199c1f0dff5). Each instance has a pinned upstream AMD64 image. The native ARM64 recipe applies to the six SymPy 1.7 instances. For other instances, preparation requests the pinned image for the Docker daemon's platform and reports any incompatibility from Docker. Each task uses the original evaluation script and test expectations.
 
 The local real-model profile gives Talos 900 seconds per task. The verifier and the controlled and Oracle runs each retain their 300-second deadline.
 
-Use the [configured-model settings](../../../docs/reference/BENCHMARKS.md#run-with-a-configured-model) with this selection:
+Use the [configured-model settings](../../../docs/reference/BENCHMARKS.md#run-with-a-configured-model) with this example selection:
 
 ```sh
 TALOS_BENCH_TASKS=sympy__sympy-20590,sympy__sympy-19254,sympy__sympy-19487,sympy__sympy-20049,sympy__sympy-20154 \

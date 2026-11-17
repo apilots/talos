@@ -2,13 +2,58 @@
   {
     "name": "deep-swe",
     "version": "1.1",
-    "description": "Pinned DeepSWE cases with a native ARM64 build",
+    "description": "Pinned DeepSWE 1.1 task catalog for Pier",
     "tasks": [
       {
-        "name": "python-statemachine-state-data-scoping",
+        "name": "abs-module-cache-flags",
         "git_url": "https://github.com/datacurve-ai/deep-swe.git",
         "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
-        "path": "tasks/python-statemachine-state-data-scoping",
+        "path": "tasks/abs-module-cache-flags",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "abs-stepped-slices",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/abs-stepped-slices",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "actionlint-action-pinning-lint",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/actionlint-action-pinning-lint",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "adaptix-name-mapping-aliases",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/adaptix-name-mapping-aliases",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "aiomonitor-task-snapshots-diff",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/aiomonitor-task-snapshots-diff",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "anko-default-function-arguments",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/anko-default-function-arguments",
         "submission_paths": [
           "/logs/artifacts/model.patch"
         ]
@@ -23,10 +68,766 @@
         ]
       },
       {
-        "name": "textual-richlog-follow-state",
+        "name": "arcane-drift-detection-baselines",
         "git_url": "https://github.com/datacurve-ai/deep-swe.git",
         "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
-        "path": "tasks/textual-richlog-follow-state",
+        "path": "tasks/arcane-drift-detection-baselines",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "arktype-json-schema-refs-dependencies",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/arktype-json-schema-refs-dependencies",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "awilix-async-container-initialization",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/awilix-async-container-initialization",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "bandit-incremental-cache-control",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/bandit-incremental-cache-control",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "bandit-interprocedural-taint-checks",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/bandit-interprocedural-taint-checks",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "bandit-structured-nosec-directives",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/bandit-structured-nosec-directives",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "boa-hierarchical-evaluation-cancellation",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/boa-hierarchical-evaluation-cancellation",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "cattrs-partial-structuring-recovery",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/cattrs-partial-structuring-recovery",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "clack-async-autocomplete-options",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/clack-async-autocomplete-options",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "claude-code-by-agents-recursive-delegation",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/claude-code-by-agents-recursive-delegation",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "cliffy-config-file-parsing",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/cliffy-config-file-parsing",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "csstree-shorthand-expansion-compression",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/csstree-shorthand-expansion-compression",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "dasel-html-document-format",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/dasel-html-document-format",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "dateutil-rfc5545-timezone-interop",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/dateutil-rfc5545-timezone-interop",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "drizzle-orm-window-function-builders",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/drizzle-orm-window-function-builders",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "dynamodb-toolbox-conditional-attribute-requirements",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/dynamodb-toolbox-conditional-attribute-requirements",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "dynamodb-toolbox-lazy-recursive-schemas",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/dynamodb-toolbox-lazy-recursive-schemas",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "effect-sse-httpapi-streaming",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/effect-sse-httpapi-streaming",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "eicrud-keyset-pagination-cursor",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/eicrud-keyset-pagination-cursor",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "etree-xml-diff-patch",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/etree-xml-diff-patch",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "expr-try-catch-errors",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/expr-try-catch-errors",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "fastapi-deprecation-response-headers",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/fastapi-deprecation-response-headers",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "fastapi-implicit-head-options",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/fastapi-implicit-head-options",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "fd-deterministic-multi-key-sorting",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/fd-deterministic-multi-key-sorting",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "geo-shapeindex-serialization",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/geo-shapeindex-serialization",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "go-critic-doc-link-checker",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/go-critic-doc-link-checker",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "go-genai-streamed-function-args",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/go-genai-streamed-function-args",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "go-git-worktree-merge-conflicts",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/go-git-worktree-merge-conflicts",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "goreleaser-retry-publish-auditing",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/goreleaser-retry-publish-auditing",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "gql-incremental-graphql-delivery",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/gql-incremental-graphql-delivery",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "happy-dom-abort-pending-body-reads",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/happy-dom-abort-pending-body-reads",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "happy-dom-deterministic-intersectionobserver",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/happy-dom-deterministic-intersectionobserver",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "helm-array-merge-strategies",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/helm-array-merge-strategies",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "helm-unified-manifest-stream",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/helm-unified-manifest-stream",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "httpx-deterministic-cookie-store",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/httpx-deterministic-cookie-store",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "httpx-multipart-response-parsing",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/httpx-multipart-response-parsing",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "httpx-streaming-json-iteration",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/httpx-streaming-json-iteration",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "igel-persist-feature-schema",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/igel-persist-feature-schema",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "ink-grid-box-layout",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/ink-grid-box-layout",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "ipython-session-bundle-replay",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/ipython-session-bundle-replay",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "katex-multicolumn-array-spans",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/katex-multicolumn-array-spans",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "kcp-go-multiplexed-kcp-streams",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/kcp-go-multiplexed-kcp-streams",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "kea-atomic-signal-selectors",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/kea-atomic-signal-selectors",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "kgateway-consistent-hash-policy",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/kgateway-consistent-hash-policy",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "kombu-single-active-consumer-priority",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/kombu-single-active-consumer-priority",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "kombu-virtual-queue-dead-lettering",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/kombu-virtual-queue-dead-lettering",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "koota-composite-trait-aspects",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/koota-composite-trait-aspects",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "koota-deferred-mutation-buffer",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/koota-deferred-mutation-buffer",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "koota-entity-snapshot-rollback",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/koota-entity-snapshot-rollback",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "koota-pair-relation-tracking",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/koota-pair-relation-tracking",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "koota-query-predicates",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/koota-query-predicates",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "kysely-window-grouping-helpers",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/kysely-window-grouping-helpers",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "langchain-request-coalescing",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/langchain-request-coalescing",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "mashumaro-flattened-dataclass-fields",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/mashumaro-flattened-dataclass-fields",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "meriyah-explicit-resource-declarations",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/meriyah-explicit-resource-declarations",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "mnamer-daemon-watch-lifecycle",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/mnamer-daemon-watch-lifecycle",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "mobly-grouped-test-barriers",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/mobly-grouped-test-barriers",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "narwhals-rolling-window-suite",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/narwhals-rolling-window-suite",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "numba-stencil-boundary-modes",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/numba-stencil-boundary-modes",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "obsidian-linter-auto-table-of-contents",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/obsidian-linter-auto-table-of-contents",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "obsidian-linter-link-format-conversion",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/obsidian-linter-link-format-conversion",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "obsidian-linter-scoped-ignore-markers",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/obsidian-linter-scoped-ignore-markers",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "ofetch-per-origin-circuit-breaker",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/ofetch-per-origin-circuit-breaker",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "onedump-dump-encryption-pipeline",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/onedump-dump-encryption-pipeline",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "opa-rego-rule-profiling",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/opa-rego-rule-profiling",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "opa-template-string-reconstruction",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/opa-template-string-reconstruction",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "optique-conditional-option-dependencies",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/optique-conditional-option-dependencies",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "oxvg-structural-selector-preservation",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/oxvg-structural-selector-preservation",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "participle-grammar-conflict-analysis",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/participle-grammar-conflict-analysis",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "pebble-durability-wait-apis",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/pebble-durability-wait-apis",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "pest-character-class-coalescing",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/pest-character-class-coalescing",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "prometheus-transactional-reload-status",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/prometheus-transactional-reload-status",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "prometheus-typed-label-sorting",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/prometheus-typed-label-sorting",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "psd-tools-blend-range-api",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/psd-tools-blend-range-api",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "pwntools-tube-multiplexing",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/pwntools-tube-multiplexing",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "python-statemachine-state-data-scoping",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/python-statemachine-state-data-scoping",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "query-persist-restored-query-state",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/query-persist-restored-query-state",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "quill-shared-toolbar-focus",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/quill-shared-toolbar-focus",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "returns-validated-error-accumulation",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/returns-validated-error-accumulation",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "scc-bounded-memory-spilling",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/scc-bounded-memory-spilling",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "scriggo-method-declarations",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/scriggo-method-declarations",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "skrub-duration-encoding",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/skrub-duration-encoding",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "sql-formatter-bigquery-pipe-formatting",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/sql-formatter-bigquery-pipe-formatting",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "sqlfmt-create-table-ddl-formatting",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/sqlfmt-create-table-ddl-formatting",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "sqlite-utils-safe-import-checkpoints",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/sqlite-utils-safe-import-checkpoints",
         "submission_paths": [
           "/logs/artifacts/model.patch"
         ]
@@ -41,10 +842,181 @@
         ]
       },
       {
+        "name": "task-task-graph-export",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/task-task-graph-export",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "tengo-callable-instance-isolation",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/tengo-callable-instance-isolation",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "tengo-destructuring-bindings",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/tengo-destructuring-bindings",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
         "name": "termenv-preserve-ansi-resets",
         "git_url": "https://github.com/datacurve-ai/deep-swe.git",
         "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
         "path": "tasks/termenv-preserve-ansi-resets",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "testem-bail-on-test-failure",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/testem-bail-on-test-failure",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "testem-per-launcher-reports",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/testem-per-launcher-reports",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "textual-kitty-key-phases",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/textual-kitty-key-phases",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "textual-richlog-follow-state",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/textual-richlog-follow-state",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "tomlkit-toml-table-converters",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/tomlkit-toml-table-converters",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "true-myth-iterable-collection-combinators",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/true-myth-iterable-collection-combinators",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "ts-pattern-match-each",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/ts-pattern-match-each",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "updo-policy-alerting",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/updo-policy-alerting",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "valibot-recursive-schema-composition",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/valibot-recursive-schema-composition",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "vitest-duration-sharding",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/vitest-duration-sharding",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "vulture-persistent-analysis-cache",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/vulture-persistent-analysis-cache",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "wasmi-trap-coredumps",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/wasmi-trap-coredumps",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "wazero-multi-module-snapshots",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/wazero-multi-module-snapshots",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "yaegi-go-embed-directives",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/yaegi-go-embed-directives",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "yjs-map-conflict-detection",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/yjs-map-conflict-detection",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "ytt-jsonpath-query-api",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/ytt-jsonpath-query-api",
         "submission_paths": [
           "/logs/artifacts/model.patch"
         ]

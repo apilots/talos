@@ -25,19 +25,18 @@ SUITE = Path(__file__).resolve().parent
 HARNESS_VERSION = "5.0.2"
 
 
-def prepare_task(run, entry, mode, target_platform, builder, client, environment_images):
+def prepare_task(run, entry, row, mode, target_platform, builder, client, environment_images):
     task_name = entry["name"]
     revision = entry["git_commit_id"]
     base_commit = entry["base_commit"]
     arch = target_platform.removeprefix("linux/")
-    row = fetch_case(entry, include_gold=mode == "oracle")
     task = run / "task" / task_name
     agent = task / "environment"
     verifier = task / "tests"
     agent.mkdir(parents=True)
     verifier.mkdir()
     (task / "instruction.md").write_text(row["problem_statement"])
-    agent_recipe = "agent.Dockerfile" if arch == "arm64" else "agent-amd64.Dockerfile"
+    agent_recipe = "agent.Dockerfile" if environment_images else "agent-amd64.Dockerfile"
     shutil.copyfile(RECIPES / agent_recipe, agent / "Dockerfile")
     shutil.copyfile(RECIPES / "verifier.Dockerfile", verifier / "Dockerfile")
     for name in ("test.sh", "grade.py"):
@@ -61,7 +60,7 @@ artifacts = [{{ source = "/logs/artifacts/submission.patch", destination = "subm
 
 [task]
 name = "swe-bench/{task_name}"
-description = "Pinned SWE-bench Lite SymPy regression"
+description = "Pinned SWE-bench Lite task"
 
 [metadata]
 task_revision = "{revision}"
@@ -84,7 +83,9 @@ network_mode = "no-network"
     builds = run / "swe-bench-build" / task_name
     builds.mkdir()
     images = dict(environment_images)
-    agent_base = images["environment"]["tag"] if arch == "arm64" else entry["amd64_image"]
+    agent_base = images["environment"]["tag"] if images else entry["amd64_image"]
+    if arch == "arm64" and not images:
+        client.images.pull(agent_base, platform=target_platform)
     images["agent"] = build_image(
         agent, builder, client, agent_tag, builds / "agent.log",
         target_platform=target_platform,
@@ -118,9 +119,19 @@ def prepare(run, selection, mode):
     builds = run / "swe-bench-build"
     builds.mkdir()
     with native_docker(target_platform) as (builder, client):
-        environment = build_arm64_environment(builds, builder, client) if target_platform == "linux/arm64" else {}
-        for task_name in selection.splitlines():
-            prepare_task(run, TASKS[task_name], mode, target_platform, builder, client, environment)
+        arm64_environment = {}
+        for name in selection.splitlines():
+            entry = TASKS[name]
+            row = fetch_case(entry, include_gold=mode == "oracle")
+            use_arm64_recipe = (
+                target_platform == "linux/arm64"
+                and row["repo"] == "sympy/sympy"
+                and row["version"] == "1.7"
+            )
+            if use_arm64_recipe and not arm64_environment:
+                arm64_environment = build_arm64_environment(builds, builder, client)
+            prepare_task(run, entry, row, mode, target_platform, builder, client,
+                         arm64_environment if use_arm64_recipe else {})
 
 
 if __name__ == "__main__":

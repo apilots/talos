@@ -8,11 +8,886 @@
       "revision": "a7658beb68e1d3572329e06734c5822bd284ddc8"
     },
     "tasks": [
-      {"name": "click-test-2", "description": "Select the requested button", "seed": 42, "submission_paths": ["/logs/artifacts/episode.json"]},
-      {"name": "click-button-sequence", "description": "Click buttons in order", "seed": 42, "submission_paths": ["/logs/artifacts/episode.json"]},
-      {"name": "enter-text", "description": "Enter and submit the requested text", "seed": 42, "submission_paths": ["/logs/artifacts/episode.json"]},
-      {"name": "choose-list", "description": "Select the requested list value", "seed": 42, "submission_paths": ["/logs/artifacts/episode.json"]},
-      {"name": "email-inbox-reply", "description": "Find an email, compose a reply and send it", "seed": 42, "submission_paths": ["/logs/artifacts/episode.json"]}
+      {
+        "name": "ascending-numbers",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "bisect-angle",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "book-flight",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "book-flight-nodelay",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "buy-ticket",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "choose-date",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "choose-date-easy",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "choose-date-medium",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "choose-date-nodelay",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "choose-list",
+        "description": "Select the requested list value",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "circle-center",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-button",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-button-sequence",
+        "description": "Click buttons in order",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-checkboxes",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-checkboxes-large",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-checkboxes-soft",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-checkboxes-transfer",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-collapsible",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-collapsible-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-collapsible-2-nodelay",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-collapsible-nodelay",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-color",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-dialog",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-dialog-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-link",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-menu",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-menu-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-option",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-pie",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-pie-nodelay",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-scroll-list",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-shades",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-shape",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-tab",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-tab-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-tab-2-easy",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-tab-2-hard",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-tab-2-medium",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-test",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-test-2",
+        "description": "Select the requested button",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-test-transfer",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "click-widget",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "copy-paste",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "copy-paste-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "count-shape",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "count-sides",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "daily-calendar",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "drag-box",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "drag-circle",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "drag-cube",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "drag-items",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "drag-items-grid",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "drag-shapes",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "drag-shapes-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "drag-single-shape",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "drag-sort-numbers",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "draw-circle",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "draw-line",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "email-inbox",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "email-inbox-delete",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "email-inbox-forward",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "email-inbox-forward-nl",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "email-inbox-forward-nl-turk",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "email-inbox-important",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "email-inbox-nl-turk",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "email-inbox-noscroll",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "email-inbox-reply",
+        "description": "Find an email, compose a reply and send it",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "email-inbox-star-reply",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "enter-date",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "enter-password",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "enter-text",
+        "description": "Enter and submit the requested text",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "enter-text-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "enter-text-dynamic",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "enter-time",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "find-greatest",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "find-midpoint",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "find-word",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "focus-text",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "focus-text-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "form-sequence",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "form-sequence-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "form-sequence-3",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "generate-number",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "grid-coordinate",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "guess-number",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "highlight-text",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "highlight-text-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "hot-cold",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "identify-shape",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "login-user",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "login-user-popup",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "multi-layouts",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "multi-orderings",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "navigate-tree",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "number-checkboxes",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "odd-or-even",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "order-food",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "phone-book",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "read-table",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "read-table-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "resize-textarea",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "right-angle",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "scroll-text",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "scroll-text-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "search-engine",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "sign-agreement",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "simple-algebra",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "simple-arithmetic",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "social-media",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "social-media-all",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "social-media-some",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "stock-market",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "terminal",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "text-editor",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "text-transform",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "tic-tac-toe",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "unicode-test",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "use-autocomplete",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "use-autocomplete-nodelay",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "use-colorwheel",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "use-colorwheel-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "use-slider",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "use-slider-2",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "use-spinner",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      },
+      {
+        "name": "visual-addition",
+        "seed": 42,
+        "submission_paths": [
+          "/logs/artifacts/episode.json"
+        ]
+      }
     ]
   }
 ]

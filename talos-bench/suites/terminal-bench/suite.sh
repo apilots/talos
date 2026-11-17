@@ -39,7 +39,9 @@ prepare_suite() {
     local submissions
     submissions="$(uv run --python 3.12 python "$bench_dir/summarize.py" submissions "$registry" "$tasks")"
     while IFS= read -r submission; do
-      suite_args+=(--artifact "$submission")
+      if [[ -n "$submission" ]]; then
+        suite_args+=(--artifact "$submission")
+      fi
     done <<< "$submissions"
   fi
 }
