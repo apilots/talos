@@ -2,6 +2,7 @@
 
 import argparse
 from contextlib import nullcontext
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -41,6 +42,38 @@ def capture_answer(destination, logs):
             if footer == {**identity, "status": "completed"}:
                 stdout = b"".join(lines[:-1])
     destination.write_bytes(stdout)
+
+
+def capture_provider_retries(home, logs):
+    events = []
+    for path in sorted((home / "logs").glob("talos*.log*")):
+        if not path.is_file():
+            continue
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict) or event.get("target") != "talos_llm_openai":
+                continue
+            fields = event.get("fields")
+            if not isinstance(fields, dict):
+                continue
+            attempt, status = fields.get("attempt"), fields.get("http_status")
+            if type(attempt) is not int or attempt not in {1, 2}:
+                continue
+            if type(status) is not int or status not in {502, 503, 504}:
+                continue
+            timestamp = event.get("timestamp")
+            if not isinstance(timestamp, str):
+                continue
+            try:
+                datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            events.append({"timestamp": timestamp, "attempt": attempt, "http_status": status})
+    (logs / "provider-retries.json").write_text(json.dumps(events, indent=2) + "\n")
+    return events
 
 
 def run(options, llm, secret, *, resources=PRODUCT, observe=None):
@@ -90,6 +123,7 @@ def run(options, llm, secret, *, resources=PRODUCT, observe=None):
                 },
             },
             "llm": llm,
+            "logging": {"level": "warn", "format": "json", "stdout": False},
         }))
         environment = dict(os.environ, TALOS_HOME=home, TALOS_CONFIG=str(config),
                            TALOS_RESOURCE_DIR=str(resources), TALOS_TUI_NO_BROWSER="1")
@@ -124,6 +158,7 @@ def run(options, llm, secret, *, resources=PRODUCT, observe=None):
             "prices_per_million": model_config.get("cost"),
             "elapsed_seconds": None,
             "exit_code": None,
+            "gateway_retries": None,
             "request_interval_ms": os.environ.get("TALOS_BENCH_OPENAI_REQUEST_INTERVAL_MS"),
             "delegation_watch": watch,
             "workspace_guidance_sha256": hashlib.sha256(guidance.read_bytes()).hexdigest() if guidance.is_file() else None,
@@ -150,6 +185,7 @@ def run(options, llm, secret, *, resources=PRODUCT, observe=None):
                 else:
                     exit_code = subprocess.run(command, env=environment, cwd=WORKSPACE, stdout=stdout, stderr=stderr).returncode
             metadata.update(elapsed_seconds=time.monotonic() - started, exit_code=exit_code)
+            metadata["gateway_retries"] = len(capture_provider_retries(Path(home), logs))
             final_metadata = run_path.with_suffix(".tmp")
             final_metadata.write_text(json.dumps(metadata, indent=2) + "\n")
             final_metadata.replace(run_path)
