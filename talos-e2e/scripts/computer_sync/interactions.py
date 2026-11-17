@@ -111,6 +111,8 @@ def abandoned_cross_coordinator_admission(cluster, node, session):
         subprocess.run(['docker', 'start', cluster.hub_container], check=True, capture_output=True)
         source['host'] = Desktop(cluster, source['home'], 'Desktop-B')
         source['token'] = source['host'].call('auth/session/read')['session']['access_token']
+        user = cluster.desktop('Desktop-B', 'user/current')['user']
+        require(user['user_id'] == cluster.users['alice']['user']['user_id'], 'Restarted Desktop-B restored the wrong account')
     wait_for(lambda: cluster.desktop('Desktop-B', 'sync/status')['connection'] == 'connected', 'B synchronization resumed')
     wait_for(lambda: cluster.history('Desktop-A', session)['data'] == cluster.history('Desktop-B', session)['data'], 'Only executed history synchronized after recovery')
     print('CASE sync_abandoned_cross_coordinator_admission_preserves_original_shared_history PASS', flush=True)
@@ -129,14 +131,26 @@ def source_files(cluster):
     wait_for(lambda: cluster.desktop('Desktop-A', 'file/read', request)['file']['tags'] == ['remote-source-update'], 'File update reached source')
     source = cluster.desktops['Desktop-A']
     source['host'].close()
-    reply = cluster.desktops['Desktop-B']['host'].request('file/content', request, cluster.desktops['Desktop-B']['token'])
+    reader = cluster.desktops['Desktop-B']
+    reply = reader['host'].request('file/content', request, reader['token'])
     require(reply.get('error', {}).get('code') == 'serviceUnavailable', 'Offline source bytes must fail explicitly through FileService')
     from cluster import Desktop
     source['host'] = Desktop(cluster, source['home'], 'Desktop-A')
     source['token'] = source['host'].call('auth/session/read')['session']['access_token']
+    user = cluster.desktop('Desktop-A', 'user/current')['user']
+    require(user['user_id'] == cluster.users['alice']['user']['user_id'], 'Restarted Desktop-A restored the wrong account')
     wait_for(lambda: any(n['nodeId'] == source['node'] and n['available'] for n in cluster.list_nodes('alice')), 'Source Worker Connect restored')
     wait_for(lambda: cluster.desktop('Desktop-A', 'sync/status')['connection'] == 'connected', 'Source management connection restored')
-    require(base64.b64decode(cluster.desktop('Desktop-B', 'file/content', request)['dataBase64']) == body, 'Source restart lost attachment')
+
+    def recovered_content():
+        response = reader['host'].request('file/content', request, reader['token'])
+        if response.get('error', {}).get('code') == 'serviceUnavailable':
+            return False
+        require('result' in response, f'Restarted source file read failed: {response.get("error", {})}')
+        return response
+
+    restored = wait_for(recovered_content, 'Source FileService route restored')['result']
+    require(base64.b64decode(restored['dataBase64']) == body, 'Source restart lost attachment')
     cluster.desktop('Desktop-B', 'file/delete', request)
     wait_for(lambda: not any(f['fileId'] == request['fileId'] for f in cluster.desktop('Desktop-A', 'file/list')['data']), 'Source deletion synchronized')
     print('CASE sync_source_files_read_update_offline_restart_delete PASS', flush=True)
@@ -275,6 +289,7 @@ def waiting_plugin_mutations_with_sync_offline(cluster):
     wait_for(lambda: settled(cluster, 'Desktop-B', session, base['turnId']), 'Plugin guard base completed', 120)
     wait_for(lambda: cluster.history('Desktop-A', session)['data'] == cluster.history('Desktop-B', session)['data'], 'Plugin guard base shared')
     subprocess.run(['docker', 'stop', '--time', '10', cluster.hub_container], check=True, capture_output=True)
+    installations = []
     try:
         question = submit(cluster, 'Desktop-B', node, session,
             'Call AskUserQuestion exactly once. Header Plugin Settings, question Choose mode; '
@@ -282,16 +297,31 @@ def waiting_plugin_mutations_with_sync_offline(cluster):
             'After the answer reply exactly PLUGIN_WAIT_OK.')
         wait_for(lambda: (cluster.desktop('Desktop-B', 'session/active_turn', {'sessionId': session})['activeTurn'] or {}).get('state') == 'waitingForInput', 'Offline sync Worker waiting', 90)
         replay = cluster.desktop('Desktop-B', 'timeline/recover', {'sessionId': session})['replay']['events']
-        action = next(event['event']['data']['payload']['data']['action'] for event in reversed(replay)
-                      if event['event']['type'] == 'agent' and event['event']['data']['payload']['type'] == 'waitingForInput')
+        require(any(event['event']['type'] == 'agent' and event['event']['data']['payload']['type'] == 'waitingForInput'
+                    for event in replay), 'Offline waiting Turn had no replayed input request')
         require(not cluster.database(cluster.desktops['Desktop-A']['home'], 'SELECT 1 FROM agent_active_turns WHERE session_id = ?', (session,)),
                 'Origin management DB unexpectedly knows the offline waiting Turn')
         params = {'json': json.dumps({'command': '/bin/echo', 'args': ['guard']}),
-                  'name': 'waiting-guard-' + uuid.uuid4().hex, 'enable': False, 'conflictPolicy': 'reject'}
-        for target in ({}, {'nodeId': node}):
-            denied = cluster.desktops['Desktop-A']['host'].request('mcp/server/import', {**params, **target}, cluster.desktops['Desktop-A']['token'])
-            require(denied.get('error', {}).get('code') in ('conflict', 'activeTurnRunning'), 'Waiting Worker allowed MCP mutation through stale origin DB')
+                  'enable': False, 'conflictPolicy': 'reject'}
         identity = {'sessionId': session, 'turnId': question['turnId']}
+        for target in ({}, {'nodeId': node}):
+            installed = cluster.desktop('Desktop-A', 'mcp/server/import', {
+                **params, **target, 'name': 'waiting-guard-' + uuid.uuid4().hex})
+            installations.append(installed)
+            path = Path(installed['install']['installed_path'])
+            require(path.resolve().is_relative_to(cluster.desktops['Desktop-A']['home'].resolve()) and path.exists(),
+                    f'Offline publication for target {target!r} was not installed on the original Worker: {path}')
+            active = cluster.desktop('Desktop-B', 'session/active_turn', {'sessionId': session})['activeTurn']
+            require(active and active['identity'] == identity and active['state'] == 'waitingForInput',
+                    f'Offline publication for target {target!r} changed the waiting Turn: {active!r}')
+        filters = {'kind': None, 'status': None, 'source_id': None, 'include_disabled': True}
+        origin = cluster.desktop('Desktop-A', 'plugin/list', {**filters, 'nodeId': node})['plugins']
+        other = cluster.desktop('Desktop-B', 'plugin/list', filters)['plugins']
+        for installed in installations:
+            plugin_id = installed['plugin']['id']
+            require(any(entry['id'] == plugin_id for entry in origin)
+                    and all(entry['id'] != plugin_id for entry in other),
+                    f'Offline publication was missing from its Worker or leaked to another Worker: {plugin_id}')
         interrupted = cluster.desktop('Desktop-B', 'turn/interrupt', {'identity': identity})
         require(interrupted['identity'] == identity and interrupted['outcome']['type'] == 'cancelled',
                 'Waiting cancellation did not reach the original Worker and coordinator')
@@ -301,10 +331,17 @@ def waiting_plugin_mutations_with_sync_offline(cluster):
         require(terminal['identity'] == identity and terminal['result']['status'] == 'failed'
                 and terminal['result']['result']['failure']['error']['code'] == 'cancelled',
                 'Waiting cancellation did not persist its exact terminal result')
-        installed = cluster.desktop('Desktop-A', 'mcp/server/import', {**params, 'nodeId': node})
-        require(Path(installed['install']['installed_path']).is_relative_to(cluster.desktops['Desktop-A']['home']), 'MCP was installed outside the target Worker')
-        cluster.desktop('Desktop-A', 'plugin/uninstall', {'nodeId': node, 'install_id': installed['install']['id']})
     finally:
-        subprocess.run(['docker', 'start', cluster.hub_container], check=True, capture_output=True)
+        try:
+            cleanup_errors = []
+            for installed in installations:
+                try:
+                    cluster.desktop('Desktop-A', 'plugin/uninstall', {'nodeId': node, 'install_id': installed['install']['id']})
+                    require(not Path(installed['install']['installed_path']).exists(), 'Offline publication cleanup left installed files')
+                except Exception as error:
+                    cleanup_errors.append(error)
+            require(not cleanup_errors, f'Offline publication cleanup failed: {cleanup_errors!r}')
+        finally:
+            subprocess.run(['docker', 'start', cluster.hub_container], check=True, capture_output=True)
     wait_for(lambda: cluster.history('Desktop-A', session)['data'] == cluster.history('Desktop-B', session)['data'], 'Offline waiting facts recovered')
-    print('CASE sync_offline_waiting_plugin_mutation_alias_uuid_and_terminal_release PASS', flush=True)
+    print('CASE sync_offline_waiting_plugin_publication_alias_uuid_isolation_and_cancellation PASS', flush=True)

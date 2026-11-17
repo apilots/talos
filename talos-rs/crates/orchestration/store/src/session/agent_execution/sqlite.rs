@@ -15,6 +15,27 @@ const MAX_EVENT_READ_LIMIT: usize = 10_000;
 
 #[async_trait]
 impl AgentExecutionStore for DatabaseSessionStore {
+    async fn history_generation(&self, session_id: &str) -> TalosResult<Option<u64>> {
+        let rows = self
+            .storage
+            .query(
+                "SELECT history_generation FROM sessions WHERE session_key = ?",
+                &[session_id],
+            )
+            .await?;
+        rows.first()
+            .map(|row| {
+                row.get_i64("history_generation")
+                    .and_then(|generation| u64::try_from(generation).ok())
+                    .ok_or_else(|| {
+                        talos_error::TalosError::internal(
+                            "Session history generation is unavailable.",
+                        )
+                    })
+            })
+            .transpose()
+    }
+
     async fn read_automation_input_origins(
         &self,
         identities: &[AgentTurnRef],

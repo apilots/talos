@@ -70,22 +70,32 @@ def workspace(cluster):
     require(rejected.get('error', {}).get('code') == 'invalidRequest', 'Project and Computer mismatch was accepted')
     passed('project_turn_worker_file_timeline_and_immutable_session')
 
-    # Keep the registered channel open while the actual execution process stops responding.
-    foreign_before = http(f'{cluster.url}/v1/projects/{project["project_id"]}', token=cluster.users['bob']['access_token'])
-    require(foreign_before.get('status') == 'error', 'Foreign owner acquired the Project')
+    project_url = f'{cluster.url}/v1/projects/{project["project_id"]}'
+    stored_project = data(http(project_url, token=token))['project']
+    bob_token = cluster.users['bob']['access_token']
+    foreign_before = http(project_url, token=bob_token).get('error', {}).get('code')
+    require(foreign_before == 'resourceNotFound', f'Unexpected foreign Project read code: {foreign_before}')
+    # Keep the Worker channel open while its process cannot answer filesystem probes.
     os.kill(selected['process'].pid, signal.SIGSTOP)
     try:
-        timed_out = data(http(f'{cluster.url}/v1/projects?{query}', token=token))['projects']
-        require(len(timed_out) == 1 and timed_out[0]['project_id'] == project['project_id'] and timed_out[0]['status']['state'] == 'nodeUnavailable', 'RPC timeout hid persisted Project metadata')
-        denied = http(f'{cluster.url}/v1/projects/{project["project_id"]}', token=cluster.users['bob']['access_token'])
-        require(denied.get('error', {}).get('code') == foreign_before['error']['code'], 'Availability handling changed the existing foreign-owner error')
+        paused_projects = data(http(f'{cluster.url}/v1/projects?{query}', token=token, timeout=5))['projects']
+        require(paused_projects == [stored_project],
+                f'Project list changed with the Worker paused: {paused_projects!r}, expected {[stored_project]!r}')
+        paused_project = data(http(project_url, token=token, timeout=5))['project']
+        require(paused_project == stored_project,
+                f'Project read changed with the Worker paused: {paused_project!r}, expected {stored_project!r}')
+        foreign_paused = http(project_url, token=bob_token, timeout=5).get('error', {}).get('code')
+        require(foreign_paused == foreign_before,
+                f'Foreign Project read code changed with the Worker paused: {foreign_paused}')
     finally:
         os.kill(selected['process'].pid, signal.SIGCONT)
-    passed('project_rpc_timeout_retains_metadata_without_swallowing_owner_error')
+    passed('paused_worker_preserves_project_metadata_and_owner_isolation')
 
     cluster.stop(selected['process'])
-    offline = data(http(f'{cluster.url}/v1/projects/{project["project_id"]}', token=token))['project']
-    require(offline['status']['state'] == 'nodeUnavailable', 'Offline Project metadata became inaccessible or used local filesystem')
+    wait_for(lambda: not cluster.info('alice-b').get('available'), 'Worker disconnect')
+    offline = data(http(project_url, token=token))['project']
+    require(offline == stored_project,
+            f'Project read changed with the Worker offline: {offline!r}, expected {stored_project!r}')
     config_path = Path(selected['env']['TALOS_CONFIG'])
     config = yaml.safe_load(config_path.read_text())
     config['workspaces']['default_workspace_id'] = 'next'

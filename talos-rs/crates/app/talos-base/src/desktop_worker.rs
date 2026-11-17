@@ -30,7 +30,7 @@ impl DesktopApplication {
         recover_node_id: Option<String>,
         request_actor: Option<&talos_service::Actor>,
     ) -> TalosResult<DesktopWorkerIdentityResponse> {
-        WorkerEnrollment {
+        let identity = WorkerEnrollment {
             sync_host: &self.sync_host,
             config: &self.config,
             store: &self.store,
@@ -43,7 +43,11 @@ impl DesktopApplication {
             worker_failures: &self.worker_failures,
         }
         .enroll(recover_node_id, None, request_actor)
-        .await
+        .await?;
+        if let Some(actor) = request_actor {
+            self.sync_host.refresh_enrolled_capture(actor).await?;
+        }
+        Ok(identity)
     }
 }
 

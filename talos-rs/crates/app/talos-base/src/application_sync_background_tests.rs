@@ -333,6 +333,14 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
     runtime.service.resume_account_sync(&actor);
     assert_eq!(host.background.lock().unwrap().tasks.len(), 1);
     let pause = host.suspend_refresh(&actor).await;
+    host.schedule_active_refresh(&refreshed);
+    assert!(host
+        .background
+        .lock()
+        .unwrap()
+        .suspended
+        .contains_key(&actor.user_id));
+    assert!(host.background.lock().unwrap().tasks.is_empty());
     runtime.service.resume_account_sync(&actor);
     assert!(host.background.lock().unwrap().tasks.is_empty());
     drop(pause);

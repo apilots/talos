@@ -68,11 +68,12 @@ fixture executable (`TALOS_CLOUD_SERVER_BIN` or `cloud-server` on `PATH`),
 Node/pnpm, Python grpcio/protobuf/PyYAML, and existing DEV configuration.
 Execution cases use the configured funded DeepSeek provider in `.env`; no model
 key is baked into an image. Sync uses the public
-[v0.1.3 Release](https://github.com/apilots/talos-sync/releases/tag/v0.1.3),
+[v0.1.6 Release](https://github.com/apilots/talos-sync/releases/tag/v0.1.6),
 locked in `scripts/computer_sync/run.sh` to its release-manifest multi-platform
-digest, matching the public SDK/types versions in Cargo.lock. No adjacent source
-checkout or moving `latest` tag is used. `TALOS_SYNC_E2E_IMAGE` may select another
-explicit digest; tag-only overrides fail before setup. Updating the pin requires
+digest. This is the first Hub release using SDK/types 0.1.5, matching the tool
+history schema in Talos. No adjacent source checkout or moving `latest` tag is
+used. `TALOS_SYNC_E2E_IMAGE` may select another explicit digest; tag-only
+overrides fail before setup. Updating the pin requires
 checking the Release manifest checksum, platform digests and registry manifest.
 Each runner invocation pulls this exact Sync image and builds the current Worker
 candidate once, then verifies both image IDs before every case. Server and Worker

@@ -11,6 +11,7 @@ pub(super) struct CountingStorage {
     reads: AtomicUsize,
     notice_reads: AtomicUsize,
     event_rows: AtomicUsize,
+    terminal_read_pause: std::sync::Mutex<Option<std::sync::Arc<TerminalReadPause>>>,
 }
 
 impl CountingStorage {
@@ -20,7 +21,18 @@ impl CountingStorage {
             reads: AtomicUsize::new(0),
             notice_reads: AtomicUsize::new(0),
             event_rows: AtomicUsize::new(0),
+            terminal_read_pause: Default::default(),
         }
+    }
+
+    pub(super) fn pause_terminal_reads(&self, count: usize) -> std::sync::Arc<TerminalReadPause> {
+        let pause = std::sync::Arc::new(TerminalReadPause {
+            remaining: AtomicUsize::new(count),
+            reached: Default::default(),
+            proceed: Default::default(),
+        });
+        *self.terminal_read_pause.lock().unwrap() = Some(pause.clone());
+        pause
     }
 
     pub(super) fn take_reads(&self) -> usize {
@@ -34,6 +46,12 @@ impl CountingStorage {
     pub(super) fn take_event_rows(&self) -> usize {
         self.event_rows.swap(0, Ordering::Relaxed)
     }
+}
+
+pub(super) struct TerminalReadPause {
+    remaining: AtomicUsize,
+    pub(super) reached: tokio::sync::Notify,
+    pub(super) proceed: tokio::sync::Notify,
 }
 
 #[async_trait]
@@ -52,6 +70,23 @@ impl Storage for CountingStorage {
             self.notice_reads.fetch_add(1, Ordering::Relaxed);
         }
         let rows = self.inner.query(sql, params).await?;
+        // Pause after terminal selection releases its connection, allowing a
+        // real reset transaction to commit before the subsequent event scan.
+        if sql.contains("'turnCompleted', 'turnFailed'") {
+            let pause = self.terminal_read_pause.lock().unwrap().clone();
+            if let Some(pause) = pause {
+                if pause
+                    .remaining
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+                        remaining.checked_sub(1)
+                    })
+                    .is_ok()
+                {
+                    pause.reached.notify_one();
+                    pause.proceed.notified().await;
+                }
+            }
+        }
         self.event_rows.fetch_add(
             rows.iter()
                 .filter(|row| row.get_string("payload_json").is_some())

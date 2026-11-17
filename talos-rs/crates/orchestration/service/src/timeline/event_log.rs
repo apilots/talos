@@ -26,6 +26,10 @@ pub struct TimelineEventService {
 }
 
 impl TimelineEventService {
+    pub(crate) async fn history_generation(&self, session_id: &str) -> TalosResult<Option<u64>> {
+        self.execution_store.history_generation(session_id).await
+    }
+
     pub(crate) fn supports_history_supplements(&self) -> bool {
         self.execution_store.supports_history_supplements()
     }

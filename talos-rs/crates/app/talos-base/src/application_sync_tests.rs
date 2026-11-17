@@ -12,6 +12,9 @@ use talos_types::{AgentUserContent, AgentUserInput, StartTurnRequest};
 
 #[path = "application_sync_access_tests.rs"]
 mod access;
+#[path = "application_sync_enrollment_tests.rs"]
+mod enrollment;
+use enrollment::TopologyScenario;
 #[path = "application_sync_login_tests.rs"]
 mod login;
 #[path = "application_sync_metrics_tests.rs"]
@@ -35,6 +38,7 @@ impl Drop for HubProcess {
 const ACCOUNT: &str = "same-account";
 const TOKEN: &str = "shared-session-fixture-token";
 const OTHER_TOKEN: &str = "other-account-fixture-token";
+const REFRESHED_TOKEN: &str = "refreshed-shared-session-fixture-token";
 #[derive(Clone, Default)]
 struct Model {
     blocked: Arc<std::sync::atomic::AtomicBool>,
@@ -43,7 +47,7 @@ struct Model {
 }
 async fn introspect(Json(request): Json<Value>) -> Json<Value> {
     Json(
-        json!({"active":request["token"] == TOKEN || request["token"] == OTHER_TOKEN,
+        json!({"active":request["token"] == TOKEN || request["token"] == OTHER_TOKEN || request["token"] == REFRESHED_TOKEN,
         "user":{"user_id":if request["token"] == OTHER_TOKEN { "other-account" } else { ACCOUNT },"email":"test@example.invalid","username":"test","role":"user","type":"free","status":"active"},
         "capabilities":{"is_admin":false,"role":"user","scopes":["sessions:read","sessions:write","projects:read","projects:write"]},
         "entitlement":{"can_use":true,"plan":"free","reason":null},"expires_at_ms":null}),
@@ -178,6 +182,10 @@ async fn close(runtime: TalosApplicationRuntime) {
 #[tokio::test]
 async fn shared_session_continues_on_the_same_worker_and_active_commands_return_to_its_coordinator()
 {
+    run_topology(TopologyScenario::SharedSession).await;
+}
+
+async fn run_topology(scenario: TopologyScenario) {
     let _logging = talos_logging::init().unwrap();
     let directory = tempfile::Builder::new()
         .prefix(".talos-sync-flow-")
@@ -358,6 +366,26 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
         auth_disabled: false,
         access_token: Some(TOKEN.into()),
     };
+    if matches!(scenario, TopologyScenario::FreshEnrollment) {
+        let mut enrollment_config = config(&directory.path().join("desktop-fresh-capture"), &api);
+        enrollment_config.cloud.agent_base_url = endpoint.clone();
+        enrollment_config.cloud.agent_trusted_ca_file = Some(cert.clone());
+        enrollment_config.sync.hub_endpoint = format!("wss://{hub_address}/v1/sync");
+        enrollment_config.sync.trusted_ca_file = Some(cert.clone());
+        std::fs::write(
+            enrollment_config.source_path(),
+            persisted_config(&enrollment_config),
+        )
+        .unwrap();
+        enrollment::verify(enrollment_config, &migration, &actor, &gateway, &b).await;
+
+        close(a).await;
+        close(b).await;
+        server_handle.shutdown().await.unwrap();
+        gateway_task.await.unwrap().unwrap();
+        http.abort();
+        return;
+    }
     // A registered remote Computer never grants access to G's private local
     // Worker; both explicit resources and execution must enforce the host policy.
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
@@ -664,9 +692,9 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
                 .get_active_turn(&actor, "shared-session")
                 .await
                 .is_ok_and(|state| {
-                    state
-                        .active_turn
-                        .is_some_and(|active| active.identity.turn_id == accepted.turn_id)
+                    state.active_turn.is_some_and(|active| {
+                        active.active_turn.identity.turn_id == accepted.turn_id
+                    })
                 })
         },
     )

@@ -41,6 +41,7 @@ mod application_sync;
 mod application_sync_background;
 mod application_sync_computers;
 mod application_sync_deletion;
+mod application_sync_enrollment;
 mod application_sync_files;
 mod application_sync_management;
 mod application_sync_metrics;

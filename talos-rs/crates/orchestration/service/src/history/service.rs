@@ -12,6 +12,8 @@ use talos_agent_api::{
 };
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
+const MAX_HISTORY_READ_ATTEMPTS: usize = 3;
+
 const DEFAULT_HISTORY_PAGE_SIZE: usize = 100;
 const MAX_HISTORY_PAGE_SIZE: usize = 1000;
 const HISTORY_CURSOR_PREFIX: &str = "history_";
@@ -59,6 +61,26 @@ impl SessionHistoryService {
     }
 
     pub async fn read(
+        &self,
+        session_id: &str,
+        cursor: Option<&str>,
+        limit: Option<usize>,
+    ) -> TalosResult<SessionHistoryResponse> {
+        for _ in 0..MAX_HISTORY_READ_ATTEMPTS {
+            let generation = self.event_service.history_generation(session_id).await?;
+            let result = self.read_page(session_id, cursor, limit).await;
+            if generation == self.event_service.history_generation(session_id).await? {
+                return result;
+            }
+            // A cursor belongs to its original generation and cannot restart at a new cut.
+            if cursor.is_some() {
+                return Err(invalid_history_cursor());
+            }
+        }
+        Err(history_changed())
+    }
+
+    async fn read_page(
         &self,
         session_id: &str,
         cursor: Option<&str>,
@@ -156,6 +178,32 @@ impl SessionHistoryService {
         if params.limit == 0 {
             return Ok(Vec::new());
         }
+        for _ in 0..MAX_HISTORY_READ_ATTEMPTS {
+            let generation = self
+                .event_service
+                .history_generation(&params.session_id)
+                .await?;
+            let result = self.read_window_at_cut(params.clone()).await;
+            if generation
+                == self
+                    .event_service
+                    .history_generation(&params.session_id)
+                    .await?
+            {
+                return result;
+            }
+            if matches!(params.window, SessionHistoryWindow::OldestAfter { completed_event_seq } if completed_event_seq > 0)
+            {
+                return Err(invalid_history_cursor());
+            }
+        }
+        Err(history_changed())
+    }
+
+    async fn read_window_at_cut(
+        &self,
+        params: SessionHistoryReadParams,
+    ) -> TalosResult<Vec<SessionHistoryTurn>> {
         let limit = params.limit.clamp(1, MAX_HISTORY_PAGE_SIZE);
         let mut turns = match params.window {
             SessionHistoryWindow::Latest => {
@@ -329,6 +377,13 @@ fn parse_history_cursor(cursor: &str) -> TalosResult<(i64, i64)> {
         return Err(invalid_history_cursor());
     }
     Ok((high_water, after))
+}
+
+fn history_changed() -> TalosError {
+    TalosError::new(
+        ErrorCode::Conflict,
+        "Session history changed repeatedly while reading.",
+    )
 }
 
 fn invalid_history_cursor() -> TalosError {

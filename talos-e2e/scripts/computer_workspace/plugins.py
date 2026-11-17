@@ -1,11 +1,12 @@
 """Real plugin/MCP lifecycle through authenticated outbound Workers."""
 from pathlib import Path
 import json
+from shlex import quote
 import sys
 import uuid
 from urllib.parse import urlencode
 from fixture import data, http, require, wait_for
-from scenarios import passed
+from scenarios import final_answer, passed
 
 
 def plugins(cluster):
@@ -72,15 +73,46 @@ def plugins(cluster):
     require(secret not in json.dumps(query('/v1/mcp/servers')), 'Status exposed credential')
     passed('write_only_credentials_and_real_mcp_tool_use_worker_owned_files')
 
-    signal=a['home']/('active-plugin-'+uuid.uuid4().hex)
-    session, ack=cluster.start_turn('alice', f'Use Bash once: touch {signal}; sleep 15; echo PLUGIN_GATE_OK. Reply PLUGIN_GATE_OK.', node_id=a['node_id'])
-    wait_for(lambda:signal.exists(),'Actual plugin-gate execution',seconds=60)
-    denied=http(cluster.url+'/v1/plugin/disable', {'nodeId':a['node_id'],'install_id':iid}, token)
-    require(denied.get('error',{}).get('code')=='conflict','Active node accepted plugin mutation')
-    other=call('/v1/mcp/servers/import', {'json':json.dumps({'command':sys.executable,'args':[str(Path(__file__).with_name('mcp_stdio.py'))]}),'name':'isolated','enable':False,'conflictPolicy':'reject'}, node=b)
-    require(Path(other['install']['installed_path']).is_relative_to(b['home']), 'Other node did not proceed independently')
-    cluster.events('alice', session, data(ack)['turnId'],90)
-    passed('plugin_mutations_are_per_node_and_do_not_block_other_computers')
+    started = a['home'] / ('active-plugin-' + uuid.uuid4().hex)
+    release = started.with_suffix('.release')
+    completed = started.with_suffix('.completed')
+    command = (
+        f'touch {quote(str(started))} && '
+        f'for attempt in {{1..45}}; do if [ -f {quote(str(release))} ]; then '
+        f'touch {quote(str(completed))} && echo PLUGIN_GATE_OK; exit $?; fi; sleep 1; done; exit 1'
+    )
+    session, ack = cluster.start_turn(
+        'alice', f'Use Bash once to run this exact command: `{command}` '
+        'Then reply with the command output.', node_id=a['node_id'])
+    turn_id = data(ack)['turnId']
+    try:
+        wait_for(started.exists, 'Worker Bash started before plugin publication', seconds=60)
+        disabled = call('/v1/plugin/disable', {'install_id': iid})['plugin']['status']
+        require(disabled['install_id'] == iid and disabled['enabled'] is False,
+                'Plugin publication did not disable the selected installation')
+        filters = {'kind': None, 'status': 'disabled', 'source_id': source_id, 'include_disabled': True}
+        listing = call('/v1/plugin/list', filters)
+        require(any(entry['status'].get('install_id') == iid for entry in listing['plugins']),
+                'Active Worker did not list the published disabled installation')
+        other = call('/v1/mcp/servers/import', {
+            'json': json.dumps({'command': sys.executable, 'args': [str(Path(__file__).with_name('mcp_stdio.py'))]}),
+            'name': 'isolated', 'enable': False, 'conflictPolicy': 'reject',
+        }, node=b)
+        other_install = Path(other['install']['installed_path'])
+        require(other_install.is_relative_to(b['home']) and other_install.exists(),
+                'Other Worker did not publish to its own filesystem')
+        require(not any(entry['id'] == other['plugin']['id'] for entry in
+                        call('/v1/plugin/list', {**filters, 'status': None, 'source_id': None})['plugins']),
+                'Other Worker publication leaked into the active Worker catalog')
+        require(cluster.query('SELECT turn_id FROM agent_active_turns WHERE session_id=?', (session,)) == [(turn_id,)],
+                'Plugin publications did not overlap the active Turn')
+    finally:
+        release.touch()
+    events = cluster.events('alice', session, turn_id, 90)
+    require(completed.exists() and events[-1]['payload']['type'] == 'turnCompleted'
+            and 'PLUGIN_GATE_OK' in final_answer(events),
+            'Plugin publication disrupted the active Turn')
+    passed('plugin_publication_during_active_turn_is_isolated_per_worker')
 
     cluster.wait_worker_settlement('alice-a')
     cluster.stop(a['process'])

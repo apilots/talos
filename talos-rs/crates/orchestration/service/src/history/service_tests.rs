@@ -21,6 +21,9 @@ use crate::TimelineEventService;
 mod test_support;
 use test_support::CountingStorage;
 
+#[path = "reset_race_tests.rs"]
+mod reset_race_tests;
+
 async fn fixture() -> (
     Arc<DatabaseSessionStore>,
     SessionHistoryService,
