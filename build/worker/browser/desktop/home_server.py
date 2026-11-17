@@ -5,13 +5,11 @@ from pathlib import Path
 
 def main():
     root = Path(__file__).resolve().parent
-    content_types = {
-        'home.html': 'text/html; charset=utf-8',
-        'home.js': 'text/javascript; charset=utf-8',
-        'talos-logo.svg': 'image/svg+xml',
+    assets = {
+        '/home.html': ('text/html; charset=utf-8', (root / 'home.html').read_bytes()),
+        '/home.js': ('text/javascript; charset=utf-8', (root / 'home.js').read_bytes()),
+        '/talos-logo.svg': ('image/svg+xml', (root / 'talos-logo.svg').read_bytes()),
     }
-    assets = {f'/{name}': (mime, (root / name).read_bytes())
-              for name, mime in content_types.items()}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):

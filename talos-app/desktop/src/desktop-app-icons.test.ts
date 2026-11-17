@@ -1,5 +1,3 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { BaseWindow, WebContentsView } from "electron";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -8,11 +6,11 @@ import { appIconAssetPath, APP_ICON_IDS, DEFAULT_APP_ICON_ID } from "../../share
 
 const fixture = vi.hoisted(() => ({
   setDockIcon: vi.fn(),
-  createFromBuffer: vi.fn(),
+  createFromPath: vi.fn(),
 }));
 vi.mock("electron", () => ({
   app: { dock: { setIcon: fixture.setDockIcon } },
-  nativeImage: { createFromBuffer: fixture.createFromBuffer },
+  nativeImage: { createFromPath: fixture.createFromPath },
 }));
 
 import { DesktopAppIcons } from "./desktop-app-icons";
@@ -21,22 +19,19 @@ import { desktopWindows } from "./desktop-window";
 const images = new Map<string, { isEmpty: () => boolean }>(
   APP_ICON_IDS.map(id => [id, { isEmpty: () => false }]),
 );
-let assetDirectory: string;
+const assetDirectory = path.resolve("app-icon-test-assets");
+const imagesByPath = new Map(APP_ICON_IDS.map(id => [
+  path.join(assetDirectory, appIconAssetPath(id, "native")),
+  images.get(id),
+]));
 
 beforeEach(() => {
-  assetDirectory = mkdtempSync(path.join(os.tmpdir(), "talos-native-icons-"));
-  for (const id of APP_ICON_IDS) {
-    const asset = path.join(assetDirectory, appIconAssetPath(id, "native"));
-    mkdirSync(path.dirname(asset), { recursive: true });
-    writeFileSync(asset, id);
-  }
   vi.clearAllMocks();
-  fixture.createFromBuffer.mockImplementation((buffer: Buffer) => images.get(buffer.toString()));
+  fixture.createFromPath.mockImplementation((filename: string) => imagesByPath.get(filename));
 });
 
 afterEach(() => {
   desktopWindows.clear();
-  rmSync(assetDirectory, { recursive: true });
 });
 
 function addProductWindow(destroyed = false) {
@@ -73,15 +68,13 @@ it("updates live Linux product windows and retains their latest icon for opening
   expect(fixture.setDockIcon).not.toHaveBeenCalled();
 });
 
-it("retains the current icon when a bundled replacement is missing or invalid", () => {
+it("retains the current icon when Electron cannot load a bundled replacement", () => {
   const icons = new DesktopAppIcons(assetDirectory, "linux");
   const window = addProductWindow();
   icons.setAppIcon("classic");
 
-  fixture.createFromBuffer.mockReturnValueOnce({ isEmpty: () => true });
+  fixture.createFromPath.mockReturnValueOnce({ isEmpty: () => true });
   expect(() => icons.setAppIcon("portrait-light")).toThrow("Unable to decode the bundled app icon");
-  rmSync(path.join(assetDirectory, appIconAssetPath("portrait-light", "native")));
-  expect(() => icons.setAppIcon("portrait-light")).toThrow();
   expect(window.setIcon).toHaveBeenCalledExactlyOnceWith(images.get("classic"));
   expect(icons.windowIcon).toBe(images.get("classic"));
 });

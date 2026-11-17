@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { app, nativeImage, type NativeImage } from "electron";
 
@@ -23,7 +22,7 @@ export class DesktopAppIcons {
     }
 
     const filename = appIconAssetPath(id, "native");
-    const image = nativeImage.createFromBuffer(readFileSync(path.join(this.assetDirectory, filename)));
+    const image = nativeImage.createFromPath(path.join(this.assetDirectory, filename));
     if (image.isEmpty()) {
       throw new Error(`Unable to decode the bundled app icon: ${filename}`);
     }
