@@ -42,6 +42,42 @@ async fn tool_results_preserve_structured_data_and_error_content() {
 }
 
 #[tokio::test]
+async fn structured_tool_result_does_not_repeat_its_json_text() {
+    let page = json!({"title": "Task", "elements": []});
+    let fallback = r#"{ "title": "Task", "elements": [] }"#;
+    let payload = call_tool_payload(
+        McpCallToolResponse {
+            content: vec![
+                McpContent::Text {
+                    text: fallback.into(),
+                },
+                McpContent::Text {
+                    text: "The page is ready.".into(),
+                },
+            ],
+            is_error: false,
+            structured_content: Some(page.clone()),
+        },
+        &ToolContext::new("mcp-results", "user"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(payload.content(), format!("{fallback}\nThe page is ready."));
+    assert_eq!(payload.structured_content(), Some(&page));
+    assert_eq!(
+        payload.envelope().content_items,
+        vec![
+            TalosContentItem::Text {
+                text: "The page is ready.".into()
+            },
+            TalosContentItem::Json {
+                value: JsonContentValue::from(page),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
 async fn structured_only_tool_result_reaches_model_content() {
     let payload = call_tool_payload(
         McpCallToolResponse {
