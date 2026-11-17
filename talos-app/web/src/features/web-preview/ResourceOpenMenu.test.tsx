@@ -47,7 +47,7 @@ it("uses the current app icon in the open-in menu", async () => {
   act(() => useAppStore.getState().setAppIconId("portrait-light"));
   expect(icon).toHaveAttribute("src", "/app-icons/portrait-light/icon.png");
   act(() => useAppStore.getState().setAppIconId("classic"));
-  expect(icon).toHaveAttribute("src", "/app-icon.svg");
+  expect(icon).toHaveAttribute("src", "/app-icons/classic/icon.svg");
 });
 
 function RetainedMenu() {

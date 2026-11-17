@@ -1,0 +1,18 @@
+{
+  "defaultId": "portrait-light",
+  "browserHomeId": "classic",
+  "presets": {
+    "portrait-light": {
+      "labelKey": "appIcons.portraitLight",
+      "format": "jpg"
+    },
+    "portrait": {
+      "labelKey": "appIcons.portrait",
+      "format": "jpg"
+    },
+    "classic": {
+      "labelKey": "appIcons.classic",
+      "format": "svg"
+    }
+  }
+}

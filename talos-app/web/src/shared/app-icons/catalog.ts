@@ -7,6 +7,7 @@ export {
   type AppIconId,
 } from "../../../../shared/app-icons";
 
-export function appIconAssetUrl(asset: string): string {
-  return `${import.meta.env.BASE_URL}${asset}`;
+export function appIconAssetUrl(id: AppIconId, use: AppIconUse): string {
+  return `${import.meta.env.BASE_URL}${appIconAssetPath(id, use)}`;
 }
+import { appIconAssetPath, type AppIconId, type AppIconUse } from "../../../../shared/app-icons";

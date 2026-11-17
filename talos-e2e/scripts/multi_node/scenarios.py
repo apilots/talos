@@ -328,7 +328,7 @@ def parity(cluster):
     image_model = os.environ.get('TALOS_E2E_IMAGE_MODEL', 'deepseek-v4-flash-vision-exp')
     cluster.model = next(model for model in models if model['id'] == image_model)
     marker = 'attached_' + uuid.uuid4().hex
-    attachment = ROOT / 'build/desktop/icons/icon.png'
+    attachment = ROOT / 'talos-e2e/fixtures/file-attachment.png'
     upload = subprocess.run(['curl', '-sS', '--noproxy', '*', '-X', 'POST', cluster.url + '/v1/files',
                              '-H', f'Authorization: Bearer {token}',
                              '-F', 'metadata={"filename":"attached.png","scope":{"type":"personal"},"tags":[],"metadata":{}};type=application/json',

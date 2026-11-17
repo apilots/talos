@@ -1,11 +1,13 @@
 const path = require("node:path");
+const { defaultId } = require("../shared/app-icons/catalog.json");
+const { appIconAssetPath } = require("../shared/app-icons/assets.mjs");
 
 const repoRoot = path.resolve(__dirname, "../..");
 const packageTarget = process.env.TALOS_DESKTOP_PACKAGE_TARGET ?? "desktop-mac";
 const outputDir = process.env.TALOS_DESKTOP_PACKAGE_DIR ?? path.join(repoRoot, `dist/products/dev/${packageTarget}`);
 const releaseBuild = process.env.TALOS_DESKTOP_RELEASE === "1";
 const macEntitlements = path.join(repoRoot, "build/desktop/mac/entitlements.mac.plist");
-const appIcon = path.join(repoRoot, "build/desktop/icons/portrait-light.png");
+const appIcon = path.join(__dirname, "dist", appIconAssetPath(defaultId, "native"));
 const dmgBackground = path.join(repoRoot, "build/desktop/dmg/background.png");
 const packageArch = process.env.TALOS_PACKAGE_ARCH ?? (process.arch === "arm64" ? "arm64" : "amd64");
 const electronBuilderArch = packageArch === "arm64" ? "arm64" : "x64";

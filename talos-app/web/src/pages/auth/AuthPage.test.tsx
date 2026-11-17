@@ -145,7 +145,7 @@ describe("AuthPage", () => {
     act(() => useAppStore.getState().setAppIconId("portrait"));
     expect(screen.getByAltText("Talos").getAttribute("src")).toBe("/app-icons/portrait/icon.png");
     act(() => useAppStore.getState().setAppIconId("classic"));
-    expect(screen.getByAltText("Talos").getAttribute("src")).toBe("/app-icon.svg");
+    expect(screen.getByAltText("Talos").getAttribute("src")).toBe("/app-icons/classic/icon.svg");
   });
 
   it("starts device login and opens the Cloud device page after user action", async () => {

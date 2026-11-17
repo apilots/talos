@@ -22,13 +22,14 @@ class HomeServerTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         shutil.copyfile(SERVER, self.root / SERVER.name)
+        subprocess.run(
+            ['node', str(ROOT / 'talos-app/shared/app-icons/generate.mjs'), str(self.root)],
+            check=True,
+        )
         self.assets = {
-            '/home.html': (ROOT / 'talos-app/shared/browser-home/home.html').read_bytes(),
-            '/home.js': (ROOT / 'talos-app/shared/browser-home/home.js').read_bytes(),
-            '/talos-logo.svg': (ROOT / 'talos-app/web/public/talos-logo.svg').read_bytes(),
+            '/' + name: (self.root / name).read_bytes()
+            for name in ('home.html', 'home.js', 'talos-logo.svg')
         }
-        for path, content in self.assets.items():
-            (self.root / path[1:]).write_bytes(content)
         # A sibling and a parent file must never become HTTP resources.
         (self.root / 'private.txt').write_text('not a homepage asset')
         self.process = subprocess.Popen([sys.executable, '-I', str(self.root / SERVER.name)],

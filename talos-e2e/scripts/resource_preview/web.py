@@ -117,6 +117,7 @@ def run(cluster):
             talos_menu_item = page.get_by_role('menuitem', name='Talos', exact=True)
             expect(talos_menu_item).to_be_visible()
             expect(talos_menu_item.locator('img')).to_have_attribute('src', '/app-icons/portrait/icon.png')
+            talos_menu_item.locator('img').evaluate('image => image.decode()')
             expect(page.get_by_role('menuitem', name='Copy link', exact=True)).to_be_visible()
             page.screenshot(path=str(REPORT / 'preview-narrow-menu.png'), full_page=True)
             page.keyboard.press('Escape')

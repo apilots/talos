@@ -25,7 +25,7 @@ import { resolveRendererEntryPath } from "./renderer-entry";
 import { resolveAppServerEnvironment } from "./shell-environment";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
-const appIcons = new DesktopAppIcons(path.join(dirname, "app-icons"));
+const appIcons = new DesktopAppIcons(dirname);
 const rendererDevUrl = process.env.TALOS_DESKTOP_RENDERER_URL;
 const serverUrl = process.env.TALOS_DESKTOP_SERVER_URL?.trim();
 

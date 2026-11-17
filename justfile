@@ -100,10 +100,6 @@ fix *args:
 gen-app-protocol:
     cargo run -p talos-app-protocol --example generate_app_protocol_artifacts
 
-# Regenerate brand and cross-platform application icon assets from the vector master.
-gen-logo-assets:
-    ../scripts/generate-logo-assets.sh
-
 # Run E2E scenarios. Pass runner args such as `--group 01_models` or `--case 01_models/health_and_models`.
 e2e *args:
     ../talos-e2e/run_e2e.sh "$@"

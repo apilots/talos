@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { BaseWindow, WebContentsView } from "electron";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { APP_ICONS, APP_ICON_IDS, DEFAULT_APP_ICON_ID } from "../../shared/app-icons";
+import { appIconAssetPath, APP_ICON_IDS, DEFAULT_APP_ICON_ID } from "../../shared/app-icons";
 
 const fixture = vi.hoisted(() => ({
   setDockIcon: vi.fn(),
@@ -26,7 +26,9 @@ let assetDirectory: string;
 beforeEach(() => {
   assetDirectory = mkdtempSync(path.join(os.tmpdir(), "talos-native-icons-"));
   for (const id of APP_ICON_IDS) {
-    writeFileSync(path.join(assetDirectory, APP_ICONS[id].nativeFile), id);
+    const asset = path.join(assetDirectory, appIconAssetPath(id, "native"));
+    mkdirSync(path.dirname(asset), { recursive: true });
+    writeFileSync(asset, id);
   }
   vi.clearAllMocks();
   fixture.createFromBuffer.mockImplementation((buffer: Buffer) => images.get(buffer.toString()));
@@ -78,7 +80,7 @@ it("retains the current icon when a bundled replacement is missing or invalid", 
 
   fixture.createFromBuffer.mockReturnValueOnce({ isEmpty: () => true });
   expect(() => icons.setAppIcon("portrait-light")).toThrow("Unable to decode the bundled app icon");
-  rmSync(path.join(assetDirectory, APP_ICONS["portrait-light"].nativeFile));
+  rmSync(path.join(assetDirectory, appIconAssetPath("portrait-light", "native")));
   expect(() => icons.setAppIcon("portrait-light")).toThrow();
   expect(window.setIcon).toHaveBeenCalledExactlyOnceWith(images.get("classic"));
   expect(icons.windowIcon).toBe(images.get("classic"));

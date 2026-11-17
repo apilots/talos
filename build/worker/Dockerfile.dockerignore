@@ -27,9 +27,8 @@ talos/talos-rs/target/
 !talos/talos-app/shared/
 !talos/talos-app/shared/browser-home/
 !talos/talos-app/shared/browser-home/**
-!talos/talos-app/web/
-!talos/talos-app/web/public/
-!talos/talos-app/web/public/talos-logo.svg
+!talos/talos-app/shared/app-icons/
+!talos/talos-app/shared/app-icons/**
 
 talos/**/__pycache__/
 talos/**/*.pyc

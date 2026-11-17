@@ -200,6 +200,10 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 direct_frontend.update({'talos-web', 'talos-desktop'})
                 result.targets['webui'].update(WORKSPACE_CASES['webui'])
                 result.targets['desktop'].update(BROWSER_CASES - WORKSPACE_CASES['webui'])
+                if path.startswith('talos-app/shared/app-icons/'):
+                    result.targets['webui'].update(PREVIEW_CASES['webui'])
+                    result.targets['desktop'].update(PREVIEW_CASES['desktop'])
+                    result.targets['server'].update(CONTAINER_CASES['server'])
             else:
                 # Frontend lockfiles, workspace config, generators and unknown inputs
                 # expand within their ecosystem, never to unrelated Rust test suites.
