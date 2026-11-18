@@ -14,7 +14,7 @@ cleanup_recovery() {
       cat "${log_file}" >> "${SCENARIO_REPORT_DIR}/app-server.log"
     fi
   done
-  rm -rf "${recovery_home}"
+  cleanup_e2e_temp_dir "${recovery_home}"
 }
 trap cleanup_recovery EXIT
 export TALOS_HOME="${recovery_home}"

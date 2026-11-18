@@ -219,11 +219,15 @@ has_real_llm_key() { return 1; }
 
     def test_targeted_reruns_preserve_attempts_and_accumulate_observed_cost(self):
         case = self.scenarios / "18_existing/one.sh"
-        case.write_text("""python3 - <<'PYTHON'
+        shutil.copy2(E2E / "scripts/common.sh", self.root / "scripts/scenario-common.sh")
+        case.write_text("""source "${TALOS_E2E_DIR}/scripts/scenario-common.sh"
+export FIXTURE_HOME="$(make_e2e_temp_dir profile-fixture)"
+trap 'cleanup_e2e_temp_dir "$FIXTURE_HOME"' EXIT
+python3 - <<'PYTHON'
 import os
 from pathlib import Path
 import sqlite3
-home = Path(os.environ["TALOS_E2E_TMP_ROOT"])
+home = Path(os.environ["FIXTURE_HOME"])
 for name in ("control", "replica"):
     data = home / name / "data"
     data.mkdir(parents=True)
@@ -255,6 +259,7 @@ exit "${FIXTURE_STATUS}"
         first_log = root / "runs" / initial_id / "cases/18_existing/one/scenario.log"
         first_result = first_log.with_name("result.json")
         original = first_result.read_bytes()
+        self.assertFalse((self.root / "tmp/runs" / initial_id).exists())
 
         # Only the selected case runs again. The initial rates carry over.
         args = ("--case", "18_existing/one", "--rerun-of", initial_id)

@@ -27,7 +27,7 @@ TUI_SESSION_NAME="talos-tui-session-controls-$$"
 
 cleanup() {
   tui_stop "${TUI_SESSION_NAME:-}"
-  rm -rf "${TEST_TALOS_HOME}"
+  cleanup_e2e_temp_dir "${TEST_TALOS_HOME}"
 }
 trap cleanup EXIT
 

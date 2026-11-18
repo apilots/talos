@@ -27,6 +27,16 @@ make_e2e_temp_dir() {
   mktemp -d "${E2E_TMP_ROOT}/${prefix}.XXXXXX"
 }
 
+cleanup_e2e_temp_dir() {
+  local directory="$1"
+  # The case runner reads Profile usage before removing its private temp root.
+  if [[ -n "${TALOS_E2E_CASE_ID:-}" && -n "${TALOS_E2E_RESOURCE_ROOT:-}" &&
+        "${directory}" == "${E2E_TMP_ROOT}/"* ]]; then
+    return 0
+  fi
+  rm -rf -- "${directory}"
+}
+
 find_listening_pid() {
   if ! command -v lsof >/dev/null 2>&1; then
     return 0
