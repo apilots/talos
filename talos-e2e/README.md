@@ -150,7 +150,7 @@ Plugin lifecycle has two secretless entry-point cases. Run
 `just e2e-case 09_app_server/plugin_api_lifecycle` for the Desktop UI's App Server
 API. It covers catalog search, document reads, and Skill and MCP management.
 Run `just e2e-case 05_cli/plugin_lifecycle` for the CLI's Marketplace
-commands, installations by name, and offline package replacement. Plugin
+commands, legacy Browser migration at startup, installations by name, and offline package replacement. Plugin
 backend and shared catalog fixture changes select both cases.
 
 `15_tui_install` runs in release and manual `release-preflight.yml` only. Native

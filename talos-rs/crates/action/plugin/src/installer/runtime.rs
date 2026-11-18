@@ -19,7 +19,12 @@ pub(crate) fn installed_skill_root(install: &PluginInstall) -> Option<talos_skil
 pub(crate) fn installed_mcp_servers(
     install: &PluginInstall,
 ) -> TalosResult<Vec<talos_types::McpServerRuntimeDescriptor>> {
-    if install.kind != PluginKind::McpServer || !install.enabled {
+    // Preserve a legacy record when the official source is unavailable without
+    // activating the old executable from its manifest.
+    if install.kind != PluginKind::McpServer
+        || !install.enabled
+        || crate::manager::official::is_legacy_builtin_browser(install)
+    {
         return Ok(Vec::new());
     }
     let mut server = server_from_installed_mcp_manifest(&install.installed_path)?;
