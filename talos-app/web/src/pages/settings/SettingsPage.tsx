@@ -68,8 +68,8 @@ export function SettingsPage() {
         canOpenAccount={connection.authStatus === "authenticated"}
       />
       <div className="min-h-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[1040px] px-5 py-6 lg:px-8">
-          <header className="mb-5 flex min-h-8 items-center">
+        <div className="mx-auto w-full max-w-[1040px] px-8 py-7">
+          <header className="mb-8 flex min-h-8 items-center">
             <h1 className="text-sm font-medium text-ink">{t(`sections.${activeSection}`)}</h1>
           </header>
           <div className="min-w-0 space-y-5">
