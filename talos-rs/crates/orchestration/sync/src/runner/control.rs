@@ -58,6 +58,7 @@ impl SyncHandle {
     pub async fn flush(&self, resource: SyncResourceKey) -> TalosResult<SyncVersion> {
         let resource = crate::projection::resource(&self.binding, &resource);
         resource.validate().map_err(crate::facade::sync_error)?;
+        self.require_connected()?;
         let (cut, minimum) = self.sync.flush_cut(&self.binding, &resource).await?;
         let (reply, received) = oneshot::channel();
         self.request(
@@ -77,9 +78,7 @@ impl SyncHandle {
         command: ControlCommand,
         reply: oneshot::Receiver<TalosResult<SyncVersion>>,
     ) -> TalosResult<SyncVersion> {
-        if self.stop.is_cancelled() || self.status().connection != SyncConnectionState::Connected {
-            return Err(unavailable());
-        }
+        self.require_connected()?;
         tokio::time::timeout(Duration::from_secs(30), async {
             self.commands
                 .send(command)
@@ -89,6 +88,13 @@ impl SyncHandle {
         })
         .await
         .map_err(|_| TalosError::new(ErrorCode::Timeout, "Synchronization operation timed out."))?
+    }
+
+    fn require_connected(&self) -> TalosResult<()> {
+        if self.stop.is_cancelled() || self.status().connection != SyncConnectionState::Connected {
+            return Err(unavailable());
+        }
+        Ok(())
     }
 }
 

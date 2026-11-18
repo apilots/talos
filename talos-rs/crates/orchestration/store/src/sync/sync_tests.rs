@@ -8,6 +8,9 @@ use talos_storage::{SqliteStorage, Storage};
 use talos_sync::{ComputerAlias, SyncBindParams, SyncOptions, SyncScope};
 use talos_types::*;
 
+#[path = "backlog_tests.rs"]
+mod backlog_tests;
+
 #[path = "read_snapshot_tests.rs"]
 mod read_snapshot_tests;
 
@@ -45,6 +48,13 @@ fn projection(record: &SessionRecord) -> TalosResult<SessionInfo> {
     })
 }
 async fn peer(local: bool) -> Peer {
+    peer_with_sync_storage(local, |storage| storage).await
+}
+
+async fn peer_with_sync_storage(
+    local: bool,
+    sync_storage: impl FnOnce(Arc<SqliteStorage>) -> Arc<dyn Storage>,
+) -> Peer {
     let home = tempfile::tempdir().unwrap();
     let storage = Arc::new(
         SqliteStorage::new(home.path().join("facts.db").to_str().unwrap())
@@ -56,7 +66,7 @@ async fn peer(local: bool) -> Peer {
         .unwrap();
     let sync = Arc::new(
         TalosSync::open(
-            storage.clone(),
+            sync_storage(storage.clone()),
             SyncOptions {
                 hub_endpoint: "wss://sync.example.test/v1/sync".into(),
             },
@@ -237,11 +247,9 @@ async fn exchange(source: &Peer, destination: &Peer, resource: SyncResourceKey) 
         .await
         .unwrap()
     {
-        let mut tx = destination.storage.begin_transaction().await.unwrap();
-        let (version, changes) = destination
+        let (mut tx, version, changes) = destination
             .sync
             .import_document(
-                &mut *tx,
                 &destination.adapter.binding,
                 &batch.resource,
                 std::slice::from_ref(&batch.update),
@@ -474,11 +482,9 @@ async fn file_source_and_child_identity_survive_import_and_source_deletion() {
         .await
         .unwrap()
         .unwrap();
-    let mut tx = b.storage.begin_transaction().await.unwrap();
-    let (version, changes) = b
+    let (mut tx, version, changes) = b
         .sync
         .import_document(
-            &mut *tx,
             &b.adapter.binding,
             &resource,
             std::slice::from_ref(&batch.update),

@@ -120,23 +120,32 @@ pub(crate) async fn has_document(
     Ok(!rows.is_empty())
 }
 
-pub(crate) async fn outbox(
+pub(crate) async fn exported_rows_through(
     tx: &mut dyn StorageTransaction,
     scope: &SyncScope,
     resource: &SyncResourceKey,
-    limit: usize,
-) -> TalosResult<Vec<OutboxRecord>> {
-    outbox_after(tx, scope, resource, 0, limit).await
+    through: i64,
+) -> TalosResult<Vec<(i64, SyncVersion)>> {
+    let rows = tx.query("SELECT seq, exported_version_json FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? AND seq <= ? AND exported_version_json IS NOT NULL ORDER BY seq LIMIT 1024", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id(), &through.to_string()]).await?;
+    rows.iter()
+        .map(|row| {
+            Ok((
+                row.get_i64("seq").ok_or_else(corrupt_record)?,
+                json(row, "exported_version_json")?,
+            ))
+        })
+        .collect()
 }
 
-pub(crate) async fn outbox_after(
+pub(crate) async fn outbox_through(
     tx: &mut dyn StorageTransaction,
     scope: &SyncScope,
     resource: &SyncResourceKey,
     after: i64,
+    through: i64,
     limit: usize,
 ) -> TalosResult<Vec<OutboxRecord>> {
-    let rows = tx.query("SELECT seq, changes_json, exported_version_json FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? AND seq > ? ORDER BY seq LIMIT ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id(), &after.to_string(), &limit.to_string()]).await?;
+    let rows = tx.query("SELECT seq, changes_json, exported_version_json FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id(), &after.to_string(), &through.to_string(), &limit.to_string()]).await?;
     rows.iter()
         .map(|row| {
             Ok(OutboxRecord {
@@ -149,6 +158,26 @@ pub(crate) async fn outbox_after(
             })
         })
         .collect()
+}
+
+pub(crate) async fn outbox_tail(
+    tx: &mut dyn StorageTransaction,
+    scope: &SyncScope,
+    resource: &SyncResourceKey,
+) -> TalosResult<Option<i64>> {
+    let rows = tx.query("SELECT MAX(seq) AS tail FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
+    Ok(rows.first().and_then(|row| row.get_i64("tail")))
+}
+
+pub(crate) async fn document_checkpoint(
+    tx: &mut dyn StorageTransaction,
+    scope: &SyncScope,
+    resource: &SyncResourceKey,
+) -> TalosResult<Option<(SyncVersion, SyncVersion)>> {
+    let rows = tx.query("SELECT hex(version_vector) AS vector, generation, hex(acknowledged_vector) AS acknowledged, acknowledged_generation FROM sync_documents WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
+    rows.first()
+        .map(|row| Ok((version(row)?, acknowledged_version(row)?)))
+        .transpose()
 }
 
 pub(crate) async fn document_version(
@@ -171,14 +200,7 @@ pub(crate) async fn document(
             Ok(DocumentRecord {
                 snapshot: unhex(&text(row, "snapshot")?)?,
                 version: version(row)?,
-                acknowledged: SyncVersion {
-                    version_vector: unhex(&text(row, "acknowledged")?)?,
-                    history_generation: u64::try_from(
-                        row.get_i64("acknowledged_generation")
-                            .ok_or_else(corrupt_record)?,
-                    )
-                    .map_err(|_| corrupt_record())?,
-                },
+                acknowledged: acknowledged_version(row)?,
             })
         })
         .transpose()
@@ -234,14 +256,7 @@ pub(crate) async fn acknowledgement(
             Ok(AcknowledgementRecord {
                 exported: json(row, "exported_version_json")?,
                 current: version(row)?,
-                acknowledged: SyncVersion {
-                    version_vector: unhex(&text(row, "acknowledged")?)?,
-                    history_generation: u64::try_from(
-                        row.get_i64("acknowledged_generation")
-                            .ok_or_else(corrupt_record)?,
-                    )
-                    .map_err(|_| corrupt_record())?,
-                },
+                acknowledged: acknowledged_version(row)?,
             })
         })
         .transpose()
@@ -260,6 +275,17 @@ pub(crate) async fn save_acknowledgement(
         return Err(corrupt_record());
     }
     Ok(())
+}
+
+fn acknowledged_version(row: &Row) -> TalosResult<SyncVersion> {
+    Ok(SyncVersion {
+        version_vector: unhex(&text(row, "acknowledged")?)?,
+        history_generation: u64::try_from(
+            row.get_i64("acknowledged_generation")
+                .ok_or_else(corrupt_record)?,
+        )
+        .map_err(|_| corrupt_record())?,
+    })
 }
 
 pub(crate) fn encode<T: Serialize + ?Sized>(value: &T) -> TalosResult<String> {

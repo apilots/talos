@@ -47,11 +47,9 @@ async fn restart_accepts_equivalent_encoded_versions_but_rejects_a_changed_cut()
         merged.import(&[peer.apply(&[change]).unwrap()]).unwrap();
     }
     let version = merged.version().unwrap();
-    let mut tx = fixture.storage.begin_transaction().await.unwrap();
-    fixture
+    let (tx, _, _) = fixture
         .sync
         .import_document(
-            &mut *tx,
             &fixture.binding,
             &resource,
             &[merged.snapshot().unwrap()],

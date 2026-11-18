@@ -449,11 +449,9 @@ async fn transcript_import_cursor_and_event_mapping_share_the_business_commit() 
         .await
         .unwrap()
         .unwrap();
-    let mut tx = target.storage.begin_transaction().await.unwrap();
-    target
+    let (tx, _, _) = target
         .sync
         .import_document(
-            &mut *tx,
             &target.binding,
             &resource,
             std::slice::from_ref(&batch.update),
@@ -475,11 +473,9 @@ async fn transcript_import_cursor_and_event_mapping_share_the_business_commit() 
         .await
         .unwrap()
         .is_none());
-    let mut tx = target.storage.begin_transaction().await.unwrap();
-    let (version, imported) = target
+    let (mut tx, version, imported) = target
         .sync
         .import_document(
-            &mut *tx,
             &target.binding,
             &resource,
             &[batch.update],

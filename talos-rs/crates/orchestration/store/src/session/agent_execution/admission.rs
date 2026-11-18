@@ -259,7 +259,7 @@ async fn commit_running_batch(
         .identity
         .clone();
     let mut transaction = store
-        .begin_session_transaction(&identity.session_id)
+        .begin_session_timeline_transaction(&identity.session_id)
         .await?;
     let active = load_active_turn(transaction.as_mut(), &identity.session_id)
         .await?
