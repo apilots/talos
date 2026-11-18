@@ -13,6 +13,7 @@ use talos_worker_runtime::ManagedWorkerRuntime;
 pub(crate) async fn configure(
     config: &Config,
     nodes: &AgentNodeService,
+    auth: Arc<dyn talos_auth::AuthService>,
 ) -> TalosResult<Option<(AgentNodeService, FileLock)>> {
     let Some(runtime) = &config.talos.worker.runtime else {
         return Ok(None);
@@ -38,6 +39,7 @@ pub(crate) async fn configure(
     let trusted_ca = read_worker_trusted_ca(connection.trusted_ca_file.as_deref())?;
     nodes.install_managed_worker_runtime(
         backend,
+        auth,
         runtime.clone(),
         config.talos.server.runtime.clone(),
         trusted_ca,

@@ -70,7 +70,7 @@ impl ApplicationSyncHost {
         Ok(token)
     }
 
-    fn credentials(
+    pub(super) fn credentials(
         &self,
         actor: &RequestIdentity,
     ) -> TalosResult<talos_sync_sdk::CredentialCallback> {
@@ -155,7 +155,9 @@ impl ApplicationSyncHost {
             .service
             .nodes
             .get_node(
-                &Actor::regular(&actor.user_id).with_role(actor.role),
+                &Actor::regular(&actor.user_id)
+                    .with_role(actor.role)
+                    .with_user_type(actor.user_type),
                 talos_types::GetNodeRequest {
                     node_id: runner.node_id.clone(),
                 },
@@ -460,7 +462,7 @@ impl ApplicationSyncHost {
             .map(Some)
     }
 
-    async fn stop_account_sync(&self, account_id: &str) -> TalosResult<()> {
+    pub(super) async fn stop_account_sync(&self, account_id: &str) -> TalosResult<()> {
         self.service.remove_sync_handle(account_id);
         let handle = self.sync_stores.remove_handle(account_id).await;
         if let Some(handle) = handle {
@@ -588,6 +590,7 @@ impl ApplicationSyncHost {
                     user_id: actor.user_id.clone(),
                     username: actor.username.clone(),
                     role: actor.role,
+                    user_type: actor.user_type,
                     auth_disabled: false,
                     access_token: actor.access_token.clone(),
                 })

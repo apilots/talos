@@ -108,6 +108,7 @@ impl ApplicationSyncHost {
             user_id: actor.user_id.clone(),
             username: actor.username.clone(),
             role: actor.role,
+            user_type: actor.user_type,
             auth_disabled: false,
             access_token: actor.access_token.clone(),
         };

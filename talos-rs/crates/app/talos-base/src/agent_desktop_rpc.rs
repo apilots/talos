@@ -232,9 +232,12 @@ impl pb::agent_desktop_media_server::AgentDesktopMedia for DesktopMediaRpc {
                     .auth_service
                     .verify_access_token(actor.access_token.as_deref().ok_or_else(denied)?)
                     .await?;
-                if identity.user_id != actor.user_id {
+                if identity.user_id != actor.user_id || identity.auth_disabled {
                     return Err(denied());
                 }
+                let actor = actor
+                    .with_role(identity.role)
+                    .with_user_type(identity.user_type);
                 rpc.owner(&actor, &node).await
             }
         });

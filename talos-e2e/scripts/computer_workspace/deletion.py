@@ -104,7 +104,7 @@ def run(cluster):
         remaining = records[0]['node']['nodeId']
         require(data(public(cluster, '/v1/computers/' + remaining, 'DELETE'))['nodeId'] == remaining,
                 'Final disposable Computer was not removed')
-        personal = page.get_by_role('tabpanel', name='Personal computers')
+        personal = page.get_by_role('region', name='Home', exact=True)
         expect(personal.get_by_role('heading', name='Connect a personal computer')).to_be_visible(timeout=15000)
         expect(page.locator('#talos-sidebar')).to_have_count(0)
         for width in (1560, 390):
@@ -115,14 +115,13 @@ def run(cluster):
             expect(page.get_by_role('banner')).to_have_count(0)
             require(page.get_by_role('main').bounding_box()['y'] <= 1, 'Empty directory retained a header spacer')
             expect(page.get_by_role('dialog')).to_have_count(0)
-            page.get_by_role('tab', name='Talo', exact=True).click()
-            expect(page.get_by_role('tabpanel', name='Talo')).to_be_visible()
-            expect(personal).not_to_be_visible()
-            page.get_by_role('tab', name='Talo', exact=True).press('ArrowLeft')
-            expect(page.get_by_role('tab', name='Personal computers')).to_be_focused()
-            expect(personal).to_be_visible()
+            expect(page.get_by_role('tablist')).to_have_count(0)
+            expect(page.get_by_role('tab', name='Talo', exact=True)).to_have_count(0)
+            page.goto(url + '/talo')
+            expect(page).to_have_url(url + '/')
+            expect(personal.get_by_role('heading', name='Connect a personal computer')).to_be_visible()
         page.screenshot(path=str(REPORT / 'homepage-no-computers.png'), full_page=True)
-        print('CASE computer_home_selection_inline_guide_and_talo_tab PASS', flush=True)
+        print('CASE computer_home_selection_inline_guide_and_restricted_talo PASS', flush=True)
 
         # Search must discover a Computer outside the initial directory response.
         registered = [data(public(cluster, '/v1/computers', 'POST', {

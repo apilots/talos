@@ -20,6 +20,7 @@ pub(crate) struct ResourceAccessService {
     sessions: Arc<SessionService>,
     projects: Arc<ProjectService>,
     restrict_embedded: bool,
+    nodes: Option<crate::AgentNodeService>,
 }
 
 /// Request accepted by `TalosService` when a caller needs a session handle.
@@ -39,21 +40,34 @@ impl ResourceAccessService {
         sessions: Arc<SessionService>,
         projects: Arc<ProjectService>,
         restrict_embedded: bool,
+        nodes: Option<crate::AgentNodeService>,
     ) -> Self {
         Self {
             coordinator,
             sessions,
             projects,
             restrict_embedded,
+            nodes,
         }
     }
 
-    pub(crate) fn ensure_worker_access(&self, actor: &Actor, node_id: &str) -> TalosResult<()> {
+    pub(crate) async fn ensure_worker_access(
+        &self,
+        actor: &Actor,
+        node_id: &str,
+    ) -> TalosResult<()> {
         if self.restrict_embedded
             && node_id == "embedded"
             && (actor.auth_disabled || actor.role != talos_auth::UserRole::Admin)
         {
             return Err(embedded_access_denied());
+        }
+        self.ensure_managed_node_access(actor, node_id).await
+    }
+
+    async fn ensure_managed_node_access(&self, actor: &Actor, node_id: &str) -> TalosResult<()> {
+        if let Some(nodes) = &self.nodes {
+            nodes.ensure_managed_node_access(actor, node_id).await?;
         }
         Ok(())
     }
@@ -163,6 +177,8 @@ impl ResourceAccessService {
             ));
         }
         self.ensure_session_visibility(actor, &record)?;
+        self.ensure_managed_node_access(actor, &record.execution_node_id)
+            .await?;
         Ok(record)
     }
 
@@ -236,6 +252,8 @@ impl ResourceAccessService {
     ) -> TalosResult<ProjectRecord> {
         let project = self.get_project_record(project_id).await?;
         self.ensure_project_visibility(actor, &project)?;
+        self.ensure_managed_node_access(actor, &project.execution_node_id)
+            .await?;
         Ok(project)
     }
 
@@ -244,7 +262,7 @@ impl ResourceAccessService {
         actor: &Actor,
         node_id: &str,
     ) -> TalosResult<Arc<dyn agent_protocol::WorkerEnvironment>> {
-        self.ensure_worker_access(actor, node_id)?;
+        self.ensure_worker_access(actor, node_id).await?;
         self.coordinator
             .worker_environment(node_id, &actor.user_id)
             .await
@@ -325,6 +343,8 @@ impl ResourceAccessService {
     ) -> TalosResult<ProjectRecord> {
         let project = self.get_project_record(project_id).await?;
         self.ensure_project_visibility(actor, &project)?;
+        self.ensure_managed_node_access(actor, &project.execution_node_id)
+            .await?;
         Ok(project)
     }
 

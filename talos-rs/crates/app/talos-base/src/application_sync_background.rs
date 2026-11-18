@@ -85,6 +85,27 @@ impl ApplicationSyncHost {
             // A new verified credential can restore a Web account after logout.
             background.suspended.remove(&actor.user_id);
         }
+        self.start_refresh(actor, &mut background);
+    }
+
+    /// Mutation completion can restore maintenance only while the account remains active.
+    /// Unlike authentication restoration, it must never clear a suspension for a newer token.
+    pub(crate) fn schedule_active_refresh(&self, actor: &Actor) {
+        let mut background = self.background.lock().expect("Sync refresh tasks lock");
+        if background.suspended.contains_key(&actor.user_id) {
+            return;
+        }
+        self.start_refresh(actor, &mut background);
+    }
+
+    fn start_refresh(&self, actor: &Actor, background: &mut RefreshTasks) {
+        if actor.auth_disabled
+            || actor.access_token.is_none()
+            || background.closed
+            || background.paused.contains_key(&actor.user_id)
+        {
+            return;
+        }
         if let Some(refresh) = background.tasks.get(&actor.user_id) {
             if !refresh.task.is_finished() {
                 refresh.actor.send_if_modified(|current| {

@@ -348,7 +348,7 @@ execution acceptance has resumed after provider funding. See the
 [scenario contract](scenarios/18_computer_workspace/README.md) for scope and evidence.
 
 Multi-control-plane synchronization uses `just e2e-group 19_computer_sync` on a
-Mac with Docker, the pinned public Sync v0.1.3 image, a Cloud fixture executable,
+Mac with Docker, the pinned public Sync v0.1.6 image, a Cloud fixture executable,
 and the same protobuf/Python/Node prerequisites. The group builds the current Worker
 image and pulls the immutable Sync Release digest without a sibling source checkout.
 It starts isolated real services and checks owner isolation, hardware
@@ -364,6 +364,53 @@ the secretless hosted PR gate. Its isolated Docker-context regressions run in CI
 Generated evidence is written under `talos-e2e/reports/`. Temporary Talos homes
 and scenario data use `talos-e2e/.tmp/` unless `TALOS_E2E_TMP_ROOT` overrides
 the location. These directories are generated output, not source documentation.
+
+The runner writes a separate `reports/e2e_results_<initial-run-id>.md` with
+numbered group summaries and case tables. Each execution has its own duration,
+estimated cost, outcome, revision and log under `reports/runs/<run-id>/cases/`.
+Execution duration excludes runner evidence collection and cleanup. Case totals
+include all executions. The original report and the traditional
+per-case paths remain available. Use the initial run ID printed by the runner to
+add only the affected case to the same report:
+
+```sh
+talos-e2e/run_e2e.sh --case 05_cli/full_flow --rerun-of <initial-run-id> \
+  --note 'The connection remained open after cancellation → close it on exit (fix abc123)'
+```
+
+Provide one short note per repaired case with the cause and fix. The table
+supplies the execution number, rerun count and observed outcome. The first
+result and its evidence are kept. Rates use PASS and FAIL for the denominator;
+blocked, cancelled and unexecuted cases appear separately from these counts.
+
+Usage is read before runner cleanup from existing Profile snapshots in
+case-owned Talos homes. The model column shows the configured provider/model,
+and duplicate snapshots are counted once. A snapshot can lack failed,
+cancelled, remote or not-yet-persisted usage. The report identifies partial
+coverage and shows N/A when it cannot estimate cost. These reads make no model
+requests.
+
+Pass `--prices /path/to/prices.json` or set `TALOS_E2E_PRICES` for the initial
+run to supply explicit rates per million tokens.
+The runner saves the rates, currency, source and date with each run. A targeted
+rerun inherits the initial snapshot unless overridden. Use an explicit
+`free: true` with four zero rates for a free fixture. If a cache count is
+missing, its fee can be estimated only when that rate equals the ordinary input
+rate. Currencies are reported individually. Example rates for a local fixture:
+
+```json
+{
+  "fixture/model": {
+    "currency": "CNY",
+    "source": "Local fixture example",
+    "as_of": "2026-01-01",
+    "input": 2,
+    "output": 5,
+    "cache_read": 0.5,
+    "cache_write": 2
+  }
+}
+```
 
 All discovered cases use the same before/after cleanup boundary. Each case gets
 private temp/home/native-output paths, an owned shell process group and a private

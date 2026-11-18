@@ -102,14 +102,26 @@ def environment(cluster):
         require('UPDATED_' in (root / 'memory/2026-10-11.md').read_text(), 'Memory file saved outside Worker')
 
         skills = data(http(f'{cluster.url}/v1/skills?{query}', token=token))
-        require([skill['name'] for skill in skills['data']] == ['computer-review'], 'Worker Skills root was not selected')
-        require(data(http(f'{cluster.url}/v1/skills/refresh?{query}', {}, token, method='POST')) == skills, 'Skills refresh changed target')
+        external_skills = [skill for skill in skills['data'] if skill['scope'] == 'external']
+        external_names = [skill['name'] for skill in external_skills]
+        require(external_names == ['computer-review'],
+                f'{node["home"].name}: expected the configured external Skill, got {external_names!r}')
+        worker_skill = external_skills[0]
+        expected_path = node['home'] / 'test-skills' / 'computer-review' / 'SKILL.md'
+        require(Path(worker_skill['path']).resolve() == expected_path.resolve(),
+                f'{node["home"].name}: listed Skill path {worker_skill["path"]!r}, expected {str(expected_path)!r}')
+        require(data(http(f'{cluster.url}/v1/skills/refresh?{query}', {}, token, method='POST')) == skills,
+                f'{node["home"].name}: Skills refresh changed the catalog')
         suggestions = data(http(f'{cluster.url}/v1/skills/suggest?{urlencode({**target, "query": "computer", "limit": 1})}', token=token))['data']
-        require(len(suggestions) == 1, 'Worker Skills suggestions missing')
+        suggested_skills = [(skill['name'], skill['scope'], skill['path']) for skill in suggestions]
+        require(suggested_skills == [('computer-review', 'external', worker_skill['path'])],
+                f'{node["home"].name}: unexpected Skill suggestions: {suggested_skills!r}')
         read = data(http(f'{cluster.url}/v1/skills/read', {**target, 'selector': {'name': 'computer-review'}}, token))['document']
-        require('SKILL_' + node['home'].name in read['contents'], 'Skill document came from another node')
+        require('SKILL_' + node['home'].name in read['contents'],
+                f'{node["home"].name}: Skill document lacked the Worker marker')
         resolved = data(http(f'{cluster.url}/v1/skills/resolve', {**target, 'text': 'Use $computer-review', 'selected': []}, token))
-        require(resolved['data'] == skills['data'] and not resolved['warnings'], 'Skill resolution diverged')
+        require(resolved['data'] == [worker_skill] and not resolved['warnings'],
+                f'{node["home"].name}: Skill resolution diverged from the selected Skill: {resolved!r}')
     passed('two_workers_isolate_documents_memory_ids_indexes_and_skills')
     passed('version_conflicts_and_index_replacement_preserve_existing_semantics')
 

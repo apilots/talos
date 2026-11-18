@@ -24,6 +24,7 @@ impl AuthService for LocalAuth {
             user_id: "alice".into(),
             username: None,
             role: UserRole::User,
+            user_type: Default::default(),
             auth_disabled: false,
             access_token: Some(token.into()),
         })

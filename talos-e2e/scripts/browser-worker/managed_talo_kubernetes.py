@@ -149,12 +149,22 @@ class Fixture:
                 "-addext", "extendedKeyUsage=serverAuth", "-keyout", str(key), "-out", str(cert))
         return cert, key
 
+    def import_image(self, image, component):
+        importer = DEPLOY / "overlays/k3d/import-image.sh"
+        try:
+            return command(str(importer), self.cluster, image, component)
+        except subprocess.CalledProcessError as error:
+            stderr = (error.stderr or "").strip() or "no stderr"
+            raise RuntimeError(
+                f"k3d {component} image import for {image} into {self.cluster} "
+                f"exited with code {error.returncode}: {stderr}"
+            ) from error
+
     def deploy(self, preflight):
         self.guard_names()
         cert, key = self.make_tls()
-        importer = DEPLOY / "overlays/k3d/import-image.sh"
-        server_image = command(str(importer), self.cluster, SERVER_IMAGE, "server")
-        self.worker_image = command(str(importer), self.cluster, WORKER_IMAGE, "worker")
+        server_image = self.import_image(SERVER_IMAGE, "server")
+        self.worker_image = self.import_image(WORKER_IMAGE, "worker")
         profile = configure(yaml.safe_load((ROOT / "conf/talos-dev.yaml").read_text()), self.files, 8080, 18080)
         profile["gateway"]["host"] = "0.0.0.0"
         profile["agent_node"] = {"control_plane": {
@@ -201,7 +211,7 @@ class Fixture:
         self.rollout(SERVICE)
 
     def add_fixture(self, overlay, server_image, preflight):
-        for source in ("fixture.py", "../lifecycle.py"):
+        for source in ("fixture.py", "../lifecycle.py", "managed_talo_access.py"):
             source = Path(__file__).parent / source
             shutil.copyfile(source, overlay / source.name)
         (overlay / "fixture_program.py").write_text(FIXTURE_PROGRAM)
@@ -210,7 +220,9 @@ class Fixture:
         repository, digest = server_image.split("@")
         doc["images"] = [{"name": "ghcr.io/apilots/talos-server", "newName": repository, "digest": digest}]
         doc["configMapGenerator"] = [{
-            "name": "talos-e2e-fixture", "files": ["fixture.py", "fixture_program.py", "lifecycle.py"],
+            "name": "talos-e2e-fixture", "files": [
+                "fixture.py", "fixture_program.py", "lifecycle.py", "managed_talo_access.py",
+            ],
         }]
         doc["generatorOptions"] = {"disableNameSuffixHash": True}
         doc["namespace"] = "talos"
@@ -461,6 +473,7 @@ def run_preflight(fixture):
 
 
 def run(files, preflight):
+    ACCOUNTS[TOKEN]["role"] = "admin"
     fixture = Fixture(files)
     try:
         fixture.deploy(preflight)

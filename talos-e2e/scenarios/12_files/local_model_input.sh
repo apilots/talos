@@ -25,7 +25,7 @@ cleanup() {
     wait "${MOCK_LLM_PID}" 2>/dev/null || true
   fi
   if [[ "${TALOS_FILES_E2E_KEEP_TMP:-0}" != "1" ]]; then
-    rm -rf "${TMP_DIR}"
+    cleanup_e2e_temp_dir "${TMP_DIR}"
   else
     echo "kept temp directory: ${TMP_DIR}"
   fi

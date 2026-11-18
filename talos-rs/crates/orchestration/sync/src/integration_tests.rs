@@ -65,6 +65,7 @@ async fn fixture_with_options(options: SyncOptions, hub_id: &str) -> Fixture {
         user_id: "account-1".into(),
         username: None,
         role: UserRole::User,
+        user_type: Default::default(),
         auth_disabled: false,
         access_token: None,
     };
@@ -555,6 +556,7 @@ async fn account_rebind_and_computer_identity_change_fail_without_reassigning_da
         user_id: "account-2".into(),
         username: None,
         role: UserRole::User,
+        user_type: Default::default(),
         auth_disabled: false,
         access_token: None,
     };
@@ -578,6 +580,7 @@ async fn account_rebind_and_computer_identity_change_fail_without_reassigning_da
         user_id: fixture.binding.scope.account_id.clone(),
         username: None,
         role: UserRole::User,
+        user_type: Default::default(),
         auth_disabled: false,
         access_token: None,
     };
@@ -656,6 +659,7 @@ async fn account_opt_out_precedes_binding_and_survives_the_schema_upgrade() {
         user_id: "new-account".into(),
         username: None,
         role: UserRole::User,
+        user_type: Default::default(),
         auth_disabled: false,
         access_token: None,
     };

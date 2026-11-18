@@ -339,3 +339,142 @@ async fn desktop_rpc_relay_carries_both_directions_and_rechecks_the_remote_lease
         .await
         .unwrap();
 }
+
+struct TierAuth(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+#[async_trait::async_trait]
+impl talos_auth::AuthService for TierAuth {
+    async fn logout(&self, _: &talos_auth::RequestIdentity) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn verify_access_token(&self, token: &str) -> TalosResult<talos_auth::RequestIdentity> {
+        Ok(talos_auth::RequestIdentity {
+            user_id: "user-1".into(),
+            username: None,
+            role: talos_auth::UserRole::User,
+            user_type: if self.0.load(std::sync::atomic::Ordering::SeqCst) {
+                talos_auth::UserType::Max
+            } else {
+                talos_auth::UserType::Free
+            },
+            auth_disabled: false,
+            access_token: Some(token.into()),
+        })
+    }
+}
+
+#[tokio::test]
+async fn managed_desktop_closes_after_the_verified_account_is_downgraded() {
+    use sha2::{Digest, Sha256};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use talos_store::node::{
+        ManagedWorkerDesired, ManagedWorkerRecord, ManagedWorkerStep, RotateCredentialParams,
+        SetNodeStatusParams,
+    };
+    let mut fixture = Fixture::new(None).await;
+    let now = chrono::Utc::now().timestamp();
+    let node = uuid::Uuid::new_v4().to_string();
+    fixture
+        .store
+        .reserve_managed_worker(&ManagedWorkerRecord {
+            instance_id: uuid::Uuid::new_v4().to_string(),
+            owner_user_id: "user-1".into(),
+            node_id: node.clone(),
+            conversation_session_id: "sess_talo_desktop".into(),
+            short_id: "01234567".into(),
+            image: "fixture".into(),
+            revision: 1,
+            generation: 1,
+            desired: ManagedWorkerDesired::Running,
+            operation: None,
+            step: ManagedWorkerStep::Stable,
+            home_ready: true,
+            last_activity_at: now,
+            operation_at: now,
+            error: None,
+        })
+        .await
+        .unwrap();
+    fixture.credential.node_id = node.clone();
+    fixture.credential.token = "registered-worker".into();
+    fixture
+        .store
+        .rotate_credential(RotateCredentialParams {
+            node_id: node.clone(),
+            hash: Sha256::digest(fixture.credential.token.as_bytes()).into(),
+            expires_at: now + 3600,
+            now_at: now,
+        })
+        .await
+        .unwrap();
+    fixture
+        .store
+        .set_status(SetNodeStatusParams {
+            node_id: node.clone(),
+            status: agent_protocol::NodeStatus::Enabled,
+            now_at: now,
+        })
+        .await
+        .unwrap();
+    let eligible = Arc::new(AtomicBool::new(true));
+    fixture.management.auth_service = Arc::new(TierAuth(eligible.clone()));
+    let lease = registered(
+        fixture
+            .control
+            .register(fixture.registration(&["talos"]))
+            .await
+            .unwrap()
+            .into_inner(),
+    );
+    let media = MediaFixture::new(&fixture).await;
+    let binding = DesktopStreamBinding {
+        stream_id: uuid::Uuid::new_v4().to_string(),
+        viewer_id: uuid::Uuid::new_v4().to_string(),
+        generation: uuid::Uuid::new_v4().to_string(),
+        target_id: "managed".into(),
+        input_mode: BrowserInputMode::ReadOnly,
+        controller_id: None,
+        input_epoch: None,
+    };
+    let reservation = media
+        .client
+        .reserve_desktop("user-1", node.clone(), binding.clone())
+        .await
+        .unwrap();
+    let worker_client = AgentSessionDataClient::connect(
+        &media.endpoint,
+        media.trust.clone(),
+        agent_protocol::NodeAuth {
+            node_id: node.clone(),
+            token: lease,
+        },
+    )
+    .await
+    .unwrap();
+    let worker = worker_client
+        .open_desktop_media(talos_types::WorkerDesktopOpen {
+            binding: binding.clone(),
+            nonce: reservation.nonce,
+        })
+        .await
+        .unwrap();
+    let mut viewer = media
+        .client
+        .view_desktop("user-1", node, binding.stream_id, reservation.ticket)
+        .await
+        .unwrap();
+    worker
+        .outgoing
+        .send(b"managed desktop".to_vec())
+        .await
+        .unwrap();
+    assert_eq!(
+        viewer.incoming.recv().await.unwrap().unwrap(),
+        b"managed desktop"
+    );
+    eligible.store(false, Ordering::SeqCst);
+    tokio::time::timeout(Duration::from_secs(3), viewer.stopped.cancelled())
+        .await
+        .unwrap();
+}

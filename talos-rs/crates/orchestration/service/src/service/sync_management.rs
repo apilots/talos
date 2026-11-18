@@ -205,7 +205,7 @@ impl super::TalosService {
             Some(host) => host.resolve_node(actor, computer_id).await?,
             None => computer_id.into(),
         };
-        self.access.ensure_worker_access(actor, &node_id)?;
+        self.access.ensure_worker_access(actor, &node_id).await?;
         Ok(node_id)
     }
     /// Resolve only the host-local alias for retained metadata. Ownership is
@@ -305,7 +305,7 @@ impl super::TalosService {
             Some(host) => host.connect_computer(actor, computer_id).await?,
             None => computer_id.into(),
         };
-        self.access.ensure_worker_access(actor, &node_id)?;
+        self.access.ensure_worker_access(actor, &node_id).await?;
         Ok(node_id)
     }
 }

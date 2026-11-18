@@ -571,6 +571,7 @@ impl AuthService for FakeAuthService {
             user_id: token.to_string(),
             username: None,
             role: talos_auth::UserRole::User,
+            user_type: Default::default(),
             auth_disabled: false,
             access_token: Some(token.to_string()),
         })
@@ -596,6 +597,7 @@ fn test_auth() -> RequestIdentity {
         user_id: "static-token".to_string(),
         username: None,
         role: talos_auth::UserRole::User,
+        user_type: Default::default(),
         auth_disabled: false,
         access_token: None,
     }

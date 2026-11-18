@@ -55,8 +55,9 @@ pub(super) async fn verify_unconnected_remote_deletion(
         .await
         .unwrap();
     assert!(listing
+        .sessions
         .iter()
-        .any(|session| session.id == "cold-remote-delete"));
+        .any(|entry| entry.session.id == "cold-remote-delete"));
     assert!(
         !a.sync_host
             .sync_stores

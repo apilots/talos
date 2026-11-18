@@ -18,6 +18,10 @@ Docker CLI shim, or scenario registry is introduced.
   detached process groups and Docker resources at their existing creation sites,
   before a later assertion can fail. `lifecycle` supplies the concrete Python
   registration/create helpers; `common.sh` exposes the same shell interface.
+- For a shell fixture directory created by `make_e2e_temp_dir` that contains a
+  Talos home, call `cleanup_e2e_temp_dir` after stopping the fixture. When the
+  runner owns the directory, the helper defers removal until after Profile
+  usage collection. A standalone invocation still removes the directory itself.
 - After every case, terminate owned process groups, then remove owned containers,
   volumes/networks and temporary files. Already-removed resources are harmless;
   a real cleanup failure is reported and makes acceptance fail. Preserve the

@@ -12,7 +12,7 @@ fi
 
 case_dir="$(make_e2e_temp_dir public-deepseek)"
 export TALOS_HOME="${case_dir}/home"
-cleanup() { stop_server; rm -rf "${case_dir}"; }
+cleanup() { stop_server; cleanup_e2e_temp_dir "${case_dir}"; }
 trap cleanup EXIT
 start_server
 mkdir -p "${case_dir}/workspace"

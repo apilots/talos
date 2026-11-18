@@ -208,6 +208,9 @@ def run(cluster):
         driver.call('web', 'screenshot', path=str(REPORT / 'project-header-reloaded.png'))
         passed('owned_project_continuation_and_collapsed_title_survive_reload')
         driver.call('web', 'viewport', width=700, height=820)
+        # Wait for React to commit the narrow layout before exercising its toggle.
+        driver.call('web', 'wait', expression='innerWidth === 700 && matchMedia("(max-width: 1023px)").matches && !document.querySelector("aside#talos-sidebar") && Boolean(document.querySelector(`header button[aria-label="Open sidebar"]`))')
+        require(driver.call('web', 'evaluate', expression='!document.querySelector("dialog[open]")'), 'Viewport resize unexpectedly opened a dialog')
         driver.call('web', 'evaluate', expression='document.querySelector(`header button[aria-label="Open sidebar"]`).focus();document.querySelector(`header button[aria-label="Open sidebar"]`).click()')
         driver.call('web', 'wait', expression='Boolean(document.querySelector("dialog[open]")) && document.querySelector("dialog").matches(":modal")')
         driver.call('web', 'screenshot', path=str(REPORT / 'narrow-sidebar.png'))

@@ -48,6 +48,7 @@ class NatHosts:
         self.hosts[name] = {'container': container, 'home': home, 'address': address}
         wait_for(lambda: self.healthy(name), name + ' original HTTP API')
         self.firewall(name)
+        self.restore_account(name)
         wait_for(lambda: data(self.api(name, '/v1/sync/status'))['connection'] == 'connected', name + ' authenticated WSS')
         node = data(self.api(name, '/v1/sync/status'))['localComputerId']
         require(node and str(uuid.UUID(node)) == node, name + ' did not enroll its own Computer')
@@ -68,6 +69,11 @@ class NatHosts:
         rows = wait_for(imported, name + ' exact same-account directory imported')
         (REPORT / (name + '-directory.json')).write_text(json.dumps({
             'expectedComputerIds': sorted(expected), 'ownerUserId': owner, 'directory': rows}, indent=2))
+
+    def restore_account(self, name):
+        user = data(self.api(name, '/v1/user'))['user']
+        require(user['user_id'] == self.cluster.users['alice']['user']['user_id'],
+                f'{name} restored the wrong account')
 
     def firewall(self, name):
         docker_create('container', 'talos-firewall-'+uuid.uuid4().hex[:10], ['--rm', '--network', 'container:' + self.hosts[name]['container'], '--cap-add', 'NET_ADMIN', os.environ['TALOS_E2E_FIREWALL_IMAGE']])
@@ -161,6 +167,7 @@ def run(cluster):
         wait_for(lambda: hosts.healthy('NAT-A'), 'NAT origin original API restarted')
         hosts.firewall('NAT-A')
         hosts.isolated()
+        hosts.restore_account('NAT-A')
         wait_for(lambda: data(hosts.api('NAT-A', '/v1/sync/status'))['connection'] == 'connected', 'NAT origin verified account rebound')
         wait_for(lambda: hosts.history('NAT-A', session, second['turnId']) == history, 'NAT origin restart caught up', 90)
         data(hosts.api('NAT-A', '/v1/models?nodeId=' + node))

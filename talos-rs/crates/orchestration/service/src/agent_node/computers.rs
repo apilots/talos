@@ -49,16 +49,17 @@ impl AgentNodeService {
             .store
             .list(ListNodesParams {
                 exclude_node_id: excluded.filter(|id| id != "embedded"),
+                include_managed_workers: actor.can_use_managed_worker(),
                 scope,
                 query,
                 cursor: request.cursor,
                 limit: request.limit.unwrap_or(50).clamp(1, 200),
             })
             .await?;
-        let managed = if actor.auth_disabled {
-            None
-        } else {
+        let managed = if actor.can_use_managed_worker() {
             self.store.managed_worker(&actor.user_id).await?
+        } else {
+            None
         };
         let mut data = Vec::with_capacity(page.data.len());
         for record in page.data {
@@ -89,6 +90,8 @@ impl AgentNodeService {
         if !actor.auth_disabled {
             ensure_management_actor(actor)?;
         }
+        self.ensure_managed_node_access(actor, &request.node_id)
+            .await?;
         let record = self
             .store
             .get(&request.node_id)
