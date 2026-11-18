@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -25,6 +26,38 @@ class BatchTest(unittest.TestCase):
             run.assert_called_once()
             state = json.loads((batch.case_dir(root, task) / "state.json").read_text())
             self.assertEqual(state["exit_code"], 1)
+
+    def test_resume_pins_forwarded_agent_overrides(self):
+        first, pending = "terminal-bench/regex-log", "terminal-bench/embedding-drift-monitor"
+        overrides = "TALOS_BENCH_COLLABORATION_TOOLS=0"
+        settings = {
+            "TALOS_BENCH_RUNTA_CHECKPOINT": "test-checkpoint",
+            "TALOS_BENCH_RUNTA_SECRET": "test-secret-name",
+            "TALOS_BENCH_MODEL": "openai:test-model",
+            "TALOS_BENCH_REASONING_EFFORT": "medium",
+            "TALOS_BENCH_AGENT_ENV": overrides,
+        }
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            args = ["runta_batch.py", str(root), "--task", first, "--task", pending, "--limit", "1"]
+            with patch.object(sys, "argv", args), patch.dict(os.environ, settings), \
+                 patch.object(batch, "run_case") as launch:
+                batch.main()
+                launch.assert_called_once_with(root, first)
+                batch.case_dir(root, first).mkdir(parents=True)
+                manifest = (root / "manifest.json").read_text()
+
+                os.environ["TALOS_BENCH_AGENT_ENV"] = "TALOS_BENCH_COLLABORATION_TOOLS=1"
+                with self.assertRaisesRegex(SystemExit, "Batch manifest differs"):
+                    batch.main()
+                launch.assert_called_once()
+                self.assertEqual((root / "manifest.json").read_text(), manifest)
+                self.assertNotIn(overrides, manifest)
+
+                os.environ["TALOS_BENCH_AGENT_ENV"] = overrides
+                batch.main()
+                self.assertEqual(launch.call_count, 2)
+                launch.assert_called_with(root, pending)
 
     def test_only_launcher_verified_archives_are_recorded(self):
         for verified in (False, True):

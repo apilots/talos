@@ -41,11 +41,13 @@ def config():
         path = os.fsdecode(raw)
         digest.update(raw + b"\0")
         digest.update((ROOT / path).read_bytes())
+    agent_env = os.environ.get("TALOS_BENCH_AGENT_ENV", "")
     return {"checkpoint": os.environ[names[0]], "secret_name": os.environ[names[1]],
             "model": os.environ[names[2]], "effort": os.environ[names[3]],
             "launcher_revision": subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip(),
             "bench_sha256": digest.hexdigest(), "batch_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "registry_sha256": hashlib.sha256(REGISTRY.read_bytes()).hexdigest(),
+            "agent_env_sha256": hashlib.sha256(os.fsencode(agent_env)).hexdigest(),
             "attempts_per_task": 1}
 
 

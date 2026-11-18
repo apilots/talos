@@ -65,7 +65,8 @@ uv run --python 3.12 python talos-bench/suites/frontier-harness/runta_batch.py o
 `--task` may be repeated to select a subset. Use `--limit 1` to start only
 the first pending case while keeping the full batch manifest for later resume;
 `--first terminal-bench/regex-log` chooses the first case. The manifest pins the task list,
-checkpoint, dataset, model, effort and launcher contents. Each case keeps its
+checkpoint, dataset, model, effort, launcher contents, and a SHA-256 fingerprint
+of the exact `TALOS_BENCH_AGENT_ENV` passed to the launcher. Each case keeps its
 launcher log, runtime name, result directory, archive checksum and raw result.
 The launcher writes the archive checksum after transfer verification and extraction.
 The collector checks it again before including the original job.
