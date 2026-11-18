@@ -112,7 +112,7 @@ def queue_and_steer(page, session, turn):
     expect(user.get_by_test_id('automation-input-source')).to_have_count(0)
 
 
-def composer_send_policy(page, origin, config_path, fixture):
+def composer_send_policy(page, origin, config_path, fixture, session):
     page.goto(origin + '/settings/general')
     composer_settings = page.get_by_role('region', name='Composer', exact=True)
     queue = composer_settings.get_by_role('button', name='Queue', exact=True)
@@ -132,15 +132,39 @@ def composer_send_policy(page, origin, config_path, fixture):
     marker = 'pending_' + uuid.uuid4().hex
     with page.expect_response(lambda response: urlsplit(response.url).path == '/v1/config/sessionMessageSendPolicy'
                               and response.request.method == 'GET') as observed:
-        started = begin(page, 'goal', 'prompt', f'AUTO_CASE={marker} Start a controlled ordinary Turn')
+        page.goto(f'{origin}/sessions/{session}')
     assert observed.value.ok, observed.value.text()
     assert observed.value.json()['data']['policy'] == 'steer'
-    session = started['sessionId']
+
+    prompt = f'AUTO_CASE={marker} Start a controlled ordinary Turn'
+    composer_label = 'Ask anything. Press / for commands and skills.'
+    composer = page.get_by_role('textbox', name=composer_label)
+    expect(page.get_by_role('button', name='Send', exact=True)).to_be_visible()
+    composer.fill(prompt)
+    start_url = '**/v1/turns/start'
+    pending_start = []
+    page.route(start_url, lambda route: pending_start.append(route), times=1)
+    with page.expect_request(start_url) as sent:
+        composer.press('Enter')
+    assert sent.value.post_data_json['sessionId'] == session
+    expect(page.get_by_test_id('user-input-message').filter(has_text=prompt)).to_be_visible()
+    expect(composer).to_have_value('')
+    page.screenshot(path=str(REPORT / 'composer-before-admission.png'), full_page=True)
+    reopened = page.context.new_page()
+    try:
+        reopened.goto(page.url)
+        expect(reopened.get_by_role('textbox', name=composer_label)).to_have_value(prompt)
+    finally:
+        reopened.close()
+    with page.expect_response(start_url) as admitted:
+        pending_start[0].continue_()
+    assert admitted.value.ok, admitted.value.text()
+    print('CASE composer_draft_submission PASS local_bubble=visible draft=empty persisted_draft=reopened before_admission=true')
+
     wait_for(lambda: (fixture / f'{marker}.busy').exists(), 'running ordinary Turn')
     with urllib.request.urlopen(f'{origin}/v1/sessions/{session}/active-turn') as response:
         turn = json.load(response)['data']['activeTurn']['identity']['turnId']
     follow_up = 'Use this follow-up in the current run.'
-    composer = page.get_by_role('textbox', name='Ask anything. Press / for commands and skills.')
     composer.fill(follow_up)
     policy_reads = []
 
@@ -279,7 +303,11 @@ def run(home):
             browser = playwright.chromium.launch(executable_path=os.environ.get('TALOS_E2E_CHROME_BIN',
                 '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), headless=True)
             context = browser.new_context(viewport={'width': 1280, 'height': 900}, locale='en-US')
-            context.add_init_script('localStorage.setItem("talos-web-ui",JSON.stringify({state:{locale:"en",uiTheme:"light"},version:0}));')
+            context.add_init_script('''
+                if (!localStorage.getItem("talos-web-ui")) {
+                    localStorage.setItem("talos-web-ui", JSON.stringify({state: {locale: "en", uiTheme: "light"}, version: 0}));
+                }
+            ''')
             page = context.new_page()
             page.goto(origin)
             try:
@@ -287,7 +315,7 @@ def run(home):
                            complete(page, home / 'data/talos.db', fixture, 'loop', 'slash'),
                            cancel(page, home / 'data/talos.db', fixture),
                            complete(page, home / 'data/talos.db', fixture, 'goal', 'prompt')]
-                composer_send_policy(page, origin, config_path, fixture)
+                composer_send_policy(page, origin, config_path, fixture, results[-1]['sessionId'])
                 assert not (fixture / 'errors.jsonl').exists(), 'Controlled upstream contract failed'
                 (REPORT / 'result.json').write_text(json.dumps({'result': 'PASS', 'tasks': results}, indent=2))
                 print('CASE automation_web_entry PASS server=real tool=real entries=Add,slash,prompt selection=typed-or-none countdown=real terminalRows=removed cancel=beforeWork')

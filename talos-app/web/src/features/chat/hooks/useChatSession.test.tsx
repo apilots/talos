@@ -14,6 +14,16 @@ import { useAppStore } from "@/shared/store/app-store";
 
 const mocks = getChatSessionMocks();
 
+function deferredAdmission() {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((accept, fail) => {
+    resolve = accept;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("useChatSession", () => {
   beforeEach(resetChatSessionMocks);
 
@@ -50,6 +60,44 @@ describe("useChatSession", () => {
 
     expect(mocks.send).toHaveBeenCalledTimes(1);
     expect(result.current.draft).toBe("keep this input");
+  });
+
+  it.each([undefined, "First input"])("hides a durable draft until admission and preserves a later edit %j", async (nextDraft) => {
+    const admission = deferredAdmission();
+    mocks.send.mockReturnValueOnce(admission.promise);
+    const { result } = renderHook(() => useChatSession("session-1", 1));
+    act(() => result.current.setDraft("First input"));
+
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.sendTurn(); });
+
+    expect(mocks.send).toHaveBeenCalledOnce();
+    expect(result.current.draft).toBe("");
+    expect(Object.values(useAppStore.getState().composerDrafts)).toEqual(["First input"]);
+    if (nextDraft !== undefined) act(() => result.current.setDraft(nextDraft));
+    await act(async () => { admission.resolve(); await sending; });
+    expect(result.current.draft).toBe(nextDraft ?? "");
+    expect(Object.values(useAppStore.getState().composerDrafts)).toEqual(nextDraft ? [nextDraft] : []);
+  });
+
+  it.each([undefined, "", "Next input"])("preserves the draft after failed admission with later edit %j", async (nextDraft) => {
+    const admission = deferredAdmission();
+    mocks.send.mockReturnValueOnce(admission.promise);
+    const { result } = renderHook(() => useChatSession("session-1", 1));
+    const original = "  First input  ";
+    act(() => result.current.setDraft(original));
+
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.sendTurn(); });
+
+    expect(result.current.draft).toBe("");
+    if (nextDraft !== undefined) act(() => result.current.setDraft(nextDraft));
+    const failure = new Error("Admission failed");
+    await act(async () => {
+      admission.reject(failure);
+      await expect(sending).rejects.toBe(failure);
+    });
+    expect(result.current.draft).toBe(nextDraft ?? original);
   });
 
   it("starts the new session timeline after the server accepts the local turn", () => {
