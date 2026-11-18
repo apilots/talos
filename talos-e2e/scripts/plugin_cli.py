@@ -1,4 +1,5 @@
 """Exercise catalog and local-package Plugin lifecycle through the CLI."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,7 @@ def run():
     def cli(*args, failure=None):
         return invoke_cli(args, evidence, failure=failure)
 
+    exercise_legacy_browser_upgrade(cli, WORKER_HOME)
     initial_commit = git(REPO, 'rev-parse', 'HEAD')
     catalog = cli('marketplace', 'add', REPO.as_uri(), '--reference', 'main')
     source_id = catalog['source']['id']
@@ -61,8 +63,49 @@ def run():
     assert all(row['id'] != source_id for row in cli('marketplace', 'list')['sources'])
     (REPORT / 'plugin-cli-acceptance.json').write_text(json.dumps({
         'status': 'passed', 'kinds': ['skill', 'mcp_server'], 'commit': commit,
-        'checks': ['marketplace add/refresh/remove', 'install', 'list', 'enable', 'disable', 'update', 'uninstall', 'explicit embedded target', 'disabled update preserved', 'named lifecycle', 'local package replacement'],
+        'checks': ['legacy Browser startup migration', 'marketplace add/refresh/remove', 'install', 'list', 'enable', 'disable', 'update', 'uninstall', 'explicit embedded target', 'disabled update preserved', 'named lifecycle', 'local package replacement'],
         'commands': evidence}, indent=2))
+
+
+def exercise_legacy_browser_upgrade(cli, home):
+    plugins = home / 'plugins'
+    browser = plugins / 'mcp/talos_browser'
+    browser.mkdir(parents=True)
+    manifest = json.dumps({
+        'name': 'talos_browser',
+        'transport': {'type': 'stdio', 'command': '/old/talos', 'args': ['--browser-mcp']},
+    }).encode()
+    (browser / 'talos-mcp.json').write_bytes(manifest)
+    size = len(manifest)
+    digest_input = b'talos-mcp.json\0' + size.to_bytes(8, 'little') + b'\0'
+    digest_input += hashlib.sha256(manifest).hexdigest().encode() + b'\0'
+    registry = plugins / 'plugin-installs.json'
+    registry.write_text(json.dumps({'schema_version': 1, 'installs': [{
+        'id': 'install_5477e7af15e95fb7d303a4df',
+        'plugin_id': 'builtin_browser',
+        'kind': 'mcp_server',
+        'name': 'talos_browser',
+        'installed_path': str(browser),
+        'enabled': True,
+        'source': {'kind': 'manual'},
+        'content_digest': {
+            'algorithm': 'sha256', 'file_count': 1, 'total_size_bytes': size,
+            'value': f'sha256:{hashlib.sha256(digest_input).hexdigest()}',
+        },
+        'installed_at_ms': 1,
+        'updated_at_ms': 1,
+    }]}))
+
+    listed = cli('mcp', 'list')['plugins']
+    migrated, = json.loads(registry.read_text())['installs']
+    assert migrated['plugin_id'] != 'builtin_browser' and migrated['enabled']
+    assert migrated['source']['kind'] == 'marketplace'
+    assert migrated['source']['path_in_source'] == 'mcp/browser'
+    assert any(plugin['id'] == migrated['plugin_id'] for plugin in listed)
+    assert json.loads((browser / 'talos-mcp.json').read_text())['transport']['command'] == 'talos'
+
+    cli('mcp', 'list')
+    assert json.loads(registry.read_text())['installs'] == [migrated]
 
 
 def exercise_named_packages(cli, repo, report):

@@ -275,22 +275,57 @@ impl PluginManager {
     ) -> TalosResult<PluginInstallResponse> {
         official::validate_candidate(&candidate)?;
         let previous_installs = self.state.load_installs()?;
-        let enabled = enable.unwrap_or_else(|| match &candidate.source {
-            InstallSource::Marketplace(source)
-                if source.kind == MarketplaceSourceKind::LocalPackage =>
-            {
-                previous_installs
-                    .installs
-                    .iter()
-                    .find(|install| {
-                        install.kind == candidate.plugin.kind
-                            && install.name == candidate.plugin.metadata.name
-                    })
-                    .is_none_or(|install| install.enabled)
+        let legacy = if candidate.plugin.id.0 == talos_types::OFFICIAL_BROWSER_PLUGIN_ID {
+            match official::browser_install_target(&self.state, &previous_installs.installs) {
+                Ok(install) => install,
+                Err(official::OfficialBrowserProvision::NameConflict)
+                    if conflict_policy == talos_types::PluginInstallConflictPolicy::Reject =>
+                {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
+                        "An existing plugin occupies the Browser installation.",
+                    ));
+                }
+                Err(_) => None,
             }
-            _ => true,
-        });
+        } else {
+            None
+        };
+        let enabled = enable
+            .or_else(|| legacy.map(|install| install.enabled))
+            .unwrap_or_else(|| match &candidate.source {
+                InstallSource::Marketplace(source)
+                    if source.kind == MarketplaceSourceKind::LocalPackage =>
+                {
+                    previous_installs
+                        .installs
+                        .iter()
+                        .find(|install| {
+                            install.kind == candidate.plugin.kind
+                                && install.name == candidate.plugin.metadata.name
+                        })
+                        .is_none_or(|install| install.enabled)
+                }
+                _ => true,
+            });
+        let conflict_policy = if let Some(legacy) = legacy {
+            crate::installer::recover_replacement_backup(
+                &self.state,
+                legacy,
+                &candidate.plugin.id,
+            )?;
+            talos_types::PluginInstallConflictPolicy::Replace
+        } else {
+            conflict_policy
+        };
         let activation = install_plugin(&self.state, candidate, conflict_policy, enabled)?;
+        if legacy.is_some() && !enabled {
+            official::verified_installed_browser(&activation.install).map_err(|error| {
+                mcp::InstallSaveError::Rejected(error).rollback_if_uncommitted(|| {
+                    rollback_install_activation(&self.state, &activation)
+                })
+            })?;
+        }
         self.finish_install(previous_installs, activation)
     }
 

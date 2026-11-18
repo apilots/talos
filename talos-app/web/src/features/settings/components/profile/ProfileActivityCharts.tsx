@@ -5,14 +5,14 @@ import type { DatedValue } from "./profileActivitySeries";
 export function DailyActivityChart({ ariaLabel, series }: ChartProps) {
   const maxTokens = Math.max(0, ...series.map((point) => point.value));
   return (
-    <div aria-label={ariaLabel} className="grid grid-flow-col grid-rows-7 gap-1" role="img">
+    <div aria-label={ariaLabel} className="grid grid-flow-col auto-cols-fr grid-rows-7 gap-1" role="img">
       {series.map((point) => {
         const level = tokenLevel(point.value, maxTokens);
         return (
           <span
             aria-hidden="true"
             className={cn(
-              "size-2.5 rounded-[0.18rem]",
+              "aspect-square w-full max-w-2.5 rounded-[0.18rem]",
               level === 0 && "bg-activity-empty",
               level === 1 && "bg-activity-1",
               level === 2 && "bg-activity-2",

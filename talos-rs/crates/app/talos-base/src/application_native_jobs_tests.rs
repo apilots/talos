@@ -175,7 +175,7 @@ struct HostFixture {
 }
 
 impl HostFixture {
-    async fn start() -> Self {
+    async fn start(personal_desktop: bool) -> Self {
         let home = tempfile::tempdir().unwrap();
         let paths = TalosPaths::from_home(home.path().into());
         paths.ensure_base_dirs().unwrap();
@@ -230,6 +230,7 @@ impl HostFixture {
             storage: storage.clone(),
             automation,
             execution_instance_id: runtime.sync_peer_id().into(),
+            personal_desktop,
         });
         Self {
             runtime,
@@ -249,7 +250,7 @@ impl HostFixture {
 
 #[tokio::test]
 async fn real_host_requires_local_owner_and_exact_computer_without_admin_override() {
-    let fixture = HostFixture::start().await;
+    let fixture = HostFixture::start(/* personal_desktop */ false).await;
     insert_session(fixture.storage.clone(), OWNER).await;
     let scope = fixture
         .host
@@ -280,6 +281,7 @@ async fn real_host_requires_local_owner_and_exact_computer_without_admin_overrid
         storage: fixture.storage.clone(),
         automation: fixture.host.automation.clone(),
         execution_instance_id: fixture.runtime.sync_peer_id().into(),
+        personal_desktop: false,
     };
     assert_code(
         unavailable
@@ -292,7 +294,7 @@ async fn real_host_requires_local_owner_and_exact_computer_without_admin_overrid
 
 #[tokio::test]
 async fn foreign_data_added_after_listing_blocks_next_control_without_side_effects() {
-    let fixture = HostFixture::start().await;
+    let fixture = HostFixture::start(/* personal_desktop */ false).await;
     let controls = Arc::new(DatabaseNativeJobControlStore::new(
         fixture.storage.pool().clone(),
     ));
@@ -345,6 +347,80 @@ async fn foreign_data_added_after_listing_blocks_next_control_without_side_effec
         .unwrap()
         .iter()
         .all(|job| job.paused && !job.running));
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn personal_desktop_owner_can_manage_jobs_with_historical_data() {
+    let fixture = HostFixture::start(/* personal_desktop */ true).await;
+    insert_session(fixture.storage.clone(), "anonymous").await;
+    insert_usage(fixture.storage.as_ref(), FOREIGN, "memory", "1").await;
+    let controls = Arc::new(DatabaseNativeJobControlStore::new(
+        fixture.storage.pool().clone(),
+    ));
+    let host: Arc<dyn NativeJobHost> = fixture.host.clone();
+    let service = NativeJobService::new(controls, Arc::downgrade(&host));
+    let owner = Actor::regular(OWNER);
+    let request = BuiltinJobListRequest {
+        computer_id: "embedded".into(),
+    };
+    let rows = service.list(&owner, request.clone()).await.unwrap().data;
+    let job = rows
+        .iter()
+        .find(|job| job.id == BuiltinJobId::ProfileUsageRetention)
+        .unwrap();
+    assert_eq!(
+        job.available_actions,
+        [BuiltinJobAction::Resume, BuiltinJobAction::RunOnce],
+    );
+    for actor in [
+        Actor::regular(FOREIGN),
+        Actor::regular(FOREIGN).with_role(talos_auth::UserRole::Admin),
+        Actor::auth_disabled(),
+    ] {
+        assert_code(
+            service.list(&actor, request.clone()).await,
+            ErrorCode::PermissionDenied,
+        );
+    }
+    let control = |action| BuiltinJobControlRequest {
+        computer_id: job.computer_id.clone(),
+        execution_instance_id: job.execution_instance_id.clone(),
+        job_id: job.id,
+        action,
+    };
+    let mut remote = control(BuiltinJobAction::RunOnce);
+    remote.computer_id = "another-computer".into();
+    assert_code(
+        service.control(&owner, remote).await,
+        ErrorCode::PermissionDenied,
+    );
+    let mut stale = control(BuiltinJobAction::RunOnce);
+    stale.execution_instance_id = "previous-instance".into();
+    assert_code(service.control(&owner, stale).await, ErrorCode::Conflict);
+    assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
+
+    let resumed = service
+        .control(&owner, control(BuiltinJobAction::Resume))
+        .await
+        .unwrap();
+    assert!(!resumed.paused);
+    let paused = service
+        .control(&owner, control(BuiltinJobAction::Pause))
+        .await
+        .unwrap();
+    assert!(paused.paused);
+    service
+        .control(&owner, control(BuiltinJobAction::RunOnce))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while fixture.calls.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     fixture.close().await;
 }
 
