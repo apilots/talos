@@ -1,7 +1,6 @@
 import { useCanManageComputer } from "@/features/computers";
 import { getDesktopBridge } from "@/shared/api/desktop-client";
 import { connectionScope } from "@/shared/store/connection-scope";
-import { Lock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useParams } from "react-router-dom";
 
@@ -61,7 +60,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="grid h-full w-full grid-cols-[320px_minmax(0,1fr)] overflow-hidden bg-background">
+    <div className="grid h-full w-full grid-cols-[320px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-background">
       <SettingsNavigation
         activeSection={activeSection}
         canManageConfig={canManageConfig}
@@ -69,17 +68,9 @@ export function SettingsPage() {
         canOpenAccount={connection.authStatus === "authenticated"}
       />
       <div className="min-h-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[1040px] px-8 py-7">
-          <header className="mb-8 flex min-h-8 items-center justify-between gap-4">
+        <div className="mx-auto w-full max-w-[1040px] px-5 py-6 lg:px-8">
+          <header className="mb-5 flex min-h-8 items-center">
             <h1 className="text-sm font-medium text-ink">{t(`sections.${activeSection}`)}</h1>
-            {activeSection === "profile" ? (
-              <div className="flex items-center gap-5 text-sm font-medium text-muted">
-                <span className="inline-flex items-center gap-1.5">
-                  <Lock aria-hidden="true" size={14} />
-                  {t("profile.private")}
-                </span>
-              </div>
-            ) : null}
           </header>
           <div className="min-w-0 space-y-5">
             {activeSection === "profile" ? <SettingsProfileSection connection={connection} /> : null}
