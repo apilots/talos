@@ -17,6 +17,7 @@ pub(crate) struct ApplicationNativeJobHost {
     pub storage: Arc<dyn Storage>,
     pub automation: Automation,
     pub execution_instance_id: String,
+    pub personal_desktop: bool,
 }
 
 impl NativeJobHost for ApplicationNativeJobHost {
@@ -42,7 +43,11 @@ impl NativeJobHost for ApplicationNativeJobHost {
             if computer_id != requested_computer || actor.user_id.is_empty() {
                 return Err(scope_denied());
             }
-            verify_maintained_data_owner(self.storage.as_ref(), actor).await?;
+            // The verified owner of a personal Desktop controls its local data,
+            // including historical sessions under other identities.
+            if !self.personal_desktop || actor.auth_disabled {
+                verify_maintained_data_owner(self.storage.as_ref(), actor).await?;
+            }
             let runtime = Arc::new(ApplicationNativeJobRuntime {
                 automation: self.automation.clone(),
                 computer_id: computer_id.clone(),

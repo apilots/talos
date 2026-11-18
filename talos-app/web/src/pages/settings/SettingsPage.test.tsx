@@ -102,6 +102,7 @@ describe("SettingsPage", () => {
 
     expect(screen.getByText("Profile content")).toBeTruthy();
     expect(screen.getByText("Models")).toBeTruthy();
+    expect(screen.queryByText("Private")).toBeNull();
   });
 
   it("does not expose disconnected global permission controls", () => {

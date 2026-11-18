@@ -2,6 +2,7 @@ import { CheckCircle2, ServerCog } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { SettingsPageState } from "../hooks/useSettingsPage";
+import { useCopyText } from "@/shared/hooks/useCopyText";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
@@ -34,47 +35,71 @@ export function SettingsServerConnectionPanel({
     <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/[0.88] p-6">
       <SectionHeader
         icon={<ServerCog size={18} />}
-        subtitle={t("settings:serverDetail")}
-        title={t("settings:serverTitle")}
+        subtitle={desktopRuntime
+          ? t(`settings:desktopConnection.status.${connection.workerRuntimeState?.kind ?? "unknown"}`)
+          : t("settings:serverDetail")}
+        title={t(desktopRuntime ? "settings:desktopConnection.title" : "settings:serverTitle")}
       />
       {desktopRuntime ? (
-        <div className="mt-5 rounded-[var(--radius-control)] border border-border/70 bg-background/55 p-4 text-sm">
-          <div className="font-medium text-ink">Desktop local runtime</div>
-          <div className="mt-1 text-muted">
-            Connected through the local app-server bridge as ordinary user{" "}
-            <span className="font-medium text-ink">{connection.userId}</span>. Admin features are not available in desktop mode.
+        <DesktopConnectionDetails connection={connection} />
+      ) : (
+        <form
+          className="mt-6 space-y-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!hasChanges) return;
+            setConnection(draft);
+            void models.refetch();
+          }}
+        >
+          <FieldBlock label={t("settings:fields.authToken")}>
+            <Input autoComplete="current-password" readOnly title={t("settings:fields.authManagedByLogin")} type="password" value="" />
+          </FieldBlock>
+          <div className="flex items-center justify-end gap-3">
+            <Button
+              onClick={() => {
+                setDraft(connection);
+                setLocale("en");
+              }}
+              type="button"
+              variant="ghost"
+            >
+              {t("settings:reset")}
+            </Button>
+            <Button disabled={!hasChanges} type="submit">
+              <CheckCircle2 size={16} />
+              {t("common:save")}
+            </Button>
           </div>
-        </div>
-      ) : null}
-      <form
-        className="mt-6 space-y-5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!hasChanges) return;
-          setConnection(draft);
-          void models.refetch();
-        }}
-      >
-        <FieldBlock label={t("settings:fields.authToken")}>
-          <Input autoComplete="current-password" readOnly title={t("settings:fields.authManagedByLogin")} type="password" value="" />
-        </FieldBlock>
-        <div className="flex items-center justify-end gap-3">
-          <Button
-            onClick={() => {
-              setDraft(connection);
-              setLocale("en");
-            }}
-            type="button"
-            variant="ghost"
-          >
-            {t("settings:reset")}
-          </Button>
-          <Button disabled={!hasChanges} type="submit">
-            <CheckCircle2 size={16} />
-            {t("common:save")}
-          </Button>
-        </div>
-      </form>
+        </form>
+      )}
     </Panel>
+  );
+}
+
+function DesktopConnectionDetails({ connection }: Pick<SettingsPageState, "connection">) {
+  const { t } = useTranslation("settings");
+  const { copied, copy } = useCopyText(connection.userId);
+  if (connection.authStatus !== "authenticated") return null;
+
+  return (
+    <div className="mt-5 space-y-3 border-t border-border/70 pt-4 text-sm">
+      <dl className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <dt className="text-muted">{t("desktopConnection.account")}</dt>
+        <dd className="min-w-0 break-all font-medium text-ink">{connection.authUsername}</dd>
+      </dl>
+      <details className="text-muted">
+        <summary className="w-fit cursor-pointer">{t("desktopConnection.diagnostics")}</summary>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <div className="min-w-0">
+            <div className="text-xs">{t("desktopConnection.userId")}</div>
+            <code className="break-all text-ink">{connection.userId}</code>
+          </div>
+          <Button onClick={() => { void copy(); }} type="button" variant="ghost">
+            {t(copied ? "desktopConnection.copied" : "desktopConnection.copy")}
+          </Button>
+        </div>
+      </details>
+    </div>
   );
 }

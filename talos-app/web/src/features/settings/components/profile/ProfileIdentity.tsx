@@ -17,10 +17,10 @@ export function ProfileIdentity({
 }: ProfileIdentityProps) {
   return (
     <section className="text-center">
-      <div className="mx-auto flex size-24 items-center justify-center overflow-hidden rounded-full border border-border/80 bg-card text-3xl font-semibold text-ink">
-        {openMode ? avatarLabel : <UserCircle aria-hidden="true" size={48} />}
+      <div className="mx-auto flex size-16 items-center justify-center overflow-hidden rounded-full border border-border/80 bg-card text-2xl font-semibold text-ink">
+        {openMode ? avatarLabel : <UserCircle aria-hidden="true" size={36} />}
       </div>
-      <h2 className="mt-6 text-[2rem] font-semibold leading-tight tracking-normal text-ink text-balance">
+      <h2 className="mt-3 text-2xl font-semibold leading-tight tracking-normal text-ink text-balance">
         {displayName}
       </h2>
       <div className="mt-2 flex items-center justify-center gap-2 text-sm text-muted">

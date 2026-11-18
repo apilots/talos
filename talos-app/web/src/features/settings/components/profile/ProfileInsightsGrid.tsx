@@ -20,7 +20,7 @@ export function ProfileInsightsGrid({
   rightTitle,
 }: ProfileInsightsGridProps) {
   return (
-    <div className="mx-auto mt-12 grid max-w-[760px] gap-12 lg:grid-cols-2">
+    <div className="mx-auto mt-7 grid max-w-[760px] gap-x-10 gap-y-6 lg:grid-cols-2">
       <ProfileMetricList rows={leftRows} title={leftTitle} />
       <ProfileMetricList rows={rightRows} title={rightTitle} />
     </div>

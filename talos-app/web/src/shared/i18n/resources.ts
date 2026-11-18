@@ -279,7 +279,7 @@ export const resources = {
         advanced: "Advanced",
       },
       profile: {
-        private: "Private", edit: "Edit",
+        edit: "Edit",
         sessions: "Sessions", tokens: "Tokens", messages: "Messages", projects: "Projects", role: "Role",
         tokenActivity: "Token activity", daily: "Daily", weekly: "Weekly", cumulative: "Cumulative",
         mostUsedModel: "Most used model", reasoningHigh: "Reasoning high",
@@ -324,6 +324,14 @@ export const resources = {
       },
       serverTitle: "Server connection",
       serverDetail: "Mirror the host and identity used by the shared SDK.",
+      desktopConnection: {
+        title: "Local runtime", account: "Signed in as", diagnostics: "Diagnostics",
+        userId: "Account ID", copy: "Copy account ID", copied: "Copied",
+        status: {
+          unknown: "Connection status unavailable", starting: "Starting", ready: "Connected",
+          restarting: "Reconnecting", stopped: "Disconnected", error: "Connection failed",
+        },
+      },
       workspaceDocsTitle: "Workspace docs",
       workspaceDocsDetail: "Edit workspace-level prompt documents through the shared API.",
       workspaceDocMissing: "This document does not exist yet. Saving will create it.",
@@ -763,7 +771,7 @@ export const resources = {
         advanced: "高级",
       },
       profile: {
-        private: "Private", edit: "Edit",
+        edit: "Edit",
         sessions: "会话", tokens: "Tokens", messages: "消息", projects: "项目", role: "角色",
         tokenActivity: "Token activity", daily: "Daily", weekly: "Weekly", cumulative: "Cumulative",
         mostUsedModel: "最常用模型", reasoningHigh: "Reasoning high",
@@ -806,6 +814,14 @@ export const resources = {
       },
       serverTitle: "服务端连接",
       serverDetail: "与共享 SDK 当前使用的 host 和身份保持一致。",
+      desktopConnection: {
+        title: "本地运行时", account: "当前账号", diagnostics: "诊断信息",
+        userId: "账号 ID", copy: "复制账号 ID", copied: "已复制",
+        status: {
+          unknown: "连接状态未知", starting: "正在启动", ready: "已连接",
+          restarting: "正在重新连接", stopped: "已断开", error: "连接失败",
+        },
+      },
       workspaceDocsTitle: "工作区文档",
       workspaceDocsDetail: "通过 shared API 编辑工作区级别的 prompt 文档。",
       workspaceDocMissing: "当前文档还不存在，保存后会直接创建。",

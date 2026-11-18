@@ -40,7 +40,7 @@ export function ProfileActivityHeatmap({
   };
 
   return (
-    <section className="mx-auto mt-10 max-w-[760px]">
+    <section className="mx-auto mt-7 max-w-[760px]">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <h3 className="text-sm font-semibold text-ink">{title}</h3>
         <div
@@ -67,19 +67,17 @@ export function ProfileActivityHeatmap({
         </div>
       </div>
 
-      <div className="min-h-[148px]">
-        {mode === "daily" ? (
-          <DailyActivityChart ariaLabel={`${dailyLabel} ${lowercaseFirst(title)}`} series={series.daily} />
-        ) : null}
-        {mode === "weekly" ? (
-          <WeeklyActivityChart ariaLabel={`${weeklyLabel} ${lowercaseFirst(title)}`} series={series.weekly} />
-        ) : null}
-        {mode === "cumulative" ? (
-          <CumulativeActivityChart ariaLabel={`${cumulativeLabel} ${lowercaseFirst(title)}`} series={series.cumulative} />
-        ) : null}
-      </div>
+      {mode === "daily" ? (
+        <DailyActivityChart ariaLabel={`${dailyLabel} ${lowercaseFirst(title)}`} series={series.daily} />
+      ) : null}
+      {mode === "weekly" ? (
+        <WeeklyActivityChart ariaLabel={`${weeklyLabel} ${lowercaseFirst(title)}`} series={series.weekly} />
+      ) : null}
+      {mode === "cumulative" ? (
+        <CumulativeActivityChart ariaLabel={`${cumulativeLabel} ${lowercaseFirst(title)}`} series={series.cumulative} />
+      ) : null}
 
-      <div className="mt-3 grid grid-cols-12 text-xs text-muted">
+      <div className="mt-2 grid grid-cols-12 text-xs text-muted">
         {series.months.map((month, index) => (
           <span key={`${month}-${index}`}>{month}</span>
         ))}

@@ -36,6 +36,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         config,
         migration_dir,
         crate::SessionOwnershipPolicy::default(),
+        /* desktop_host */ false,
     )
     .await
 }
@@ -44,6 +45,7 @@ pub(crate) async fn build_application_runtime_with_policy(
     config: Config,
     migration_dir: &Path,
     session_ownership: crate::SessionOwnershipPolicy,
+    desktop_host: bool,
 ) -> TalosResult<TalosApplicationRuntime> {
     let storage_connection = application_storage::connect_application_storage(&config).await?;
     let upgrade_report = talos_upgrade::run_startup_upgrades(talos_upgrade::StartupUpgradeParams {
@@ -432,6 +434,8 @@ pub(crate) async fn build_application_runtime_with_policy(
             storage: storage.clone(),
             automation: automation.clone(),
             execution_instance_id: sync.peer_id().to_owned(),
+            personal_desktop: desktop_host
+                && config.storage.database_type == talos_config::DatabaseType::Sqlite,
         });
     service.install_native_job_control(Arc::new(
         talos_service::automation::native_jobs::NativeJobService::new(
