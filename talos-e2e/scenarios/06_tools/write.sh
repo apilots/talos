@@ -18,7 +18,7 @@ echo "CASE write_real_llm_precheck PASS key_detected=true"
 TEST_TALOS_HOME="$(make_e2e_temp_dir "talos-tool-write-home")"
 cleanup() {
   stop_server
-  rm -rf "${TEST_TALOS_HOME}"
+  cleanup_e2e_temp_dir "${TEST_TALOS_HOME}"
 }
 export TALOS_HOME="${TEST_TALOS_HOME}"
 
