@@ -1,5 +1,6 @@
 import { automationResources } from "./automationResources";
 import { tracingResources } from "./tracingResources";
+import { timelineResources } from "./timelineResources";
 import { computerResources } from "./computerResources";
 export const defaultLocale = "en" as const;
 import { composerResources } from "./composerResources";
@@ -101,11 +102,7 @@ export const resources = {
       sentAsLoop: "Sent as loop",
       helpful: "Helpful",
       notHelpful: "Not helpful",
-      showEarlierSteps: "Show {{count}} earlier steps",
-      processWorking: "Working", processWorkingDuration: "Working for {{duration}}",
-      processWorked: "Worked", processWorkedDuration: "Worked for {{duration}}",
-      processFailed: "Failed", processFailedDuration: "Failed after {{duration}}",
-      processStopped: "Stopped", processStoppedDuration: "Stopped after {{duration}}",
+      ...timelineResources.en,
       turnAverageMetrics: "Turn average execution metrics", tokensPerSecond: "{{value}} tokens/s",
       turnOutputThroughputHelp: "Average output tokens per second over the whole Turn, including model waiting and tool execution. Not model decode speed.",
       tokens: "{{value}} tokens", round: "{{value}} round", rounds: "{{value}} rounds",
@@ -596,11 +593,7 @@ export const resources = {
       sentAsLoop: "以 Loop 发送",
       helpful: "赞",
       notHelpful: "不赞",
-      showEarlierSteps: "显示之前的 {{count}} 个步骤",
-      processWorking: "执行中", processWorkingDuration: "执行中 · {{duration}}",
-      processWorked: "已执行", processWorkedDuration: "已执行 · {{duration}}",
-      processFailed: "执行失败", processFailedDuration: "执行失败 · {{duration}}",
-      processStopped: "已停止", processStoppedDuration: "已停止 · {{duration}}",
+      ...timelineResources.zh,
       turnAverageMetrics: "本轮平均执行指标", tokensPerSecond: "{{value}} tokens/s",
       turnOutputThroughputHelp: "本轮输出 tokens ÷ 整轮执行秒数，包含模型等待和工具执行；不是模型纯生成速度。",
       tokens: "{{value}} tokens", round: "{{value}} round", rounds: "{{value}} rounds",

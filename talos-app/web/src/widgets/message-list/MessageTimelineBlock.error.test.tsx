@@ -31,13 +31,14 @@ it("keeps turn warnings in their original activity position and translates on re
     { itemId: "notice", startedAtMs: 2, kind: "system_notice", phase: "system", status: "completed", text: "", notice },
     { itemId: "after", startedAtMs: 3, kind: "reasoning", phase: "thinking", status: "completed", text: "After warning" },
   ] }} copiedLabel="Copied" copyLabel="Copy" helpfulLabel="Helpful" notHelpfulLabel="Not helpful" />);
-  expect(container.querySelector("details")?.open).toBe(false);
-  fireEvent.click(container.querySelector("summary")!);
-  expect(container.querySelector("details")?.open).toBe(true);
+  expect(container.querySelector("details")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Worked" }));
+  for (const summary of screen.getAllByText("Thinking")) fireEvent.click(summary);
+  await screen.findByText("After warning");
   expect(Array.from(container.querySelectorAll("[data-process-step]")).map((item) => item.getAttribute("data-timeline-item-key")))
     .toEqual(["success:before", "success:notice", "success:after"]);
   const warning = screen.getByText("Prompt bootstrap file is missing: IDENTITY.md");
-  expect(warning.closest("details")).toBeTruthy();
+  expect(warning.closest("details")).toBeNull();
   expect(warning.closest("article")?.getAttribute("data-timeline-surface")).toBe("plain");
   await act(() => i18n.changeLanguage("zh-CN"));
   expect(container.querySelector('[data-timeline-item-key="success:notice"]')?.textContent)

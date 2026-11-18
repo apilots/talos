@@ -12,7 +12,7 @@ describe("ToolCallBlock", () => {
   it("presents waiting status with complete tool details", () => {
     const { container } = render(
       <ToolCallBlock
-        argumentsText={'{"cmd":"pnpm test"}'}
+        argumentsValue={'{"cmd":"pnpm test"}'}
         callId="call-waiting"
         progress={[{ kind: "status", message: "Waiting for approval." }]}
         prompt="Approve this command."
@@ -40,7 +40,7 @@ describe("ToolCallBlock", () => {
   it("presents failed typed results with failure summary and result body", () => {
     render(
       <ToolCallBlock
-        argumentsText={'{"path":"src/app.tsx"}'}
+        argumentsValue={'{"path":"src/app.tsx"}'}
         callId="call-failed"
         contentItems={[{
           type: "diff",
@@ -81,7 +81,7 @@ describe("ToolCallBlock", () => {
   it("separates completed status, item duration, and Bash result summary", () => {
     render(
       <ToolCallBlock
-        argumentsText={'{"cmd":"pnpm test"}'}
+        argumentsValue={'{"cmd":"pnpm test"}'}
         callId="call-completed"
         contentItems={[{
           type: "bash_output",
@@ -112,7 +112,7 @@ describe("ToolCallBlock", () => {
   it("presents a completed timeline tool as a plain execution step with compact result metadata", () => {
     const { container } = render(
       <ToolCallBlock
-        argumentsText={'{"pattern":"src/**/*.ts"}'}
+        argumentsValue={'{"pattern":"src/**/*.ts"}'}
         callId="call-search"
         contentItems={[{
           type: "search_results",
@@ -143,5 +143,28 @@ describe("ToolCallBlock", () => {
     expect(container.querySelector('[data-tool-status-presentation="inline"]')?.textContent).toContain("Completed");
     expect(container.querySelector('[data-tool-result-preview="compact"]')?.textContent).toContain("1 result(s)");
     expect(screen.getByText("240ms").textContent).toBe("240ms");
+  });
+
+  it("shows a WebFetch source once and keeps the fetched text available in its details", () => {
+    const url = "https://api.open-meteo.com/v1/forecast";
+    const responseText = '{"current":{"temperature_2m":4.2}}';
+    render(<ToolCallBlock
+      argumentsValue={{ url }}
+      callId="web-weather"
+      contentItems={[
+        { type: "web_reference", url, title: url, source_domain: null, snippet: null,
+          citation_id: "weather", published_at: null, provider_rank: null },
+        { type: "text", text: responseText },
+      ]}
+      progress={[]}
+      status="done"
+      toolName="WebFetch"
+      variant="timeline"
+    />);
+    expect(screen.queryByText(url, { exact: true })).toBeNull();
+    expect(screen.queryByText(responseText, { exact: true })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /WebFetch/ }));
+    expect(screen.getAllByText(url, { exact: true })).toHaveLength(1);
+    expect(screen.getByText(responseText, { exact: true })).toBeTruthy();
   });
 });

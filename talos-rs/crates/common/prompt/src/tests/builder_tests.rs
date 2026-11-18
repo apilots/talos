@@ -67,6 +67,35 @@ async fn test_prompt_builder_basic() {
 }
 
 #[tokio::test]
+async fn communication_policy_reaches_the_prompt_with_the_original_user_message() {
+    let user_text = "请用中文思考，执行过程中简短反馈。";
+    let assembly = PromptBuilder::new()
+        .phase(PromptPhase::Execution)
+        .user_input(user_text)
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+    let messages = render_prompt_assembly(&assembly);
+    let policy = messages
+        .iter()
+        .find(|message| {
+            message.role == Role::System && message.content.contains("- commentary_purpose:")
+        })
+        .expect("the system prompt should include the communication policy");
+    for instruction in [
+        "verified progress that affects the goal",
+        "including repeated short lookups",
+        "before your next tool call",
+        "Honor explicit requests for a reasoning language",
+    ] {
+        assert!(policy.content.contains(instruction), "{instruction}");
+    }
+    let user_message = messages.last().expect("the user message should exist");
+    assert_eq!(user_message.role, Role::User);
+    assert_eq!(user_message.content, user_text);
+}
+
+#[tokio::test]
 async fn test_prompt_blocks_follow_expected_order() {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(EchoTool));

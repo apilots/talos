@@ -98,6 +98,7 @@ export function ChatSessionContent({ sessionId, talo }: {
     retryResponse,
     retryStream,
     showReconnectControls,
+    streamConnectionState,
     stopResponse,
     streamError,
     sessionHistoryQuery,
@@ -192,6 +193,7 @@ export function ChatSessionContent({ sessionId, talo }: {
           contentRef={autoScroll.contentRef}
           endRef={autoScroll.endRef}
           isCancelling={isCancelling}
+          isReconnecting={streamConnectionState === "reconnecting"}
           onUserActionSubmit={(response) => {
             if (!pendingUserAction || !activeTurnId) {
               return;

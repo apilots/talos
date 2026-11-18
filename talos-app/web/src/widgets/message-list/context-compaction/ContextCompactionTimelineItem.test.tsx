@@ -87,7 +87,8 @@ describe("ContextCompactionTimelineItem", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Worked for 1ms"));
+    expect(screen.queryByText("Working context reduced")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
     expect(screen.getByText("Working context reduced")).not.toBeNull();
     expect(screen.getByText("128K → 74K")).not.toBeNull();
     expect(

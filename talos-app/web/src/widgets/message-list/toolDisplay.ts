@@ -8,8 +8,8 @@ const TOOL_ARGUMENT_KEYS: Array<{ names: string[]; keys: string[] }> = [
   { names: ["web", "reference", "url"], keys: ["url", "domain", "query"] },
 ];
 
-export function buildToolDisplayTitle(toolName: string, argumentsText: string) {
-  const argumentsValue = parseArguments(argumentsText);
+export function buildToolDisplayTitle(toolName: string, input: unknown) {
+  const argumentsValue = typeof input === "string" ? parseArguments(input) : isRecord(input) ? input : undefined;
   if (!argumentsValue) {
     return toolName;
   }
@@ -20,6 +20,21 @@ export function buildToolDisplayTitle(toolName: string, argumentsText: string) {
   )?.keys;
   const previewValue = findStringArgument(argumentsValue, preferredKeys);
   return previewValue ? `${toolName} · ${truncatePreview(previewValue)}` : toolName;
+}
+
+export function toolActivity(toolName: string) {
+  switch (toolName) {
+    case "Bash": return "commands";
+    case "Read": return "read";
+    case "Edit":
+    case "Write": return "edit";
+    case "Grep":
+    case "Glob": return "search";
+    case "WebFetch":
+    case "WebSearch": return "web";
+    case "ToolSearch": return "lookup";
+    default: return undefined;
+  }
 }
 
 function parseArguments(argumentsText: string): Record<string, unknown> | undefined {

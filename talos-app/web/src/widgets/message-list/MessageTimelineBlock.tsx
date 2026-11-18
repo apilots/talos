@@ -1,34 +1,23 @@
-import { useNowMs } from "@/shared/hooks/useNowMs";
 import type { ReactNode } from "react";
 import type { PendingUserAction } from "@talos/sdk-browser";
-import {
-  Activity,
-  Brain,
-  Check,
-  ChevronDown,
-  CircleStop,
-  LoaderCircle,
-  MessageCircle,
-  TriangleAlert,
-  Wrench,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { LoaderCircle, MessageCircle, TriangleAlert } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ChatRenderBlock } from "@/shared/types/ui";
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
+import type { ChatRenderBlock, ChatTimelineItem } from "@/shared/types/ui";
 import { Button } from "@/shared/ui/Button";
 import { CopyableBlock } from "./CopyableBlock";
-import { formatDuration } from "@/shared/lib/formatDuration";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { ToolCallBlock } from "./ToolCallBlock";
+import { TimelineActivityGroup } from "./TimelineActivityGroup";
+import { TimelineProcessHeader } from "./TimelineProcessHeader";
+import { TimelineRailRow } from "./TimelineRailRow";
+import { TimelineStep } from "./TimelineStep";
 import { TurnMetricsFooter } from "./TurnMetricsFooter";
-import { ContextCompactionTimelineItem } from "./context-compaction/ContextCompactionTimelineItem";
-import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
-import { systemNoticeMessage } from "@/shared/i18n/systemNoticeMessage";
+import { groupTimelineItems, TIMELINE_PAGE_SIZE, timelineProcessTiming } from "./timelineDisplay";
 
 type TimelineBlock = Extract<ChatRenderBlock, { kind: "timeline" }>;
-type TimelineItem = TimelineBlock["items"][number];
-type TimelineTextItem = Exclude<TimelineItem, { kind: "tool_call" }>;
+type TimelineTextItem = Exclude<ChatTimelineItem, { kind: "tool_call" }>;
 
 interface MessageTimelineBlockProps {
   block: TimelineBlock;
@@ -39,9 +28,8 @@ interface MessageTimelineBlockProps {
   pendingUserAction?: PendingUserAction;
   renderUserAction?: (action: PendingUserAction) => ReactNode;
   showWaitingIndicator?: boolean;
+  liveUpdatesPaused?: boolean;
 }
-
-const PROCESS_PAGE_SIZE = 64;
 
 const FINAL_ANSWER_REPLAY_CHUNK_SIZE = 24;
 const FINAL_ANSWER_REPLAY_INTERVAL_MS = 16;
@@ -55,321 +43,144 @@ export function MessageTimelineBlock({
   pendingUserAction,
   renderUserAction,
   showWaitingIndicator = true,
+  liveUpdatesPaused = false,
 }: MessageTimelineBlockProps) {
   const { t } = useTranslation("chat");
-  const { items, id: timelineId } = block;
-  const visibleItems = items.filter(
+  const items = block.items.filter(
     (item) => item.kind !== "context_compaction" || item.trigger !== "user_requested",
   );
-  const live = Boolean(block.live);
-  const metrics = block.metrics ?? null;
-  const responseItems = visibleItems.filter(
-    (item): item is TimelineTextItem => item.kind !== "tool_call" && isTimelineResponseItem(item),
+  const answers = items.filter(isFinalAnswer);
+  const processItems = items.filter((item) => !isFinalAnswer(item));
+  const rows = groupTimelineItems(processItems);
+  const [processExpanded, setProcessExpanded] = useState<boolean>();
+  const [rowLimit, setRowLimit] = useState(TIMELINE_PAGE_SIZE);
+  const activeItems = processItems.filter(
+    (item) => item.status === "running" || item.status === "queued" || item.status === "waitingForInput",
   );
-  const processItems = visibleItems.filter((item) => !isTimelineResponseItem(item));
-  const [processVisibleCount, setProcessVisibleCount] = useState(PROCESS_PAGE_SIZE);
-  const processStart = Math.max(0, processItems.length - processVisibleCount);
-  const renderedProcessItems = processItems.filter((item, index) => index >= processStart || item.itemId === pendingUserAction?.itemId);
-  const hasRunningItem = processItems.some(
-    (item) => item.status === "running" || item.status === "waitingForInput",
+  const active = block.live ?? (activeItems.length > 0);
+  const live = active && !liveUpdatesPaused;
+  const expanded = processExpanded ?? active;
+  const inputRows = rows.filter((row) => row.kind === "tool_call" && row.status === "waitingForInput");
+  const firstRecentRow = Math.max(0, rows.length - rowLimit);
+  const latestCommentary = firstRecentRow > 0 ? lastCommentary(processItems) : undefined;
+  const activeTools = new Set(activeItems.filter((item) => item.kind === "tool_call"));
+  const visibleRows = !expanded ? inputRows : rows.filter((row, index) =>
+    index >= firstRecentRow || row === latestCommentary || (row.kind === "tool_call" && activeTools.has(row)),
   );
-  const hasActiveTimeline = hasRunningItem || (live && processItems.length > 0 && responseItems.length === 0);
-  const isAwaitingTimelineDelta = block.live !== false && (live || hasRunningItem) && responseItems.length === 0;
-  const nowMs = useNowMs(hasRunningItem);
-  const totalDuration = timelineDuration(processItems, nowMs);
-  const displayDuration = metrics?.durationMs ?? totalDuration;
-  const requiresAttention = processItems.some((item) => item.status === "waitingForInput");
-  const [open, setOpen] = useState(hasActiveTimeline);
-  const wasActiveRef = useRef(hasActiveTimeline);
-  const userCollapsedRef = useRef(false);
+  const showEarlier = expanded && visibleRows.length < rows.length;
+  const showWorkingIndicator = expanded && live && showWaitingIndicator && answers.length === 0 &&
+    inputRows.length === 0 && rows.length > 0;
+  const waitingForUpdate = activeItems.every((item) => item.kind === "reasoning");
 
-  useEffect(() => {
-    if (requiresAttention) {
-      userCollapsedRef.current = false;
-      setOpen(true);
-    } else if (!hasActiveTimeline && wasActiveRef.current) {
-      userCollapsedRef.current = false;
-      setOpen(false);
-    } else if (hasActiveTimeline && !wasActiveRef.current && !userCollapsedRef.current) {
-      setOpen(true);
-    }
-    wasActiveRef.current = hasActiveTimeline;
-  }, [hasActiveTimeline, requiresAttention]);
-
-  if (!block.error && processItems.length === 0 && responseItems.length === 0) {
+  if (!block.error && items.length === 0) {
     return null;
   }
 
-  const processLabel = timelineProcessLabel({
-    displayDuration,
-    hasActiveTimeline,
-    items: processItems,
-    metrics,
-    t,
-  });
-
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
+      {rows.length > 0 ? (
+        <div>
+          <TimelineProcessHeader
+            expanded={expanded}
+            live={active}
+            onToggle={inputRows.length < rows.length ? () => setProcessExpanded(!expanded) : undefined}
+            paused={liveUpdatesPaused}
+            timing={timelineProcessTiming(processItems, block)}
+          />
+          {visibleRows.length || showWorkingIndicator ? (
+            <div className="space-y-2 border-t border-border/35 px-2 pt-2.5 md:px-3" data-process-surface="rail">
+              {showEarlier ? (
+                <Button type="button" variant="ghost" onClick={() => setRowLimit((count) => count + TIMELINE_PAGE_SIZE)}>
+                  {t("timelineShowEarlierActivity")}
+                </Button>
+              ) : null}
+              {visibleRows.map((row) => {
+                const itemKey = `${block.id}:${row.itemId}`;
+                if (row.kind === "activity") {
+                  return <TimelineActivityGroup group={row} key={itemKey} timelineId={block.id} />;
+                }
+                if (row.kind === "assistant_text") {
+                  return row.text.trim() ? (
+                    <TimelineRailRow icon={MessageCircle} key={itemKey}>
+                      <p
+                        className="min-w-0 whitespace-pre-wrap break-words px-1 py-1 text-sm leading-6 text-ink"
+                        data-timeline-item-key={itemKey}
+                        data-timeline-role="commentary"
+                      >
+                        {row.text}
+                      </p>
+                    </TimelineRailRow>
+                  ) : null;
+                }
+                return (
+                  <TimelineStep item={row} itemKey={itemKey} key={itemKey} live={live}>
+                    {pendingUserAction?.itemId === row.itemId ? renderUserAction?.(pendingUserAction) : null}
+                  </TimelineStep>
+                );
+              })}
+              {showWorkingIndicator ? (
+                <TimelineRailRow icon={LoaderCircle} spinning>
+                  <p className={waitingForUpdate ? "px-1 py-1.5 text-[13px] text-muted" : "sr-only"} role="status">
+                    {waitingForUpdate
+                      ? t(activeItems.length ? "timelineThinking" : "waitingForTimelineUpdate")
+                      : t("processWorking")}
+                  </p>
+                </TimelineRailRow>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {answers.map((item, index) => {
+        const itemKey = `${block.id}:${item.itemId}`;
+        return (
+          <CopyableBlock
+            copiedLabel={copiedLabel}
+            copyLabel={copyLabel}
+            copyText={item.text}
+            helpfulLabel={helpfulLabel}
+            key={itemKey}
+            notHelpfulLabel={notHelpfulLabel}
+            variant="response"
+          >
+            <section
+              className="min-w-0 px-1 py-2 text-ink"
+              data-response-surface="plain"
+              data-timeline-item-key={itemKey}
+              data-timeline-response="true"
+            >
+              <FinalAnswerTextContent item={item} />
+              {live && item.status === "running" ? (
+                <span
+                  aria-label={t("streamingFinalAnswer")}
+                  className="mt-2 inline-block size-1.5 rounded-full bg-brand motion-safe:animate-pulse"
+                />
+              ) : null}
+              {block.metrics && index === answers.length - 1 ? <TurnMetricsFooter metrics={block.metrics} /> : null}
+            </section>
+          </CopyableBlock>
+        );
+      })}
       {block.error ? (
         <div role="alert" className="flex items-start gap-2 px-1 py-2 text-sm leading-6 text-danger">
           <TriangleAlert aria-hidden="true" className="mt-1 shrink-0" size={14} />
           <p className="min-w-0 whitespace-pre-wrap break-words">{apiErrorMessage(block.error)}</p>
         </div>
       ) : null}
-      {processItems.length > 0 ? (
-        <details
-          className="group/timeline text-ink"
-          data-process-surface="rail"
-          open={open}
-        >
-          <summary
-            className="cursor-pointer list-none border-b border-border/35 px-1 py-2 marker:hidden group-open/timeline:border-b-transparent"
-            onClick={(event) => {
-              event.preventDefault();
-              setOpen((current) => {
-                const next = !current;
-                userCollapsedRef.current = hasActiveTimeline && !next;
-                return next;
-              });
-            }}
-          >
-            <span className="flex items-center gap-1.5 text-[13px] text-muted">
-              {processLabel}
-              <ChevronDown className="transition-transform duration-200 group-open/timeline:rotate-180" size={13} />
-            </span>
-          </summary>
-          {processStart > 0 && open ? (
-            <Button className="my-2" type="button" variant="ghost"
-              onClick={() => setProcessVisibleCount((count) => count + PROCESS_PAGE_SIZE)}>
-              {t("showEarlierSteps", { count: Math.min(PROCESS_PAGE_SIZE, processStart) })}
-            </Button>
-          ) : null}
-          <ol className="space-y-4 border-t border-border/35 px-3 py-3.5 md:px-4">
-            {renderedProcessItems.map((item, index) => {
-              const statusLabel = visibleTimelineItemStatus(item);
-              const itemKey = timelineItemKey(timelineId, item.itemId);
-              const role = timelineItemRole(item);
-              return (
-                <li
-                  className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5"
-                  data-process-step="true"
-                  data-timeline-item-key={itemKey}
-                  data-timeline-role={role}
-                  key={itemKey}
-                >
-                  {index < renderedProcessItems.length - 1 || isAwaitingTimelineDelta ? (
-                    <span className="absolute left-[0.72rem] top-7 h-[calc(100%-0.9rem)] w-px bg-border/65" />
-                  ) : null}
-                  <span className={timelineIconClass(role)}>
-                    <TimelineItemIcon item={item} />
-                  </span>
-                  {item.kind === "tool_call" ? (
-                    <div className="min-w-0">
-                      <ToolCallBlock
-                        argumentsText={formatArguments(item.arguments)}
-                        callId={item.callId}
-                        contentItems={item.contentItems}
-                        output={item.output}
-                        progress={item.progress}
-                        prompt={item.prompt}
-                        status={timelineToolStatus(item)}
-                        timingMs={timelineItemDuration(item)}
-                        toolName={item.toolName}
-                        variant="timeline"
-                      />
-                      {pendingUserAction?.itemId === item.itemId
-                        ? renderUserAction?.(pendingUserAction)
-                        : null}
-                    </div>
-                  ) : item.kind === "context_compaction" ? (
-                    <ContextCompactionTimelineItem item={item} />
-                  ) : (
-                    <article className={timelineTextCardClass(role)} data-timeline-surface="plain">
-                      {role === "system" || statusLabel ? (
-                        <header className="flex items-center justify-between gap-3 px-1 pb-1 pt-2">
-                          {role === "system" ? (
-                            <span className="truncate text-[12px] font-semibold tracking-[0.01em]">
-                              {item.kind === "system_notice" ? t("systemNoticeTitle") : timelineItemTitle(item)}
-                            </span>
-                          ) : <span />}
-                          {statusLabel ? (
-                            <span className="shrink-0 text-[11px] text-muted">{statusLabel}</span>
-                          ) : null}
-                        </header>
-                      ) : null}
-                      <div className={role === "system" || statusLabel ? "px-1 pb-2.5 pt-1" : "px-1 py-2.5"}>
-                        <TimelineTextContent item={item} role={role} />
-                      </div>
-                    </article>
-                  )}
-                </li>
-              );
-            })}
-            {isAwaitingTimelineDelta && showWaitingIndicator ? (
-              <li className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5" key="timeline-waiting-indicator">
-                <span
-                  aria-label="Waiting for timeline update"
-                  className="relative z-[1] mt-1 flex size-6 items-center justify-center rounded-full bg-background text-muted"
-                >
-                  <LoaderCircle className="animate-spin" size={13} />
-                </span>
-                <span className="min-h-7" />
-              </li>
-            ) : null}
-          </ol>
-        </details>
-      ) : null}
-      {responseItems.map((item, index) => {
-        const itemKey = timelineItemKey(timelineId, item.itemId);
-        const streaming = live && item.status === "running";
-        return (
-          <div className="min-w-0" key={itemKey}>
-            <CopyableBlock
-              copiedLabel={copiedLabel}
-              copyLabel={copyLabel}
-              copyText={item.text}
-              helpfulLabel={helpfulLabel}
-              notHelpfulLabel={notHelpfulLabel}
-              variant="response"
-            >
-              <section
-                className="px-1 py-2 text-ink"
-                data-response-surface="plain"
-                data-timeline-item-key={itemKey}
-                data-timeline-response="true"
-              >
-                <FinalAnswerTextContent item={item} />
-                {streaming ? (
-                  <span
-                    aria-label={t("streamingFinalAnswer")}
-                    className="mt-2 inline-block size-1.5 animate-pulse rounded-full bg-brand"
-                  />
-                ) : null}
-                {metrics && index === responseItems.length - 1 ? (
-                  <TurnMetricsFooter metrics={metrics} />
-                ) : null}
-              </section>
-            </CopyableBlock>
-          </div>
-        );
-      })}
     </div>
   );
 }
 
-function isTimelineResponseItem(item: TimelineItem) {
+function lastCommentary(items: ChatTimelineItem[]) {
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index];
+    if (item.kind === "assistant_text" && item.text.trim()) return item;
+  }
+  return undefined;
+}
+
+function isFinalAnswer(item: ChatTimelineItem): item is TimelineTextItem & { kind: "assistant_text"; phase: "final_answer" } {
   return item.kind === "assistant_text" && item.phase === "final_answer";
-}
-
-function timelineItemRole(item: TimelineItem) {
-  if (item.kind === "tool_call") {
-    return "tool";
-  }
-  if (item.kind === "reasoning") {
-    return "thinking";
-  }
-  if (item.kind === "assistant_text" && (item.phase === "commentary" || item.phase === "pending")) {
-    return "commentary";
-  }
-  return "system";
-}
-
-function timelineIconClass(role: ReturnType<typeof timelineItemRole>) {
-  const base = "relative z-[1] mt-1 flex size-6 items-center justify-center rounded-full bg-background";
-  return role === "thinking" ? `${base} text-muted` : `${base} text-brand`;
-}
-
-function timelineTextCardClass(role: ReturnType<typeof timelineItemRole>) {
-  const base = "min-w-0";
-  if (role === "thinking") {
-    return `${base} text-muted`;
-  }
-  return `${base} text-ink`;
-}
-
-function timelineProcessLabel({
-  displayDuration,
-  hasActiveTimeline,
-  items,
-  metrics,
-  t,
-}: {
-  displayDuration: number | null;
-  hasActiveTimeline: boolean;
-  items: TimelineItem[];
-  metrics: TimelineBlock["metrics"];
-  t: (key: string, options?: Record<string, unknown>) => string;
-}) {
-  const hasFailedItem = items.some((item) => item.status === "failed");
-  const hasCancelledItem = items.some((item) => item.status === "cancelled");
-  const state = hasActiveTimeline
-    ? "processWorking"
-    : metrics?.state === "completed"
-      ? "processWorked"
-      : metrics?.state === "failed" || hasFailedItem
-        ? "processFailed"
-        : hasCancelledItem
-          ? "processStopped"
-          : "processWorked";
-  return displayDuration === null
-    ? t(state)
-    : t(`${state}Duration`, { duration: formatDuration(displayDuration) });
-}
-
-function TimelineItemIcon({ item }: { item: TimelineItem }) {
-  if (item.kind === "tool_call") {
-    return <Wrench className="shrink-0" size={13} />;
-  }
-  if (item.kind === "reasoning") {
-    return <Brain className="shrink-0" size={13} />;
-  }
-  if (item.kind === "context_compaction") {
-    if (item.status === "running") {
-      return <LoaderCircle className="shrink-0 motion-safe:animate-spin" size={13} />;
-    }
-    if (item.status === "cancelled") {
-      return <CircleStop className="shrink-0 text-muted" size={13} />;
-    }
-    if (item.status === "failed" || item.stage === "failed") {
-      return <TriangleAlert className="shrink-0 text-danger" size={13} />;
-    }
-    return <Check className="shrink-0" size={13} />;
-  }
-  if (item.kind === "assistant_text" && (item.phase === "commentary" || item.phase === "pending")) {
-    return <MessageCircle className="shrink-0" size={13} />;
-  }
-  return <Activity className="shrink-0" size={13} />;
-}
-
-function TimelineTextContent({
-  item,
-  markdown = false,
-  role,
-}: {
-  item: TimelineTextItem;
-  markdown?: boolean;
-  role: ReturnType<typeof timelineItemRole> | "final-answer";
-}) {
-  const text = item.kind === "system_notice" && item.notice ? systemNoticeMessage(item.notice) : item.text;
-  if (!text.trim()) {
-    return <div className="text-sm leading-6 text-muted">…</div>;
-  }
-  if (markdown || item.phase === "final_answer") {
-    return (
-      <MarkdownRenderer
-        className="markdown-body prose prose-sm max-w-none prose-headings:font-display prose-headings:tracking-[-0.035em] prose-p:my-2 prose-p:leading-[1.9] prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-li:leading-[1.8]"
-        text={text}
-      />
-    );
-  }
-  return (
-    <p
-      className={`min-w-0 whitespace-pre-wrap break-words text-sm leading-6 ${role === "thinking" ? "text-muted" : "text-ink/[0.82]"}`}
-      data-timeline-text="true"
-    >
-      {text}
-    </p>
-  );
 }
 
 function FinalAnswerTextContent({ item }: { item: TimelineTextItem }) {
@@ -391,102 +202,10 @@ function FinalAnswerTextContent({ item }: { item: TimelineTextItem }) {
     return () => window.clearTimeout(timer);
   }, [item.replayFinalAnswer, item.text, visibleText]);
 
-  return <TimelineTextContent item={{ ...item, text: visibleText }} markdown role="final-answer" />;
-}
-
-function timelineItemTitle(item: TimelineItem) {
-  if (item.kind === "tool_call") {
-    return item.toolName;
-  }
-  if (item.kind === "reasoning") {
-    return "Thinking";
-  }
-  if (item.kind === "execution_summary") {
-    return "Execution summary";
-  }
-  if (item.kind === "context_compaction") {
-    return "Context status";
-  }
-  if (item.kind === "assistant_text") {
-    if (item.phase === "commentary" || item.phase === "pending") {
-      return "Commentary";
-    }
-    if (item.phase === "final_answer") {
-      return "Final answer";
-    }
-    return "Commentary";
-  }
-  if (item.phase === "system") {
-    return item.title || "System";
-  }
-  return item.title || item.kind.replaceAll("_", " ");
-}
-
-function timelineItemKey(timelineId: string, itemId: string) {
-  return `${timelineId}:${itemId}`;
-}
-
-function timelineItemStatus(item: TimelineItem) {
-  const duration = timelineItemDuration(item);
-  return duration === null
-    ? item.status.replaceAll("_", " ")
-    : `${item.status.replaceAll("_", " ")} · ${formatDuration(duration)}`;
-}
-
-function visibleTimelineItemStatus(item: TimelineItem) {
-  if (item.kind === "tool_call") {
-    const duration = timelineItemDuration(item);
-    return duration === null ? undefined : formatDuration(duration);
-  }
-  if (item.status === "failed" || item.status === "cancelled") {
-    return timelineItemStatus(item);
-  }
-  return undefined;
-}
-
-function timelineItemDuration(item: TimelineItem) {
-  if (!item.completedAtMs) {
-    return null;
-  }
-  return Math.max(0, item.completedAtMs - item.startedAtMs);
-}
-
-function timelineDuration(items: TimelineItem[], nowMs: number) {
-  const started = items.map((item) => item.startedAtMs).filter((value) => value > 0);
-  const completed = items
-    .map((item) => item.completedAtMs ?? (item.status === "running" ? nowMs : null))
-    .filter((value): value is number => value !== null && value > 0);
-  if (started.length === 0 || completed.length === 0) {
-    return null;
-  }
-  return Math.max(0, Math.max(...completed) - Math.min(...started));
-}
-
-function timelineToolStatus(item: TimelineItem) {
-  if (item.kind !== "tool_call") {
-    return "queued";
-  }
-  if (item.status === "queued") {
-    return "queued";
-  }
-  if (item.status === "completed") {
-    return item.isError ? "error" : "done";
-  }
-  if (item.status === "failed") {
-    return "error";
-  }
-  if (item.status === "cancelled") {
-    return "cancelled";
-  }
-  if (item.status === "waitingForInput") {
-    return "waiting_dynamic_input";
-  }
-  return "running";
-}
-
-function formatArguments(value: unknown) {
-  if (typeof value === "string") {
-    return value;
-  }
-  return JSON.stringify(value, null, 2);
+  return visibleText.trim() ? (
+    <MarkdownRenderer
+      className="markdown-body prose prose-sm max-w-none prose-headings:font-display prose-headings:tracking-[-0.035em] prose-p:my-2 prose-p:leading-[1.9] prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-li:leading-[1.8]"
+      text={visibleText}
+    />
+  ) : <div className="text-sm leading-6 text-muted">…</div>;
 }

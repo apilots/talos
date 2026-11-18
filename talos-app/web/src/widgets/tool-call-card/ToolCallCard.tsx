@@ -60,17 +60,19 @@ export const ToolCallCard = {
   },
   Header({
     compact = false,
-    durationLabel,
+    duration,
     open,
     onToggle,
+    running,
     statusLabel,
     title,
     tone,
   }: {
     compact?: boolean;
-    durationLabel?: string;
+    duration?: ReactNode;
     open: boolean;
     onToggle: () => void;
+    running: boolean;
     statusLabel: string;
     title: string;
     tone: "default" | "success" | "warning" | "danger";
@@ -100,7 +102,7 @@ export const ToolCallCard = {
           </div>
         </div>
         <div className={cn("flex shrink-0 items-center", compact ? "gap-2.5" : "gap-2")}>
-          {durationLabel ? <span className="text-[11px] text-muted">{durationLabel}</span> : null}
+          {duration ? <span className="whitespace-nowrap text-[11px] tabular-nums text-muted" data-tool-duration="true">{duration}</span> : null}
           {compact ? (
             <span
               className={cn(
@@ -121,8 +123,8 @@ export const ToolCallCard = {
                 <CircleAlert size={13} />
               ) : tone === "danger" ? (
                 <CircleX size={13} />
-              ) : statusLabel === "Running" ? (
-                <LoaderCircle className="animate-spin" size={13} />
+              ) : running ? (
+                <LoaderCircle aria-hidden="true" className="motion-safe:animate-spin" size={13} />
               ) : (
                 <CircleDashed size={13} />
               )}
