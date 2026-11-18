@@ -7,15 +7,19 @@ import signal
 import socket as unix_socket
 import subprocess
 import sys
+import time
 
 from lifecycle import adopt_case_processes, cleanup, own_process, root, socket_directory
+from result_report import write_json
+from result_usage import collect_usage
 
 
 def interrupted(signum, _frame):
     raise InterruptedError(signum)
 
 
-def run(script):
+def run(script, result_file=None):
+    started = time.monotonic()
     case = os.environ['TALOS_E2E_CASE_ID']
     if Path(case).is_absolute() or '..' in Path(case).parts or not Path(case).parts:
         raise ValueError('Case ID must be a relative catalog path')
@@ -31,15 +35,24 @@ def run(script):
         signal.signal(sig, interrupted)
     status = 1
     child = None
+    cancelled = False
     try:
         child = own_process(subprocess.Popen(['bash', script], env=env, cwd=directory, start_new_session=True))
         status = child.wait()
     except InterruptedError as error:
         status = 128 + error.args[0]
+        cancelled = True
     finally:
         # Ignore further signals while the bounded cleanup retires this case.
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, signal.SIG_IGN)
+        seconds = round(time.monotonic() - started, 3)
+        usage, coverage = [], ""
+        if result_file:
+            try:
+                usage, coverage = collect_usage(directory, temporary)
+            except OSError:
+                coverage = "N/A（无法读取场景用量）"
         errors = []
         for socket in temporary.glob('tmux-*/default'):
             if socket.is_socket():
@@ -81,8 +94,13 @@ def run(script):
             print(error, file=sys.stderr)
         if errors and status == 0:
             status = 1
+        if result_file:
+            outcome = "CANCELLED" if cancelled else "PASS" if status == 0 else "FAIL"
+            write_json(result_file, {"status": outcome, "exit_code": status,
+                                     "seconds": seconds,
+                                     "usage": usage, "coverage": coverage})
     return status if status >= 0 else 128 - status
 
 
 if __name__ == '__main__':
-    sys.exit(run(sys.argv[1]))
+    sys.exit(run(sys.argv[1], Path(sys.argv[2]) if len(sys.argv) > 2 else None))

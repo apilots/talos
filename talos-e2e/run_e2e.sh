@@ -7,6 +7,7 @@ source "${TALOS_E2E_DIR}/scripts/common.sh"
 
 SCENARIO_ROOT="${TALOS_E2E_DIR}/scenarios"
 RUNNER="${TALOS_E2E_DIR}/scripts/runner.py"
+RESULT_REPORT="${TALOS_E2E_DIR}/scripts/result_report.py"
 
 usage() {
   cat <<'EOF'
@@ -14,12 +15,16 @@ Usage:
   talos-e2e/run_e2e.sh [--list | --check]
   talos-e2e/run_e2e.sh --group 06_tools [--list | --check]
   talos-e2e/run_e2e.sh --case 05_cli/full_flow [--list | --check]
+  talos-e2e/run_e2e.sh --case 05_cli/full_flow --rerun-of <initial-run-id> [--note <text>]
 
 Options:
   --group <name>   Select one discovered numbered group
   --case <name>    Select one discovered case by relative path or unique basename
   --list          List selected paths only; no .env, preflight, builds or reports
   --check         Check selected environment prerequisites without running cases
+  --rerun-of <id> Add a targeted case execution to a finished initial run
+  --note <text>   Single-line case note with failure cause and fix, if known
+  --prices <file> Explicit provider/model rate snapshot for estimating observed cost
 
 Without a selector, discover every numbered root case and group. Missing
 prerequisites block execution; scenarios are never silently omitted.
@@ -44,25 +49,14 @@ build_required_binaries() {
   export TALOS_E2E_REQUIRED_BINARIES_READY=1
 }
 
-reset_case_directory() {
-  local root_dir="$1"
-  local case_dir="$2"
-
-  case "${case_dir}" in
-    "${root_dir}/"?*) ;;
-    *)
-      echo "Refusing to reset case directory outside ${root_dir}: ${case_dir}" >&2
-      exit 1
-      ;;
-  esac
-  rm -rf "${case_dir}"
-}
-
 declare -a scenarios=() selected_cases=()
 case_name=""
 group_name=""
 list_only=0
 check_only=0
+rerun_of=""
+case_note=""
+prices=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --case|--group)
@@ -75,12 +69,28 @@ while [[ $# -gt 0 ]]; do
       ;;
     --list) list_only=1; shift ;;
     --check) check_only=1; shift ;;
+    --rerun-of|--note|--prices)
+      if [[ -z "${2:-}" || "${2}" == --* ]]; then
+        echo "$1 requires a value" >&2
+        exit 2
+      fi
+      case "$1" in
+        --rerun-of) rerun_of="$2" ;;
+        --note) case_note="$2" ;;
+        --prices) prices="$2" ;;
+      esac
+      shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 if [[ "${list_only}" == 1 && "${check_only}" == 1 ]]; then
   echo "--list and --check are mutually exclusive" >&2
+  exit 2
+fi
+if [[ ( -n "${rerun_of}${case_note}" && -z "${case_name}" ) ||
+      ( -n "${rerun_of}${case_note}${prices}" && ( "${list_only}" == 1 || "${check_only}" == 1 ) ) ]]; then
+  echo "--rerun-of and --note require an executing --case; --prices requires execution" >&2
   exit 2
 fi
 command -v python3 >/dev/null || { echo "Python 3.9+ is required for scenario discovery" >&2; exit 2; }
@@ -95,6 +105,7 @@ if [[ "${list_only}" == 1 ]]; then
 fi
 
 load_env
+if [[ -z "${rerun_of}${prices}" ]]; then prices="${TALOS_E2E_PRICES:-}"; fi
 # Preserve the existing standalone sandbox case's extra Linux acceptance.
 export TALOS_E2E_SINGLE_CASE=""
 if [[ -n "${case_name}" ]]; then export TALOS_E2E_SINGLE_CASE="${selected_cases[0]}"; fi
@@ -104,9 +115,16 @@ report_file="${REPORT_ROOT}/e2e_report_${TALOS_E2E_RUN_ID}.md"
 latest_file="${REPORT_ROOT}/latest_report.md"
 mkdir -p "${REPORT_ROOT}"
 preflight_log="${REPORT_ROOT}/preflight_${TALOS_E2E_RUN_ID}.log"
+if [[ "${check_only}" == 0 ]]; then
+  python3 "${RESULT_REPORT}" "${REPORT_ROOT}" "${TALOS_E2E_RUN_ID}" start \
+    "${rerun_of}" "${case_note}" "${prices}" "${selected_cases[@]}"
+fi
 if ! python3 "${RUNNER}" check "${SCENARIO_ROOT}" "${selected_cases[@]}" >"${preflight_log}" 2>&1; then
   cat "${preflight_log}" >&2
   echo "E2E blocked before build/execution. Prerequisites: ${preflight_log}" >&2
+  if [[ "${check_only}" == 0 ]]; then
+    python3 "${RESULT_REPORT}" "${REPORT_ROOT}" "${TALOS_E2E_RUN_ID}" finish 1 preflight
+  fi
   exit 1
 fi
 cat "${preflight_log}"
@@ -118,8 +136,10 @@ export TALOS_E2E_RESOURCE_ROOT="${TALOS_E2E_TMP_ROOT}/runs/${TALOS_E2E_RUN_ID}"
 export PYTHONPATH="${TALOS_E2E_DIR}/scripts${PYTHONPATH:+:${PYTHONPATH}}"
 mkdir -p "${TALOS_E2E_RESOURCE_ROOT}/shared"
 active_case=""
+stage="build"
 finish_run() {
   local status=$?
+  if [[ "${status}" == 0 && "${stage}" != finished ]]; then status=1; fi
   trap - EXIT
   trap '' INT TERM
   if [[ -n "${active_case}" ]]; then
@@ -130,7 +150,9 @@ finish_run() {
     rm -rf "${TALOS_E2E_RESOURCE_ROOT}"
   else
     echo "Run cleanup failed; ownership records retained: ${TALOS_E2E_RESOURCE_ROOT}" >&2
+    stage="cleanup"
     if [[ -f "${report_file}" ]]; then
+      # shellcheck disable=SC2016
       printf '\n## Run cleanup\n\nFAIL: owned resources remain in `%s`.\n' "${TALOS_E2E_RESOURCE_ROOT}" >> "${report_file}"
     fi
     [[ "${status}" != 0 ]] || status=1
@@ -150,6 +172,9 @@ finally:
     temporary.unlink(missing_ok=True)
 PY
   fi
+  if ! python3 "${RESULT_REPORT}" "${REPORT_ROOT}" "${TALOS_E2E_RUN_ID}" finish "${status}" "${stage}"; then
+    [[ "${status}" != 0 ]] || status=1
+  fi
   if [[ "${status}" == 0 ]]; then echo "E2E passed. Report: ${report_file}"; fi
   exit "${status}"
 }
@@ -157,6 +182,7 @@ trap finish_run EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 build_required_binaries
+stage="execution"
 
 pass_count=0
 fail_count=0
@@ -177,23 +203,17 @@ fail_count=0
 
 for scenario in "${scenarios[@]}"; do
   script_path="${scenario}"
-  scenario_name="${script_path#${SCENARIO_ROOT}/}"
-  scenario_report_dir="${REPORT_ROOT}/${scenario_name%.sh}"
+  scenario_name="${script_path#"${SCENARIO_ROOT}"/}"
+  scenario_report_dir="${REPORT_ROOT}/runs/${TALOS_E2E_RUN_ID}/cases/${scenario_name%.sh}"
   log_file="${scenario_report_dir}/scenario.log"
-  reset_case_directory "${REPORT_ROOT}" "${scenario_report_dir}"
   mkdir -p "${scenario_report_dir}"
-  scenario_started_at="$(python3 - <<'PY'
-import time
-print(time.time())
-PY
-)"
   chmod +x "${script_path}"
   echo "Running ${scenario_name}..."
   # Full runs use the same group semantics as --group, without repeating
   # each native sandbox case's standalone Docker expansion before case99.
   effective_group="${group_name}"
   if [[ -z "${case_name}" && "${scenario_name}" == */* ]]; then effective_group="${scenario_name%%/*}"; fi
-  TALOS_E2E_CASE_ID="${scenario_name%.sh}" TALOS_E2E_GROUP_NAME="${effective_group}" TALOS_SCENARIO_NAME="${scenario_name%.sh}" TALOS_SCENARIO_REPORT_DIR="${scenario_report_dir}" python3 "${TALOS_E2E_DIR}/scripts/case_run.py" "${script_path}" >"${log_file}" 2>&1 &
+  TALOS_E2E_CASE_ID="${scenario_name%.sh}" TALOS_E2E_GROUP_NAME="${effective_group}" TALOS_SCENARIO_NAME="${scenario_name%.sh}" TALOS_SCENARIO_REPORT_DIR="${scenario_report_dir}" python3 "${TALOS_E2E_DIR}/scripts/case_run.py" "${script_path}" "${scenario_report_dir}/result.json" >"${log_file}" 2>&1 &
   active_case=$!
   if wait "${active_case}"; then
     status="PASS"
@@ -203,14 +223,8 @@ PY
     fail_count=$((fail_count + 1))
   fi
   active_case=""
-  scenario_elapsed_secs="$(SCENARIO_STARTED_AT="${scenario_started_at}" python3 - <<'PY'
-import os
-import time
-started = float(os.environ["SCENARIO_STARTED_AT"])
-print(f"{time.time() - started:.2f}")
-PY
-)"
-  echo "Finished ${scenario_name} (${status}) in ${scenario_elapsed_secs}s"
+  scenario_elapsed_secs="$(python3 "${RESULT_REPORT}" "${REPORT_ROOT}" "${TALOS_E2E_RUN_ID}" publish "${scenario_name%.sh}")"
+  echo "Finished ${scenario_name} (${status}), elapsed seconds: ${scenario_elapsed_secs}"
 
   {
     echo "### 场景 ${scenario_name}"
@@ -233,6 +247,7 @@ done
   echo "- 通过: ${pass_count}"
   echo "- 失败: ${fail_count}"
 } >> "${report_file}"
+stage="finished"
 
 if [[ "${fail_count}" -gt 0 ]]; then
   echo "E2E failed. Report: ${report_file}" >&2

@@ -30,7 +30,7 @@ class RunnerTests(unittest.TestCase):
         self.scenarios.mkdir()
         shutil.copy2(E2E / "run_e2e.sh", self.root / "run_e2e.sh")
         shutil.copy2(E2E / "scripts/runner.py", self.root / "scripts/runner.py")
-        for helper in ["case_run.py", "lifecycle.py"]:
+        for helper in ["case_run.py", "lifecycle.py", "result_report.py", "result_usage.py", "report_failures.py"]:
             shutil.copy2(E2E / "scripts" / helper, self.root / "scripts" / helper)
         (self.root / "scripts/common.sh").write_text('''
 export TALOS_E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -139,6 +139,8 @@ has_real_llm_key() { return 1; }
             self.assertIn(text, result.stderr)
         self.assert_no_execution()
         self.assertEqual(len(list((self.root / "reports").glob("preflight_*.log"))), 1)
+        result_doc, = (self.root / "reports").glob("e2e_results_*.md")
+        self.assertIn("| one | 预检阻塞 | 预检阻塞 | 0 | 0 |", result_doc.read_text())
 
     def test_check_only_and_scoped_exception_do_not_require_unselected_dependencies(self):
         self.declare(self.scenarios / "18_existing", {"commands": ["missing-command"]},
@@ -215,6 +217,77 @@ has_real_llm_key() { return 1; }
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.root / "executed").read_text(), "18_existing/one:\n")
 
+    def test_targeted_reruns_preserve_attempts_and_accumulate_observed_cost(self):
+        case = self.scenarios / "18_existing/one.sh"
+        case.write_text("""python3 - <<'PYTHON'
+import os
+from pathlib import Path
+import sqlite3
+home = Path(os.environ["TALOS_E2E_TMP_ROOT"])
+for name in ("control", "replica"):
+    data = home / name / "data"
+    data.mkdir(parents=True)
+    with sqlite3.connect(data / "talos.db") as db:
+        db.executescript('''
+          CREATE TABLE profile_turn_usage (
+            user_id, session_id, turn_id, last_request_id, usage_kind,
+            model_provider, model_id, usage_available, finalized, input_tokens,
+            output_tokens, total_tokens, cache_read_input_tokens, cache_creation_input_tokens
+          );
+          INSERT INTO profile_turn_usage VALUES
+            ('user', 'session', 'turn', 'request', 'turn', 'fixture', 'model',
+             1, 1, 1000, 200, 1200, 400, NULL);
+        ''')
+PYTHON
+exit "${FIXTURE_STATUS}"
+""")
+        root = self.root / "reports"
+        prices = self.root / "prices.json"
+        prices.write_text(json.dumps({"fixture/model": {
+            "currency": "CNY", "source": "test fixture", "as_of": "2026-01-01",
+            "input": 2, "output": 5, "cache_read": 0.5, "cache_write": 2,
+        }}))
+        self.env["FIXTURE_STATUS"] = "7"
+        baseline = self.call("--group", "18_existing", "--prices", str(prices))
+        self.assertEqual(baseline.returncode, 1, baseline.stderr)
+        report, = root.glob("e2e_results_*.md")
+        initial_id = report.stem.removeprefix("e2e_results_")
+        first_log = root / "runs" / initial_id / "cases/18_existing/one/scenario.log"
+        first_result = first_log.with_name("result.json")
+        original = first_result.read_bytes()
+
+        # Only the selected case runs again. The initial rates carry over.
+        args = ("--case", "18_existing/one", "--rerun-of", initial_id)
+        failed = self.call(*args, "--note", "服务重启后仍失败，待定位")
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.env["FIXTURE_STATUS"] = "0"
+        note = "连接未释放 → 退出时释放连接（fix abc123）→ 第 3 次执行通过"
+        recovered = self.call(*args, "--note", note)
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertEqual(list(root.glob("e2e_results_*.md")), [report])
+        self.assertEqual(first_result.read_bytes(), original)
+        self.assertTrue(first_log.is_file())
+        self.assertNotEqual((root / "18_existing/one").resolve(), first_log.parent)
+        self.assertEqual((self.root / "executed").read_text().splitlines(), ["18_existing/two:18_existing"])
+        document = report.read_text()
+        self.assertIn("| 18_existing | 2 | 1 / 1 / 0 | 50.0% / 50.0% | 1 | 2 | 1 | 2 / 0 / 0 |", document)
+        self.assertIn("| one | FAIL | PASS | 3 | 2 | 第 3 次 |", document)
+        self.assertRegex(document, r"\| one \| 第 3 次（补跑 2） \| PASS \| \d+\.\d{2} \| 0\.002400 CNY \|")
+        self.assertIn("0.007200 CNY", document)
+        self.assertIn("缓存命中 40.0%（覆盖 3000/3000", document)
+        self.assertIn(note, document)
+        self.assertIn("| two | PASS | PASS | 1 | 0 | 第 1 次 |", document)
+        self.assertIn("N/A（无可读快照）", document)
+
+    def test_missing_cache_component_with_different_rates_stays_unpriced(self):
+        sys.path.insert(0, str(E2E / "scripts"))
+        try:
+            from result_usage import estimate
+        finally:
+            sys.path.pop(0)
+        self.assertIsNone(estimate({"input": 100, "output": 10, "cache_read": None, "cache_write": None},
+                                   {"input": "1", "output": "2", "cache_read": "0.1", "cache_write": "1"}))
+
     def test_distinct_runs_in_the_same_second_keep_separate_reports(self):
         date = self.bin/'date'
         date.write_text('#!/bin/sh\necho 20260101_000000\n')
@@ -249,6 +322,9 @@ has_real_llm_key() { return 1; }
                     stdout, stderr = child.communicate(timeout=12)
                     self.assertEqual(child.returncode, 128 + sig, stdout + stderr)
                     self.assertFalse(Path(ready.read_text()).exists())
+                    run_id = Path(ready.read_text()).name
+                    report = self.root / "reports" / f"e2e_results_{run_id}.md"
+                    self.assertIn("| 01_root | CANCELLED | CANCELLED | 1 | 0 |", report.read_text())
                 finally:
                     if child.poll() is None:
                         child.kill()
