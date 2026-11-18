@@ -102,6 +102,7 @@ def queue_and_steer(page, session, turn):
         assert json.load(response)['data']['activeTurn']['identity']['turnId'] == turn
     waiting = page.get_by_test_id('waiting-messages')
     expect(waiting).to_contain_text(human)
+    expect(composer).to_have_value('')
     with page.expect_request(lambda request: request.url.endswith('/v1/turns/input')) as steered:
         waiting.get_by_role('button', name='Steer', exact=True).click()
     assert steered.value.post_data_json['identity']['turnId'] == turn
@@ -112,7 +113,7 @@ def queue_and_steer(page, session, turn):
     expect(user.get_by_test_id('automation-input-source')).to_have_count(0)
 
 
-def composer_send_policy(page, origin, config_path, fixture):
+def composer_send_policy(page, origin, config_path, fixture, session):
     page.goto(origin + '/settings/general')
     composer_settings = page.get_by_role('region', name='Composer', exact=True)
     queue = composer_settings.get_by_role('button', name='Queue', exact=True)
@@ -132,15 +133,36 @@ def composer_send_policy(page, origin, config_path, fixture):
     marker = 'pending_' + uuid.uuid4().hex
     with page.expect_response(lambda response: urlsplit(response.url).path == '/v1/config/sessionMessageSendPolicy'
                               and response.request.method == 'GET') as observed:
-        started = begin(page, 'goal', 'prompt', f'AUTO_CASE={marker} Start a controlled ordinary Turn')
+        page.goto(f'{origin}/sessions/{session}')
     assert observed.value.ok, observed.value.text()
     assert observed.value.json()['data']['policy'] == 'steer'
-    session = started['sessionId']
+
+    prompt = f'AUTO_CASE={marker} Start a controlled ordinary Turn'
+    composer = page.get_by_role('textbox', name='Ask anything. Press / for commands and skills.')
+    user_input = page.get_by_test_id('user-input-message').filter(has_text=prompt)
+    expect(page.get_by_role('button', name='Send', exact=True)).to_be_visible()
+    composer.fill(prompt)
+    start_url = '**/v1/turns/start'
+    pending_start = []
+    page.route(start_url, lambda route: pending_start.append(route), times=1)
+    with page.expect_request(start_url) as sent:
+        composer.press('Enter')
+    assert sent.value.post_data_json['sessionId'] == session
+    expect(user_input).to_have_count(0)
+    expect(composer).to_have_value(prompt)
+    page.screenshot(path=str(REPORT / 'composer-before-admission.png'), full_page=True)
+    with page.expect_response(start_url) as admitted:
+        pending_start[0].continue_()
+    assert admitted.value.ok, admitted.value.text()
+
     wait_for(lambda: (fixture / f'{marker}.busy').exists(), 'running ordinary Turn')
+    expect(user_input).to_be_visible()
+    expect(composer).to_have_value('')
+    page.screenshot(path=str(REPORT / 'composer-after-admission.png'), full_page=True)
+    print('CASE composer_draft_submission PASS draft_retained_before_admission=true composer_cleared_while_model_running=true')
     with urllib.request.urlopen(f'{origin}/v1/sessions/{session}/active-turn') as response:
         turn = json.load(response)['data']['activeTurn']['identity']['turnId']
     follow_up = 'Use this follow-up in the current run.'
-    composer = page.get_by_role('textbox', name='Ask anything. Press / for commands and skills.')
     composer.fill(follow_up)
     policy_reads = []
 
@@ -287,7 +309,7 @@ def run(home):
                            complete(page, home / 'data/talos.db', fixture, 'loop', 'slash'),
                            cancel(page, home / 'data/talos.db', fixture),
                            complete(page, home / 'data/talos.db', fixture, 'goal', 'prompt')]
-                composer_send_policy(page, origin, config_path, fixture)
+                composer_send_policy(page, origin, config_path, fixture, results[-1]['sessionId'])
                 assert not (fixture / 'errors.jsonl').exists(), 'Controlled upstream contract failed'
                 (REPORT / 'result.json').write_text(json.dumps({'result': 'PASS', 'tasks': results}, indent=2))
                 print('CASE automation_web_entry PASS server=real tool=real entries=Add,slash,prompt selection=typed-or-none countdown=real terminalRows=removed cancel=beforeWork')

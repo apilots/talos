@@ -14,10 +14,11 @@ function visibleBlocks(history = buildBlocksFromHistorySnapshot(undefined)) {
 }
 beforeEach(() => useAppStore.setState({ streams: {} }));
 
-it.each(["goal", "loop"] as const)("shows the original %s selection before binding and after canonical/history replacement", (mode) => {
+it.each(["goal", "loop"] as const)("shows the original %s selection after admission and canonical/history replacement", (mode) => {
   useAppStore.getState().setPendingInput("sess-1", { text: "same text", fileIds: [], activationMode: mode, clientMessageId: "local", phase: "local" });
-  expect(visibleBlocks()).toMatchObject([{ text: "same text", activationMode: mode }]);
+  expect(visibleBlocks()).toHaveLength(0);
   useAppStore.getState().setPendingInput("sess-1", { text: "same text", fileIds: [], activationMode: mode, clientMessageId: "local", serverMessageId: "msg-first", phase: "accepted" });
+  expect(visibleBlocks()).toMatchObject([{ text: "same text", activationMode: mode }]);
   const first = userInputStarted("first", "same text", 1);
   if (first.event.type !== "agent" || first.event.data.payload.type !== "messageStarted") throw new Error("Expected User input fixture");
   selectMode(first.event.data.payload.data.message, mode);
