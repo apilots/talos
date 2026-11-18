@@ -38,6 +38,8 @@ For a stdio server with bundled resources, put `mcp.json` and those resources to
 
 The Worker validates the requested package type before publishing a contained snapshot into the existing Marketplace cache. It installs the selected candidate through the existing transaction and records the source identity in the managed installation. Importing identical bytes reuses the registered snapshot. Source refresh and update cannot fetch changes for a local package. The user supplies a replacement explicitly. Built-in Browser identity and privileges remain governed by the existing official-source checks.
 
+Worker startup migrates the former built-in Browser at its managed installation path to the verified official Marketplace installation, preserving the saved enabled preference. The existing install transaction commits the replacement and keeps the previous directory available for rollback until the new record is durable. If the official source is unavailable, the legacy record stays available for a later retry and its executable is excluded from MCP discovery. Other name or path collisions require explicit resolution.
+
 Plugin publication can proceed while a Turn runs on the Worker. The existing Plugin transaction protects installation state. A change that invalidates a running tool call is reported through its normal tool or Turn error.
 
 ## Verification

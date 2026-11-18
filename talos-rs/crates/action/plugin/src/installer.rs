@@ -1,6 +1,8 @@
 mod manual;
+mod replacement;
 mod runtime;
 pub(crate) use manual::{manual_mcp_candidate, manual_mcp_plugin};
+pub(crate) use replacement::{recover_replacement_backup, rollback_install_activation};
 
 pub(crate) use runtime::{
     installed_mcp_servers, installed_plugin, installed_skill_root, missing_plugin_from_install,
@@ -140,22 +142,6 @@ pub(crate) fn cleanup_install_activation(activation: &InstallActivation) -> Talo
     if let Some(backup_dir) = &activation.backup_dir {
         if backup_dir.exists() {
             remove_plugin_directory(backup_dir, "remove plugin install backup")?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn rollback_install_activation(
-    _state: &PluginStateStore,
-    activation: &InstallActivation,
-) -> TalosResult<()> {
-    let install_dir = &activation.install.installed_path;
-    if install_dir.exists() {
-        remove_plugin_directory(install_dir, "remove failed plugin install")?;
-    }
-    if let Some(backup_dir) = &activation.backup_dir {
-        if backup_dir.exists() {
-            rename_plugin_path(backup_dir, install_dir, "restore plugin install backup")?;
         }
     }
     Ok(())
