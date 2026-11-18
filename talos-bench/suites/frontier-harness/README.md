@@ -74,8 +74,7 @@ A case directory is created before launch and is never automatically retried,
 including after a controller interruption or transfer failure. Inspect its log
 and retained runtime and recover its original job before deciding on a separate
 infrastructure retry. Resuming the same batch refuses configuration changes and
-skips every started case. The five metadata-only entries remain excluded and are
-recorded in the manifest. Preserve the original run directories alongside the
+skips every started case. Preserve the original run directories alongside the
 batch directory when moving or submitting evidence.
 
 This controller records a single attempt, not the four-attempt leaderboard

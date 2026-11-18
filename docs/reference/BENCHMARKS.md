@@ -70,7 +70,7 @@ An optional product file `workspace-AGENTS.md` seeds the temporary Talos workspa
 
 ## Run FrontierHarness v1.1
 
-Use `frontier-harness@1.1.0` in the model command. Harbor resolves the published Hub dataset by its pinned content digest. The launcher lists 57 selectable IDs and five inventory entries with notes. Set `TALOS_BENCH_TASKS` to a comma-separated list of full IDs from the selectable entries. The default is `terminal-bench/log-summary-date-ranges` and records the official verifier result, `/app/summary.csv`, and ATIF for model runs. On ARM64 the launcher builds the upstream Dockerfiles natively. The local summary records the dataset ref, task digest, platform, and paths to the original Harbor outputs.
+Use `frontier-harness@1.1.0` in the model command. Harbor resolves the published Hub dataset by its pinned content digest. The launcher lists 62 selectable IDs. Set `TALOS_BENCH_TASKS` to a comma-separated list of full IDs from the selectable entries. The default is `terminal-bench/log-summary-date-ranges` and records the official verifier result, `/app/summary.csv`, and ATIF for model runs. On ARM64 the launcher builds the upstream Dockerfiles natively. The local summary records the dataset ref, task digest, platform, and paths to the original Harbor outputs.
 
 For a verifier with a published AMD64-only image, the ARM64 launcher verifies the task digest and removes its verifier image pointer in a disposable copy so Harbor builds the original verifier Dockerfile. Each `provenance/<task>.json` file links the adaptation to its upstream task. The two guest workloads use native AMD64 Docker, including the Runta backend. Use the [batch guide](../../talos-bench/suites/frontier-harness/README.md) for cases that need prepared native images.
 
