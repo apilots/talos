@@ -50,3 +50,46 @@ For an archived trial with complete submissions and a separate verifier, use Har
 For the pinned `terminal-bench/filter-js-from-html` case, add `--verifier-env SE_CHROMEDRIVER=/usr/bin/chromedriver` to the batch command when using its native ARM64 image. Selenium then uses the Chromium driver installed by the upstream Dockerfile. The registry also captures `/app/filter.py` for review.
 
 Use the report to check coverage, scores and failure evidence. If a verifier writes zero after a dependency fails before the checker can run, preserve that raw reward and exclude the attempt from the local score as an infrastructure failure. A local native pass can include rebuilt environments and unavailable tasks. The published FrontierHarness protocol uses four scored attempts per task. [FrontierHarness scoring protocol](https://frontierharness.org/about/)
+
+## Runta one-attempt batch
+
+The batch controller runs each selectable task once in a separate Runta restore
+using the shared launcher. Set `TALOS_BENCH_RUNTA_CHECKPOINT`,
+`TALOS_BENCH_RUNTA_SECRET`, `TALOS_BENCH_MODEL`, and
+`TALOS_BENCH_REASONING_EFFORT` as in the shared guide, then run:
+
+```bash
+uv run --python 3.12 python talos-bench/suites/frontier-harness/runta_batch.py output/frontier-runta/batch --jobs 1
+```
+
+`--task` may be repeated to select a subset. Use `--limit 1` to start only
+the first pending case while keeping the full batch manifest for later resume;
+`--first terminal-bench/regex-log` chooses the first case. The manifest pins the task list,
+checkpoint, dataset, model, effort, launcher contents, and a SHA-256 fingerprint
+of the exact `TALOS_BENCH_AGENT_ENV` passed to the launcher. Each case keeps its
+launcher log, runtime name, result directory, archive checksum and raw result.
+The launcher writes the archive checksum after transfer verification and extraction.
+The collector checks it again before including the original job.
+A case directory is created before launch and is never automatically retried,
+including after a controller interruption or transfer failure. Inspect its log
+and retained runtime and recover its original job before deciding on a separate
+infrastructure retry. Resuming the same batch refuses configuration changes and
+skips every started case. Preserve the original run directories alongside the
+batch directory when moving or submitting evidence.
+
+This controller records a single attempt, not the four-attempt leaderboard
+protocol. A Runta runtime alone does not establish equivalence to the official
+v1.1 configuration; document the model, resource limits, network policy,
+checkpoint, runner versions and any remaining differences with each submission.
+
+After the batch, create a portable evidence bundle with:
+
+```bash
+uv run --python 3.12 python talos-bench/suites/frontier-harness/runta_collect.py \
+  output/frontier-runta/batch output/frontier-runta/evidence.zip
+```
+
+The bundle contains each original archive whose saved SHA-256 still matches and
+an index that retains missing, unfinished and unscored cases. It omits the local
+secret name and local controller logs. Inspect the archives and add installation,
+model and methodology details before sending them to the benchmark maintainers.

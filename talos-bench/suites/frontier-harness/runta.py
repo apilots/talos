@@ -138,6 +138,7 @@ fi""")
             raise RuntimeError("Runta archive checksum does not match")
     with tarfile.open(archive) as package:
         package.extractall(output, filter="data")
+    (output / "original-job.sha256").write_text(digest + "\n")
     release(runtime)
     return int(code)
 

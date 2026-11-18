@@ -2,14 +2,17 @@
 
 import argparse
 from contextlib import nullcontext
+from datetime import datetime
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -41,6 +44,64 @@ def capture_answer(destination, logs):
             if footer == {**identity, "status": "completed"}:
                 stdout = b"".join(lines[:-1])
     destination.write_bytes(stdout)
+
+
+def capture_provider_http_failures(home, logs):
+    failures = []
+    for path in sorted((home / "logs").glob("talos*.log*")):
+        if not path.is_file():
+            continue
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict) or event.get("target") != "talos_llm_openai":
+                continue
+            fields = event.get("fields")
+            if not isinstance(fields, dict):
+                continue
+            attempt, maximum, elapsed = (fields.get(key) for key in ("attempt", "max_attempts", "elapsed_ms"))
+            if not all(type(value) is int for value in (attempt, maximum, elapsed)):
+                continue
+            if not 1 <= attempt <= maximum or elapsed < 0:
+                continue
+            timestamp = event.get("timestamp")
+            if not isinstance(timestamp, str):
+                continue
+            try:
+                fraction = re.sub(r"\.(\d+)", lambda match: "." + match[1][:6].ljust(6, "0"), timestamp)
+                recorded_at = datetime.fromisoformat(fraction.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if recorded_at.tzinfo is None:
+                continue
+            protocol = fields.get("protocol")
+            if protocol not in ("Chat", "Responses"):
+                continue
+            record = {"timestamp": timestamp, "protocol": protocol, "attempt": attempt,
+                      "max_attempts": maximum, "elapsed_ms": elapsed}
+            if fields.get("event") == "http_rejection":
+                status, will_retry = fields.get("http_status"), fields.get("will_retry")
+                if type(status) is not int or not 100 <= status <= 599 or type(will_retry) is not bool:
+                    continue
+                if will_retry and (attempt >= maximum or status not in (502, 503, 504)):
+                    continue
+                record.update(http_status=status, will_retry=will_retry)
+                request_id = fields.get("upstream_request_id")
+                if isinstance(request_id, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id):
+                    record["upstream_request_id"] = request_id
+            elif fields.get("event") == "transport_failure":
+                failure = fields.get("failure")
+                if failure not in ("timeout", "connection", "transport"):
+                    continue
+                record.update(failure=failure, will_retry=False)
+            else:
+                continue
+            failures.append((recorded_at, record))
+    failures = [record for _, record in sorted(failures, key=lambda item: item[0])]
+    (logs / "provider-http-failures.json").write_text(json.dumps(failures, indent=2) + "\n")
+    return sum(record["will_retry"] for record in failures)
 
 
 def run(options, llm, secret, *, resources=PRODUCT, observe=None):
@@ -90,6 +151,7 @@ def run(options, llm, secret, *, resources=PRODUCT, observe=None):
                 },
             },
             "llm": llm,
+            "logging": {"level": "warn", "format": "json", "stdout": False},
         }))
         environment = dict(os.environ, TALOS_HOME=home, TALOS_CONFIG=str(config),
                            TALOS_RESOURCE_DIR=str(resources), TALOS_TUI_NO_BROWSER="1")
@@ -124,6 +186,7 @@ def run(options, llm, secret, *, resources=PRODUCT, observe=None):
             "prices_per_million": model_config.get("cost"),
             "elapsed_seconds": None,
             "exit_code": None,
+            "gateway_retries": None,
             "request_interval_ms": os.environ.get("TALOS_BENCH_OPENAI_REQUEST_INTERVAL_MS"),
             "delegation_watch": watch,
             "workspace_guidance_sha256": hashlib.sha256(guidance.read_bytes()).hexdigest() if guidance.is_file() else None,
@@ -150,6 +213,10 @@ def run(options, llm, secret, *, resources=PRODUCT, observe=None):
                 else:
                     exit_code = subprocess.run(command, env=environment, cwd=WORKSPACE, stdout=stdout, stderr=stderr).returncode
             metadata.update(elapsed_seconds=time.monotonic() - started, exit_code=exit_code)
+            try:
+                metadata["gateway_retries"] = capture_provider_http_failures(Path(home), logs)
+            except OSError as error:
+                print(f"OpenAI HTTP evidence collection failed: {type(error).__name__}", file=sys.stderr)
             final_metadata = run_path.with_suffix(".tmp")
             final_metadata.write_text(json.dumps(metadata, indent=2) + "\n")
             final_metadata.replace(run_path)

@@ -763,3 +763,6 @@ fn official_reasoning_off_distinguishes_gpt6_sol_from_gpt61_sol() {
         );
     }
 }
+
+#[path = "request_retry_tests.rs"]
+mod request_retry_tests;

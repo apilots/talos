@@ -84,17 +84,9 @@ pub fn transport_error(operation: &'static str, error: reqwest::Error) -> TalosE
     TalosError::from_source(code, format!("{operation} {reason}."), error.without_url())
 }
 
-/// Consume only a bounded rejection envelope. Arbitrary remote text is discarded.
-pub async fn http_rejection_error(
-    provider: &'static str,
-    mut response: reqwest::Response,
-) -> TalosError {
-    let mut error = http_response_error(provider, &response);
-    let status_source = response
-        .error_for_status_ref()
-        .err()
-        .map(reqwest::Error::without_url);
-    let request_id = response
+/// Return a bounded upstream correlation ID suitable for private diagnostics.
+pub fn http_request_id(response: &reqwest::Response) -> Option<&str> {
+    response
         .headers()
         .get("x-request-id")
         .and_then(|value| value.to_str().ok())
@@ -105,7 +97,19 @@ pub async fn http_rejection_error(
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
         })
-        .map(str::to_owned);
+}
+
+/// Consume only a bounded rejection envelope. Arbitrary remote text is discarded.
+pub async fn http_rejection_error(
+    provider: &'static str,
+    mut response: reqwest::Response,
+) -> TalosError {
+    let mut error = http_response_error(provider, &response);
+    let status_source = response
+        .error_for_status_ref()
+        .err()
+        .map(reqwest::Error::without_url);
+    let request_id = http_request_id(&response).map(str::to_owned);
     let read = async {
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.ok()? {
