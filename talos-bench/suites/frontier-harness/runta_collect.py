@@ -25,34 +25,25 @@ def collect(batch, destination):
                 row.update({key: state.get(key) for key in ("status", "started_at", "finished_at", "exit_code",
                                                             "runtime", "complete", "scored_trials", "score")})
                 result_dir = Path(state.get("output") or "")
-                summary = result_dir / "summary.json"
-                if state.get("output") and summary.is_file():
-                    trials = json.loads(summary.read_text()).get("trials", [])
-                    row["trial_evidence"] = [{key: trial.get(key) for key in
-                                             ("trial", "score", "verifierReward", "exception", "stopReason")}
-                                             for trial in trials]
+                expected = state.get("archive_sha256")
                 archive = result_dir / "original-job.tar.gz"
-                if archive.is_file() and state.get("archive_sha256") == sha256(archive):
+                if expected and archive.is_file() and sha256(archive) == expected:
                     name = "jobs/" + task.replace("/", "--") + "/original-job.tar.gz"
                     package.write(archive, name)
-                    row.update(archive=name, archive_sha256=state["archive_sha256"])
+                    row.update(archive=name, archive_sha256=expected)
+                    summary = result_dir / "summary.json"
+                    if summary.is_file():
+                        trials = json.loads(summary.read_text()).get("trials", [])
+                        row["trial_evidence"] = [{key: trial.get(key) for key in
+                                                 ("trial", "score", "verifierReward", "exception", "stopReason")}
+                                                 for trial in trials]
                 else:
                     row["archive"] = None
                 if (case / "launcher.log").is_file():
                     # Logs may contain local paths; retain them locally, not in the external bundle.
                     row["launcher_log_retained_locally"] = True
             rows.append(row)
-        environment = batch / "environment.json"
-        if environment.is_file():
-            package.write(environment, "environment.json")
         public = {key: value for key, value in manifest.items() if key != "secret_name"}
-        public["supplemental_evidence"] = []
-        for name in ("verifier-diagnostic-evidence.tar.gz", "batched-regrade-evidence.tar.gz"):
-            source = batch / name
-            if source.is_file():
-                target = "supplemental/" + name
-                package.write(source, target)
-                public["supplemental_evidence"].append({"path": target, "sha256": sha256(source)})
         public["cases"] = rows
         package.writestr("manifest.json", json.dumps(public, indent=2) + "\n")
     return rows

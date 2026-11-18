@@ -67,6 +67,8 @@ the first pending case while keeping the full batch manifest for later resume;
 `--first terminal-bench/regex-log` chooses the first case. The manifest pins the task list,
 checkpoint, dataset, model, effort and launcher contents. Each case keeps its
 launcher log, runtime name, result directory, archive checksum and raw result.
+The launcher writes the archive checksum after transfer verification and extraction.
+The collector checks it again before including the original job.
 A case directory is created before launch and is never automatically retried,
 including after a controller interruption or transfer failure. Inspect its log
 and retained runtime and recover its original job before deciding on a separate

@@ -55,10 +55,7 @@ def case_dir(batch, task):
 
 def run_case(batch, task):
     case = case_dir(batch, task)
-    try:
-        case.mkdir(parents=True, exist_ok=False)
-    except FileExistsError:
-        return task, "already-started"
+    case.mkdir(parents=True)
     state = {"task": task, "status": "started", "started_at": now()}
     write_json(case / "state.json", state)
     env = os.environ.copy()
@@ -75,17 +72,16 @@ def run_case(batch, task):
                  output=output, runtime=runtime)
     if output:
         result_dir = Path(output)
-        archive = result_dir / "original-job.tar.gz"
-        summary = result_dir / "summary.json"
-        if archive.is_file():
-            with archive.open("rb") as f:
-                state["archive_sha256"] = hashlib.file_digest(f, "sha256").hexdigest()
-        if summary.is_file():
-            value = json.loads(summary.read_text())
-            state.update(complete=value.get("complete"), scored_trials=value.get("scoredTrials"),
-                         score=value.get("meanScore"))
+        receipt = result_dir / "original-job.sha256"
+        if receipt.is_file():
+            state["archive_sha256"] = receipt.read_text().strip()
+            summary = result_dir / "summary.json"
+            if summary.is_file():
+                value = json.loads(summary.read_text())
+                state.update(complete=value.get("complete"), scored_trials=value.get("scoredTrials"),
+                             score=value.get("meanScore"))
     write_json(case / "state.json", state)
-    return task, "finished"
+    return task
 
 
 def main():
@@ -128,8 +124,7 @@ def main():
             with ThreadPoolExecutor(max_workers=args.jobs) as pool:
                 futures = [pool.submit(run_case, args.directory, task) for task in pending]
                 for future in as_completed(futures):
-                    task, status = future.result()
-                    print(f"{task}: {status}", flush=True)
+                    print(f"{future.result()}: finished", flush=True)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         sys.exit(str(error))
 

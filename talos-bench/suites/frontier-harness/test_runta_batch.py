@@ -1,6 +1,8 @@
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
@@ -11,26 +13,45 @@ spec.loader.exec_module(batch)
 
 
 class BatchTest(unittest.TestCase):
-    def test_existing_case_is_never_relaunched(self):
+    def test_resuming_the_controller_skips_started_cases(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)
-            batch.case_dir(root, "terminal-bench/example").mkdir(parents=True)
-            with patch.object(batch.subprocess, "run") as run:
-                self.assertEqual(batch.run_case(root, "terminal-bench/example")[1], "already-started")
-                run.assert_not_called()
-
-    def test_persists_failure_and_runtime_without_retry(self):
-        with TemporaryDirectory() as temp:
-            root = Path(temp)
-            def fake_run(*args, **kwargs):
-                kwargs["stdout"].write("Talos benchmark run: /missing/result\nRunta runtime: retained-case\n")
-                return type("Result", (), {"returncode": 1})()
-            with patch.object(batch.subprocess, "run", side_effect=fake_run):
-                batch.run_case(root, "terminal-bench/example")
-            state = json.loads((batch.case_dir(root, "terminal-bench/example") / "state.json").read_text())
-            self.assertEqual(state["runtime"], "retained-case")
+            task = "terminal-bench/regex-log"
+            args = ["runta_batch.py", str(root), "--task", task]
+            with patch.object(sys, "argv", args), patch.object(batch, "config", return_value={}), \
+                 patch.object(batch.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)) as run:
+                batch.main()
+                batch.main()
+            run.assert_called_once()
+            state = json.loads((batch.case_dir(root, task) / "state.json").read_text())
             self.assertEqual(state["exit_code"], 1)
-            self.assertNotIn("score", state)
+
+    def test_only_launcher_verified_archives_are_recorded(self):
+        for verified in (False, True):
+            with self.subTest(verified=verified), TemporaryDirectory() as temp:
+                root = Path(temp)
+                output = root / "result"
+                output.mkdir()
+                (output / "original-job.tar.gz").write_bytes(b"downloaded job")
+                (output / "summary.json").write_text('{"complete": true, "scoredTrials": 1, "meanScore": 1.0}')
+                if verified:
+                    (output / "original-job.sha256").write_text("a" * 64 + "\n")
+
+                def failed_launch(*args, **kwargs):
+                    kwargs["stdout"].write(f"Talos benchmark run: {output}\nRunta runtime: retained-case\n")
+                    return subprocess.CompletedProcess([], 1)
+
+                with patch.object(batch.subprocess, "run", side_effect=failed_launch):
+                    batch.run_case(root, "terminal-bench/example")
+                state = json.loads((batch.case_dir(root, "terminal-bench/example") / "state.json").read_text())
+                self.assertEqual(state["runtime"], "retained-case")
+                self.assertEqual(state["exit_code"], 1)
+                if verified:
+                    self.assertEqual(state["archive_sha256"], "a" * 64)
+                    self.assertEqual(state["score"], 1.0)
+                else:
+                    self.assertNotIn("archive_sha256", state)
+                    self.assertNotIn("score", state)
 
 
 if __name__ == "__main__":
