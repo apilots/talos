@@ -3,7 +3,7 @@
 pub(crate) mod api;
 mod attachment;
 mod error;
-pub use error::{http_rejection_error, http_response_error, transport_error};
+pub use error::{http_rejection_error, http_request_id, http_response_error, transport_error};
 mod http;
 pub use http::{ProviderHttpClients, ProviderHttpTimeouts};
 mod message;
