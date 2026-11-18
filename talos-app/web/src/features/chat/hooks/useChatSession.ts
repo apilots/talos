@@ -40,9 +40,7 @@ export function useChatSession(
   useTranslation("errors");
   const scope = useProductScope();
   const draftKey = JSON.stringify([scope, sessionId]);
-  const draft = useAppStore((state) =>
-    state.composerDraftSubmissions[draftKey] ? "" : state.composerDrafts[draftKey] ?? "",
-  );
+  const draft = useAppStore((state) => state.composerDrafts[draftKey] ?? "");
   const saveDraft = useAppStore((state) => state.saveComposerDraft);
   const setDraft = (text: string) => saveDraft(draftKey, text);
   const sessionAvailable = serverMessageCount !== undefined;
@@ -230,14 +228,10 @@ export function useChatSession(
             },
           )
         : undefined;
-      const finishDraftSubmission = useAppStore.getState().beginComposerDraftSubmission(draftKey, draft);
-      let accepted = false;
-      try {
-        await sendMutation.mutateAsync({ text, request });
-        accepted = true;
-      } finally {
-        finishDraftSubmission?.(accepted);
-      }
+      return sendMutation.mutateAsync({ text, request }).then(() => {
+        // A rejected admission keeps the original draft and one-shot Skill mode.
+        if (useAppStore.getState().composerDrafts[draftKey] === draft) setDraft("");
+      });
     },
     retryStream: retryTimeline,
     retryResponse,

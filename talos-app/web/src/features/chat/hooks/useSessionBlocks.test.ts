@@ -116,12 +116,13 @@ describe("buildSessionBlocks", () => {
     ]);
   });
 
-  it("renders an attachment-only pending input", () => {
+  it("renders an attachment-only pending input after admission", () => {
     useAppStore.getState().setPendingInput("sess-1", {
       text: "",
       fileIds: ["file-1"],
       clientMessageId: "client-1",
-      phase: "local",
+      serverMessageId: "message-1",
+      phase: "accepted",
     });
 
     const blocks = buildSessionBlocks({

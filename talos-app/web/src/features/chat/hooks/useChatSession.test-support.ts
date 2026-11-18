@@ -116,7 +116,7 @@ vi.mock("./useSessionStreaming", () => ({
 }));
 
 export function resetChatSessionMocks() {
-  useAppStore.setState({ composerDrafts: {}, composerDraftSubmissions: {} });
+  useAppStore.setState({ composerDrafts: {} });
   mocks.send.mockReset().mockRejectedValue(new TalosApiError({
     code: AppProtocol.ErrorCode.ActiveTurnRunning, localization: null,
     message: "Active turn is already running",

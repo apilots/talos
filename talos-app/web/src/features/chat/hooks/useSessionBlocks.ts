@@ -180,9 +180,8 @@ function createPendingInputBlock(
 ): ChatRenderBlock | undefined {
   const pendingInput = streamState?.pendingInput;
   if (
-    !pendingInput ||
-    (!pendingInput.text.trim() && pendingInput.fileIds.length === 0) ||
-    pendingInput.phase === "completed"
+    pendingInput?.phase !== "accepted" ||
+    (!pendingInput.text.trim() && pendingInput.fileIds.length === 0)
   ) {
     return undefined;
   }

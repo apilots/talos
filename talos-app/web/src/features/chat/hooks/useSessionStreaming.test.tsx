@@ -51,7 +51,7 @@ describe("useSessionStreaming", () => {
     mocks.invalidateSessionQueries.mockReset().mockResolvedValue(undefined);
   });
 
-  it.each(["goal", "loop"] as const)("preserves this request's %s selection in the first pending bubble until admission", async (mode) => {
+  it.each(["goal", "loop"] as const)("preserves this request's %s selection through admission", async (mode) => {
     let accept!: () => void;
     mocks.startTimelineTurn.mockImplementation((_request, onAccepted) => new Promise<string>((resolve) => {
       accept = () => { onAccepted("canonical-input"); resolve("canonical-input"); };
