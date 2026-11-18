@@ -54,7 +54,7 @@ Worker读取本机最小持久历史游标标记；若最新Local事实只在B�
 ## 5. 原子提交、排序和恢复
 
 1. 业务写入与typed capture同事务；先后快照diff只改实际变化字段，不能把旧完整snapshot当远端整行覆盖。
-2. exporter按outbox次序形成Loro操作；源文档与导出水位同事务commit。暂存LoroDoc，不先改变活跃VV。
+2. exporter按outbox次序形成Loro操作。同步先在SQLite只读快照中固定文档及outbox水位，在事务外构建Loro候选，写事务内复核文档和ACK版本，再原子持久化文档与导出水位。导入还需复核本地outbox水位，避免覆盖并发追加的本地事实。
 3. hub/client接收后暂存import，验证scope/immutable binding、事件一致性、前驱/generation；依赖缺失先补齐，不能发布不完整terminal快照。
 4. hub的document/update/feed、client的document/业务事实/event map/cursor分别同事务持久化。
 5. commit成功后替换可见文档/通知；hub提交后发上传成功Ack，client提交后只mark_committed本地恢复水位，不发送下载成功Ack。失败不推进VV/cursor，不开放跨端handoff。

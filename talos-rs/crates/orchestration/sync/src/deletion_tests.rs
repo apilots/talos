@@ -50,11 +50,9 @@ async fn confirmed_hub_delete_supersedes_pending_patch_atomically_without_an_upl
         .unwrap();
     let delete = hub.apply(&[talos_sync_types::SyncChange::Delete]).unwrap();
     let hub_version = hub.version().unwrap();
-    let mut transaction = fixture.storage.begin_transaction().await.unwrap();
-    fixture
+    let (transaction, _, _) = fixture
         .sync
         .import_document(
-            &mut *transaction,
             &fixture.binding,
             &resource,
             std::slice::from_ref(&delete),
@@ -81,11 +79,9 @@ async fn confirmed_hub_delete_supersedes_pending_patch_atomically_without_an_upl
         None
     );
 
-    let mut transaction = fixture.storage.begin_transaction().await.unwrap();
-    let (_, changes) = fixture
+    let (transaction, _, changes) = fixture
         .sync
         .import_document(
-            &mut *transaction,
             &fixture.binding,
             &resource,
             &[delete],
@@ -160,17 +156,9 @@ async fn local_unacknowledged_delete_survives_a_concurrent_hub_patch_until_its_a
         }])
         .unwrap();
     let hub_version = hub.version().unwrap();
-    let mut transaction = fixture.storage.begin_transaction().await.unwrap();
-    let (_, changes) = fixture
+    let (transaction, _, changes) = fixture
         .sync
-        .import_document(
-            &mut *transaction,
-            &fixture.binding,
-            &resource,
-            &[update],
-            &hub_version,
-            None,
-        )
+        .import_document(&fixture.binding, &resource, &[update], &hub_version, None)
         .await
         .unwrap();
     assert!(matches!(

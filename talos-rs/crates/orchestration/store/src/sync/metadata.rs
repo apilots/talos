@@ -95,25 +95,10 @@ pub(super) async fn read(
                 .transpose()?
         }
         SyncResourceKey::Session { session_id } => {
-            let rows = tx
-                .query(
-                    "SELECT * FROM sessions WHERE session_key = ? AND user_id IN (?, ?)",
-                    &[
-                        session_id,
-                        &adapter.binding.source_user_id,
-                        &adapter.binding.scope.account_id,
-                    ],
-                )
-                .await?;
-            let Some(row) = rows.first() else {
+            let Some(row) = session_row(adapter, tx, session_id).await? else {
                 return Ok(None);
             };
-            let record = crate::session::DatabaseSessionStore::parse_session_record(row)?;
-            if record.execution_node_id == "embedded"
-                && !capture_local_resource(adapter, tx, "session", session_id).await?
-            {
-                return Ok(None);
-            }
+            let record = crate::session::DatabaseSessionStore::parse_session_record(&row)?;
             let memory_processed_through = session::key_at(
                 adapter,
                 tx,
@@ -301,6 +286,32 @@ pub(super) async fn delete(
 pub(super) fn text(row: &talos_storage::Row, key: &str) -> TalosResult<String> {
     row.get_string(key)
         .ok_or_else(|| TalosError::internal("Missing persisted synchronization field."))
+}
+
+pub(super) async fn session_row(
+    adapter: &StoreSyncAdapter,
+    tx: &mut dyn StorageTransaction,
+    session_id: &str,
+) -> TalosResult<Option<talos_storage::Row>> {
+    let rows = tx
+        .query(
+            "SELECT * FROM sessions WHERE session_key = ? AND user_id IN (?, ?)",
+            &[
+                session_id,
+                &adapter.binding.source_user_id,
+                &adapter.binding.scope.account_id,
+            ],
+        )
+        .await?;
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    if text(&row, "execution_node_id")? == "embedded"
+        && !capture_local_resource(adapter, tx, "session", session_id).await?
+    {
+        return Ok(None);
+    }
+    Ok(Some(row))
 }
 
 async fn capture_local_resource(

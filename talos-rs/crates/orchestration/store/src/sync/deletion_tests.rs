@@ -44,11 +44,9 @@ async fn deleted_computer_still_satisfies_history_dependencies_on_a_new_manageme
         .await
         .unwrap()
         .unwrap();
-    let mut tx = target.storage.begin_transaction().await.unwrap();
-    let (version, changes) = target
+    let (mut tx, version, changes) = target
         .sync
         .import_document(
-            &mut *tx,
             &target.adapter.binding,
             &resource,
             &[exported.update],

@@ -338,9 +338,8 @@ async fn download_with_depth<A: SyncDataAdapter>(
                     "Synchronization document disconnected.",
                 ));
             };
-            let mut tx = sync.storage.begin_transaction().await?;
-            let (mut version, facts) = sync
-                .import_document(&mut *tx, binding, resource, &updates, &hub_version, None)
+            let (mut tx, mut version, facts) = sync
+                .import_document(binding, resource, &updates, &hub_version, None)
                 .await?;
             let batch = SyncImportBatch {
                 scope: binding.scope.clone(),
@@ -372,10 +371,10 @@ async fn download_with_depth<A: SyncDataAdapter>(
                 }
                 // The received bytes remain owned by this call. Rebuild the cut
                 // after dependencies commit; do not await the runner's own queue.
-                tx = sync.storage.begin_transaction().await?;
-                let (recovered_version, facts) = sync
-                    .import_document(&mut *tx, binding, resource, &updates, &hub_version, None)
+                let (recovered_tx, recovered_version, facts) = sync
+                    .import_document(binding, resource, &updates, &hub_version, None)
                     .await?;
+                tx = recovered_tx;
                 version = recovered_version;
                 adapter
                     .apply(
@@ -458,11 +457,8 @@ async fn upload_pending<A: SyncDataAdapter>(
         {
             continue;
         }
-        let result = async {
-            sync.flush_cut(binding, &resource).await?;
-            upload_resource(sync, adapter, binding, client, channels, resource.clone()).await
-        }
-        .await;
+        let result =
+            upload_resource(sync, adapter, binding, client, channels, resource.clone()).await;
         match result {
             Ok(_) => {
                 channels.failed_uploads.remove(&resource);

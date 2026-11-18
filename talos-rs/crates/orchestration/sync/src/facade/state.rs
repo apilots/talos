@@ -1,9 +1,8 @@
 use talos_error::{TalosError, TalosResult};
-use talos_sync_sdk::SyncReplica;
 use talos_sync_types::SyncResourceSummary;
 
 use super::TalosSync;
-use crate::{facade::sync_error, store, SyncBinding, SyncResourceKey, SyncVersion};
+use crate::{facade::sync_error, store, SyncBinding, SyncResourceKey};
 
 impl TalosSync {
     /// Retire only the specified local capture alias. The product transaction must
@@ -45,66 +44,6 @@ impl TalosSync {
         }
     }
 
-    /// Fix the flush boundary to committed outbox rows visible at this read cut.
-    pub(crate) async fn flush_cut(
-        &self,
-        binding: &SyncBinding,
-        resource: &SyncResourceKey,
-    ) -> TalosResult<(Option<i64>, SyncVersion)> {
-        let mut tx = self.storage.begin_transaction().await?;
-        self.require_binding(&mut *tx, binding).await?;
-        let (mut document, acknowledged) = self
-            .load_document(&mut *tx, &binding.scope, resource)
-            .await?;
-        let cut = self
-            .apply_pending(&mut *tx, binding, resource, &mut document)
-            .await?;
-        let version = document.version().map_err(sync_error)?;
-        if cut.is_some() {
-            store::save_document(
-                &mut *tx,
-                &binding.scope,
-                &document.summary().map_err(sync_error)?,
-                &document.snapshot().map_err(sync_error)?,
-                &acknowledged,
-            )
-            .await?;
-        }
-        tx.commit().await?;
-        Ok((cut, version))
-    }
-
-    pub(super) async fn apply_pending(
-        &self,
-        tx: &mut dyn talos_storage::StorageTransaction,
-        binding: &SyncBinding,
-        resource: &SyncResourceKey,
-        document: &mut SyncReplica,
-    ) -> TalosResult<Option<i64>> {
-        let mut after = 0;
-        loop {
-            let pending = store::outbox_after(tx, &binding.scope, resource, after, 128).await?;
-            if pending.is_empty() {
-                break;
-            }
-            for row in pending {
-                if row.exported_version.is_none() {
-                    document.apply(&row.changes).map_err(sync_error)?;
-                    // Freeze each local cut before importing H; downloaded ops
-                    // are never labelled as an acknowledgement of local facts.
-                    let version = store::encode(&document.version().map_err(sync_error)?)?;
-                    tx.execute(
-                        "UPDATE sync_outbox SET exported_version_json = ? WHERE seq = ?",
-                        &[&version, &row.seq.to_string()],
-                    )
-                    .await?;
-                }
-                after = row.seq;
-            }
-        }
-        Ok((after > 0).then_some(after))
-    }
-
     pub(crate) async fn has_pending_through(
         &self,
         binding: &SyncBinding,
@@ -120,7 +59,7 @@ impl TalosSync {
         binding: &SyncBinding,
         resource: &SyncResourceKey,
     ) -> TalosResult<Option<SyncResourceSummary>> {
-        let mut tx = self.storage.begin_transaction().await?;
+        let mut tx = self.storage.begin_read_transaction().await?;
         self.require_binding(&mut *tx, binding).await?;
         let summary = if store::document(&mut *tx, &binding.scope, resource)
             .await?

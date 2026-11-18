@@ -25,6 +25,7 @@ Status: Implemented；本轮账号选择专项已自测，统一8/8验收通过�
 | `bind_account(actor, SyncBindParams)` | Return SyncBinding after verified account/source-user/Computer association; no implicit anonymous claim. |
 | `enabled(account_id)` / `set_enabled(account_id, bool)` | Read/persist the verified account choice in this host DB, even before discovery; no network, YAML write or other-host preference propagation. |
 | `capture(tx, SyncCaptureParams)` | Append typed changes in the existing business transaction. No network await; rollback removes capture. |
+| `import_document(binding, resource, updates, version, cursor)` | Prepare the replica outside the writer. Return a staged transaction, the merged version, and the validated facts. The caller applies the facts to the original Store and commits before advancing the SDK recovery watermark. |
 | `start(adapter, SyncStartParams)` | Return SyncHandle; authenticate, discover, export/import and reconnect. Credentials come from existing account lifecycle. |
 | `SyncHandle::catch_up(resource, minimum_version?)` | Recover and materialize a complete resource cut on the handle's existing authenticated connection. None requests the current hub cut; an unpublished minimum fails explicitly. |
 | `SyncHandle::flush(resource)` | Fix the current transaction's committed outbox sequence and VV, then await a durable hub cut including that VV without waiting for later commits. A remote terminal Delete superseding this cut returns Conflict rather than a false ACK. Used before opening that 历史游标 to a different coordinator. |

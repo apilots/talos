@@ -259,11 +259,9 @@ async fn offline_backlog_larger_than_one_thousand_rows_recovers_before_remote_im
         .await
         .unwrap()
         .unwrap();
-    let mut transaction = fixture.storage.begin_transaction().await.unwrap();
-    let (version, changes) = fixture
+    let (transaction, version, changes) = fixture
         .sync
         .import_document(
-            &mut *transaction,
             &fixture.binding,
             &resource,
             &[],
