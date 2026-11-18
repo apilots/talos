@@ -1,10 +1,10 @@
 use super::PluginManager;
-use crate::{installer, scanner, source};
+use crate::{installer, scanner, source, PluginStateStore};
 use serde::Deserialize;
 use std::path::Path;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::{
-    McpServerDefinition, McpTransportDefinition, PluginDefinition, PluginInstall,
+    McpServerDefinition, McpTransportDefinition, PluginDefinition, PluginId, PluginInstall,
     PluginInstallConflictPolicy, PluginInstallSource, PluginKind, BROWSER_MCP_SERVER_NAME,
     OFFICIAL_BROWSER_PLUGIN_ID,
 };
@@ -34,6 +34,37 @@ pub(crate) fn is_official_browser(install: &PluginInstall) -> bool {
             && path_in_source == "mcp/browser" && valid_commit(commit))
 }
 
+pub(crate) fn is_legacy_builtin_browser(install: &PluginInstall) -> bool {
+    let legacy_id = PluginId("builtin_browser".into());
+    install.plugin_id == legacy_id
+        && install.id == installer::install_id_for(&legacy_id)
+        && install.name == BROWSER_MCP_SERVER_NAME
+        && install.kind == PluginKind::McpServer
+        && install.source == PluginInstallSource::Manual
+}
+
+pub(super) fn browser_install_target<'a>(
+    state: &PluginStateStore,
+    installs: &'a [PluginInstall],
+) -> Result<Option<&'a PluginInstall>, OfficialBrowserProvision> {
+    if installs.iter().any(is_official_browser) {
+        return Err(OfficialBrowserProvision::Ready);
+    }
+    let path = state.mcp_installs_dir().join(BROWSER_MCP_SERVER_NAME);
+    let mut occupants = installs.iter().filter(|install| {
+        install.name == BROWSER_MCP_SERVER_NAME || install.installed_path == path
+    });
+    match (occupants.next(), occupants.next()) {
+        (None, None) => Ok(None),
+        (Some(install), None)
+            if is_legacy_builtin_browser(install) && install.installed_path == path =>
+        {
+            Ok(Some(install))
+        }
+        _ => Err(OfficialBrowserProvision::NameConflict),
+    }
+}
+
 fn valid_commit(commit: &str) -> bool {
     commit.len() == 40 && commit.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -61,6 +92,7 @@ pub(crate) fn validate_candidate(candidate: &installer::InstallCandidate) -> Tal
     }
     let expected = talos_config::official_mcp_source();
     if candidate.plugin.id.0 != OFFICIAL_BROWSER_PLUGIN_ID
+        || candidate.plugin.metadata.name != BROWSER_MCP_SERVER_NAME
         || candidate.plugin.kind != PluginKind::McpServer
         || candidate.plugin.path_in_source.as_deref() != Some("mcp/browser")
         || !candidate
@@ -185,15 +217,14 @@ impl PluginManager {
         Ok(())
     }
 
-    /// Uses the existing install API for an absent verified default, without overriding disable.
+    /// Requests the verified default through the normal install transaction, including legacy upgrades.
     pub fn default_browser_install_request(
         &self,
     ) -> TalosResult<Option<talos_types::PluginInstallRequest>> {
         self.state
             .with_exclusive_lock("plugin.browser.default", || {
-                if self.state.load_installs()?.installs.iter().any(|install| {
-                    is_official_browser(install) || install.name == BROWSER_MCP_SERVER_NAME
-                }) {
+                let previous = self.state.load_installs()?;
+                if browser_install_target(&self.state, &previous.installs).is_err() {
                     return Ok(None);
                 }
                 let candidate = self
@@ -214,7 +245,7 @@ impl PluginManager {
                         plugin_id: candidate.plugin.id,
                         expected_source_commit: candidate.plugin.source_commit,
                     },
-                    enable: Some(true),
+                    enable: None,
                     conflict_policy: PluginInstallConflictPolicy::Reject,
                 }))
             })
@@ -232,7 +263,7 @@ impl PluginManager {
         })
     }
 
-    /// Initializes only the verified default Browser through the existing installer.
+    /// Provisions the verified default Browser and upgrades its legacy built-in installation.
     /// The composition root supplies immutable packaged resources. Missing snapshots
     /// leave Browser unavailable; startup never invents a source revision or downloads
     /// an unpinned package. Existing installations, including disable, are preserved.
@@ -259,15 +290,8 @@ impl PluginManager {
         self.state
             .with_exclusive_lock("plugin.browser.provision", || {
                 let previous = self.state.load_installs()?;
-                if previous.installs.iter().any(is_official_browser) {
-                    return Ok(OfficialBrowserProvision::Ready);
-                }
-                if previous
-                    .installs
-                    .iter()
-                    .any(|install| install.name == BROWSER_MCP_SERVER_NAME)
-                {
-                    return Ok(OfficialBrowserProvision::NameConflict);
+                if let Err(status) = browser_install_target(&self.state, &previous.installs) {
+                    return Ok(status);
                 }
                 let configured = talos_config::official_mcp_source();
                 let official = source::config_source(&configured).ok_or_else(|| {
@@ -299,7 +323,7 @@ impl PluginManager {
                     source: installer::InstallSource::Marketplace(official),
                     prepared_dir: None,
                 };
-                self.activate_install(candidate, Some(true), PluginInstallConflictPolicy::Reject)?;
+                self.activate_install(candidate, None, PluginInstallConflictPolicy::Reject)?;
                 Ok(OfficialBrowserProvision::Ready)
             })
     }
