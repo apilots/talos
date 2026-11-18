@@ -50,7 +50,7 @@ Use the summary for score and job time, `agent/talos-run.json` for the launch pr
 
 ATIF export retains recorded steps after a nonzero or interrupted CLI exit. A failed first request may contain only the original user step; the exporter never invents assistant content. Failed trajectories carry `talos_exit_code` and `talos_execution_status` in their `extra` metadata. The original launch profile, error and verifier reward remain independent evidence. Successful runs still require agent content.
 
-`agent/provider-retries.json` retains only observed gateway-retry timestamps, HTTP status codes and retry attempt numbers from the temporary product log. The launch profile’s `gateway_retries` is null until collection finishes, then records the event count. Internal HTTP retries are separate from task reruns and model rounds; rejected requests have no provider-reported token usage.
+`agent/provider-http-failures.json` retains allowlisted HTTP and transport failure events from the temporary product log. Each records the protocol, attempt, elapsed time, retry decision and HTTP status or transport failure. The event includes an upstream request ID when present and valid. The launch profile’s `gateway_retries` remains null until collection succeeds, then counts decisions to retry. Cancellation during the wait can prevent a resend. Internal HTTP retries are separate from task reruns and model rounds.
 
 ## Review a representative selection
 

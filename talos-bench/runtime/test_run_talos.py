@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from run_talos import capture_answer, capture_provider_retries
+from run_talos import capture_answer, capture_provider_http_failures
 
 
 class CaptureAnswerTests(unittest.TestCase):
@@ -32,24 +32,38 @@ class CaptureAnswerTests(unittest.TestCase):
 
 
 class ProviderRetryEvidenceTests(unittest.TestCase):
-    def test_projects_only_typed_retry_fields_from_rotated_json_logs(self):
+    def test_retains_retries_and_terminal_failures_without_remote_text(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             private = root / "home/logs"
             private.mkdir(parents=True)
             logs = root / "agent"
             logs.mkdir()
-            event = {"timestamp": "2026-11-18T00:00:00Z", "target": "talos_llm_openai",
-                     "fields": {"attempt": 1, "http_status": 502, "message": "private diagnostic"}}
-            (private / "talos.log.1").write_text(json.dumps(event) + "\n")
-            event["fields"]["attempt"] = 2
-            event["fields"]["http_status"] = 503
-            (private / "talos.log").write_text(json.dumps(event) + "\n{partial")
-            events = capture_provider_retries(root / "home", logs)
-            self.assertEqual(sorted(x["attempt"] for x in events), [1, 2])
-            self.assertEqual({x["http_status"] for x in events}, {502, 503})
-            self.assertTrue(all(set(x) == {"timestamp", "attempt", "http_status"} for x in events))
-            self.assertNotIn("private diagnostic", (logs / "provider-retries.json").read_text())
+            fields = {"event": "http_rejection", "protocol": "Responses", "attempt": 5,
+                      "max_attempts": 6, "elapsed_ms": 80, "http_status": 502,
+                      "will_retry": True, "upstream_request_id": "req-502", "message": "private diagnostic"}
+            retry = {"timestamp": "2026-11-18T00:00:00Z", "target": "talos_llm_openai", "fields": fields}
+            terminal = {**retry, "timestamp": "2026-11-18T00:00:00.100000001Z",
+                        "fields": {**fields, "attempt": 6, "http_status": 504, "will_retry": False,
+                                   "upstream_request_id": "https://example.invalid/private"}}
+            timeout = {**retry, "timestamp": "2026-11-18T00:00:06.1Z",
+                       "fields": {"event": "transport_failure", "protocol": "Chat", "attempt": 1,
+                                  "max_attempts": 6, "elapsed_ms": 120000, "failure": "timeout"}}
+            (private / "talos.log.1").write_text(json.dumps(retry) + "\n")
+            (private / "talos.log").write_text(json.dumps(terminal) + "\n" + json.dumps(timeout) + "\n{partial")
+            self.assertEqual(capture_provider_http_failures(root / "home", logs), 1)
+            preserved = (logs / "provider-http-failures.json").read_text()
+            failures = json.loads(preserved)
+            self.assertEqual(failures, [
+                {"timestamp": retry["timestamp"], "protocol": "Responses", "attempt": 5,
+                 "max_attempts": 6, "elapsed_ms": 80, "http_status": 502,
+                 "will_retry": True, "upstream_request_id": "req-502"},
+                {"timestamp": terminal["timestamp"], "protocol": "Responses", "attempt": 6,
+                 "max_attempts": 6, "elapsed_ms": 80, "http_status": 504, "will_retry": False},
+                {"timestamp": timeout["timestamp"], "protocol": "Chat", "attempt": 1,
+                 "max_attempts": 6, "elapsed_ms": 120000, "failure": "timeout", "will_retry": False},
+            ])
+            self.assertNotIn("private", preserved)
 
     def test_unrelated_or_invalid_records_do_not_become_retry_evidence(self):
         with TemporaryDirectory() as temporary:
@@ -57,14 +71,16 @@ class ProviderRetryEvidenceTests(unittest.TestCase):
             (root / "home/logs").mkdir(parents=True)
             logs = root / "agent"
             logs.mkdir()
+            fields = {"event": "http_rejection", "protocol": "Responses", "attempt": 1,
+                      "max_attempts": 6, "elapsed_ms": 42, "http_status": 502, "will_retry": True}
+            original = {"target": "talos_llm_openai", "timestamp": "2026-11-18T00:00:00Z", "fields": fields}
             records = [
-                {"target": "other", "fields": {"attempt": 1, "http_status": 502}},
-                {"target": "talos_llm_openai", "fields": {"attempt": "1", "http_status": 502}},
-                {"target": "talos_llm_openai", "fields": {"attempt": 1, "http_status": 401}},
-                {"target": "talos_llm_openai", "fields": {"attempt": 0, "http_status": 502}},
+                {**original, "target": "other"},
+                {**original, "fields": {**fields, "attempt": "1"}},
+                {**original, "fields": {**fields, "http_status": 401}},
+                {**original, "fields": {**fields, "attempt": 6}},
+                {**original, "fields": {**fields, "event": "other"}},
             ]
-            for record in records:
-                record["timestamp"] = "2026-11-18T00:00:00Z"
             (root / "home/logs/talos.log").write_text("\n".join(map(json.dumps, records)))
-            self.assertEqual(capture_provider_retries(root / "home", logs), [])
-            self.assertEqual(json.loads((logs / "provider-retries.json").read_text()), [])
+            self.assertEqual(capture_provider_http_failures(root / "home", logs), 0)
+            self.assertEqual(json.loads((logs / "provider-http-failures.json").read_text()), [])

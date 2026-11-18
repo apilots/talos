@@ -208,8 +208,11 @@ claims; do not claim runtime behavior was tested by a Markdown check.
 ## Model connection acceptance
 
 The native OpenAI adapter retries HTTP 502, 503 and 504 gateway rejections
-before returning a response, with at most three total requests and one- then
-two-second backoff. It preserves the serialized request and final typed error.
+before returning a response, with at most five retries and a fixed five-second
+wait after each retryable rejection. Each resend has its own HTTP timeout. The adapter preserves the
+serialized request and final typed error. HTTP rejection warnings record the
+protocol, status, attempt, elapsed time, retry decision and any validated
+upstream request ID. Transport warnings record the failure category.
 Accepted responses, transport failures, rate-limit rejections and interrupted
 streams retain their existing behavior; emitted model/tool blocks are never
 replayed by this policy.

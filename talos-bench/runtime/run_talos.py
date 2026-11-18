@@ -8,9 +8,11 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -44,8 +46,8 @@ def capture_answer(destination, logs):
     destination.write_bytes(stdout)
 
 
-def capture_provider_retries(home, logs):
-    events = []
+def capture_provider_http_failures(home, logs):
+    failures = []
     for path in sorted((home / "logs").glob("talos*.log*")):
         if not path.is_file():
             continue
@@ -59,21 +61,47 @@ def capture_provider_retries(home, logs):
             fields = event.get("fields")
             if not isinstance(fields, dict):
                 continue
-            attempt, status = fields.get("attempt"), fields.get("http_status")
-            if type(attempt) is not int or attempt not in {1, 2}:
+            attempt, maximum, elapsed = (fields.get(key) for key in ("attempt", "max_attempts", "elapsed_ms"))
+            if not all(type(value) is int for value in (attempt, maximum, elapsed)):
                 continue
-            if type(status) is not int or status not in {502, 503, 504}:
+            if not 1 <= attempt <= maximum or elapsed < 0:
                 continue
             timestamp = event.get("timestamp")
             if not isinstance(timestamp, str):
                 continue
             try:
-                datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                fraction = re.sub(r"\.(\d+)", lambda match: "." + match[1][:6].ljust(6, "0"), timestamp)
+                recorded_at = datetime.fromisoformat(fraction.replace("Z", "+00:00"))
             except ValueError:
                 continue
-            events.append({"timestamp": timestamp, "attempt": attempt, "http_status": status})
-    (logs / "provider-retries.json").write_text(json.dumps(events, indent=2) + "\n")
-    return events
+            if recorded_at.tzinfo is None:
+                continue
+            protocol = fields.get("protocol")
+            if protocol not in ("Chat", "Responses"):
+                continue
+            record = {"timestamp": timestamp, "protocol": protocol, "attempt": attempt,
+                      "max_attempts": maximum, "elapsed_ms": elapsed}
+            if fields.get("event") == "http_rejection":
+                status, will_retry = fields.get("http_status"), fields.get("will_retry")
+                if type(status) is not int or not 100 <= status <= 599 or type(will_retry) is not bool:
+                    continue
+                if will_retry and (attempt >= maximum or status not in (502, 503, 504)):
+                    continue
+                record.update(http_status=status, will_retry=will_retry)
+                request_id = fields.get("upstream_request_id")
+                if isinstance(request_id, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id):
+                    record["upstream_request_id"] = request_id
+            elif fields.get("event") == "transport_failure":
+                failure = fields.get("failure")
+                if failure not in ("timeout", "connection", "transport"):
+                    continue
+                record.update(failure=failure, will_retry=False)
+            else:
+                continue
+            failures.append((recorded_at, record))
+    failures = [record for _, record in sorted(failures, key=lambda item: item[0])]
+    (logs / "provider-http-failures.json").write_text(json.dumps(failures, indent=2) + "\n")
+    return sum(record["will_retry"] for record in failures)
 
 
 def run(options, llm, secret, *, resources=PRODUCT, observe=None):
@@ -185,7 +213,10 @@ def run(options, llm, secret, *, resources=PRODUCT, observe=None):
                 else:
                     exit_code = subprocess.run(command, env=environment, cwd=WORKSPACE, stdout=stdout, stderr=stderr).returncode
             metadata.update(elapsed_seconds=time.monotonic() - started, exit_code=exit_code)
-            metadata["gateway_retries"] = len(capture_provider_retries(Path(home), logs))
+            try:
+                metadata["gateway_retries"] = capture_provider_http_failures(Path(home), logs)
+            except OSError as error:
+                print(f"OpenAI HTTP evidence collection failed: {type(error).__name__}", file=sys.stderr)
             final_metadata = run_path.with_suffix(".tmp")
             final_metadata.write_text(json.dumps(metadata, indent=2) + "\n")
             final_metadata.replace(run_path)

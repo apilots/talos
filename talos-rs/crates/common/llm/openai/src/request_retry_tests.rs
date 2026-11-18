@@ -37,7 +37,7 @@ async fn gateway(statuses: Vec<u16>, body: &'static str) -> (String, Requests, J
             observed.lock().unwrap().push(bytes);
             let payload = if status == 200 { body } else { "{}" };
             let reply = format!(
-                "HTTP/1.1 {status} Test\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
+                "HTTP/1.1 {status} Test\r\ncontent-length: {}\r\nx-request-id: req-{status}\r\nconnection: close\r\n\r\n{payload}",
                 payload.len()
             );
             socket.write_all(reply.as_bytes()).await.unwrap();
@@ -97,7 +97,8 @@ async fn gateway_timeout_recovery_applies_to_non_streaming_requests() {
 
 #[tokio::test]
 async fn exhausted_gateway_retries_keep_the_final_typed_error() {
-    let (url, requests, server) = gateway(vec![502, 503, 504, 200], CHAT_STREAM).await;
+    let (url, requests, server) =
+        gateway(vec![502, 503, 502, 503, 502, 504, 200], CHAT_STREAM).await;
     let provider = OpenAIProvider::new(OpenAIConfig::new("test-key").with_base_url(url));
     let error = provider
         .stream_model_blocks(ChatRequest::new_user("task", "test"))
@@ -105,7 +106,10 @@ async fn exhausted_gateway_retries_keep_the_final_typed_error() {
         .err()
         .unwrap();
     assert_eq!(error.error_code(), talos_error::ErrorCode::Timeout);
-    assert_eq!(requests.lock().unwrap().len(), 3);
+    assert!(error
+        .diagnostic_message()
+        .contains("upstream_request_id=req-504"));
+    assert_eq!(requests.lock().unwrap().len(), 6);
     server.abort();
 }
 
