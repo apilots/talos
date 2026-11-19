@@ -131,12 +131,28 @@ pub enum SyncChange {
     Delete,
 }
 
-/// Facts appended inside the caller's existing business transaction.
+/// Canonical facts to project into the existing outbox.
 pub struct SyncCaptureParams {
     pub binding: SyncBinding,
     pub resource: SyncResourceKey,
     pub changes: Vec<SyncChange>,
     pub created_at: i64,
+}
+
+/// Encoded outbox rows for one validated resource and source binding.
+pub struct PreparedSyncCapture {
+    pub(crate) binding: SyncBinding,
+    pub(crate) resource: SyncResourceKey,
+    pub(crate) batches: Vec<String>,
+    pub(crate) created_at: i64,
+    pub(crate) stage: Option<crate::store::staged_write::StagedWrite>,
+}
+
+/// Pure projection of a business snapshot and the cursor mappings to commit.
+#[derive(Default)]
+pub struct SyncExportFacts {
+    pub changes: Vec<SyncChange>,
+    pub event_mappings: Vec<SyncEventMapping>,
 }
 
 /// Durable upload candidate; network delivery alone never removes this batch.

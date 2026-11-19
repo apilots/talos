@@ -68,9 +68,7 @@ pub(crate) async fn build_application_runtime_with_policy(
         .await?,
     );
     let session_store_impl = Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
-    let node_store = Arc::new(DatabaseAgentNodeStore::new(
-        storage_connection.pool().clone(),
-    ));
+    let node_store = Arc::new(DatabaseAgentNodeStore::new(&storage_connection));
     let node_service = AgentNodeService::new(node_store.clone());
     let project_store_impl = Arc::new(StorageProjectStore::new(storage.clone()).await?);
     let session_store: Arc<dyn SessionStore> = session_store_impl.clone();

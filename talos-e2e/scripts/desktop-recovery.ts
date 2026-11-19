@@ -1,7 +1,7 @@
 /** Secretless public regression: real stdio authentication and backend replacement. */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { createServer as createSocket } from "node:net";
+import { createConnection, createServer as createSocket } from "node:net";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -18,6 +18,7 @@ let introspections = 0;
 let cloudAvailable = true;
 let accountReads = 0;
 let completions = 0;
+let heldStream: { marker: string; opened: boolean; closed: boolean } | undefined;
 const events: AppProtocol.TimelineEvent[] = [];
 const auth = createServer(async (request, response) => {
   let body = "";
@@ -33,6 +34,13 @@ const auth = createServer(async (request, response) => {
     const chunk = { id: "fixture", object: "chat.completion.chunk", created: 1, model: "deepseek-chat", choices: [{ index: 0, delta: { role: "assistant", content: completion.tools?.length ? "recovery response" : '{"operation":"noop"}' }, finish_reason: null }] };
     const end = { ...chunk, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } };
     response.writeHead(200, { "content-type": "text/event-stream" });
+    if (heldStream && JSON.stringify(completion.messages?.findLast((message: { role: string }) => message.role === "user"))?.includes(heldStream.marker)) {
+      const active = heldStream;
+      response.on("close", () => { active.closed = true; });
+      active.opened = true;
+      response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      return;
+    }
     response.end(`data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(end)}\n\ndata: [DONE]\n\n`);
     return;
   }
@@ -49,12 +57,13 @@ const auth = createServer(async (request, response) => {
   if (!cloudAvailable) { response.writeHead(503).end(); return; }
   response.setHeader("content-type", "application/json");
   response.end(JSON.stringify({ active: JSON.parse(body).token === token,
-    user: { ...user, status: "active" }, capabilities: { is_admin: false, role: "user", scopes: ["sessions:read", "sessions:write"] },
+    user: { ...user, status: "active" }, capabilities: { is_admin: false, role: "user", scopes: ["sessions:read", "sessions:write", "projects:read", "projects:write"] },
     entitlement: { can_use: true, plan: "free", reason: null }, expires_at_ms: null }));
 });
 await new Promise<void>((resolve) => auth.listen(0, "127.0.0.1", resolve));
 let controllerToClose: DesktopAppServerController | undefined;
 let serverToClose: ReturnType<typeof spawn> | undefined;
+let hubToClose: ReturnType<typeof spawn> | undefined;
 try {
   const address = auth.address();
   assert(address && typeof address !== "string");
@@ -65,7 +74,8 @@ try {
   process.env.TALOS_DESKTOP_RECOVERY_TIMEZONE = "America/New_York";
   config.gateway.auth = true;
   config.cloud.api_base_url = api;
-  config.sync.enabled = false;
+  const hubBinary = process.env.TALOS_E2E_SYNC_HUB_BIN;
+  config.sync.enabled = Boolean(hubBinary);
   config.llm.provider = "deepseek";
   config.llm.model = "deepseek-chat";
   config.agent.inner_model = { provider: "deepseek", id: "deepseek-chat" };
@@ -80,10 +90,33 @@ try {
   config.cloud.agent_base_url = `https://127.0.0.1:${rpcPort}`;
   config.cloud.agent_trusted_ca_file = cert;
   config.agent_node = {};
+  const hubDatabase = path.join(home, "hub.db");
+  let startHub: (() => Promise<void>) | undefined;
+  if (hubBinary) {
+    const hubPort = await freePort();
+    const hubConfig = path.join(home, "sync.yaml");
+    await writeFile(hubConfig, JSON.stringify({
+      listener: { bind_address: `127.0.0.1:${hubPort}`, certificate_file: cert, private_key_file: key },
+      storage: { backend: "sqlite", path: hubDatabase, max_connections: 4, busy_timeout_ms: 30000 },
+      auth: { issuer_url: api, timeout_ms: 5000, revalidate_interval_ms: 1000 },
+    }));
+    startHub = async () => {
+      hubToClose = spawn(hubBinary, ["--config", hubConfig], { stdio: ["ignore", "inherit", "inherit"] });
+      await waitFor(() => new Promise<boolean>((resolve) => {
+        const socket = createConnection({ host: "127.0.0.1", port: hubPort });
+        socket.once("connect", () => { socket.destroy(); resolve(true); });
+        socket.once("error", () => resolve(false));
+      }));
+    };
+    await startHub();
+    config.sync.hub_endpoint = `wss://127.0.0.1:${hubPort}/v1/sync`;
+    config.sync.trusted_ca_file = cert;
+  }
   await writeFile(configPath, JSON.stringify(config));
   const serverHome = path.join(home, "server");
   await mkdir(path.join(serverHome, "conf"), { recursive: true });
   const serverConfig = structuredClone(config);
+  serverConfig.sync.enabled = false;
   serverConfig.gateway.port = httpPort;
   serverConfig.agent_node = { control_plane: { bind_address: `127.0.0.1:${rpcPort}`, tls_certificate_file: cert, tls_private_key_file: key, trusted_node_ca_file: cert } };
   const serverPath = path.join(serverHome, "selected-config.yaml");
@@ -174,6 +207,152 @@ try {
   assert.equal(removed.unsubscribed, true);
   assert.notEqual(removed.subscriptionId, subscribed.subscriptionId);
   assert.deepEqual(requests.filter((request) => request.method === "event/subscribe").map((request) => request.authorized), [false, true, true]);
+  if (startHub) {
+    const syncStatus = () => controller.invoke<AppProtocol.SyncStatusResponse>("sync/status", null, options);
+    const isolationId = randomUUID();
+    const startTurn = (text: string) => controller.invoke<AppProtocol.StartTurnResponse>("turn/start", {
+      ...turn, sessionId: isolationId, input: { content: [{ type: "text", text }] }, clientRequestId: randomUUID(),
+    }, options);
+    const timeline = async () => (await controller.invoke<AppProtocol.RecoverTimelineResponse>("timeline/recover", {
+      sessionId: isolationId, afterEventId: null, replayLimit: 200,
+    }, options)).replay.events;
+    const terminal = async (turnId: string) => (await timeline()).filter(({ event }) => (
+      event.type === "agent" && event.data.identity.turnId === turnId
+      && ["turnCompleted", "turnFailed"].includes(event.data.payload.type)
+    ));
+    const waitForCompletion = async (turnId: string) => {
+      await waitFor(async () => (await terminal(turnId)).length === 1, 5000);
+      const [entry] = await terminal(turnId);
+      assert(entry?.event.type === "agent" && entry.event.data.payload.type === "turnCompleted");
+    };
+    const runWhileBlocked = async (scenario: string) => {
+      const began = performance.now();
+      await waitForCompletion((await startTurn(`finish while ${scenario}`)).turnId);
+      const finishMs = performance.now() - began;
+      assert(finishMs < 5000, `Local completion took ${finishMs.toFixed(1)}ms`);
+      const marker = `hold ${scenario} ${randomUUID()}`;
+      const active = { marker, opened: false, closed: false };
+      heldStream = active;
+      try {
+        const started = await startTurn(marker);
+        await waitFor(async () => active.opened, 5000);
+        const stoppedAt = performance.now();
+        const stopped = await controller.invoke<AppProtocol.InterruptTurnResponse>("turn/interrupt", {
+          identity: { sessionId: isolationId, turnId: started.turnId },
+        }, options);
+        assert.equal(stopped.outcome.type, "cancelled");
+        await waitFor(async () => active.closed && (await terminal(started.turnId)).length === 1, 5000);
+        const stopMs = performance.now() - stoppedAt;
+        assert(stopMs < 5000, `Local Stop took ${stopMs.toFixed(1)}ms`);
+        const [entry] = await terminal(started.turnId);
+        assert(entry?.event.type === "agent" && entry.event.data.payload.type === "turnFailed");
+        assert.equal(entry.event.data.payload.data.error.code, "cancelled");
+        const recovered = await controller.invoke<AppProtocol.SessionActiveTurnResponse>("session/active_turn", { sessionId: isolationId }, options);
+        assert.equal(recovered.activeTurn, null);
+        const cancelledEvents = async () => (await timeline()).filter(({ event }) =>
+          event.type === "agent" && event.data.identity.turnId === started.turnId,
+        ).map(({ eventId }) => eventId);
+        const stoppedEvents = await cancelledEvents();
+        await waitForCompletion((await startTurn(`follow-up after ${scenario}`)).turnId);
+        assert.equal((await terminal(started.turnId)).length, 1);
+        assert.deepEqual(await cancelledEvents(), stoppedEvents);
+        console.log(`CASE desktop_sync_${scenario}_local_completion_and_stop PASS finish=${finishMs.toFixed(1)}ms stop=${stopMs.toFixed(1)}ms`);
+      } finally {
+        heldStream = undefined;
+      }
+    };
+    const storage = new DatabaseSync(path.join(home, "data", "talos.db"));
+    const pending = () => (storage.prepare("SELECT COUNT(*) AS count FROM visible_sync_outbox").get() as { count: number }).count;
+    const batches = 379;
+    const noticesPerBatch = process.env.TALOS_E2E_SYNC_STRESS === "1" ? 32 : 0;
+    try {
+      await waitFor(async () => (await syncStatus()).connection === "connected");
+      const baseline = await startTurn("publish baseline before Sync faults");
+      await waitForCompletion(baseline.turnId);
+      await waitFor(async () => pending() === 0 && storage.prepare(
+        "SELECT 1 FROM sync_documents WHERE kind='session' AND resource_id=? AND session_projection_json IS NOT NULL",
+      ).get(isolationId) !== undefined);
+      await stopChild(hubToClose);
+      await waitFor(async () => (await syncStatus()).connection === "disconnected");
+      await runWhileBlocked("offline");
+      assert(pending() > 0, "offline local work must leave durable Sync changes");
+
+      // Hold the actual Hub writer so a live WSS transport retains its outbox.
+      await startHub();
+      await waitFor(async () => (await syncStatus()).connection === "connected");
+      const hubWriter = new DatabaseSync(hubDatabase);
+      const seedPending = storage.prepare("SELECT COUNT(*) AS count FROM visible_sync_outbox WHERE seq > ? AND seq <= ?");
+      let seedAfter: number | bigint = 0;
+      let seedThrough: number | bigint = 0;
+      const remainingSeed = () => (seedPending.get(seedAfter, seedThrough) as { count: number }).count;
+      try {
+        await waitFor(async () => {
+          try { hubWriter.exec("BEGIN IMMEDIATE"); return true; }
+          catch (error) {
+            if (error instanceof Error && "errcode" in error && error.errcode === 5) return false;
+            throw error;
+          }
+        }, 5000);
+        const binding = storage.prepare("SELECT hub_id,account_id,source_user_id FROM sync_bindings").get();
+        const peerId = storage.prepare("SELECT peer_id FROM sync_identity").get()?.peer_id;
+        const document = storage.prepare("SELECT session_projection_json FROM sync_documents WHERE kind='session' AND resource_id=?").get(isolationId);
+        assert(binding && typeof peerId === "string" && typeof document?.session_projection_json === "string");
+        let before = JSON.parse(document.session_projection_json).snapshot;
+        const append = storage.prepare("INSERT INTO sync_outbox(hub_id,account_id,source_user_id,kind,resource_id,changes_json,created_at) VALUES (?,?,?,'session',?,?,?)");
+        storage.exec("PRAGMA busy_timeout=5000; BEGIN IMMEDIATE");
+        try {
+          seedAfter = Number(storage.prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM sync_outbox").get()?.seq);
+          for (let index = 0; index < batches; index++) {
+            const after = { ...before, session: { ...before.session, title: `backlog ${index}` } };
+            const metadata = (data: unknown) => ({ kind: "session", data });
+            const changes: unknown[] = [{ type: "metadata", data: { before: metadata(before), after: metadata(after) } }];
+            for (let notice = 0; notice < noticesPerBatch; notice++) {
+              const id = `stress-${index}-${notice}`;
+              const persistedAt = Date.now();
+              changes.push({ type: "event", data: {
+                key: { type: "notice", peerId, sourceEventId: id }, persistedAt,
+                event: { type: "systemNotice", data: {
+                  identity: { sessionId: isolationId, turnId: baseline.turnId }, occurredAt: persistedAt,
+                  notice: { level: "info", content: { type: "text", data: id } },
+                } },
+              } });
+            }
+            seedThrough = append.run(binding.hub_id!, binding.account_id!, binding.source_user_id!, isolationId,
+              JSON.stringify(changes), Math.floor(Date.now() / 1000)).lastInsertRowid;
+            before = after;
+          }
+          storage.exec("COMMIT");
+        } catch (error) {
+          storage.exec("ROLLBACK");
+          throw error;
+        }
+        assert.equal(remainingSeed(), batches);
+        console.log(`CASE desktop_sync_seeded_backlog PASS batches=${batches} timelineFacts=${batches * noticesPerBatch}`);
+        await runWhileBlocked("backlog");
+        assert.equal(remainingSeed(), batches, "the Hub must still be blocked after finish and Stop");
+      } finally {
+        hubWriter.close();
+      }
+      const drainStarted = performance.now();
+      const drainBudget = noticesPerBatch ? 120000 : 30000;
+      const remainingBudget = () => drainBudget - (performance.now() - drainStarted);
+      if (noticesPerBatch) {
+        await waitFor(async () => {
+          const rows = remainingSeed();
+          return rows > 0 && rows < batches;
+        }, remainingBudget());
+        await runWhileBlocked("recovery");
+        // Foreground turns add their own rows, so use only the seeded prefix.
+        const rows = remainingSeed();
+        assert(rows > 0, "seeded work must remain after recovery finish and Stop");
+        console.log(`CASE desktop_sync_recovery_overlap PASS seededBatchesRemaining=${rows}`);
+      }
+      await waitFor(async () => pending() === 0, remainingBudget());
+      console.log(`CASE desktop_sync_backlog_drained PASS elapsed=${(performance.now() - drainStarted).toFixed(1)}ms`);
+    } finally {
+      storage.close();
+    }
+  }
   // Both gateways retain authorization locally. Cloud failure must not add
   // introspection, delay metadata/History/status, or prevent local idle deletion.
   const httpOrigin = `http://127.0.0.1:${httpPort}`;
@@ -225,6 +404,7 @@ try {
 } finally {
   try { await controllerToClose?.close(); }
   finally {
+    await stopChild(hubToClose);
     if (serverToClose && serverToClose.exitCode === null && serverToClose.signalCode === null) {
       const exited = new Promise<void>((resolve) => serverToClose!.once("exit", () => resolve()));
       serverToClose.kill("SIGINT");
@@ -232,6 +412,13 @@ try {
     }
     await new Promise<void>((resolve, reject) => auth.close((error) => error ? reject(error) : resolve()));
   }
+}
+
+async function stopChild(child: ReturnType<typeof spawn> | undefined) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  child.kill("SIGINT");
+  await exited;
 }
 
 async function freePort(): Promise<number> {

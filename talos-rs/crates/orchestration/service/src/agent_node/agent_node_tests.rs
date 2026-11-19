@@ -24,7 +24,7 @@ async fn owner_registration_restart_and_credential_rotation() {
     )
     .await
     .unwrap();
-    let store = Arc::new(DatabaseAgentNodeStore::new(storage.pool().clone()));
+    let store = Arc::new(DatabaseAgentNodeStore::new(&storage));
     let service = AgentNodeService::new(store.clone());
     let owner = Actor::regular("user-1");
     let other = Actor::regular("user-2");

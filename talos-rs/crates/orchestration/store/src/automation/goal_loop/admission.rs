@@ -18,8 +18,8 @@ async fn bind_input(
     origin: &AutomationTurnOrigin,
     message: &str,
 ) -> TalosResult<()> {
-    if tx.query("SELECT event_seq FROM agent_events WHERE session_id=? AND turn_id=? AND json_extract(payload_json,'$.type')='messageCompleted' AND json_extract(payload_json,'$.data.messageId')=? AND json_extract(payload_json,'$.data.role')='user'",&[&turn.session_id,&turn.turn_id,message]).await?.is_empty(){return Err(missing())}
-    let rows = tx.query("SELECT automation_origin_json,automation_input_message_id FROM agent_events WHERE session_id=? AND turn_id=? AND sequence=1", &[&turn.session_id, &turn.turn_id]).await?;
+    if tx.query("SELECT event_seq FROM visible_agent_events WHERE session_id=? AND turn_id=? AND json_extract(payload_json,'$.type')='messageCompleted' AND json_extract(payload_json,'$.data.messageId')=? AND json_extract(payload_json,'$.data.role')='user'",&[&turn.session_id,&turn.turn_id,message]).await?.is_empty(){return Err(missing())}
+    let rows = tx.query("SELECT automation_origin_json,automation_input_message_id FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=1", &[&turn.session_id, &turn.turn_id]).await?;
     let row = rows.first().ok_or_else(missing)?;
     if let Some(raw) = row.get_string("automation_origin_json") {
         return if decode::<AutomationTurnOrigin>(&raw)? == *origin
@@ -30,7 +30,7 @@ async fn bind_input(
             Err(conflict())
         };
     }
-    tx.execute("UPDATE agent_events SET automation_origin_json=?,automation_input_message_id=? WHERE session_id=? AND turn_id=? AND sequence=1 AND automation_origin_json IS NULL", &[&encode(origin)?,message,&turn.session_id,&turn.turn_id]).await?;
+    tx.execute("UPDATE agent_events SET automation_origin_json=?,automation_input_message_id=? WHERE event_seq=(SELECT event_seq FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=1 AND automation_origin_json IS NULL)", &[&encode(origin)?,message,&turn.session_id,&turn.turn_id]).await?;
     Ok(())
 }
 /// Called inside the original admission transaction, before the execution permit

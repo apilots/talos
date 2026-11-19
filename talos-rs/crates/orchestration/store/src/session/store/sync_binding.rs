@@ -3,7 +3,7 @@ use super::DatabaseSessionStore;
 use std::sync::Arc;
 use talos_error::{TalosError, TalosResult};
 
-use crate::sync::capture::{self, CaptureScope};
+use crate::sync::capture;
 impl DatabaseSessionStore {
     /// Preserve the canonical identity of historical local records before an
     /// explicitly deleted enrollment is replaced. New unregistered local records
@@ -23,9 +23,6 @@ impl DatabaseSessionStore {
             return Err(TalosError::localized(talos_error::ErrorLocalization::ComputerDeletionActive));
         }
         let mut resources = Vec::new();
-        for row in tx.query("SELECT resource_id AS id FROM local_computer_retirement_resources WHERE node_id = ? AND kind = 'session'", &[computer_id]).await? {
-            resources.push(talos_sync::SyncResourceKey::Session { session_id: row.get_string("id").expect("Session key") });
-        }
         for row in tx.query("SELECT resource_id AS id FROM local_computer_retirement_resources WHERE node_id = ? AND kind = 'project'", &[computer_id]).await? {
             resources.push(talos_sync::SyncResourceKey::Project { project_id: row.get_string("id").expect("Project key") });
         }
@@ -35,12 +32,25 @@ impl DatabaseSessionStore {
             if adapter.binding().scope.account_id == user_id {
                 cuts.push((
                     adapter.clone(),
-                    capture::prepare(adapter, &mut *tx, resources.clone(), CaptureScope::Resource)
-                        .await?,
+                    capture::prepare(adapter, &mut *tx, resources.clone()).await?,
                 ));
             }
         }
         tx.execute("UPDATE sessions SET execution_node_id = ? WHERE execution_node_id = 'embedded' AND user_id = ? AND session_key IN (SELECT resource_id FROM local_computer_retirement_resources WHERE node_id = ? AND kind = 'session')", &[computer_id, user_id, computer_id]).await?;
+        tx.execute(
+            "UPDATE resource_revisions SET execution_node_id=?1,
+               changes_json=CASE WHEN json_type(changes_json, '$.before.fields')='object'
+                   THEN json_set(changes_json, '$.before.fields.execution_node_id', ?1) ELSE changes_json END
+             WHERE kind='session' AND execution_node_id='embedded' AND owner_user_id=?2
+               AND resource_id IN (SELECT resource_id FROM local_computer_retirement_resources WHERE node_id=?1 AND kind='session')",
+            &[computer_id, user_id],
+        ).await?;
+        tx.execute(
+            "UPDATE resource_revisions SET changes_json=json_set(changes_json, '$.after.fields.execution_node_id', ?1)
+             WHERE kind='session' AND execution_node_id=?1 AND owner_user_id=?2 AND json_type(changes_json, '$.after.fields')='object'
+               AND json_extract(changes_json, '$.after.fields.execution_node_id')='embedded'",
+            &[computer_id, user_id],
+        ).await?;
         tx.execute("UPDATE projects SET execution_node_id = ? WHERE execution_node_id = 'embedded' AND user_id = ? AND project_id IN (SELECT resource_id FROM local_computer_retirement_resources WHERE node_id = ? AND kind = 'project')", &[computer_id, user_id, computer_id]).await?;
         for (adapter, cut) in &cuts {
             capture::finish(adapter, &mut *tx, cut).await?;
@@ -100,31 +110,10 @@ impl DatabaseSessionStore {
         &self,
         session_id: &str,
     ) -> TalosResult<Box<dyn talos_storage::StorageTransaction>> {
-        self.begin_session_capture(session_id, CaptureScope::Resource)
-            .await
-    }
-
-    /// Capture stream progress and cancellation without rebuilding session metadata.
-    pub(crate) async fn begin_session_timeline_transaction(
-        &self,
-        session_id: &str,
-    ) -> TalosResult<Box<dyn talos_storage::StorageTransaction>> {
-        self.begin_session_capture(session_id, CaptureScope::SessionTimeline)
-            .await
-    }
-
-    async fn begin_session_capture(
-        &self,
-        session_id: &str,
-        scope: CaptureScope,
-    ) -> TalosResult<Box<dyn talos_storage::StorageTransaction>> {
-        capture::transaction_with_scope(
+        crate::sync::source::transaction(
             self.storage.begin_transaction().await?,
             self.sync.clone(),
-            vec![talos_sync::SyncResourceKey::Session {
-                session_id: session_id.into(),
-            }],
-            scope,
+            vec![session_id.into()],
         )
         .await
     }

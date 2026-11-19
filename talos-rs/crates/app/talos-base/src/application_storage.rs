@@ -30,9 +30,8 @@ pub(crate) fn build_database_stores(
     Arc<dyn ProfileStore>,
     Arc<DatabaseFileStore>,
 ) {
-    let profile_store: Arc<dyn ProfileStore> =
-        Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
-    let file_store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
+    let profile_store: Arc<dyn ProfileStore> = Arc::new(DatabaseProfileStore::new(storage));
+    let file_store = Arc::new(DatabaseFileStore::new(storage));
     (storage.clone(), profile_store, file_store)
 }
 

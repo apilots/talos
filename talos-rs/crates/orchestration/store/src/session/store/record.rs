@@ -244,9 +244,9 @@ impl DatabaseSessionStore {
                 SELECT s.session_key, a.session_id AS local_session_id, e.payload_json
                 FROM sessions s
                 LEFT JOIN agent_active_turns a ON a.session_id = s.session_key
-                LEFT JOIN agent_events e ON a.session_id IS NULL
+                LEFT JOIN visible_agent_events e ON a.session_id IS NULL
                     AND s.execution_node_id != 'embedded' AND e.event_seq = (
-                        SELECT event_seq FROM agent_events
+                        SELECT event_seq FROM visible_agent_events
                         WHERE session_id = s.session_key AND sequence IS NOT NULL
                         ORDER BY event_seq DESC LIMIT 1
                     )

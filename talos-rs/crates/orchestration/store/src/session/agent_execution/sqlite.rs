@@ -74,20 +74,17 @@ impl AgentExecutionStore for DatabaseSessionStore {
         session_id: &str,
     ) -> TalosResult<Option<talos_agent_api::TimelineActiveTurn>> {
         let mut tx = self.storage.begin_read_transaction().await?;
-        let Some(adapter) = self
-            .sync
-            .resource(
-                &mut *tx,
-                &talos_sync::SyncResourceKey::Session {
-                    session_id: session_id.into(),
-                },
-            )
-            .await?
-        else {
+        let Some(adapter) = self.sync.session(&mut *tx, session_id).await? else {
             tx.commit().await?;
             return Ok(None);
         };
-        let rows = tx.query("SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE session_id = ? AND sequence IS NOT NULL ORDER BY event_seq DESC LIMIT 1", &[session_id]).await?;
+        let rows = tx.query(
+            "SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json
+             FROM committed_agent_events WHERE session_id = ?1
+               AND history_generation = COALESCE((SELECT history_generation FROM sessions WHERE session_key = ?1), 0)
+               AND sequence IS NOT NULL ORDER BY event_seq DESC LIMIT 1",
+            &[session_id],
+        ).await?;
         let Some(row) = rows.first() else {
             tx.commit().await?;
             return Ok(None);
@@ -118,7 +115,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
                     last.persisted_at,
                 ),
             };
-        let initial_message = tx.query("SELECT json_extract(payload_json, '$.data.messageId') AS message_id FROM agent_events WHERE session_id = ? AND turn_id = ? AND json_extract(payload_json, '$.type') = 'messageCompleted' AND json_extract(payload_json, '$.data.role') = 'user' ORDER BY sequence LIMIT 1", &[session_id, &last.identity.turn_id]).await?.first().and_then(|r| r.get_string("message_id"));
+        let initial_message = tx.query("SELECT json_extract(payload_json, '$.data.messageId') AS message_id FROM visible_agent_events WHERE session_id = ? AND turn_id = ? AND json_extract(payload_json, '$.type') = 'messageCompleted' AND json_extract(payload_json, '$.data.role') = 'user' ORDER BY sequence LIMIT 1", &[session_id, &last.identity.turn_id]).await?.first().and_then(|r| r.get_string("message_id"));
         tx.commit().await?;
         Ok(Some(talos_agent_api::TimelineActiveTurn {
             automation_input: None,
@@ -145,7 +142,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
     ) -> TalosResult<Vec<super::TimelineEventRecord>> {
         let after = after_event_seq.to_string();
         let limit = limit.clamp(1, MAX_EVENT_READ_LIMIT).to_string();
-        self.storage.query("SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE session_id = ? AND event_seq > ? ORDER BY event_seq ASC LIMIT ?", &[session_id, &after, &limit]).await?
+        self.storage.query("SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM visible_agent_events WHERE session_id = ? AND event_seq > ? ORDER BY event_seq ASC LIMIT ?", &[session_id, &after, &limit]).await?
             .iter().map(super::notice::parse).collect()
     }
 
@@ -155,7 +152,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
     ) -> TalosResult<Option<super::TimelineEventRecord>> {
         self.storage
             .query(
-                "SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE event_seq = ?",
+                "SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM visible_agent_events WHERE event_seq = ?",
                 &[&event_seq.to_string()],
             )
             .await?
@@ -168,7 +165,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
         Ok(self
             .storage
             .query(
-                "SELECT MAX(event_seq) AS event_seq FROM agent_events WHERE session_id = ?",
+                "SELECT MAX(event_seq) AS event_seq FROM visible_agent_events WHERE session_id = ?",
                 &[session_id],
             )
             .await?
@@ -281,7 +278,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
                 r#"
                 SELECT event_seq, session_id, turn_id, sequence,
                        occurred_at, persisted_at, payload_json
-                FROM agent_events
+                FROM visible_agent_events
                 WHERE session_id = ? AND turn_id = ? AND sequence IS NOT NULL
                 ORDER BY sequence ASC
                 LIMIT ?
@@ -310,7 +307,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
                 r#"
                 SELECT event_seq, session_id, turn_id, sequence,
                        occurred_at, persisted_at, payload_json
-                FROM agent_events
+                FROM visible_agent_events
                 WHERE session_id = ? AND event_seq > ? AND sequence IS NOT NULL
                 ORDER BY event_seq ASC
                 LIMIT ?
@@ -329,7 +326,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
                 r#"
                 SELECT event_seq, session_id, turn_id, sequence,
                        occurred_at, persisted_at, payload_json
-                FROM agent_events
+                FROM visible_agent_events
                 WHERE event_seq = ? AND sequence IS NOT NULL
                 "#,
                 &[event_seq.as_str()],
@@ -342,7 +339,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
         let rows = self
             .storage
             .query(
-                "SELECT MAX(event_seq) AS event_seq FROM agent_events WHERE session_id = ? AND sequence IS NOT NULL",
+                "SELECT MAX(event_seq) AS event_seq FROM visible_agent_events WHERE session_id = ? AND sequence IS NOT NULL",
                 &[session_id],
             )
             .await?;
@@ -359,8 +356,9 @@ impl AgentExecutionStore for DatabaseSessionStore {
                 r#"
                 SELECT event_seq, session_id, turn_id, sequence,
                        occurred_at, persisted_at, payload_json
-                FROM agent_events
-                WHERE session_id = ?
+                FROM committed_agent_events
+                WHERE session_id = ?1
+                  AND history_generation = COALESCE((SELECT history_generation FROM sessions WHERE session_key = ?1), 0)
                   AND json_extract(payload_json, '$.type') IN ('turnCompleted', 'turnFailed')
                 ORDER BY event_seq DESC
                 LIMIT 1
@@ -388,13 +386,14 @@ impl AgentExecutionStore for DatabaseSessionStore {
                 FROM (
                     SELECT event_seq, session_id, turn_id, sequence,
                            occurred_at, persisted_at, payload_json
-                    FROM agent_events
-                    WHERE session_id = ?
-                      AND event_seq < ?
+                    FROM committed_agent_events
+                    WHERE session_id = ?1
+                      AND history_generation = COALESCE((SELECT history_generation FROM sessions WHERE session_key = ?1), 0)
+                      AND event_seq < ?2
                       AND json_extract(payload_json, '$.type')
                           IN ('turnCompleted', 'turnFailed')
                     ORDER BY event_seq DESC
-                    LIMIT ?
+                    LIMIT ?3
                 ) AS latest_terminal_events
                 ORDER BY event_seq ASC
                 "#,
@@ -416,7 +415,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
         let limit = limit.clamp(1, MAX_EVENT_READ_LIMIT).to_string();
         self.storage
             .query(
-                "SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE session_id = ? AND event_seq > ? AND event_seq <= ? AND json_extract(payload_json, '$.type') IN ('turnCompleted', 'turnFailed') ORDER BY event_seq ASC LIMIT ?",
+                "SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM visible_agent_events WHERE session_id = ? AND event_seq > ? AND event_seq <= ? AND json_extract(payload_json, '$.type') IN ('turnCompleted', 'turnFailed') ORDER BY event_seq ASC LIMIT ?",
                 &[session_id, &after, &through, &limit],
             )
             .await?
@@ -436,14 +435,14 @@ impl AgentExecutionStore for DatabaseSessionStore {
                 r#"
                 WITH initial_turn AS (
                     SELECT message.turn_id
-                    FROM agent_events AS message
+                    FROM visible_agent_events AS message
                     WHERE message.session_id = ?
                       AND json_extract(message.payload_json, '$.type') = 'messageCompleted'
                       AND json_extract(message.payload_json, '$.data.messageId') = ?
                       AND json_extract(message.payload_json, '$.data.role') = 'user'
                       AND NOT EXISTS (
                           SELECT 1
-                          FROM agent_events AS earlier
+                          FROM visible_agent_events AS earlier
                           WHERE earlier.session_id = message.session_id
                             AND earlier.turn_id = message.turn_id
                             AND earlier.sequence < message.sequence
@@ -454,7 +453,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
                 SELECT terminal.event_seq, terminal.session_id, terminal.turn_id,
                        terminal.sequence, terminal.occurred_at, terminal.persisted_at,
                        terminal.payload_json
-                FROM agent_events AS terminal
+                FROM visible_agent_events AS terminal
                 JOIN initial_turn ON initial_turn.turn_id = terminal.turn_id
                 WHERE terminal.session_id = ?
                   AND json_extract(terminal.payload_json, '$.type')

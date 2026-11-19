@@ -13,7 +13,7 @@ async fn waiting_interrupt_discards_usage_without_dispatching_the_queue() {
     .await;
     create_test_session_record(store.clone()).await;
     insert_pending_dynamic_action(store.as_ref(), None).await;
-    let profile = DatabaseProfileStore::new(storage.pool().clone());
+    let profile = DatabaseProfileStore::new(&storage);
     let session = test_session();
     profile
         .record_turn_usage(talos_store::profile::TurnUsageUpdate {

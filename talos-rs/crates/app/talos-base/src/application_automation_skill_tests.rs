@@ -34,7 +34,7 @@ impl ResolverFixture {
         )
         .await
         .unwrap();
-        let nodes = Arc::new(DatabaseAgentNodeStore::new(storage.pool().clone()));
+        let nodes = Arc::new(DatabaseAgentNodeStore::new(&storage));
         let sessions = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
         let now = chrono::Utc::now().timestamp();
         nodes

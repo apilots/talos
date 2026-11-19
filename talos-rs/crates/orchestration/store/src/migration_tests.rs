@@ -827,6 +827,18 @@ async fn execution_details_upgrade_preserves_main_history_with_null_details() {
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO agent_events (session_id,turn_id,sequence,occurred_at,persisted_at,payload_json) VALUES ('old-session','old-turn',1,10,11,'{\"type\":\"turnStarted\",\"data\":{}}'),('old-session','old-turn',2,20,21,'{\"type\":\"turnCompleted\",\"data\":{\"stopReason\":\"endTurn\"}}')")
         .execute(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO agent_command_idempotency (
+            session_id, command, idempotency_key, request_id, request_hash, turn_id,
+            status, outcome, committed_event_seq, created_at, updated_at
+         )
+         SELECT session_id, 'turn_submission', 'old-key', 'old-request', 'old-hash', turn_id,
+                'completed', 'accepted', event_seq, occurred_at, persisted_at
+         FROM agent_events WHERE session_id = 'old-session' AND sequence = 1",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let event_query = "SELECT event_seq,session_id,turn_id,sequence,occurred_at,persisted_at,payload_json FROM agent_events ORDER BY event_seq";
     let before = sqlx::query_as::<_, (i64, String, String, i64, i64, i64, String)>(event_query)
         .fetch_all(&pool)
@@ -851,11 +863,37 @@ async fn execution_details_upgrade_preserves_main_history_with_null_details() {
         "automation_native_job_controls".to_owned(),
         "managed_workers".to_owned(),
         "managed_worker_deletions".to_owned(),
+        "session_command_revisions".to_owned(),
+        "resource_revisions".to_owned(),
+        "sync_resource_capture".to_owned(),
+        "sync_import_stages".to_owned(),
+        "sync_snapshot_chunks".to_owned(),
+        "sync_snapshots".to_owned(),
+        "sync_capture_batches".to_owned(),
+        "session_event_retention".to_owned(),
     ]);
     tables_before.sort();
 
     run_migrations(&pool, &migration_dir).await.unwrap();
     run_migrations(&pool, &migration_dir).await.unwrap();
+
+    let receipts = sqlx::query_as::<_, (String, String, i64, i64, String)>(
+        "SELECT session_id, owner_user_id, history_generation, committed_event_seq, request_id
+         FROM session_command_revisions",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        receipts,
+        vec![(
+            "old-session".into(),
+            "old-user".into(),
+            0,
+            before[0].0,
+            "old-request".into()
+        )]
+    );
 
     assert_eq!(
         sqlx::query_as::<_, (i64, String, String, i64, i64, i64, String)>(event_query)

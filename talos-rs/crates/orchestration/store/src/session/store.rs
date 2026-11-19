@@ -173,16 +173,7 @@ impl SessionStore for DatabaseSessionStore {
         session_id: &str,
     ) -> TalosResult<Option<talos_types::SessionInfo>> {
         let mut tx = self.storage.begin_read_transaction().await?;
-        let Some(adapter) = self
-            .sync
-            .resource(
-                &mut *tx,
-                &talos_sync::SyncResourceKey::Session {
-                    session_id: session_id.into(),
-                },
-            )
-            .await?
-        else {
+        let Some(adapter) = self.sync.session(&mut *tx, session_id).await? else {
             tx.commit().await?;
             return Ok(None);
         };
@@ -211,7 +202,7 @@ impl SessionStore for DatabaseSessionStore {
         let generation = row
             .get_i64("history_generation")
             .ok_or_else(|| TalosError::internal("Session history generation is unavailable."))?;
-        let rows = tx.query("SELECT turn_id, sequence FROM agent_events WHERE session_id = ? AND json_extract(payload_json, '$.type') IN ('turnCompleted', 'turnFailed') ORDER BY event_seq DESC LIMIT 1", &[session_id]).await?;
+        let rows = tx.query("SELECT turn_id, sequence FROM committed_agent_events WHERE session_id = ? AND history_generation = ? AND json_extract(payload_json, '$.type') IN ('turnCompleted', 'turnFailed') ORDER BY event_seq DESC LIMIT 1", &[session_id, &generation.to_string()]).await?;
         let history_cursor = talos_types::SessionHistoryCursor {
             history_generation: generation as u64,
             completed_turn_id: rows.first().and_then(|r| r.get_string("turn_id")),
@@ -422,7 +413,7 @@ impl SessionStore for DatabaseSessionStore {
         }
         if query.memory_pending_only {
             clauses.push(
-                "EXISTS (SELECT 1 FROM agent_events AS event WHERE event.session_id = sessions.session_key AND json_extract(event.payload_json, '$.type') IN ('turnCompleted', 'turnFailed') AND event.event_seq > sessions.memory_processed_until_event_seq)",
+                "EXISTS (SELECT 1 FROM visible_agent_events AS event WHERE event.session_id = sessions.session_key AND json_extract(event.payload_json, '$.type') IN ('turnCompleted', 'turnFailed') AND event.event_seq > sessions.memory_processed_until_event_seq)",
             );
         }
         if let Some(after) = &query.after {
@@ -501,7 +492,7 @@ impl SessionStore for DatabaseSessionStore {
         }
         if query.memory_pending_only {
             clauses.push(
-                "EXISTS (SELECT 1 FROM agent_events AS event WHERE event.session_id = sessions.session_key AND json_extract(event.payload_json, '$.type') IN ('turnCompleted', 'turnFailed') AND event.event_seq > sessions.memory_processed_until_event_seq)",
+                "EXISTS (SELECT 1 FROM visible_agent_events AS event WHERE event.session_id = sessions.session_key AND json_extract(event.payload_json, '$.type') IN ('turnCompleted', 'turnFailed') AND event.event_seq > sessions.memory_processed_until_event_seq)",
             );
         }
         if let Some(after) = &query.after {
@@ -680,32 +671,26 @@ impl SessionStore for DatabaseSessionStore {
                 &[session_id],
             )
             .await?;
-        transaction
-            .execute(
-                "DELETE FROM agent_events WHERE session_id = ?",
-                &[session_id],
-            )
-            .await?;
-
-        let resource = talos_sync::SyncResourceKey::Session {
-            session_id: session_id.into(),
-        };
-        if let Some(adapter) = self.sync.resource(&mut *transaction, &resource).await? {
-            let generation = adapter.generation(&mut *transaction, &resource).await? + 1;
-            adapter
-                .sync
-                .capture(
-                    &mut *transaction,
-                    talos_sync::SyncCaptureParams {
-                        binding: adapter.binding.clone(),
-                        resource,
-                        changes: vec![talos_sync::SyncChange::Reset {
-                            history_generation: generation,
-                        }],
-                        created_at: chrono::Utc::now().timestamp(),
-                    },
+        if self.sync.is_empty() {
+            transaction
+                .execute(
+                    "DELETE FROM agent_events WHERE session_id = ?",
+                    &[session_id],
                 )
                 .await?;
+            transaction
+                .execute(
+                    "DELETE FROM session_command_revisions WHERE session_id = ?",
+                    &[session_id],
+                )
+                .await?;
+        } else {
+            crate::sync::source::retire_history(
+                &mut *transaction,
+                session_id,
+                /*deleted*/ false,
+            )
+            .await?;
         }
         let usage_json = Self::build_usage_json(&SessionUsage::default())?;
         let cleared_at = cleared_at.to_string();
@@ -822,6 +807,9 @@ impl SessionStore for DatabaseSessionStore {
 
     async fn delete_session_record(&self, session_id: &str) -> TalosResult<bool> {
         let mut transaction = self.begin_session_transaction(session_id).await?;
+        if !self.sync.is_empty() {
+            crate::sync::source::retain_deleted_events(&mut *transaction, &[session_id]).await?;
+        }
         let affected = transaction
             .execute("DELETE FROM sessions WHERE session_key = ?", &[session_id])
             .await?;
@@ -832,14 +820,20 @@ impl SessionStore for DatabaseSessionStore {
     async fn delete_session_tree(&self, tree_root_session_id: &str) -> TalosResult<bool> {
         let mut transaction = self.storage.begin_transaction().await?;
         let rows = transaction.query("SELECT session_key FROM sessions WHERE session_key = ? OR tree_root_session_id = ?", &[tree_root_session_id, tree_root_session_id]).await?;
-        let resources = rows
+        let session_ids: Vec<_> = rows
             .iter()
-            .map(|row| talos_sync::SyncResourceKey::Session {
-                session_id: row.get_string("session_key").expect("persisted Session ID"),
-            })
+            .map(|row| row.get_string("session_key").expect("persisted Session ID"))
             .collect();
         let mut transaction =
-            crate::sync::capture::transaction(transaction, self.sync.clone(), resources).await?;
+            crate::sync::source::transaction(transaction, self.sync.clone(), session_ids.clone())
+                .await?;
+        if !self.sync.is_empty() {
+            crate::sync::source::retain_deleted_events(
+                &mut *transaction,
+                &session_ids.iter().map(String::as_str).collect::<Vec<_>>(),
+            )
+            .await?;
+        }
         let affected = transaction
             .execute(
                 "DELETE FROM sessions WHERE session_key = ? OR tree_root_session_id = ?",

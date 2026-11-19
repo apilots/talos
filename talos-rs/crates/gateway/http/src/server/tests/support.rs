@@ -61,7 +61,7 @@ pub(crate) async fn test_file_service(
     let operator = Operator::new(Memory::default()).unwrap().finish();
     std::sync::Arc::new(
         FileService::new(
-            std::sync::Arc::new(DatabaseFileStore::new(pool)),
+            std::sync::Arc::new(DatabaseFileStore::new(&storage)),
             projects,
             BTreeMap::from([("local".to_string(), operator)]),
             config,
@@ -83,7 +83,7 @@ pub(crate) async fn test_database_stores(
         .await
         .unwrap();
     let nodes = talos_service::AgentNodeService::new(Arc::new(
-        talos_store::node::DatabaseAgentNodeStore::new(storage.pool().clone()),
+        talos_store::node::DatabaseAgentNodeStore::new(&storage),
     ));
     nodes.register_embedded(true).await.unwrap();
     (

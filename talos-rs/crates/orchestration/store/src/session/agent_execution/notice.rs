@@ -35,7 +35,7 @@ pub(super) async fn list(
                 SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json, ROW_NUMBER() OVER (
                     PARTITION BY session_id, turn_id ORDER BY event_seq
                 ) AS notice_position
-                FROM agent_events
+                FROM visible_agent_events
                 WHERE (session_id, turn_id) IN (
                     SELECT json_extract(value, '$.sessionId'), json_extract(value, '$.turnId')
                     FROM json_each(?)
@@ -70,8 +70,11 @@ pub(super) async fn append(
         .begin_session_transaction(&notice.identity.session_id)
         .await?;
     let rows = transaction.query(
-        "INSERT INTO agent_events (session_id, turn_id, sequence, occurred_at, persisted_at, payload_json) SELECT ?, ?, NULL, ?, ?, ? WHERE EXISTS (SELECT 1 FROM agent_events WHERE session_id = ? AND turn_id = ? AND sequence IS NOT NULL) RETURNING event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json",
-        &[&notice.identity.session_id, &notice.identity.turn_id, &occurred_at, &persisted_at, &raw, &notice.identity.session_id, &notice.identity.turn_id],
+        "INSERT INTO agent_events (session_id, turn_id, sequence, occurred_at, persisted_at, payload_json, history_generation)
+         SELECT ?1, ?2, NULL, ?3, ?4, ?5, COALESCE((SELECT history_generation FROM sessions WHERE session_key = ?1), 0)
+         WHERE EXISTS (SELECT 1 FROM visible_agent_events WHERE session_id = ?1 AND turn_id = ?2 AND sequence IS NOT NULL)
+         RETURNING event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json",
+        &[&notice.identity.session_id, &notice.identity.turn_id, &occurred_at, &persisted_at, &raw],
     ).await?;
     let result = rows
         .first()

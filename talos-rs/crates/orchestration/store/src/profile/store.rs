@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use sqlx::SqlitePool;
 use talos_error::TalosResult;
 
 use super::{
@@ -50,24 +49,26 @@ pub trait ProfileStore: Send + Sync {
 
 /// SQLite-backed Profile usage repository.
 pub struct DatabaseProfileStore {
-    pub(super) pool: SqlitePool,
+    pub(super) storage: talos_storage::SqliteStorage,
 }
 
 impl DatabaseProfileStore {
-    /// Creates a Profile repository backed by the supplied SQLite pool.
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    /// Creates a Profile repository sharing the supplied SQLite writer.
+    pub fn new(storage: &talos_storage::SqliteStorage) -> Self {
+        Self {
+            storage: storage.clone(),
+        }
     }
 }
 
 #[async_trait]
 impl ProfileStore for DatabaseProfileStore {
     async fn record_usage(&self, update: ProfileUsageUpdate) -> TalosResult<()> {
-        super::write::record_usage(&self.pool, update).await
+        super::write::record_usage(&self.storage, update).await
     }
 
     async fn discard_turn_usage(&self, session_id: &str, turn_id: &str) -> TalosResult<()> {
-        super::write::discard_turn_usage(&self.pool, session_id, turn_id).await
+        super::write::discard_turn_usage(&self.storage, session_id, turn_id).await
     }
 
     async fn delete_finalized_before(
@@ -75,11 +76,11 @@ impl ProfileStore for DatabaseProfileStore {
         completed_before_ms: i64,
         limit: usize,
     ) -> TalosResult<u64> {
-        super::write::delete_finalized_before(&self.pool, completed_before_ms, limit).await
+        super::write::delete_finalized_before(&self.storage, completed_before_ms, limit).await
     }
 
     async fn usage_summary(&self, user_id: &str) -> TalosResult<ProfileUsageSummary> {
-        super::query::usage_summary(&self.pool, user_id).await
+        super::query::usage_summary(self.storage.pool(), user_id).await
     }
 
     async fn daily_usage(
@@ -88,7 +89,7 @@ impl ProfileStore for DatabaseProfileStore {
         start_date: &str,
         end_date: &str,
     ) -> TalosResult<Vec<ProfileDailyUsageSummary>> {
-        super::query::daily_usage(&self.pool, user_id, start_date, end_date).await
+        super::query::daily_usage(self.storage.pool(), user_id, start_date, end_date).await
     }
 
     async fn model_usage(
@@ -96,6 +97,6 @@ impl ProfileStore for DatabaseProfileStore {
         user_id: &str,
         limit: usize,
     ) -> TalosResult<Vec<ProfileModelUsageSummary>> {
-        super::query::model_usage(&self.pool, user_id, limit).await
+        super::query::model_usage(self.storage.pool(), user_id, limit).await
     }
 }

@@ -9,7 +9,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    SyncChange, SyncConnectionState, SyncExportParams, SyncImportBatch, SyncScanPage,
+    SyncConnectionState, SyncExportFacts, SyncExportParams, SyncImportBatch, SyncScanPage,
     SyncScanParams, SyncStartParams, SyncStatus, TalosSync,
 };
 
@@ -44,12 +44,20 @@ pub trait SyncDataAdapter: Send + Sync {
         &self,
         params: SyncScanParams,
     ) -> impl Future<Output = TalosResult<SyncScanPage>> + Send;
-    /// Export one original business read cut while holding the caller's transaction.
+    /// Project one consistent business read cut. The runner commits the returned
+    /// cursor mappings with the outbox only if the resource still needs a baseline.
     fn export(
         &self,
         tx: &mut dyn StorageTransaction,
         params: SyncExportParams,
-    ) -> impl Future<Output = TalosResult<Vec<SyncChange>>> + Send;
+    ) -> impl Future<Output = TalosResult<SyncExportFacts>> + Send;
+    /// Prepare Store facts before the publication transaction begins.
+    fn prepare_import(
+        &self,
+        _batch: &SyncImportBatch,
+    ) -> impl Future<Output = TalosResult<()>> + Send {
+        async { Ok(()) }
+    }
     /// Return only absent immutable dependencies. The runner recovers them after
     /// rolling back its candidate, never while holding the business transaction.
     fn missing_dependencies(
@@ -64,6 +72,13 @@ pub trait SyncDataAdapter: Send + Sync {
         tx: &mut dyn StorageTransaction,
         batch: &SyncImportBatch,
     ) -> impl Future<Output = TalosResult<()>> + Send;
+    fn apply_prepared(
+        &self,
+        tx: &mut dyn StorageTransaction,
+        batch: &SyncImportBatch,
+    ) -> impl Future<Output = TalosResult<()>> + Send {
+        self.apply(tx, batch)
+    }
 }
 
 /// Owns only synchronization transport. Dropping it never shuts down a Worker.

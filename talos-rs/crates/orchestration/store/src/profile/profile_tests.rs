@@ -14,7 +14,7 @@ async fn store() -> DatabaseProfileStore {
         .unwrap();
     let pool = storage.pool().clone();
     run_migrations(&pool, &test_migrations_dir()).await.unwrap();
-    DatabaseProfileStore::new(pool)
+    DatabaseProfileStore::new(&storage)
 }
 
 fn usage(input_tokens: u32, output_tokens: u32) -> TokenUsage {
@@ -90,7 +90,7 @@ async fn model_call_usage_reuses_profile_aggregates_without_changing_session_cou
     let kinds = sqlx::query_scalar::<_, String>(
         "SELECT usage_kind FROM profile_turn_usage ORDER BY id ASC",
     )
-    .fetch_all(&store.pool)
+    .fetch_all(store.storage.pool())
     .await
     .unwrap();
     assert_eq!(kinds, vec!["turn".to_string(), "dream".to_string()]);
@@ -354,12 +354,12 @@ async fn deletion_keeps_recent_and_unfinished_usage() {
 
     let finalized: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM profile_turn_usage WHERE finalized = 1")
-            .fetch_one(&store.pool)
+            .fetch_one(store.storage.pool())
             .await
             .unwrap();
     let unfinished: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM profile_turn_usage WHERE finalized = 0")
-            .fetch_one(&store.pool)
+            .fetch_one(store.storage.pool())
             .await
             .unwrap();
     assert_eq!(finalized, 1);

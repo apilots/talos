@@ -266,13 +266,20 @@ async fn delete_session_tree_removes_descendants_and_runtime_rows() {
             )
             .await
             .unwrap();
+        storage
+            .execute(
+                "INSERT INTO session_command_revisions (session_id, owner_user_id, history_generation, command, idempotency_key, request_id, request_hash, turn_id, outcome, committed_event_seq) VALUES (?, 'user-1', 0, 'turn_submission', 'key-1', 'request-1', 'hash-1', 'turn-1', 'accepted', 1)",
+                &[session_id],
+            )
+            .await
+            .unwrap();
     }
 
     assert!(store.delete_session_tree(&root.id).await.unwrap());
 
     let counts = storage
         .query(
-            "SELECT (SELECT COUNT(*) FROM sessions) AS sessions, (SELECT COUNT(*) FROM agent_events) AS events, (SELECT COUNT(*) FROM agent_active_turns) AS active_turns, (SELECT COUNT(*) FROM agent_command_idempotency) AS idempotency_keys",
+            "SELECT (SELECT COUNT(*) FROM sessions) AS sessions, (SELECT COUNT(*) FROM agent_events) AS events, (SELECT COUNT(*) FROM agent_active_turns) AS active_turns, (SELECT COUNT(*) FROM agent_command_idempotency) AS idempotency_keys, (SELECT COUNT(*) FROM session_command_revisions) AS command_revisions",
             &[],
         )
         .await
@@ -283,8 +290,9 @@ async fn delete_session_tree_removes_descendants_and_runtime_rows() {
             counts[0].get_i64("events"),
             counts[0].get_i64("active_turns"),
             counts[0].get_i64("idempotency_keys"),
+            counts[0].get_i64("command_revisions"),
         ),
-        (Some(0), Some(0), Some(0), Some(0))
+        (Some(0), Some(0), Some(0), Some(0), Some(0))
     );
 }
 

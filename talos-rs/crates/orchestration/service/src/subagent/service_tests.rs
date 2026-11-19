@@ -391,8 +391,7 @@ async fn test_services_with_config(config: TalosConfig) -> TestServices {
     ));
     let event_service = Arc::new(TimelineEventService::new(store.clone()));
     let executor = Arc::new(RecordingAgentExecution::default());
-    let profile_store: Arc<dyn ProfileStore> =
-        Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
+    let profile_store: Arc<dyn ProfileStore> = Arc::new(DatabaseProfileStore::new(&storage));
     let recording_coordinator = Arc::new(RecordingAgentCoordinator::default());
     let coordinator: Arc<dyn AgentCoordinator> = Arc::new(RecordingExecutionCoordinator {
         execution: executor.clone(),

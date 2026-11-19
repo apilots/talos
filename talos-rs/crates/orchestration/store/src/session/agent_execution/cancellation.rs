@@ -10,7 +10,7 @@ pub(super) async fn begin(
     identity: &talos_agent_api::AgentTurnRef,
 ) -> TalosResult<AgentCancellationAdmission> {
     let mut transaction = store
-        .begin_session_timeline_transaction(&identity.session_id)
+        .begin_session_transaction(&identity.session_id)
         .await?;
     let active = load_active_turn(transaction.as_mut(), &identity.session_id)
         .await?
@@ -61,7 +61,7 @@ pub(super) async fn restore(
         ));
     }
     let mut transaction = store
-        .begin_session_timeline_transaction(&admission.active_turn.identity.session_id)
+        .begin_session_transaction(&admission.active_turn.identity.session_id)
         .await?;
     let current = load_active_turn(
         transaction.as_mut(),

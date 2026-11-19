@@ -271,6 +271,67 @@ async fn concurrent_writers_wait_for_the_active_transaction() {
 }
 
 #[tokio::test]
+async fn queued_foreground_write_precedes_the_next_background_transaction() {
+    use std::future::{poll_fn, Future};
+    use std::task::Poll;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("priority.db");
+    let storage = SqliteStorage::new(path.to_str().unwrap()).await.unwrap();
+    storage
+        .execute("CREATE TABLE writes (label TEXT NOT NULL)", &[])
+        .await
+        .unwrap();
+    let mut first = storage.begin_background_transaction().await.unwrap();
+    first
+        .execute("INSERT INTO writes VALUES ('first background')", &[])
+        .await
+        .unwrap();
+
+    let mut next_background = std::pin::pin!(storage.begin_background_transaction());
+    poll_fn(|cx| {
+        assert!(next_background.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    let typed_storage = storage.clone();
+    let mut foreground = std::pin::pin!(async {
+        let _writer = typed_storage.lock_writer().await;
+        sqlx::query_scalar::<_, String>("INSERT INTO writes VALUES ('foreground') RETURNING label")
+            .fetch_one(typed_storage.pool())
+            .await
+    });
+    poll_fn(|cx| {
+        assert!(foreground.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    first.commit().await.unwrap();
+    tokio::select! {
+        biased;
+        _ = &mut next_background => panic!("Background acquired the writer ahead of queued foreground work"),
+        result = &mut foreground => { assert_eq!(result.unwrap(), "foreground"); }
+    }
+    let mut next = next_background.await.unwrap();
+    next.execute("INSERT INTO writes VALUES ('next background')", &[])
+        .await
+        .unwrap();
+    next.commit().await.unwrap();
+    let rows = storage
+        .query("SELECT label FROM writes ORDER BY rowid", &[])
+        .await
+        .unwrap();
+    let labels: Vec<_> = rows
+        .iter()
+        .map(|row| row.get_string("label").unwrap())
+        .collect();
+    assert_eq!(
+        labels,
+        ["first background", "foreground", "next background"]
+    );
+}
+
+#[tokio::test]
 async fn cancelled_begin_does_not_return_an_open_transaction_or_retain_the_writer() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("cancelled-begin.db");
