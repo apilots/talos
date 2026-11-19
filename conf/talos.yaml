@@ -331,20 +331,20 @@ llm:
     base_url: "https://api.openai.com/v1"
     protocol: "responses"
     models:
-      - id: "gpt-6-astra"
-        name: "GPT-6 Astra"
+      - id: "gpt-6.2-astra"
+        name: "GPT-6.2 Astra"
         context_window: 1050000
         reasoning: true
         reasoning_effort: "medium"
         speed: "standard"
         input: ["text", "image", "file"]
         cost:
-          input: 10.0
-          output: 50.0
-          cache_read: 1.0
-          cache_write: 12.5
-      - id: "gpt-6.1-sol"
-        name: "GPT-6.1 Sol"
+          input: 8.0
+          output: 40.0
+          cache_read: 0.4
+          cache_write: 10.0
+      - id: "gpt-6.2-sol"
+        name: "GPT-6.2 Sol"
         context_window: 1050000
         reasoning: true
         reasoning_effort: "medium"
@@ -379,42 +379,6 @@ llm:
           output: 0.5
           cache_read: 0.01
           cache_write: 0.125
-      - id: "gpt-5.5"
-        name: "GPT-5.5"
-        context_window: 1000000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image", "file"]
-        cost:
-          input: 5
-          output: 30
-          cache_read: 0
-          cache_write: 0
-      - id: "gpt-5.4"
-        name: "GPT-5.4"
-        context_window: 1000000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image", "file"]
-        cost:
-          input: 2.5
-          output: 15
-          cache_read: 0
-          cache_write: 0
-      - id: "gpt-5.4-mini"
-        name: "GPT-5.4 mini"
-        context_window: 400000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image", "file"]
-        cost:
-          input: 0.75
-          output: 4.5
-          cache_read: 0
-          cache_write: 0
   bailian:
     http_timeouts: null
     api_key: ${TALOS_LLM_BAILIAN_API_KEY}
