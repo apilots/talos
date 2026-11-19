@@ -337,8 +337,26 @@ ordered-event semantics for other consumers.
 
 A Turn may run for hours. Neither message/block count nor execution duration is
 truncated by the client accumulator. Running and completed Turns share linear
-message-to-display projection. Process steps render in pages with earlier steps
-available on demand; all content remains in state. Event bursts yield between
+message-to-display projection. The process rail shows the Turn's elapsed time.
+The process disclosure opens by default on a running Turn. Closing it hides
+the process rail. Pending user input remains accessible and retains its draft.
+Commentary stays in sequence as its own row while the process is open.
+A live Turn shows a spinner at the end of the expanded rail, including while
+a tool runs. The spinner stops when the Turn requires user input.
+Consecutive successful tools can share a collapsed activity with a single action
+label. Expanding the group shows one row per tool. A tool's command, output and
+arguments are shown when its row is opened. Reasoning before or after a tool
+has its own collapsed disclosure. A completed reasoning block may join an
+adjacent successful command only when its full timestamp range falls inside
+that command's recorded execution window.
+The rail and expanded groups render bounded pages and provide access to earlier
+steps. The latest commentary and active tool rows remain visible in the open
+rail when earlier activity is paged. Exceptional tools remain individual rows.
+The tool timer uses the
+existing block start time, so a quiet command shows its active status before
+output arrives. Turn failure comes from the Turn outcome. Individual tool
+failures retain their own status and count in the response metrics. All
+content remains in state. Event bursts yield between
 bounded batches and publish one store update per batch. Navigation cancels
 uncommitted work without advancing the resume offset beyond applied content.
 

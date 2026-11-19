@@ -150,11 +150,7 @@ function buildTurnBlocks({ identity, messages, metrics, notices, error, automati
       if (block.content.type === "toolResult") {
         const tool = toolItems.get(block.content.data.callId);
         if (tool) {
-          tool.output = outputContentToText(block.content.data.content);
-          tool.contentItems = block.content.data.content;
-          tool.isError = block.content.data.isError;
-          tool.status = block.content.data.isError ? "failed" : "completed";
-          tool.completedAtMs = block.completedAt === null ? null : block.completedAt * 1000;
+          Object.assign(tool, toolResultUpdate(block.content.data, block.completedAt));
         }
         continue;
       }
@@ -502,6 +498,20 @@ function applyBlockDelta(
   }
 }
 
+function toolResultUpdate(
+  result: Extract<AgentMessageBlockContent, { type: "toolResult" }>["data"],
+  completedAt: AgentMessageBlock["completedAt"],
+) {
+  return {
+    output: outputContentToText(result.content),
+    contentItems: result.content,
+    executionMetrics: result.metrics,
+    isError: result.isError,
+    status: result.isError ? "failed" : "completed",
+    completedAtMs: completedAt === null ? null : completedAt * 1000,
+  } as const;
+}
+
 function applyBlockCompleted(
   sessionId: string,
   accumulator: LiveTurnProjection,
@@ -513,13 +523,9 @@ function applyBlockCompleted(
     if (!toolRef) {
       return;
     }
-    chatState().updateTimelineTool(sessionId, turnId, toolRef.block.blockId, {
-      output: outputContentToText(block.content.data.content),
-      contentItems: block.content.data.content,
-      isError: block.content.data.isError,
-      status: block.content.data.isError ? "failed" : "completed",
-      completedAtMs: block.completedAt === null ? null : block.completedAt * 1000,
-    });
+    chatState().updateTimelineTool(
+      sessionId, turnId, toolRef.block.blockId, toolResultUpdate(block.content.data, block.completedAt),
+    );
     return;
   }
   const item = blockToChatItem(block);

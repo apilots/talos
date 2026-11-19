@@ -44,6 +44,9 @@ def snapshot(steps):
                     completedAt=None if running else started + 1)
     messages = [message('input', 'user', [block('input', {'type': 'userContent',
                  'data': {'type': 'text', 'text': 'A normal three-hour single Turn'}})])]
+    messages.append(message('progress', 'agent', [block('progress', {
+        'type': 'assistantText', 'data': {'phase': 'commentary', 'text': 'The checks are running.'},
+    })]))
     for index in range(steps):
         messages.append(message(f'model-{index}', 'agent', [
             block(f'thinking-{index}', {'type': 'reasoning', 'data': {'text': f'Step {index}: ' + 'detail ' * 128}}),
@@ -54,7 +57,15 @@ def snapshot(steps):
             'type': 'toolResult', 'data': {'callId': f'call-{index}', 'toolName': 'Bash',
             'metrics': None, 'isError': False, 'content': [{'type': 'text', 'text': f'Result {index}: ' + 'output ' * 128}]},
         })]))
-    messages.append(message('live', 'agent', [block('tail', {'type': 'reasoning', 'data': {'text': 'SNAPSHOT_READY'}}, True)], True))
+    quiet_tool = block('quiet-call', {'type': 'toolCall', 'data': {
+        'callId': 'quiet-call', 'name': 'Bash',
+        'arguments': {'state': 'complete', 'value': {'command': 'sleep 120'}}, 'progress': [],
+    }}, True)
+    quiet_tool['startedAt'] = int(time.time()) - 92
+    messages.append(message('live', 'agent', [
+        quiet_tool,
+        block('tail', {'type': 'reasoning', 'data': {'text': 'SNAPSHOT_READY'}}, True),
+    ], True))
     usage = dict(input_tokens=0, output_tokens=0, total_tokens=0, cache_creation_input_tokens=None, cache_read_input_tokens=None)
     return dict(identity={'sessionId': LONG, 'turnId': 'long-turn'}, initialMessageId='input',
                 state='running', lastEventId=f'ev_{OFFSET:020d}', lastEventSeq=OFFSET,
@@ -78,16 +89,22 @@ class Data:
             'activeTurn': self.turn, 'lastCompletedEventSeq': 0, 'latestEventId': self.turn['lastEventId']}}).encode()
 
     def burst(self, count=1000):
-        for index in range(count + 1):
-            text = 'x' if index < count else 'LIVE_TAIL'
-            seq = OFFSET + index + 1
+        output = {'kind': 'stdout', 'text': 'COMMAND_OUTPUT_READY\n', 'occurredAt': int(time.time())}
+        deltas = [('tail', {'type': 'text', 'data': 'x'})] * count + [
+            ('tail', {'type': 'text', 'data': 'LIVE_TAIL'}),
+            ('quiet-call', {'type': 'toolProgress', 'data': output}),
+        ]
+        for index, (block_id, delta) in enumerate(deltas, 1):
+            seq = OFFSET + index
             self.events.append(dict(eventId=f'ev_{seq:020d}', eventSeq=seq, persistedAt=int(time.time()),
                 event={'type': 'agent', 'data': {'identity': self.turn['identity'],
-                'sequence': SEQUENCE + index + 1, 'occurredAt': int(time.time()),
+                'sequence': SEQUENCE + index, 'occurredAt': int(time.time()),
                 'payload': {'type': 'messageBlockDelta', 'data': {'messageId': 'live',
-                'blockId': 'tail', 'delta': {'type': 'text', 'data': text}}}}}))
-        self.turn['messages'][-1]['blocks'][0]['content']['data']['text'] += 'x' * count + 'LIVE_TAIL'
-        self.turn.update(lastEventId=self.events[-1]['eventId'], lastEventSeq=self.events[-1]['eventSeq'], lastSequence=SEQUENCE + count + 1)
+                'blockId': block_id, 'delta': delta}}}}))
+        quiet_tool, reasoning = self.turn['messages'][-1]['blocks']
+        reasoning['content']['data']['text'] += 'x' * count + 'LIVE_TAIL'
+        quiet_tool['content']['data']['progress'].append(output)
+        self.turn.update(lastEventId=self.events[-1]['eventId'], lastEventSeq=self.events[-1]['eventSeq'], lastSequence=SEQUENCE + len(deltas))
         self.refresh()
 
 
@@ -168,19 +185,59 @@ def profile(browser, origin, steps):
     try:
         began = time.monotonic()
         page.goto(origin + '/sessions/' + LONG)
+        activities = page.locator('[data-timeline-activity]')
+        last_command = page.get_by_text(f'Bash · echo step-{steps - 1}', exact=True)
+        group = activities.filter(has=last_command)
+        thinking = page.locator('[data-timeline-activity] > summary').get_by_text('Thinking', exact=True).last
+        commentary = page.get_by_text('The checks are running.', exact=True)
+        active_tool = page.locator('[data-timeline-item-key$=":quiet-call"]')
         tail = page.locator('[data-timeline-item-key$=":tail"] [data-timeline-text]')
-        expect(tail).to_have_text('SNAPSHOT_READY', timeout=30000)
+        expect(active_tool.get_by_text('Running', exact=True)).to_be_visible(timeout=30000)
         cold_ms = (time.monotonic() - began) * 1000
+        expect(commentary).to_be_visible()
+        overview = page.locator('[data-timeline-overview]')
+        expect(overview).to_have_text(re.compile(r'^Working for '))
+        expect(overview).to_have_attribute('aria-expanded', 'true')
+        overview.click()
+        expect(activities).to_have_count(0)
+        expect(commentary).to_have_count(0)
+        expect(active_tool).to_have_count(0)
+        expect(overview).to_have_attribute('aria-expanded', 'false')
+        overview.click()
+        expect(commentary).to_be_visible()
+        expect(last_command).to_be_visible()
+        assert group.evaluate('''node => {
+            const groups = Array.from(document.querySelectorAll('[data-timeline-activity]'));
+            return groups[groups.indexOf(node) - 1]?.querySelector('summary')?.textContent.trim() === 'Thinking';
+        }'''), 'Thinking should be a separate row before its command'
+        expect(active_tool.get_by_text('No command output yet')).to_be_visible()
+        expect(tail).to_have_count(0)
+        duration = active_tool.locator('[data-tool-duration]')
+        expect(duration).to_have_text(re.compile(r'^\d+m\d+s$'))
+        expect(duration).not_to_have_text(duration.inner_text())
+        expect(page.get_by_text('Waiting for the next update…', exact=True)).to_have_count(0)
+        expect(page.locator('[data-process-surface]').get_by_role('status')).to_have_text('Working')
+        if steps == 8:
+            page.screenshot(path=str(REPORT / 'running-quiet.png'))
+        mounted = activities.count()
+        assert mounted <= 64, mounted
+        group.locator('summary').click()
+        expect(group.locator('[data-timeline-role="tool"]')).to_be_visible()
+        expect(group.get_by_text('Thinking', exact=True)).to_have_count(0)
         page.wait_for_timeout(100)
         assert fixture.requests and not fixture.stale, fixture.requests
         initial_requests = list(fixture.requests)
         cold_tasks = page.evaluate("window.loadTasks")
-        mounted = page.locator('[data-process-step]').count()
-        assert mounted <= 64, mounted
         if steps >= 64:
-            page.get_by_role('button', name=re.compile('Show .* earlier steps')).click()
-            assert page.locator('[data-process-step]').count() > mounted
+            earlier = page.get_by_text(f'Bash · echo step-{steps - 33}', exact=True)
+            expect(earlier).to_have_count(0)
+            page.get_by_role('button', name='Show earlier steps', exact=True).click()
+            expect(earlier).to_be_visible()
+            assert activities.count() > mounted
         page.reload()
+        expect(active_tool.get_by_text('No command output yet')).to_be_visible()
+        expect(duration).to_be_visible()
+        thinking.click()
         expect(tail).to_have_text('SNAPSHOT_READY')
         fixture.burst()
         expect(tail).not_to_have_text('SNAPSHOT_READY', timeout=30000)
@@ -190,6 +247,8 @@ def profile(browser, origin, steps):
         switch_ms = (time.monotonic() - began) * 1000
         assert switch_ms < 1500, switch_ms
         page.get_by_role('button', name=re.compile('^Long JSON session')).click()
+        expect(active_tool.get_by_text('COMMAND_OUTPUT_READY')).to_be_visible()
+        thinking.click()
         expected = 'SNAPSHOT_READY' + 'x' * 1000 + 'LIVE_TAIL'
         expect(tail).to_have_text(expected, timeout=30000)
         assert not errors, errors
@@ -200,7 +259,7 @@ def profile(browser, origin, steps):
             blocks=sum(len(message['blocks']) for message in fixture.turn['messages']),
             jsonBytes=snapshot_bytes, representedHours=3, snapshotOffset=OFFSET,
             coldReadyMs=round(cold_ms, 1), switchDuringBurstMs=round(switch_ms, 1),
-            initiallyMountedSteps=mounted, resumedOffsets=initial_requests,
+            initiallyMountedActivities=mounted, resumedOffsets=initial_requests,
             finalTextExact=True, staleReplayRequests=fixture.stale, pageErrors=errors,
             coldLongTasks=cold_tasks, reloadAndBurstLongTasks=tasks)
     finally:
@@ -243,7 +302,7 @@ def main():
                             REPORT.joinpath('performance.json').write_text(json.dumps(results, indent=2))
                             print(json.dumps({key: value for key, value in result.items() if key != 'longTasks'}), flush=True)
                     finally: browser.close()
-                print('CASE running_turn_json PASS cold_offset=true content_exact=true navigation=responsive')
+                print('CASE running_turn_json PASS cold_offset=true content_exact=true navigation=responsive quiet_tool_timer=true')
             finally:
                 server.terminate()
                 try: server.wait(timeout=15)

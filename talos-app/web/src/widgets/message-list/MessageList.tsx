@@ -19,6 +19,7 @@ interface MessageListProps {
   actions?: ReactNode;
   pendingUserAction?: PendingUserAction;
   renderUserAction?: (action: PendingUserAction) => ReactNode;
+  liveUpdatesPaused?: boolean;
 }
 
 export function MessageList({
@@ -28,6 +29,7 @@ export function MessageList({
   actions,
   pendingUserAction,
   renderUserAction,
+  liveUpdatesPaused,
 }: MessageListProps) {
   const { t } = useTranslation("chat");
   const copyBlockLabel = t("copyBlock");
@@ -60,15 +62,16 @@ export function MessageList({
         if (block.kind === "timeline") {
           return (
             <MessageTimelineBlock
-              block={index < lastUserIndex ? { ...block, live: false } : block}
+              block={block}
               copiedLabel={copiedBlockLabel}
               copyLabel={copyBlockLabel}
               helpfulLabel={helpfulLabel}
               key={block.id}
+              liveUpdatesPaused={liveUpdatesPaused}
               notHelpfulLabel={notHelpfulLabel}
               pendingUserAction={pendingUserAction}
               renderUserAction={renderUserAction}
-              showWaitingIndicator={!showingWaitStatus}
+              showWaitingIndicator={index >= lastUserIndex && !showingWaitStatus}
             />
           );
         }
@@ -91,7 +94,7 @@ export function MessageList({
           return (
             <CopyableBlock copyLabel={copyBlockLabel} copyText={copyText} copiedLabel={copiedBlockLabel} key={block.id}>
               <ToolCallBlock
-                argumentsText={JSON.stringify(block.arguments, null, 2)}
+                argumentsValue={block.arguments}
                 callId={block.callId}
                 contentItems={block.contentItems}
                 output={block.output}

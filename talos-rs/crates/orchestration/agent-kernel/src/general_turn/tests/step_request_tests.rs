@@ -4,7 +4,7 @@ use talos_prompt::{PromptMode, PromptWindowUsage};
 
 #[tokio::test]
 async fn test_build_general_turn_step_request() {
-    let prepared = PreparedGeneralTurn {
+    let mut prepared = PreparedGeneralTurn {
         registration: None,
         trajectory: None,
         browser_uploads: Vec::new(),
@@ -79,4 +79,38 @@ async fn test_build_general_turn_step_request() {
         message.content.contains("retrieved_memories")
             && message.content.contains("The user prefers tea.")
     }));
+
+    let tool_output = ChatMessage::tool("lookup", "WebFetch", "Verified dates");
+    state.messages.push(tool_output.clone());
+    let short = build_general_turn_step_request(&prepared, &state, Vec::new(), false, 0, 0);
+    assert_eq!(short.messages.last().unwrap().content, "Verified dates");
+
+    state.started_at -= std::time::Duration::from_secs(31);
+    let long = build_general_turn_step_request(&prepared, &state, Vec::new(), false, 0, 0);
+    assert_eq!(long.messages.len(), short.messages.len() + 1);
+    assert!(long
+        .messages
+        .last()
+        .unwrap()
+        .content
+        .contains("user-visible progress update"));
+    assert_eq!(state.messages.len(), 1);
+
+    prepared.prompt_diagnostics.window_usage.window_resolved = true;
+    prepared
+        .prompt_diagnostics
+        .window_usage
+        .effective_prompt_budget = 32;
+    let budgeted = build_general_turn_step_request(&prepared, &state, Vec::new(), false, 0, 0);
+    assert_eq!(budgeted.messages.last().unwrap().content, "Verified dates");
+    prepared.prompt_diagnostics.window_usage.window_resolved = false;
+
+    state
+        .messages
+        .insert(0, ChatMessage::assistant("The dates are confirmed."));
+    let reported = build_general_turn_step_request(&prepared, &state, Vec::new(), false, 0, 0);
+    assert_eq!(
+        reported.messages.last().unwrap().content,
+        tool_output.content
+    );
 }

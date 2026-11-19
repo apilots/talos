@@ -12,6 +12,7 @@ import {
   itemStarted,
   sessionHistory,
   textDelta,
+  toolExecutionMetrics,
   toolProgress,
   toolResult,
   turnCompleted,
@@ -117,14 +118,13 @@ describe("timeline stream events", () => {
         published_at: null,
         provider_rank: 1,
       },
-    ], 3));
+    ], 3, toolExecutionMetrics));
 
     const runningTimeline = useAppStore.getState().streams["sess-1"]?.blocks.find(
       (block) => block.kind === "timeline",
     );
     expect(runningTimeline).toMatchObject({
-      kind: "timeline",
-      items: [expect.objectContaining({ itemId: "tool-1", status: "completed" })],
+      items: [expect.objectContaining({ itemId: "tool-1", status: "completed", executionMetrics: toolExecutionMetrics })],
     });
 
     applyStreamEvent("sess-1", itemCompleted("tool-1", 4, "tool_call"));
@@ -283,7 +283,7 @@ describe("timeline stream events", () => {
     const history = sessionHistory([
       historyTextItem("input-1", "user_input", "input", "inspect prompt builder"),
       historyTextItem("thinking-1", "assistant_text", "commentary", "I will inspect the module."),
-      ...historyToolItems("tool-1", "lib.rs"),
+      ...historyToolItems("tool-1", "lib.rs", toolExecutionMetrics),
       historyTextItem("final-1", "assistant_text", "final_answer", "The module is layered."),
     ]);
 
@@ -302,7 +302,7 @@ describe("timeline stream events", () => {
       kind: "timeline",
       items: [
         expect.objectContaining({ itemId: "thinking-1", text: "I will inspect the module." }),
-        expect.objectContaining({ itemId: "tool-1", kind: "tool_call", output: "lib.rs", startedAtMs: 1000, completedAtMs: 2000 }),
+        expect.objectContaining({ itemId: "tool-1", output: "lib.rs", startedAtMs: 1000, completedAtMs: 2000, executionMetrics: toolExecutionMetrics }),
         expect.objectContaining({ itemId: "final-1", phase: "final_answer", text: "The module is layered." }),
       ],
     });

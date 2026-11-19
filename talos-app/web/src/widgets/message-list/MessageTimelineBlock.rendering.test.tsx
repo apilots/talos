@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { AppProtocol } from "@talos/sdk-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
@@ -87,10 +88,17 @@ describe("MessageTimelineBlock rendering", () => {
     expect(getByText("Worked for 320ms")).not.toBeNull();
     expect(screen.queryByText("4 events")).toBeNull();
     expect(screen.queryByText("46 tokens")).toBeNull();
-    expect(container.querySelector('[data-process-surface="rail"]')).not.toBeNull();
-    expect(container.querySelector("details")?.hasAttribute("open")).toBe(false);
+    expect(container.querySelector("details")).toBeNull();
     expect(screen.queryByRole("button", { name: "Copy block" })).toBeNull();
+    expect(screen.queryByText("Checking context")).toBeNull();
+    expect(screen.queryByText("I will inspect the workspace.")).toBeNull();
+    expect(screen.queryByText("Failed")).toBeNull();
+    expect(screen.queryByText("Validation completed.")).toBeNull();
     fireEvent.click(getByText("Worked for 320ms"));
+    expect(getByText("I will inspect the workspace.").closest("details")).toBeNull();
+    expect(getByText("Failed").closest("details")).toBeNull();
+    expect(container.querySelector("details")?.hasAttribute("open")).toBe(false);
+    fireEvent.click(getByText("Thinking"));
 
     await waitFor(() => {
       expect(getByText("Checking context")).not.toBeNull();
@@ -106,7 +114,7 @@ describe("MessageTimelineBlock rendering", () => {
       expect(container.querySelector('[data-timeline-surface="plain"]')).not.toBeNull();
       expect(container.querySelector('[data-tool-call-variant="compact"]')).not.toBeNull();
       expect(container.querySelector('[data-tool-surface="plain"]')).not.toBeNull();
-      expect(container.querySelectorAll('[data-process-step="true"]')).toHaveLength(4);
+      expect(container.querySelectorAll('[data-process-step="true"]')).toHaveLength(3);
     });
   });
 
@@ -144,6 +152,15 @@ describe("MessageTimelineBlock rendering", () => {
                 completedAtMs: 2,
               },
               {
+                itemId: "progress-1",
+                kind: "assistant_text",
+                phase: "commentary",
+                status: "completed",
+                text: "Ready for final validation.",
+                startedAtMs: 2,
+                completedAtMs: 3,
+              },
+              {
                 itemId: "answer-1",
                 kind: "assistant_text",
                 phase: "final_answer",
@@ -162,8 +179,16 @@ describe("MessageTimelineBlock rendering", () => {
 
     const footers = container.querySelectorAll('[data-turn-metrics="true"]');
     expect(footers).toHaveLength(1);
-    expect(container.querySelector("summary")?.contains(footers[0] as Node)).toBe(false);
+    expect(footers[0]?.closest('[data-process-surface="rail"]')).toBeNull();
     expect(container.querySelector('[data-timeline-response="true"]')?.contains(footers[0] as Node)).toBe(true);
+    const answer = screen.getByText("The implementation is complete.");
+    const disclosure = screen.getByRole("button", { name: "Worked for 30s" });
+    expect(screen.queryByText("Ready for final validation.")).toBeNull();
+    fireEvent.click(disclosure);
+    expect(screen.getByText("Ready for final validation.")).toBeTruthy();
+    fireEvent.click(disclosure);
+    expect(screen.queryByText("Ready for final validation.")).toBeNull();
+    expect(screen.getByText("The implementation is complete.")).toBe(answer);
   });
 
   it("labels a cancelled turn and its tool as stopped without metrics", () => {
@@ -196,17 +221,26 @@ describe("MessageTimelineBlock rendering", () => {
 
     expect(screen.getByText("Stopped after 13s")).not.toBeNull();
     expect(screen.queryByText("Worked for 13s")).toBeNull();
-    fireEvent.click(screen.getByText("Stopped after 13s"));
-    expect(screen.getAllByText("Cancelled").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Cancelled")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stopped after 13s" }));
+    expect(screen.getAllByText("Cancelled")[0]?.closest("details")).toBeNull();
   });
 
-  it("labels a failed turn from its terminal item when metrics are unavailable", () => {
+  it.each([
+    { turnFailed: false, heading: "Worked for 2s", absent: "Failed after 2s" },
+    { turnFailed: true, heading: "Failed after 2s", absent: "Worked for 2s" },
+  ])("shows $heading based on the turn outcome when metrics are unavailable", ({ turnFailed, heading, absent }) => {
     render(
       <MessageList
         blocks={[
           {
             id: "timeline-failed",
             kind: "timeline",
+            error: turnFailed ? {
+              code: AppProtocol.ErrorCode.InternalError,
+              message: "The turn could not complete.",
+              localization: null,
+            } : undefined,
             items: [
               {
                 itemId: "tool-failed",
@@ -228,12 +262,15 @@ describe("MessageTimelineBlock rendering", () => {
       />,
     );
 
-    expect(screen.getByText("Failed after 2s")).not.toBeNull();
-    expect(screen.queryByText("Worked for 2s")).toBeNull();
+    expect(screen.getByText(heading)).not.toBeNull();
+    expect(screen.queryByText(absent)).toBeNull();
+    expect(screen.queryByText("Failed")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: heading }));
+    expect(screen.getByText("Failed")).not.toBeNull();
   });
 
   it("preserves complete thinking sentences and model-provided line breaks", async () => {
-    const { container, getAllByText, getByLabelText, getByText } = render(
+    const { getByText } = render(
       <MessageList
         blocks={[
           {
@@ -267,12 +304,11 @@ describe("MessageTimelineBlock rendering", () => {
       />,
     );
 
-    const thinkingText = getByText((_, element) =>
-      element?.getAttribute("data-timeline-text") === "true",
-    );
+    expect(screen.queryByText(/First thought/)).toBeNull();
+    fireEvent.click(getByText("Thinking"));
+    const thinkingText = await screen.findByText(/First thought/);
     expect(thinkingText.textContent).toBe("First thought. Second thought.\nThird thought.");
-    expect(getAllByText(/Glob/).length).toBeGreaterThan(0);
-    expect(getByLabelText("Waiting for timeline update")).not.toBeNull();
-    expect(container.querySelectorAll("ol > li")).toHaveLength(3);
+    expect(getByText(/Glob/).closest("details")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Working");
   });
 });

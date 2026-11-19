@@ -339,23 +339,32 @@ function buildExploredModel(items: TalosContentItem[], status: ChatToolStatus): 
 }
 
 function buildReferenceModel(items: TalosContentItem[], status: ChatToolStatus): ToolResultRenderModel {
-  const lines = items.flatMap((item) => {
-    if (item.type === "web_reference") {
-      return [item.title ?? item.url, item.source_domain ?? item.url, item.snippet ?? ""].filter(Boolean);
-    }
-    if (item.type === "artifact_ref") {
-      return [`artifact: ${item.label ?? item.artifact_id}${item.mime_type ? ` · ${item.mime_type}` : ""}`];
-    }
-    if (item.type === "mcp_resource_ref") {
-      return [`mcp: ${item.server}:${item.uri}${item.mime_type ? ` · ${item.mime_type}` : ""}`];
-    }
-    return [];
-  });
-  const summary = `${toolResultStateLabel(status)} · ${lines.length || 1} reference(s)`;
+  const preview = items.flatMap((item) => item.type === "web_reference" && item.title && item.title !== item.url
+    ? [item.title] : []);
   return {
-    summary,
-    preview: lines.slice(0, 2),
-    body: <ResultList lines={lines} />,
+    summary: toolResultStateLabel(status),
+    preview: preview.slice(0, 2),
+    get body() {
+      const lines = items.flatMap((item) => {
+        if (item.type === "web_reference") {
+          return [item.title, item.source_domain, item.url, item.snippet].filter((line): line is string => Boolean(line));
+        }
+        if (item.type === "artifact_ref") {
+          return [`artifact: ${item.label ?? item.artifact_id}${item.mime_type ? ` · ${item.mime_type}` : ""}`];
+        }
+        if (item.type === "mcp_resource_ref") {
+          return [`mcp: ${item.server}:${item.uri}${item.mime_type ? ` · ${item.mime_type}` : ""}`];
+        }
+        return [];
+      });
+      const hasBody = items.some((item) => item.type === "text" || item.type === "json" || item.type === "image");
+      return (
+        <div className="space-y-2">
+          <div className="[overflow-wrap:anywhere]"><ResultList lines={Array.from(new Set(lines))} /></div>
+          {hasBody ? buildTextJsonModel(items, status).body : null}
+        </div>
+      );
+    },
   };
 }
 
@@ -374,9 +383,10 @@ function buildTextJsonModel(items: TalosContentItem[], status: ChatToolStatus): 
   });
   const text = lines.join("\n");
   const summary = toolResultStateLabel(status);
+  const preview = firstNonEmptyLine(text);
   return {
     summary,
-    preview: [firstNonEmptyLine(text) ?? summary],
+    preview: preview && preview !== "{" && preview !== "[" ? [preview] : [],
     body: <div className="flex flex-col gap-3">
       {text && <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">{text}</pre>}
       {items.filter((item) => item.type === "image").map((item) => (
@@ -398,9 +408,12 @@ function buildProgressFallbackModel(
       .map((entry) => entry.message)
       .join("");
   const summary = toolResultStateLabel(status);
+  const preview = status === "running"
+    ? output.trim().split(/\r?\n/).at(-1)
+    : firstNonEmptyLine(output);
   return {
     summary,
-    preview: output ? [firstNonEmptyLine(output) ?? output] : [],
+    preview: preview ? [preview] : [],
     body: output ? (
       <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">
         {output}

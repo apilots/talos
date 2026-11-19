@@ -231,9 +231,10 @@ fn chat_replays_reasoning_content_before_tool_calls() {
 }
 
 #[tokio::test]
-async fn chat_stream_reasoning_content_replays_after_tool_call() {
+async fn chat_stream_preserves_pre_tool_text_and_reasoning_replay() {
     let body = concat!(
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"think\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"我先读取文件。\"}}]}\n\n",
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]}}]}\n\n",
         "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
         "data: [DONE]\n\n"
@@ -258,6 +259,21 @@ async fn chat_stream_reasoning_content_replays_after_tool_call() {
             .expect("stream should start"),
     )
     .await;
+    let progress_index = events
+        .iter()
+        .position(|event| {
+            matches!(event, ModelBlockStreamEvent::BlockDelta { delta: ModelBlockDelta::AssistantText { delta }, .. }
+                if delta == "我先读取文件。")
+        })
+        .expect("user-visible progress should stream as assistant text");
+    let tool_index = events
+        .iter()
+        .position(|event| {
+            matches!(event, ModelBlockStreamEvent::BlockStarted(block) if block.kind == ModelBlockKind::ToolCall)
+        })
+        .expect("the tool call should stream");
+    assert!(progress_index < tool_index);
+
     let continuation = events
         .iter()
         .find_map(|event| match event {

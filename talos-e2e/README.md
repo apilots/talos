@@ -467,8 +467,12 @@ maintainer-only `06_tools` workflow; public PR gates do not receive model secret
 `just e2e-case 09_app_server/running_turn` uses the production Web build and an
 isolated system Chrome with explicit JSON Session/SSE fixtures. Computer and
 metadata APIs use a real Server. It covers a single three-hour-shaped Turn at a
-large offset with8/500/3000steps, refresh, earlier-step access, a live1000-delta
-burst and Sidebar navigation. It saves the input JSON, screenshots and timings.
+large offset with 8, 500, or 3000 tool calls, refresh, earlier-step access, a live
+1000-delta burst and Sidebar navigation. It verifies that a folded Turn hides
+its process, that the expanded rail keeps commentary and Thinking in sequence
+with the tools, and that a long interleaved history renders bounded pages. It
+also checks the quiet-command timer and the first streamed output after
+refresh and navigation. The case saves the input JSON, screenshots and timings.
 The represented duration is fixture data; this test does not wait three hours or
 claim model/runtime endurance. Service/HTTP tests separately verify that a real
 canonical Turn read and the offset subscription agree. The WebUI hosted gate

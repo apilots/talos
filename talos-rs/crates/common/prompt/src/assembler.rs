@@ -85,9 +85,9 @@ fn build_task_protocol_library_payload() -> String {
 
 fn build_communication_policy_payload() -> String {
     [
-        "- progress_updates: short and milestone-based",
-        "- final_answer_must_distinguish_evidence_from_inference: true",
-        "- exact_output_requests_must_be_honored: true",
+        "- commentary_purpose: Briefly report verified progress that affects the goal before continuing substantial work, including repeated short lookups.",
+        "- progress_channel: Group new findings in one short assistant message before your next tool call. Use the requested reply language and skip routine status.",
+        "- reasoning_language: Honor explicit requests for a reasoning language.\n- final_answer_must_distinguish_evidence_from_inference: true\n- exact_output_requests_must_be_honored: true",
     ]
     .join("\n")
 }

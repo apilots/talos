@@ -291,7 +291,7 @@ fn count_preserved_recent_exchanges(
     recent_complete_exchange_indexes(groups, preserve_recent_exchanges).len()
 }
 
-fn estimate_messages_tokens(messages: &[ChatMessage]) -> usize {
+pub(super) fn estimate_messages_tokens(messages: &[ChatMessage]) -> usize {
     messages.iter().map(estimate_message_tokens).sum()
 }
 

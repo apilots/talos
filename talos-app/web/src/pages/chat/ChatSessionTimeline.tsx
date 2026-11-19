@@ -13,6 +13,7 @@ interface ChatSessionTimelineProps {
   contentRef: RefObject<HTMLDivElement | null>;
   endRef: RefObject<HTMLDivElement | null>;
   isCancelling: boolean;
+  isReconnecting: boolean;
   pendingUserAction?: ComponentProps<typeof MessageList>["pendingUserAction"];
   userActionDisabled?: boolean;
   userActionError?: string;
@@ -34,6 +35,7 @@ export function ChatSessionTimeline({
   contentRef,
   endRef,
   isCancelling,
+  isReconnecting,
   pendingUserAction,
   userActionDisabled,
   userActionError,
@@ -63,6 +65,7 @@ export function ChatSessionTimeline({
             blocks={blocks}
             emptyDetail={t("emptyReadyDetail")}
             emptyTitle={t("emptyReadyTitle")}
+            liveUpdatesPaused={isCancelling || isReconnecting || showReconnectControls}
             pendingUserAction={pendingUserAction}
             renderUserAction={onUserActionSubmit
               ? (action) => (
@@ -91,6 +94,8 @@ export function ChatSessionTimeline({
             onRetryStream={() => void onRetryStream()}
             onStopResponse={() => void onStopResponse()}
           />
+        ) : isReconnecting ? (
+          <p className="px-1 py-2 text-sm text-muted" role="status">{t("reconnecting")}</p>
         ) : null}
         <div aria-hidden="true" ref={endRef} />
       </div>

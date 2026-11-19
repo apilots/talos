@@ -177,6 +177,7 @@ export type ChatTimelineItem =
       arguments: unknown;
       output?: string;
       contentItems?: TalosContentItem[];
+      executionMetrics?: import("@talos/sdk-core").AppProtocol.ToolExecutionMetrics | null;
       isError?: boolean;
       progress: Array<{ kind: TalosToolProgressKind; message: string }>;
       prompt?: string;

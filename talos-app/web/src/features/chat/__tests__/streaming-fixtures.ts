@@ -6,6 +6,7 @@ import type {
   AgentMessageBlock,
   AgentMessageBlockContent,
   AgentRunMetrics,
+  AppProtocol,
   AgentStopReason,
   ContextCompactionMetrics,
   ContextCompactionOutcome,
@@ -211,10 +212,19 @@ export function toolProgress(itemId: string, text: string, sequence: number): Ag
   }, sequence);
 }
 
+export const toolExecutionMetrics = {
+  queuedAtMs: 1_050,
+  startedAtMs: 1_100,
+  finishedAtMs: 1_800,
+  queueDurationMs: 50,
+  executionDurationMs: 700,
+};
+
 export function toolResult(
   itemId: string,
   content: string | TalosContentItem[],
   sequence: number,
+  metrics: AppProtocol.ToolExecutionMetrics | null = null,
 ): AgentTimelineEvent {
   const result = typeof content === "string" ? [{ type: "text" as const, text: content }] : content;
   return baseEvent({
@@ -225,7 +235,7 @@ export function toolResult(
         `${itemId}-result`,
         {
           type: "toolResult",
-          data: { metrics: null,
+          data: { metrics,
             callId: `call-${itemId}`,
             toolName: "Shell",
             content: result,
@@ -409,7 +419,11 @@ export function historyUserInputItem(
   ];
 }
 
-export function historyToolItems(itemId: string, output: string): AgentMessageBlock[] {
+export function historyToolItems(
+  itemId: string,
+  output: string,
+  metrics: AppProtocol.ToolExecutionMetrics | null = null,
+): AgentMessageBlock[] {
   return [
     block(
       itemId,
@@ -430,7 +444,7 @@ export function historyToolItems(itemId: string, output: string): AgentMessageBl
       `${itemId}-result`,
       {
         type: "toolResult",
-        data: { metrics: null,
+        data: { metrics,
           callId: `call-${itemId}`,
           toolName: "Shell",
           content: [{ type: "text", text: output }],
