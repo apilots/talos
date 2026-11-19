@@ -10,6 +10,7 @@ export const timelineResources = {
       search: "Searched files",
       web: "Consulted web sources",
       lookup: "Looked up tools",
+      other: "Other tools",
     },
     timelineToolTarget: {
       read: "Read {{target}}",
@@ -50,6 +51,7 @@ export const timelineResources = {
       search: "搜索了文件",
       web: "查阅了网页",
       lookup: "查找了工具",
+      other: "其他工具",
     },
     timelineToolTarget: {
       read: "读取了 {{target}}",

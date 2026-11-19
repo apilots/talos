@@ -207,4 +207,20 @@ describe("MessageTimelineBlock lifecycle", () => {
     expect(within(groups[0]).getByText("Think while Bash runs.")).toBeTruthy();
     expect(within(groups[0]).queryByText(/straddles/)).toBeNull();
   });
+
+  it("summarizes unclassified tools once in a mixed group and shows their names when opened", async () => {
+    const { container } = render(
+      <MessageList blocks={[{ id: "mixed-tools", kind: "timeline", live: true, items: [
+        { ...command, toolName: "Read", arguments: { path: "result.txt" }, status: "completed" },
+        { ...command, itemId: "todo", callId: "todo", toolName: "TodoWrite", arguments: {}, status: "completed" },
+        { ...command, itemId: "mcp", callId: "mcp", toolName: "mcp__example__inspect", arguments: {}, status: "completed" },
+      ] }]} emptyDetail="" emptyTitle="" />,
+    );
+    const group = within(container.querySelector("[data-timeline-activity]")! as HTMLElement);
+    const summary = group.getByText("Read files and Other tools", { exact: true });
+    expect(group.queryByRole("button")).toBeNull();
+    fireEvent.click(summary);
+    expect(await group.findByRole("button", { name: "TodoWrite" })).toBeTruthy();
+    expect(group.getByRole("button", { name: "mcp__example__inspect" })).toBeTruthy();
+  });
 });

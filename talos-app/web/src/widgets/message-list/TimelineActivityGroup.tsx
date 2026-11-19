@@ -17,6 +17,9 @@ export function TimelineActivityGroup({ group, timelineId }: { group: TimelineAc
   const tools = group.items.filter((item) => item.kind === "tool_call");
   const activities = new Set(tools.map((tool) => toolActivity(tool.toolName)));
   const labels = Array.from(activities).flatMap((activity) => activity ? [t(`timelineActivity.${activity}`)] : []);
+  if (labels.length > 0 && activities.has(undefined)) {
+    labels.push(t("timelineActivity.other"));
+  }
   const singleTool = group.items.length === 1 ? tools[0] : undefined;
   const title = singleTool
     ? timelineToolTitle(singleTool.toolName, singleTool.arguments, t)
