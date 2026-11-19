@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -30,6 +31,11 @@ pub(super) enum ConnectionPhase {
     Upload,
     LocalStatus,
     Shutdown,
+}
+
+struct CatalogRecovery {
+    cursor: String,
+    deferred: VecDeque<(SyncResourceKey, crate::SyncVersion)>,
 }
 
 pub(super) async fn connected<A: SyncDataAdapter>(
@@ -150,18 +156,24 @@ async fn session<A: SyncDataAdapter>(
     phase: &mut ConnectionPhase,
 ) -> TalosResult<()> {
     *phase = ConnectionPhase::CatchUp;
-    let cursor = match sync.download_cursor(binding).await? {
-        Some(cursor) => cursor,
+    let mut recovery = match sync.download_cursor(binding).await? {
+        Some(cursor) => CatalogRecovery {
+            cursor,
+            deferred: VecDeque::new(),
+        },
         None => catch_up(sync, adapter, binding, client, &channels.changes).await?,
     };
     *phase = ConnectionPhase::Subscribe;
-    let mut subscription = match client.events(Some(cursor)).await {
+    let mut subscription = match client.events(Some(recovery.cursor.clone())).await {
         Ok(subscription) => subscription,
         Err(error) if error.code == talos_sync_types::SyncErrorCode::EventCursorExpired => {
             *phase = ConnectionPhase::CatchUp;
-            let cursor = catch_up(sync, adapter, binding, client, &channels.changes).await?;
+            recovery = catch_up(sync, adapter, binding, client, &channels.changes).await?;
             *phase = ConnectionPhase::Subscribe;
-            client.events(Some(cursor)).await.map_err(sync_error)?
+            client
+                .events(Some(recovery.cursor.clone()))
+                .await
+                .map_err(sync_error)?
         }
         Err(error) => return Err(sync_error(error)),
     };
@@ -200,7 +212,7 @@ async fn session<A: SyncDataAdapter>(
                         channels.failed_uploads.remove(&entry.resource);
                     }
                 }
-                if !feed_gap {
+                if !feed_gap && recovery.deferred.is_empty() {
                     commit_cursor(sync, binding, &batch.next_cursor).await?;
                 }
             }
@@ -211,7 +223,23 @@ async fn session<A: SyncDataAdapter>(
             _ = interval.tick() => {
                 *phase = ConnectionPhase::Upload;
                 upload_pending(sync, binding, client, channels).await?;
-                if feed_gap {
+                if let Some((resource, version)) = recovery.deferred.pop_front() {
+                    *phase = ConnectionPhase::CatchUp;
+                    match download_if_newer(sync, adapter, binding, client, (&resource, &version), &channels.changes).await {
+                        Ok(()) => {}
+                        Err(error) if error.error_code() == ErrorCode::Conflict => {
+                            recovery.deferred.push_back((resource, version));
+                        }
+                        Err(error) => return Err(error),
+                    }
+                    if recovery.deferred.is_empty() {
+                        // Replay the feed from the catalog cut now that every
+                        // resource at that cut has been published.
+                        commit_cursor(sync, binding, &recovery.cursor).await?;
+                        feed_gap = true;
+                    }
+                }
+                if feed_gap && recovery.deferred.is_empty() {
                     *phase = ConnectionPhase::Subscribe;
                     subscription.close().await.map_err(sync_error)?;
                     drop(subscription);
@@ -244,7 +272,7 @@ async fn catch_up<A: SyncDataAdapter>(
     binding: &SyncBinding,
     client: &SyncClient,
     changes: &broadcast::Sender<talos_sync_types::SyncResourceSummary>,
-) -> TalosResult<String> {
+) -> TalosResult<CatalogRecovery> {
     let initial = client
         .catalog(SyncListParams {
             limit: Some(1),
@@ -252,7 +280,7 @@ async fn catch_up<A: SyncDataAdapter>(
         })
         .await
         .map_err(sync_error)?;
-    let mut blocked = None;
+    let mut deferred = VecDeque::new();
     // Dependencies precede Session facts. The initial cut remains the feed start,
     // even if a later kind scan observes a newer committed resource version.
     for kind in [
@@ -285,7 +313,7 @@ async fn catch_up<A: SyncDataAdapter>(
                 {
                     Ok(()) => {}
                     Err(error) if error.error_code() == ErrorCode::Conflict => {
-                        blocked.get_or_insert(error);
+                        deferred.push_back((resource.resource, resource.version));
                     }
                     Err(error) => return Err(error),
                 }
@@ -302,11 +330,13 @@ async fn catch_up<A: SyncDataAdapter>(
             cursor = page.next_cursor;
         }
     }
-    if let Some(error) = blocked {
-        return Err(error);
+    if deferred.is_empty() {
+        commit_cursor(sync, binding, &initial.feed_cursor).await?;
     }
-    commit_cursor(sync, binding, &initial.feed_cursor).await?;
-    Ok(initial.feed_cursor)
+    Ok(CatalogRecovery {
+        cursor: initial.feed_cursor,
+        deferred,
+    })
 }
 
 async fn download_if_newer<A: SyncDataAdapter>(

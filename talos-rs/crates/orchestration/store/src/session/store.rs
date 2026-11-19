@@ -678,6 +678,12 @@ impl SessionStore for DatabaseSessionStore {
                     &[session_id],
                 )
                 .await?;
+            transaction
+                .execute(
+                    "DELETE FROM session_command_revisions WHERE session_id = ?",
+                    &[session_id],
+                )
+                .await?;
         } else {
             crate::sync::source::retire_history(
                 &mut *transaction,

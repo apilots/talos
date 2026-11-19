@@ -746,7 +746,15 @@ async fn session_clear_atomically_removes_canonical_history_and_resets_summary()
         .await
         .unwrap();
 
+    let revisions = || async {
+        store.storage.query(
+            "SELECT COUNT(*) AS count FROM session_command_revisions WHERE session_id='session-1'",
+            &[],
+        ).await.unwrap()[0].get_i64("count").unwrap()
+    };
+    assert_eq!(revisions().await, 1);
     assert!(store.clear_session_history("session-1", 200).await.unwrap());
+    assert_eq!(revisions().await, 0);
 
     let mut expected = original;
     expected.title = talos_types::DEFAULT_SESSION_TITLE.to_string();

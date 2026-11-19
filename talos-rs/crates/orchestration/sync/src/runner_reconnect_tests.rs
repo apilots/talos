@@ -44,9 +44,20 @@ impl SyncDataAdapter for DeferredImport {
 
 #[tokio::test]
 async fn deferred_import_replays_from_the_gap_without_blocking_later_feed_entries() {
+    deferred_import_keeps_connection_live(Some("base")).await;
+}
+
+#[tokio::test]
+async fn cold_recovery_defers_one_resource_without_blocking_the_connection() {
+    deferred_import_keeps_connection_live(None).await;
+}
+
+async fn deferred_import_keeps_connection_live(saved_cursor: Option<&'static str>) {
     use talos_storage::Storage;
     use talos_sync_sdk::loro_protocol::{self, BatchId, Permission, ProtocolMessage};
-    use talos_sync_types::{DocumentJoinAccepted, SyncFeedEntry};
+    use talos_sync_types::{
+        DocumentJoinAccepted, ResourceKind, SyncFeedEntry, SyncResourceSummary,
+    };
 
     let (listener, acceptor, trusted_ca) = tls_listener().await;
     let fixture = fixture_with_options(
@@ -59,11 +70,13 @@ async fn deferred_import_replays_from_the_gap_without_blocking_later_feed_entrie
         "hub-1",
     )
     .await;
-    fixture
-        .storage
-        .execute("UPDATE sync_bindings SET download_cursor='base'", &[])
-        .await
-        .unwrap();
+    if let Some(cursor) = saved_cursor {
+        fixture
+            .storage
+            .execute("UPDATE sync_bindings SET download_cursor=?", &[cursor])
+            .await
+            .unwrap();
+    }
 
     let mut documents = std::collections::HashMap::new();
     let mut entries = Vec::new();
@@ -142,6 +155,11 @@ async fn deferred_import_replays_from_the_gap_without_blocking_later_feed_entrie
                                 .await
                                 .unwrap();
                             for (entry, cursor) in entries.iter().zip(["one", "two"]) {
+                                if saved_cursor.is_none() && cursor == "one" {
+                                    // This resource predates the catalog cut, so
+                                    // a feed replay alone cannot recover it.
+                                    continue;
+                                }
                                 socket
                                     .send(control(
                                         None,
@@ -154,6 +172,36 @@ async fn deferred_import_replays_from_the_gap_without_blocking_later_feed_entrie
                                     .await
                                     .unwrap();
                             }
+                        }
+                        SyncControlMessage::CatalogRequest(params) => {
+                            assert!(
+                                saved_cursor.is_none(),
+                                "a saved cursor skips catalog recovery"
+                            );
+                            let resources = if params.kind == Some(ResourceKind::Computer) {
+                                entries
+                                    .iter()
+                                    .map(|entry| SyncResourceSummary {
+                                        resource: entry.resource.clone(),
+                                        computer_id: Some(entry.resource.id().into()),
+                                        version: entry.version.clone(),
+                                        deleted: false,
+                                    })
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
+                            socket
+                                .send(control(
+                                    request.request_id,
+                                    SyncControlMessage::CatalogResponse(SyncPage {
+                                        resources,
+                                        next_cursor: None,
+                                        feed_cursor: "base".into(),
+                                    }),
+                                ))
+                                .await
+                                .unwrap();
                         }
                         unsubscribe @ SyncControlMessage::Unsubscribe { .. } => {
                             socket
@@ -229,14 +277,19 @@ async fn deferred_import_replays_from_the_gap_without_blocking_later_feed_entrie
         )
         .unwrap();
     let mut changes = handle.subscribe_changes();
+    let mut status = handle.subscribe();
     tokio::time::timeout(Duration::from_secs(3), async {
         assert_eq!(changes.recv().await.unwrap().resource, healthy);
+        status
+            .wait_for(|value| value.connection == SyncConnectionState::Connected)
+            .await
+            .unwrap();
         assert_eq!(
             sync.download_cursor(&fixture.binding)
                 .await
                 .unwrap()
                 .as_deref(),
-            Some("base")
+            saved_cursor
         );
         assert!(sync
             .document_version(&fixture.binding, &deferred)
