@@ -73,7 +73,7 @@ export const ToolCallCard = {
     open: boolean;
     onToggle: () => void;
     running: boolean;
-    statusLabel: string;
+    statusLabel?: string;
     title: string;
     tone: "default" | "success" | "warning" | "danger";
   }) {
@@ -83,7 +83,7 @@ export const ToolCallCard = {
         className={cn(
           "flex w-full items-center justify-between gap-3 text-left",
           compact
-            ? "group/tool rounded-[0.7rem] px-1 py-1.5 transition-colors hover:bg-hover focus:outline-none focus:ring-2 focus:ring-brand/20"
+            ? "group/tool rounded-[0.7rem] px-1 py-1.5 transition-colors hover:bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/20"
             : "px-4 py-3",
         )}
         onClick={onToggle}
@@ -96,14 +96,14 @@ export const ToolCallCard = {
             </span>
           ) : null}
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[13.5px] font-medium text-ink" title={title}>
+            <div className={cn("truncate text-[13.5px]", statusLabel ? "font-medium text-ink" : "text-muted")} title={title}>
               {title}
             </div>
           </div>
         </div>
         <div className={cn("flex shrink-0 items-center", compact ? "gap-2.5" : "gap-2")}>
           {duration ? <span className="whitespace-nowrap text-[11px] tabular-nums text-muted" data-tool-duration="true">{duration}</span> : null}
-          {compact ? (
+          {statusLabel && (compact ? (
             <span
               className={cn(
                 "flex items-center gap-1.5 whitespace-nowrap text-[10.5px] font-medium",
@@ -134,7 +134,7 @@ export const ToolCallCard = {
             <Badge className="whitespace-nowrap text-[10px]" tone={tone}>
               {statusLabel}
             </Badge>
-          )}
+          ))}
           <span className={compact ? "text-muted transition-colors group-hover/tool:text-ink" : undefined}>
             {open ? <ChevronUp size={compact ? 14 : 16} /> : <ChevronDown size={compact ? 14 : 16} />}
           </span>

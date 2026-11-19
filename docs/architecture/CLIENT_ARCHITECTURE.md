@@ -343,8 +343,9 @@ the process rail. Pending user input remains accessible and retains its draft.
 Commentary stays in sequence as its own row while the process is open.
 A live Turn shows a spinner at the end of the expanded rail, including while
 a tool runs. The spinner stops when the Turn requires user input.
-Consecutive successful tools can share a collapsed activity with an action label
-and up to two command or argument previews. Reasoning before or after a tool
+Consecutive successful tools can share a collapsed activity with a single action
+label. Expanding the group shows one row per tool. A tool's command, output and
+arguments are shown when its row is opened. Reasoning before or after a tool
 has its own collapsed disclosure. A completed reasoning block may join an
 adjacent successful command only when its full timestamp range falls inside
 that command's recorded execution window.

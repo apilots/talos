@@ -1,17 +1,23 @@
 const ARGUMENT_PREVIEW_LIMIT = 94;
+const COMMAND_ARGUMENT_KEYS = ["command", "cmd"];
 
 const TOOL_ARGUMENT_KEYS: Array<{ names: string[]; keys: string[] }> = [
-  { names: ["bash", "shell", "exec", "command"], keys: ["cmd", "command"] },
-  { names: ["read", "write", "edit"], keys: ["file_path", "path", "file"] },
+  { names: ["bash", "shell", "exec", "command"], keys: COMMAND_ARGUMENT_KEYS },
+  { names: ["read", "write", "edit"], keys: ["path", "file_path", "file"] },
   { names: ["grep", "search"], keys: ["pattern", "query"] },
   { names: ["glob"], keys: ["pattern", "glob"] },
   { names: ["web", "reference", "url"], keys: ["url", "domain", "query"] },
 ];
 
 export function buildToolDisplayTitle(toolName: string, input: unknown) {
-  const argumentsValue = typeof input === "string" ? parseArguments(input) : isRecord(input) ? input : undefined;
+  const previewValue = toolDisplayTarget(toolName, input);
+  return previewValue ? `${toolName} · ${previewValue}` : toolName;
+}
+
+export function toolDisplayTarget(toolName: string, input: unknown, basename = false) {
+  const argumentsValue = resolveArguments(input);
   if (!argumentsValue) {
-    return toolName;
+    return undefined;
   }
 
   const normalizedName = toolName.toLowerCase();
@@ -19,7 +25,15 @@ export function buildToolDisplayTitle(toolName: string, input: unknown) {
     names.some((name) => normalizedName.includes(name)),
   )?.keys;
   const previewValue = findStringArgument(argumentsValue, preferredKeys);
-  return previewValue ? `${toolName} · ${truncatePreview(previewValue)}` : toolName;
+  if (!previewValue) return undefined;
+  const target = basename ? previewValue.split(/[/\\]/).at(-1) || previewValue : previewValue;
+  return truncatePreview(target);
+}
+
+export function toolCommand(input: unknown) {
+  const args = resolveArguments(input);
+  return COMMAND_ARGUMENT_KEYS.map((key) => args?.[key])
+    .find((value): value is string => typeof value === "string" && !!value.trim());
 }
 
 export function toolActivity(toolName: string) {
@@ -37,9 +51,10 @@ export function toolActivity(toolName: string) {
   }
 }
 
-function parseArguments(argumentsText: string): Record<string, unknown> | undefined {
+function resolveArguments(input: unknown): Record<string, unknown> | undefined {
+  if (typeof input !== "string") return isRecord(input) ? input : undefined;
   try {
-    const value: unknown = JSON.parse(argumentsText);
+    const value: unknown = JSON.parse(input);
     return isRecord(value) ? value : undefined;
   } catch {
     return undefined;

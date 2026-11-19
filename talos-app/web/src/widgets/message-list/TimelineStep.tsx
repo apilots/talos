@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Activity, Brain, ChevronDown, Wrench } from "lucide-react";
+import { Activity, Brain, ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { systemNoticeMessage } from "@/shared/i18n/systemNoticeMessage";
@@ -7,25 +7,26 @@ import type { ChatTimelineItem } from "@/shared/types/ui";
 import { ContextCompactionTimelineItem } from "./context-compaction/ContextCompactionTimelineItem";
 import { TimelineRailRow } from "./TimelineRailRow";
 import { timelineItemDuration, timelineToolStatus } from "./timelineDisplay";
+import { timelineToolIcon } from "./timelineToolPresentation";
 import { ToolCallBlock } from "./ToolCallBlock";
 
 export function TimelineStep({
   item,
   itemKey,
   live = false,
-  foldThinking = false,
+  grouped = false,
   children,
 }: {
   item: ChatTimelineItem;
   itemKey: string;
   live?: boolean;
-  foldThinking?: boolean;
+  grouped?: boolean;
   children?: ReactNode;
 }) {
   const { t } = useTranslation("chat");
   if (item.kind === "tool_call") {
     return (
-      <TimelineRailRow icon={Wrench}>
+      <TimelineRailRow icon={timelineToolIcon(item.toolName)}>
         <div
           data-process-step="true"
           data-timeline-item-key={itemKey}
@@ -43,7 +44,7 @@ export function TimelineStep({
             status={timelineToolStatus(item)}
             timingMs={timelineItemDuration(item)}
             toolName={item.toolName}
-            variant="timeline"
+            variant={grouped ? "activity" : "timeline"}
           />
           {children}
         </div>
@@ -54,7 +55,7 @@ export function TimelineStep({
   return (
     <TimelineRailRow icon={thinking ? Brain : Activity}>
       <div data-process-step="true" data-timeline-item-key={itemKey} data-timeline-role={thinking ? "thinking" : "system"}>
-        {item.kind === "context_compaction" ? <ContextCompactionTimelineItem item={item} /> : thinking && foldThinking ? (
+        {item.kind === "context_compaction" ? <ContextCompactionTimelineItem item={item} /> : thinking && grouped ? (
           <details className="group/thinking">
             <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 text-[13px] text-muted marker:hidden hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
               {t("timelineThinkingDetails")}

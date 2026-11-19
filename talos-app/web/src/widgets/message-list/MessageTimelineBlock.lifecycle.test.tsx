@@ -75,9 +75,10 @@ describe("MessageTimelineBlock lifecycle", () => {
     expect(progress.compareDocumentPosition(groups[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(groups[0]).getByText("Bash · sleep 30")).toBeTruthy();
     expect(within(groups[0]).queryByRole("button")).toBeNull();
-    fireEvent.click(within(groups[0]).getByText("Ran commands"));
+    const groupSummary = groups[0].querySelector("summary")!;
+    fireEvent.click(groupSummary);
     expect(await within(groups[0]).findByRole("button", { name: /Bash · sleep 30/ })).toBeTruthy();
-    fireEvent.click(within(groups[0]).getByText("Ran commands"));
+    fireEvent.click(groupSummary);
     expect(groups[0].open).toBe(false);
 
     rerender(<MessageList {...view.props} blocks={[{
@@ -88,7 +89,7 @@ describe("MessageTimelineBlock lifecycle", () => {
     expect(screen.getByText("The first check passed.").closest("details")).toBeNull();
     expect(screen.getByText(/sleep 20/).closest("details")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^Working/ }));
-    expect(screen.queryByText("Ran commands")).toBeNull();
+    expect(screen.queryByText("Bash · sleep 30")).toBeNull();
     expect(screen.queryByText("The first check passed.")).toBeNull();
     expect(screen.queryByText(/sleep 20/)).toBeNull();
     expect(container.querySelector("[data-process-surface]")).toBeNull();
@@ -146,7 +147,7 @@ describe("MessageTimelineBlock lifecycle", () => {
       ...view.props.blocks[0],
       items: [{ ...reportingCommand, status: "completed", completedAtMs: 123_000 }],
     }]} />);
-    expect(screen.getByText("Ran commands")).toBeTruthy();
+    expect(screen.getByText("Bash · sleep 30")).toBeTruthy();
     expect(screen.queryByText("Running")).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("Waiting for the next update…");
   });
@@ -156,8 +157,9 @@ describe("MessageTimelineBlock lifecycle", () => {
       <MessageList blocks={[{ id: "ordered", kind: "timeline", live: true, items: [
         { kind: "reasoning", phase: "thinking", status: "completed", itemId: "before",
           text: "Choose the first check.", startedAtMs: 1_000, completedAtMs: 1_050 },
-        { ...command, status: "completed", completedAtMs: 1_100 },
-        { ...command, itemId: "read", toolName: "Read", arguments: { path: "result.txt" },
+        { ...command, arguments: { command: "sleep 30\nprintf ready", cmd: "printf other" }, output: "command output",
+          status: "completed", completedAtMs: 1_100 },
+        { ...command, itemId: "read", toolName: "Read", arguments: { path: "reports/result.txt", file_path: "other.txt" },
           status: "completed", startedAtMs: 1_100, completedAtMs: 1_190 },
         { kind: "reasoning", phase: "thinking", status: "completed", itemId: "between",
           text: "Verify the read result.", startedAtMs: 1_200, completedAtMs: 1_250 },
@@ -167,14 +169,18 @@ describe("MessageTimelineBlock lifecycle", () => {
     );
     const groups = container.querySelectorAll<HTMLDetailsElement>("[data-timeline-activity]");
     expect(Array.from(groups, (group) => group.querySelector("summary > span")?.textContent)).toEqual([
-      "Thinking", "Ran commands and Read files", "Thinking", "Ran commands",
+      "Thinking", "Ran commands and Read files", "Thinking", "Bash · printf checked",
     ]);
-    expect(within(groups[1]).getByText("Bash · sleep 30")).toBeTruthy();
-    expect(within(groups[1]).getByText("Read · result.txt")).toBeTruthy();
-    expect(within(groups[3]).getByText("Bash · printf checked")).toBeTruthy();
-    fireEvent.click(within(groups[1]).getByText("Ran commands and Read files"));
-    expect(await within(groups[1]).findByRole("button", { name: /Read · result.txt/ })).toBeTruthy();
-    expect(within(groups[1]).queryByText("Thinking")).toBeNull();
+    const tools = within(groups[1]);
+    expect(tools.queryByText(/sleep 30|result\.txt|command output/)).toBeNull();
+    fireEvent.click(tools.getByText("Ran commands and Read files"));
+    const bashRow = await tools.findByRole("button", { name: "Bash · sleep 30 printf ready" });
+    expect(tools.getByRole("button", { name: "Read result.txt" })).toBeTruthy();
+    expect(tools.queryByText("command output")).toBeNull();
+    expect(tools.queryByText("Thinking")).toBeNull();
+    fireEvent.click(bashRow);
+    expect(tools.getByText("Command").nextElementSibling?.textContent).toBe("sleep 30\nprintf ready");
+    expect(tools.getByText("command output")).toBeTruthy();
     fireEvent.click(within(groups[2]).getByText("Thinking"));
     expect(await within(groups[2]).findByText("Verify the read result.")).toBeTruthy();
   });
