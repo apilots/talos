@@ -27,8 +27,11 @@ pub(super) async fn append_events(
             .query(
                 r#"
                 INSERT INTO agent_events (
-                    session_id, turn_id, sequence, occurred_at, persisted_at, payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    session_id, turn_id, sequence, occurred_at, persisted_at, payload_json,
+                    history_generation
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6,
+                        COALESCE((SELECT history_generation FROM sessions WHERE session_key = ?1), 0))
                 RETURNING event_seq, session_id, turn_id, sequence,
                           occurred_at, persisted_at, payload_json
                 "#,
@@ -82,7 +85,7 @@ pub(super) async fn load_event_sequence(
     let event_seq = event_seq.to_string();
     let rows = transaction
         .query(
-            "SELECT sequence FROM agent_events WHERE event_seq = ?",
+            "SELECT sequence FROM visible_agent_events WHERE event_seq = ?",
             &[event_seq.as_str()],
         )
         .await?;
@@ -123,7 +126,7 @@ pub(super) async fn load_event_range(
             r#"
             SELECT event_seq, session_id, turn_id, sequence,
                    occurred_at, persisted_at, payload_json
-            FROM agent_events
+            FROM visible_agent_events
             WHERE session_id = ? AND turn_id = ?
               AND sequence >= ? AND sequence <= ?
             ORDER BY sequence ASC

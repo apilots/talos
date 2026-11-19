@@ -704,8 +704,7 @@ async fn test_service_with_storage(
     SessionMessageQueueService,
 ) {
     run_test_migrations(storage.pool()).await;
-    let profile_store: Arc<dyn ProfileStore> =
-        Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
+    let profile_store: Arc<dyn ProfileStore> = Arc::new(DatabaseProfileStore::new(&storage));
     let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
     let event_service = Arc::new(TimelineEventService::new(store.clone()));
     let config = test_config();

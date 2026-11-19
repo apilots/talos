@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
-use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite};
 use talos_error::{TalosError, TalosResult};
 use talos_types::FileScope;
 
@@ -61,14 +61,14 @@ pub trait FileStore: Send + Sync {
 
 /// SQLite-backed file repository.
 pub struct DatabaseFileStore {
-    pool: SqlitePool,
+    storage: talos_storage::SqliteStorage,
     sync: std::sync::Arc<crate::sync::StoreSyncBindings>,
 }
 
 impl DatabaseFileStore {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(storage: &talos_storage::SqliteStorage) -> Self {
         Self {
-            pool,
+            storage: storage.clone(),
             sync: Default::default(),
         }
     }
@@ -91,7 +91,7 @@ impl DatabaseFileStore {
         file_id: &str,
     ) -> TalosResult<crate::sync::capture::SqliteCaptureTransaction> {
         crate::sync::capture::SqliteCaptureTransaction::begin(
-            &self.pool,
+            &self.storage,
             self.sync.clone(),
             vec![talos_sync::SyncResourceKey::File {
                 file_id: file_id.into(),
@@ -105,7 +105,7 @@ impl DatabaseFileStore {
         query: sqlx::query::Query<'a, Sqlite, sqlx::sqlite::SqliteArguments<'a>>,
     ) -> TalosResult<Vec<FileRecord>> {
         let rows = query
-            .fetch_all(&self.pool)
+            .fetch_all(self.storage.pool())
             .await
             .map_err(|error| storage_error("query files", error))?;
         let mut records = rows
@@ -130,7 +130,7 @@ impl DatabaseFileStore {
         separated.push_unseparated(") ORDER BY file_id, tag");
         let rows = builder
             .build()
-            .fetch_all(&self.pool)
+            .fetch_all(self.storage.pool())
             .await
             .map_err(|error| storage_error("query file tags", error))?;
 
@@ -443,7 +443,7 @@ impl FileStore for DatabaseFileStore {
     async fn count_by_project(&self, project_id: &str) -> TalosResult<u64> {
         let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM files WHERE project_id = ?")
             .bind(project_id)
-            .fetch_one(&self.pool)
+            .fetch_one(self.storage.pool())
             .await
             .map_err(|error| storage_error("count project files", error))?;
         u64::try_from(count).map_err(|_| TalosError::internal("project file count is negative"))
@@ -453,7 +453,7 @@ impl FileStore for DatabaseFileStore {
         let ids = sqlx::query_scalar::<_, String>(
             "SELECT DISTINCT storage_id FROM files WHERE storage_id IS NOT NULL ORDER BY storage_id",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(self.storage.pool())
         .await
         .map_err(|error| storage_error("list file storage ids", error))?;
         Ok(ids.into_iter().collect())

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sqlx::{sqlite::SqliteRow, Row, SqlitePool};
+use sqlx::{sqlite::SqliteRow, Row};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::database_error;
 
@@ -78,14 +78,14 @@ pub trait AgentNodeStore: Send + Sync {
 }
 
 pub struct DatabaseAgentNodeStore {
-    pub(super) pool: SqlitePool,
+    pub(super) storage: talos_storage::SqliteStorage,
     sync: std::sync::Arc<crate::sync::StoreSyncBindings>,
 }
 
 impl DatabaseAgentNodeStore {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(storage: &talos_storage::SqliteStorage) -> Self {
         Self {
-            pool,
+            storage: storage.clone(),
             sync: Default::default(),
         }
     }
@@ -107,7 +107,7 @@ impl DatabaseAgentNodeStore {
         node_id: &str,
     ) -> TalosResult<crate::sync::capture::SqliteCaptureTransaction> {
         crate::sync::capture::SqliteCaptureTransaction::begin(
-            &self.pool,
+            &self.storage,
             self.sync.clone(),
             vec![talos_sync::SyncResourceKey::Computer {
                 computer_id: node_id.into(),
@@ -152,7 +152,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
 
     async fn has_managed_workers(&self) -> TalosResult<bool> {
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM managed_workers)")
-            .fetch_one(&self.pool)
+            .fetch_one(self.storage.pool())
             .await
             .map_err(|error| database_error("check owned Talo resources", error))
     }
@@ -160,7 +160,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     async fn managed_worker(&self, owner: &str) -> TalosResult<Option<ManagedWorkerRecord>> {
         sqlx::query_as("SELECT * FROM managed_workers WHERE owner_user_id = ?")
             .bind(owner)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.storage.pool())
             .await
             .map_err(|error| database_error("read Talo lifecycle", error))
     }
@@ -171,7 +171,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     ) -> TalosResult<Option<ManagedWorkerRecord>> {
         sqlx::query_as("SELECT * FROM managed_workers WHERE node_id = ?")
             .bind(node_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.storage.pool())
             .await
             .map_err(|error| database_error("read managed Computer lifecycle", error))
     }
@@ -182,7 +182,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     ) -> TalosResult<Option<ManagedWorkerRecord>> {
         sqlx::query_as("SELECT * FROM managed_workers WHERE conversation_session_id = ?")
             .bind(session_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.storage.pool())
             .await
             .map_err(|error| database_error("read Talo conversation binding", error))
     }
@@ -193,7 +193,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     ) -> TalosResult<Vec<ManagedWorkerRecord>> {
         sqlx::query_as("SELECT * FROM managed_workers WHERE step = 'wait' OR (step <> 'stable' AND error IS NULL) OR (step = 'stable' AND desired = 'running' AND last_activity_at <= ?)")
             .bind(idle_before)
-            .fetch_all(&self.pool)
+            .fetch_all(self.storage.pool())
             .await
             .map_err(|error| database_error("scan Talo lifecycles", error))
     }
@@ -241,10 +241,11 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     }
 
     async fn record_managed_worker_activity(&self, node_id: &str, now_at: i64) -> TalosResult<()> {
+        let _writer = self.storage.lock_writer().await;
         sqlx::query("UPDATE managed_workers SET last_activity_at = max(last_activity_at, ?) WHERE node_id = ? AND desired = 'running'")
             .bind(now_at)
             .bind(node_id)
-            .execute(&self.pool)
+            .execute(self.storage.pool())
             .await
             .map_err(|error| database_error("record Talo activity", error))?;
         Ok(())
@@ -296,7 +297,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         sqlx::query_as("SELECT instance_id, node_id, generation FROM managed_worker_deletions WHERE instance_id = ? AND owner_user_id = ?")
             .bind(instance_id)
             .bind(owner)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.storage.pool())
             .await
             .map_err(|error| database_error("read Talo deletion receipt", error))
     }
@@ -375,7 +376,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
             "SELECT {NODE_COLUMNS} FROM agent_nodes WHERE node_id = ?"
         ))
         .bind(node_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.storage.pool())
         .await
         .map_err(|error| database_error("read Agent node", error))?;
         row.as_ref().map(record_from_row).transpose()
@@ -387,7 +388,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     ) -> TalosResult<Option<NodeAuthenticationRecord>> {
         let row = sqlx::query("SELECT node_id, owner_user_id, mode, status, credential_hash, credential_expires_at, lease_token_hash, lease_expires_at FROM agent_nodes WHERE node_id = ?")
             .bind(node_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.storage.pool())
             .await
             .map_err(|error| database_error("read Agent node authentication", error))?;
         row.as_ref().map(authentication_from_row).transpose()
@@ -405,7 +406,8 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         };
         let filter = "(? OR owner_user_id = ? OR (? AND mode = 'embedded')) AND (? IS NULL OR node_id <> ?) AND (? IS NULL OR instr(lower(display_name), lower(?)) > 0) AND (? OR NOT EXISTS (SELECT 1 FROM managed_workers WHERE managed_workers.node_id = agent_nodes.node_id))";
         let mut transaction = self
-            .pool
+            .storage
+            .pool()
             .begin()
             .await
             .map_err(|error| database_error("begin Agent node directory read", error))?;
@@ -492,6 +494,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     }
 
     async fn renew(&self, params: RenewNodeParams) -> TalosResult<NodeRecord> {
+        let _writer = self.storage.lock_writer().await;
         let row = sqlx::query(&format!(
             "UPDATE agent_nodes SET lease_expires_at = ?, updated_at = ? WHERE node_id = ? AND status = 'enabled' AND lease_token_hash = ? AND lease_expires_at > ? AND lease_expires_at <= ? AND credential_expires_at >= ? RETURNING {NODE_COLUMNS}"
         ))
@@ -502,13 +505,14 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .bind(params.lease.now_at)
         .bind(params.expires_at)
         .bind(params.expires_at)
-        .fetch_all(&self.pool)
+        .fetch_all(self.storage.pool())
         .await
         .map_err(|error| database_error("renew Agent node lease", error))?;
         record_or_expired(row.into_iter().next())
     }
 
     async fn heartbeat(&self, params: HeartbeatNodeParams) -> TalosResult<NodeRecord> {
+        let _writer = self.storage.lock_writer().await;
         let row = sqlx::query(&format!(
             "UPDATE agent_nodes SET last_heartbeat_at = ?, health = ?, updated_at = ? WHERE node_id = ? AND status = 'enabled' AND lease_token_hash = ? AND lease_expires_at > ? RETURNING {NODE_COLUMNS}"
         ))
@@ -518,13 +522,14 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .bind(&params.lease.node_id)
         .bind(params.lease.token_hash.as_slice())
         .bind(params.lease.now_at)
-        .fetch_all(&self.pool)
+        .fetch_all(self.storage.pool())
         .await
         .map_err(|error| database_error("record Agent node heartbeat", error))?;
         record_or_expired(row.into_iter().next())
     }
 
     async fn unregister(&self, lease: LeaseCheck) -> TalosResult<()> {
+        let _writer = self.storage.lock_writer().await;
         let changed = sqlx::query(
             "UPDATE agent_nodes SET lease_token_hash = NULL, lease_expires_at = NULL, last_heartbeat_at = NULL, health = 'unknown', updated_at = ? WHERE node_id = ? AND lease_token_hash = ? AND lease_expires_at > ?",
         )
@@ -532,7 +537,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .bind(&lease.node_id)
         .bind(lease.token_hash.as_slice())
         .bind(lease.now_at)
-        .execute(&self.pool)
+        .execute(self.storage.pool())
         .await
         .map_err(|error| database_error("unregister Agent node", error))?;
         if changed.rows_affected() == 0 {
@@ -570,6 +575,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     }
 
     async fn rotate_credential(&self, params: RotateCredentialParams) -> TalosResult<NodeRecord> {
+        let _writer = self.storage.lock_writer().await;
         let row = sqlx::query(&format!(
             "UPDATE agent_nodes SET credential_hash = ?, credential_expires_at = ?, lease_token_hash = NULL, lease_expires_at = NULL, last_heartbeat_at = NULL, health = 'unknown', updated_at = ? WHERE node_id = ? AND mode = 'remote' RETURNING {NODE_COLUMNS}"
         ))
@@ -577,7 +583,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .bind(params.expires_at)
         .bind(params.now_at)
         .bind(&params.node_id)
-        .fetch_all(&self.pool)
+        .fetch_all(self.storage.pool())
         .await
         .map_err(|error| database_error("rotate Agent node credential", error))?;
         record_or_missing(row.into_iter().next())

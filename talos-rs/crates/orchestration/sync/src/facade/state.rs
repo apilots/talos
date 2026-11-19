@@ -1,8 +1,68 @@
+use std::collections::HashSet;
+
+use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
-use talos_sync_types::SyncResourceSummary;
+use talos_sync_types::{
+    generated::{AgentEventPayload, TimelineEventPayload},
+    SyncChange, SyncResourceSnapshot, SyncResourceSummary,
+};
 
 use super::TalosSync;
 use crate::{facade::sync_error, store, SyncBinding, SyncResourceKey};
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct SessionProjection {
+    snapshot: Option<talos_sync_types::SyncSessionSnapshot>,
+    active_turns: Vec<talos_sync_types::SyncActiveTurnMetadata>,
+}
+
+impl SessionProjection {
+    pub(super) fn from_changes(changes: &[SyncChange]) -> Self {
+        let terminal_turns: HashSet<_> = changes.iter().filter_map(terminal_turn).collect();
+        let mut snapshot = None;
+        let mut active_turns = Vec::new();
+        for change in changes {
+            match change {
+                SyncChange::Metadata { after, .. } => {
+                    if let SyncResourceSnapshot::Session(session) = after.as_ref() {
+                        snapshot = Some(session.as_ref().clone());
+                    }
+                }
+                SyncChange::ActiveTurnMetadata(active)
+                    if !terminal_turns.contains(active.identity.turn_id.as_str()) =>
+                {
+                    active_turns.push(active.clone());
+                }
+                _ => {}
+            }
+        }
+        Self {
+            snapshot,
+            active_turns,
+        }
+    }
+}
+
+pub(super) fn changes_session_projection(change: &SyncChange) -> bool {
+    matches!(
+        change,
+        SyncChange::Metadata { .. } | SyncChange::ActiveTurnMetadata(_) | SyncChange::Reset { .. }
+    ) || terminal_turn(change).is_some()
+}
+
+fn terminal_turn(change: &SyncChange) -> Option<&str> {
+    let SyncChange::Event(entry) = change else {
+        return None;
+    };
+    let TimelineEventPayload::Agent(event) = &entry.event else {
+        return None;
+    };
+    matches!(
+        event.payload,
+        AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_)
+    )
+    .then_some(event.identity.turn_id.as_str())
+}
 
 impl TalosSync {
     /// Retire only the specified local capture alias. The product transaction must
@@ -50,7 +110,7 @@ impl TalosSync {
         resource: &SyncResourceKey,
         cut: i64,
     ) -> TalosResult<bool> {
-        let rows = self.storage.query("SELECT seq FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? AND seq <= ? LIMIT 1", &[&binding.scope.hub_id, &binding.scope.account_id, resource.kind().as_str(), resource.id(), &cut.to_string()]).await?;
+        let rows = self.storage.query("SELECT seq FROM visible_sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? AND seq <= ? LIMIT 1", &[&binding.scope.hub_id, &binding.scope.account_id, resource.kind().as_str(), resource.id(), &cut.to_string()]).await?;
         Ok(!rows.is_empty())
     }
 
@@ -61,23 +121,74 @@ impl TalosSync {
     ) -> TalosResult<Option<SyncResourceSummary>> {
         let mut tx = self.storage.begin_read_transaction().await?;
         self.require_binding(&mut *tx, binding).await?;
-        let summary = if store::document(&mut *tx, &binding.scope, resource)
-            .await?
-            .is_some()
-        {
-            let (document, _) = self
-                .load_document(&mut *tx, &binding.scope, resource)
-                .await?;
-            Some(document.summary().map_err(sync_error)?)
-        } else {
-            None
-        };
+        let summary = store::resource_summary(&mut *tx, &binding.scope, resource).await?;
         tx.commit().await?;
         Ok(summary)
     }
 }
 
 impl TalosSync {
+    /// Populate retained documents gradually after an upgrade. The lookup
+    /// only visits documents missing the projection.
+    pub async fn backfill_session_projections(
+        &self,
+        binding: &SyncBinding,
+        after: &str,
+    ) -> TalosResult<String> {
+        const LIMIT: usize = 4;
+        let rows = self.storage.query(
+            "SELECT resource_id FROM sync_documents WHERE hub_id=? AND account_id=? AND kind='session' AND session_projection_json IS NULL AND resource_id>? ORDER BY resource_id LIMIT ?",
+            &[&binding.scope.hub_id, &binding.scope.account_id, after, &LIMIT.to_string()],
+        ).await?;
+        let mut cursor = String::new();
+        for row in &rows {
+            cursor = store::text(row, "resource_id")?;
+            if let Err(error) = self.backfill_session_projection(binding, &cursor).await {
+                tracing::warn!(session = %cursor, code = ?error.error_code(), "Backfill Session projection");
+            }
+        }
+        if rows.len() < LIMIT {
+            cursor.clear();
+        }
+        Ok(cursor)
+    }
+
+    async fn backfill_session_projection(
+        &self,
+        binding: &SyncBinding,
+        session_id: &str,
+    ) -> TalosResult<()> {
+        let resource = SyncResourceKey::Session {
+            session_id: session_id.into(),
+        };
+        let mut tx = self.storage.begin_read_transaction().await?;
+        self.require_binding(&mut *tx, binding).await?;
+        let record = store::document(&mut *tx, &binding.scope, &resource).await?;
+        tx.commit().await?;
+        let Some(record) = record.filter(|record| !record.has_session_projection) else {
+            return Ok(());
+        };
+        let version = record.version.clone();
+        let writer = self.writer_id;
+        let snapshot = tokio::task::spawn_blocking(move || {
+            let (replica, _) = Self::restore_replica(writer, &resource, Some(record))?;
+            store::encode(&SessionProjection::from_changes(
+                &replica.changes().map_err(sync_error)?,
+            ))
+        })
+        .await
+        .map_err(|error| {
+            TalosError::internal_with_source("Prepare retained Session projection.", error)
+        })??;
+        let mut tx = self.storage.begin_background_transaction().await?;
+        tx.execute(
+            "UPDATE sync_documents SET session_projection_json=? WHERE hub_id=? AND account_id=? AND kind='session' AND resource_id=? AND session_projection_json IS NULL AND version_vector=unhex(?) AND generation=?",
+            &[&snapshot, &binding.scope.hub_id, &binding.scope.account_id, session_id, &store::hex(&version.version_vector), &version.history_generation.to_string()],
+        ).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Read the committed original Session projection in the caller's transaction.
     /// The bound Worker's display fields remain facts; this does not select a
     /// Worker, resolve receiver defaults, acquire execution or perform network I/O.
@@ -87,25 +198,40 @@ impl TalosSync {
         binding: &SyncBinding,
         session_id: &str,
     ) -> TalosResult<Option<crate::SyncSessionSnapshot>> {
+        self.session_projection(tx, binding, session_id)
+            .await?
+            .and_then(|projection| projection.snapshot)
+            .as_ref()
+            .map(crate::projection::transcode)
+            .transpose()
+    }
+
+    async fn session_projection(
+        &self,
+        tx: &mut dyn talos_storage::StorageTransaction,
+        binding: &SyncBinding,
+        session_id: &str,
+    ) -> TalosResult<Option<SessionProjection>> {
         self.require_binding(tx, binding).await?;
         let resource = SyncResourceKey::Session {
             session_id: session_id.into(),
         };
-        if store::document(tx, &binding.scope, &resource)
-            .await?
-            .is_none()
-        {
+        let rows = tx.query(
+            "SELECT session_projection_json FROM sync_documents WHERE hub_id=? AND account_id=? AND kind='session' AND resource_id=?",
+            &[&binding.scope.hub_id, &binding.scope.account_id, session_id],
+        ).await?;
+        let Some(row) = rows.first() else {
             return Ok(None);
+        };
+        if row.get_string("session_projection_json").is_some() {
+            return store::json(row, "session_projection_json").map(Some);
         }
+        // Upgraded documents can be read before the background materializer
+        // has written this projection for the first time.
         let (document, _) = self.load_document(tx, &binding.scope, &resource).await?;
-        for change in document.changes().map_err(sync_error)? {
-            if let talos_sync_types::SyncChange::Metadata { after, .. } = change {
-                if let talos_sync_types::SyncResourceSnapshot::Session(session) = *after {
-                    return crate::projection::transcode(&session).map(Some);
-                }
-            }
-        }
-        Ok(None)
+        Ok(Some(SessionProjection::from_changes(
+            &document.changes().map_err(sync_error)?,
+        )))
     }
 }
 
@@ -117,24 +243,16 @@ impl TalosSync {
         binding: &SyncBinding,
         identity: &talos_types::AgentTurnRef,
     ) -> TalosResult<Option<crate::SyncActiveTurnMetadata>> {
-        self.require_binding(tx, binding).await?;
-        let resource = SyncResourceKey::Session {
-            session_id: identity.session_id.clone(),
-        };
-        if store::document(tx, &binding.scope, &resource)
+        self.session_projection(tx, binding, &identity.session_id)
             .await?
-            .is_none()
-        {
-            return Ok(None);
-        }
-        let (document, _) = self.load_document(tx, &binding.scope, &resource).await?;
-        for change in document.changes().map_err(sync_error)? {
-            if let talos_sync_types::SyncChange::ActiveTurnMetadata(active) = change {
-                if active.identity.turn_id == identity.turn_id {
-                    return crate::projection::transcode(&active).map(Some);
-                }
-            }
-        }
-        Ok(None)
+            .and_then(|projection| {
+                projection
+                    .active_turns
+                    .into_iter()
+                    .find(|active| active.identity.turn_id == identity.turn_id)
+            })
+            .as_ref()
+            .map(crate::projection::transcode)
+            .transpose()
     }
 }

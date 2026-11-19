@@ -11,18 +11,23 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use tokio::sync::OwnedMutexGuard;
 use tracing::{debug, info};
 
 #[path = "sqlite_read_transaction.rs"]
 mod read_transaction;
 
+#[path = "sqlite_write_gate.rs"]
+mod write_gate;
+use write_gate::WriteGate;
+
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// SQLite Storage implementation
+#[derive(Clone)]
 pub struct SqliteStorage {
     pool: Pool<Sqlite>,
-    write_gate: std::sync::Arc<Mutex<()>>,
+    write_gate: std::sync::Arc<WriteGate>,
 }
 
 impl SqliteStorage {
@@ -73,13 +78,29 @@ impl SqliteStorage {
 
         Ok(Self {
             pool,
-            write_gate: std::sync::Arc::new(Mutex::new(())),
+            write_gate: Default::default(),
         })
     }
 
     /// Get the connection pool
     pub fn pool(&self) -> &Pool<Sqlite> {
         &self.pool
+    }
+
+    /// Queue a typed SQLx foreground write on the same writer as Storage.
+    pub async fn lock_writer(&self) -> OwnedMutexGuard<()> {
+        self.write_gate.foreground().await
+    }
+
+    /// Begin an immediate foreground transaction for typed SQLx operations.
+    pub async fn write_transaction(&self) -> TalosResult<SqliteWriteTransaction> {
+        self.begin_write(self.lock_writer().await).await
+    }
+
+    async fn begin_write(&self, guard: OwnedMutexGuard<()>) -> TalosResult<SqliteWriteTransaction> {
+        let mut transaction = SqliteWriteTransaction::begin(&self.pool).await?;
+        transaction._write_guard = Some(guard);
+        Ok(transaction)
     }
 
     fn value_to_param(value: &Value) -> String {
@@ -133,11 +154,12 @@ impl SqliteStorage {
 /// a deferred transaction cannot fail while upgrading a stale read snapshot.
 pub struct SqliteWriteTransaction {
     connection: Option<PoolConnection<Sqlite>>,
+    _write_guard: Option<OwnedMutexGuard<()>>,
 }
 
 impl SqliteWriteTransaction {
     /// Acquire one pooled connection and begin an immediate SQLite transaction.
-    pub async fn begin(pool: &Pool<Sqlite>) -> TalosResult<Self> {
+    async fn begin(pool: &Pool<Sqlite>) -> TalosResult<Self> {
         let connection = pool
             .acquire()
             .await
@@ -147,6 +169,7 @@ impl SqliteWriteTransaction {
         // never returned to the pool with its writer lock still held.
         let mut transaction = Self {
             connection: Some(connection),
+            _write_guard: None,
         };
         sqlx::query("BEGIN IMMEDIATE")
             .execute(&mut *transaction)
@@ -208,64 +231,6 @@ impl Drop for SqliteWriteTransaction {
     }
 }
 
-struct SqliteStorageTransaction {
-    transaction: Option<SqliteWriteTransaction>,
-    _write_guard: OwnedMutexGuard<()>,
-}
-
-#[async_trait]
-impl StorageTransaction for SqliteStorageTransaction {
-    async fn query(&mut self, sql: &str, params: &[&str]) -> TalosResult<Vec<Row>> {
-        let mut query = sqlx::query(sql);
-        for param in params {
-            query = query.bind(param);
-        }
-        let rows = query
-            .fetch_all(&mut **self.transaction_mut()?)
-            .await
-            .map_err(|error| {
-                crate::database_error("query within the database transaction", error)
-            })?;
-        Ok(SqliteStorage::rows(rows))
-    }
-
-    async fn execute(&mut self, sql: &str, params: &[&str]) -> TalosResult<u64> {
-        let mut query = sqlx::query(sql);
-        for param in params {
-            query = query.bind(param);
-        }
-        query
-            .execute(&mut **self.transaction_mut()?)
-            .await
-            .map(|result| result.rows_affected())
-            .map_err(|error| crate::database_error("execute the database transaction", error))
-    }
-
-    async fn commit(mut self: Box<Self>) -> TalosResult<()> {
-        self.transaction
-            .take()
-            .expect("transaction can finish only once")
-            .commit()
-            .await
-    }
-
-    async fn rollback(mut self: Box<Self>) -> TalosResult<()> {
-        self.transaction
-            .take()
-            .expect("transaction can finish only once")
-            .rollback()
-            .await
-    }
-}
-
-impl SqliteStorageTransaction {
-    fn transaction_mut(&mut self) -> TalosResult<&mut SqliteWriteTransaction> {
-        self.transaction
-            .as_mut()
-            .ok_or_else(|| TalosError::internal("transaction already finished"))
-    }
-}
-
 fn sqlite_row(row: sqlx::sqlite::SqliteRow) -> Row {
     let columns = row
         .columns()
@@ -307,12 +272,12 @@ impl Storage for SqliteStorage {
     }
 
     async fn begin_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>> {
-        let write_guard = self.write_gate.clone().lock_owned().await;
-        let transaction = SqliteWriteTransaction::begin(&self.pool).await?;
-        Ok(Box::new(SqliteStorageTransaction {
-            transaction: Some(transaction),
-            _write_guard: write_guard,
-        }))
+        Ok(Box::new(self.write_transaction().await?))
+    }
+
+    async fn begin_background_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>> {
+        let guard = self.write_gate.background().await;
+        Ok(Box::new(self.begin_write(guard).await?))
     }
 
     async fn query(&self, sql: &str, params: &[&str]) -> TalosResult<Vec<Row>> {
@@ -336,7 +301,7 @@ impl Storage for SqliteStorage {
 
     async fn execute(&self, sql: &str, params: &[&str]) -> TalosResult<u64> {
         debug!("Executing: {} with params: {:?}", sql, params);
-        let _write_guard = self.write_gate.lock().await;
+        let _write_guard = self.lock_writer().await;
 
         let mut query = sqlx::query(sql);
         for param in params {

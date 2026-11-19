@@ -16,9 +16,7 @@ async fn local_callback_ports_and_current_invocation_use_the_persisted_session_o
     )
     .await
     .unwrap();
-    let nodes = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(
-        storage.pool().clone(),
-    )));
+    let nodes = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(&storage)));
     let sessions = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
     let record = session_record();
     sessions.insert_session_record(&record).await.unwrap();
@@ -164,9 +162,7 @@ async fn history_supplement_stream_round_trips_large_invocation_and_uses_origina
     )
     .await
     .unwrap();
-    let nodes = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(
-        storage.pool().clone(),
-    )));
+    let nodes = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(&storage)));
     let sessions = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let record = session_record();
     sessions.insert_session_record(&record).await.unwrap();

@@ -22,7 +22,7 @@ async fn store() -> DatabaseFileStore {
         .execute(&pool)
         .await
         .unwrap();
-    DatabaseFileStore::new(pool)
+    DatabaseFileStore::new(&storage)
 }
 
 fn uploading(file_id: &str, owner_user_id: &str, project_id: Option<&str>, at: i64) -> FileRecord {

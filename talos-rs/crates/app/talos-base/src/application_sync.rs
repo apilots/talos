@@ -219,6 +219,7 @@ impl ApplicationSyncHost {
         self.sync_stores.projects.install_sync(adapter.clone())?;
         self.sync_stores.nodes.install_sync(adapter.clone())?;
         self.sync_stores.files.install_sync(adapter.clone())?;
+        adapter.start_capture();
         Ok(adapter)
     }
 

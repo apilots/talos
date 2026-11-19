@@ -19,7 +19,7 @@ async fn screenshots_use_owned_files_and_preserve_completed_uploads_on_later_fai
     .finish();
     let service = Arc::new(
         FileService::new(
-            Arc::new(DatabaseFileStore::new(storage.pool().clone())),
+            Arc::new(DatabaseFileStore::new(&storage)),
             Arc::new(StorageProjectStore::new(storage).await.unwrap()),
             BTreeMap::from([("local".into(), operator)]),
             Default::default(),

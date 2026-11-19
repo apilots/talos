@@ -11,8 +11,7 @@ async fn deleted_computer_still_satisfies_history_dependencies_on_a_new_manageme
         .await
         .unwrap();
     run(&source, "retained-history", "turn-1").await;
-    let nodes = DatabaseAgentNodeStore::new(source.storage.pool().clone())
-        .with_sync(source.adapter.clone());
+    let nodes = DatabaseAgentNodeStore::new(&source.storage).with_sync(source.adapter.clone());
     nodes
         .delete_owned(
             COMPUTER,
@@ -30,7 +29,7 @@ async fn deleted_computer_still_satisfies_history_dependencies_on_a_new_manageme
         },
     )
     .await;
-    assert!(DatabaseAgentNodeStore::new(target.storage.pool().clone())
+    assert!(DatabaseAgentNodeStore::new(&target.storage)
         .get(COMPUTER)
         .await
         .unwrap()
@@ -38,6 +37,7 @@ async fn deleted_computer_still_satisfies_history_dependencies_on_a_new_manageme
     let resource = SyncResourceKey::Session {
         session_id: "retained-history".into(),
     };
+    collect(&source.adapter, &resource).await;
     let exported = source
         .sync
         .export_pending(&source.adapter.binding, resource.clone(), 128)
@@ -212,6 +212,20 @@ async fn local_registration_retirement_freezes_history_and_new_enrollment_uses_a
         .insert_session_record(&record("fresh-local"))
         .await
         .unwrap();
+    collect(
+        &adapter,
+        &SyncResourceKey::Session {
+            session_id: "old-local-history".into(),
+        },
+    )
+    .await;
+    collect(
+        &adapter,
+        &SyncResourceKey::Session {
+            session_id: "fresh-local".into(),
+        },
+    )
+    .await;
     let old = source
         .sync
         .export_pending(
@@ -269,7 +283,7 @@ async fn imported_own_deletion_snapshots_history_before_new_local_work() {
         .await
         .unwrap();
     run(&target, "pre-import-history", "turn-1").await;
-    DatabaseAgentNodeStore::new(source.storage.pool().clone())
+    DatabaseAgentNodeStore::new(&source.storage)
         .with_sync(source.adapter.clone())
         .delete_owned(
             COMPUTER,

@@ -92,7 +92,7 @@ async fn verify_node_lifecycle(configuration: Configuration) {
     )
     .await
     .unwrap();
-    let store = Arc::new(DatabaseAgentNodeStore::new(storage.pool().clone()));
+    let store = Arc::new(DatabaseAgentNodeStore::new(&storage));
     let sessions: Arc<dyn SessionStore> =
         Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let coordinator = Arc::new(CoordinatorImpl::new(

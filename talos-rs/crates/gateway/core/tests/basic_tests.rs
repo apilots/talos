@@ -232,11 +232,10 @@ async fn test_gateway_with_coordinator(
     store: Arc<DatabaseSessionStore>,
     coordinator: Arc<dyn AgentCoordinator>,
 ) -> ServiceGateway {
-    let profile_store: Arc<dyn ProfileStore> =
-        Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
-    let file_store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
+    let profile_store: Arc<dyn ProfileStore> = Arc::new(DatabaseProfileStore::new(&storage));
+    let file_store = Arc::new(DatabaseFileStore::new(&storage));
     let nodes = talos_service::AgentNodeService::new(Arc::new(
-        talos_store::node::DatabaseAgentNodeStore::new(storage.pool().clone()),
+        talos_store::node::DatabaseAgentNodeStore::new(&storage),
     ));
     let project_store_impl = Arc::new(StorageProjectStore::new(storage).await.unwrap());
     let session_store: Arc<dyn SessionStore> = store.clone();

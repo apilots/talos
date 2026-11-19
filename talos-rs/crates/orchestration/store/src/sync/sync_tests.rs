@@ -14,6 +14,12 @@ mod backlog_tests;
 #[path = "read_snapshot_tests.rs"]
 mod read_snapshot_tests;
 
+#[path = "durable_capture_tests.rs"]
+mod durable_capture_tests;
+
+#[path = "import_stage_tests.rs"]
+mod import_stage_tests;
+
 const COMPUTER: &str = "d4383755-33d1-43fd-a6ef-cf14dc2a823d";
 struct Peer {
     storage: Arc<SqliteStorage>,
@@ -122,7 +128,7 @@ async fn peer_with_sync_storage(
     }
 }
 async fn registered_computer(peer: &Peer) {
-    DatabaseAgentNodeStore::new(peer.storage.pool().clone())
+    DatabaseAgentNodeStore::new(&peer.storage)
         .with_sync(peer.adapter.clone())
         .create(crate::node::CreateNodeParams {
             node_id: COMPUTER.into(),
@@ -241,6 +247,7 @@ async fn run(peer: &Peer, session: &str, turn: &str) {
         .unwrap();
 }
 async fn exchange(source: &Peer, destination: &Peer, resource: SyncResourceKey) {
+    collect(&source.adapter, &resource).await;
     while let Some(batch) = source
         .sync
         .export_pending(&source.adapter.binding, resource.clone(), 128)
@@ -274,6 +281,10 @@ async fn exchange(source: &Peer, destination: &Peer, resource: SyncResourceKey) 
         tx.commit().await.unwrap();
         source.sync.acknowledge(&batch).await.unwrap();
     }
+}
+
+async fn collect(adapter: &StoreSyncAdapter, resource: &SyncResourceKey) {
+    while adapter.collect_revision(resource).await.unwrap() {}
 }
 #[tokio::test]
 async fn original_stores_capture_full_facts_and_materialize_without_execution_or_recapture() {
@@ -309,7 +320,7 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
         },
     )
     .await;
-    let remote = DatabaseAgentNodeStore::new(b.storage.pool().clone())
+    let remote = DatabaseAgentNodeStore::new(&b.storage)
         .get(COMPUTER)
         .await
         .unwrap()
@@ -476,6 +487,7 @@ async fn file_source_and_child_identity_survive_import_and_source_deletion() {
     let resource = SyncResourceKey::Session {
         session_id: child.id.clone(),
     };
+    collect(&a.adapter, &resource).await;
     let batch = a
         .sync
         .export_pending(&a.adapter.binding, resource.clone(), 128)
@@ -538,7 +550,7 @@ async fn file_source_and_child_identity_survive_import_and_source_deletion() {
             .tree_identity,
         child.tree_identity
     );
-    let files = DatabaseFileStore::new(a.storage.pool().clone()).with_sync(a.adapter.clone());
+    let files = DatabaseFileStore::new(&a.storage).with_sync(a.adapter.clone());
     files
         .create_file(FileRecord {
             file_id: "file-1".into(),
@@ -572,7 +584,7 @@ async fn file_source_and_child_identity_survive_import_and_source_deletion() {
         file_id: "file-1".into(),
     };
     exchange(&a, &b, resource.clone()).await;
-    let remote = DatabaseFileStore::new(b.storage.pool().clone())
+    let remote = DatabaseFileStore::new(&b.storage)
         .get_file_for_owner(&crate::file::FileOwnerKey {
             file_id: "file-1".into(),
             owner_user_id: "account-1".into(),
@@ -594,7 +606,7 @@ async fn file_source_and_child_identity_survive_import_and_source_deletion() {
     files.mark_deleting_for_owner(&key, 3).await.unwrap();
     files.delete_file_record("file-1").await.unwrap();
     exchange(&a, &b, resource).await;
-    assert!(DatabaseFileStore::new(b.storage.pool().clone())
+    assert!(DatabaseFileStore::new(&b.storage)
         .get_file_for_owner(&key)
         .await
         .unwrap()

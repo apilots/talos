@@ -83,6 +83,7 @@ async fn local_turns_finish_and_cancel_while_sync_backlog_is_being_read() {
     let resource = SyncResourceKey::Session {
         session_id: completion.session_id.clone(),
     };
+    collect(&peer.adapter, &resource).await;
     let upload = {
         let sync = peer.sync.clone();
         let binding = peer.adapter.binding().clone();
@@ -123,6 +124,7 @@ async fn local_turns_finish_and_cancel_while_sync_backlog_is_being_read() {
     let _ = resume_tx.send(());
     local_result.expect("Local completion and cancellation must commit while Sync is paused");
     let first = upload.await.unwrap().unwrap().unwrap();
+    collect(&peer.adapter, &resource).await;
     let terminal = peer
         .sync
         .export_pending(peer.adapter.binding(), resource, 128)
@@ -246,7 +248,7 @@ struct PausedOutboxTransaction {
 impl StorageTransaction for PausedOutboxTransaction {
     async fn query(&mut self, sql: &str, params: &[&str]) -> TalosResult<Vec<Row>> {
         let rows = self.transaction.query(sql, params).await?;
-        if sql.contains("changes_json") && sql.contains("FROM sync_outbox") {
+        if sql.contains("changes_json") && sql.contains("FROM visible_sync_outbox") {
             let pause = self.pause.lock().unwrap().take();
             if let Some((paused, resume)) = pause {
                 let _ = paused.send(());

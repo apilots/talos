@@ -115,7 +115,7 @@ async fn profile_discard_failure_preserves_the_error_and_dispatches_queued_work(
     let input = completed_agent_user_input("failed-turn", "message-1", test_user_input("first"), 1)
         .unwrap();
     commit_test_running_turn(store.as_ref(), identity, input).await;
-    DatabaseProfileStore::new(storage.pool().clone())
+    DatabaseProfileStore::new(&storage)
         .record_turn_usage(talos_store::profile::TurnUsageUpdate {
             user_id: "u1".to_string(),
             session_id: "s1".to_string(),
@@ -410,7 +410,7 @@ async fn automation_settlement_warning_preserves_usage_cleanup_and_queued_work()
     )
     .unwrap();
     commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
-    DatabaseProfileStore::new(storage.pool().clone())
+    DatabaseProfileStore::new(&storage)
         .record_turn_usage(talos_store::profile::TurnUsageUpdate {
             user_id: "u1".into(),
             session_id: identity.session_id.clone(),

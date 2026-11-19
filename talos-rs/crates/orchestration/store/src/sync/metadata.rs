@@ -3,37 +3,88 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::StorageTransaction;
 use talos_sync::{
     SessionExecutionBinding, SyncImportBatch, SyncResourceKey, SyncResourceSnapshot,
-    SyncSessionSnapshot,
+    SyncSessionSnapshot, TalosSync,
 };
+use talos_sync_types::ResourceKind;
 use talos_types::{
     NodeHealth, NodeInfo, NodeMode, NodeStatus, ProjectInfo, ProjectStatus, ProjectStatusState,
     ProjectUnavailableReason,
 };
 
-pub(super) async fn read(
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(super) struct MetadataSource {
+    fields: super::source::SourceFields,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<String>,
+}
+
+pub(super) async fn read_source(
     adapter: &StoreSyncAdapter,
     tx: &mut dyn StorageTransaction,
     resource: &SyncResourceKey,
-) -> TalosResult<Option<SyncResourceSnapshot>> {
-    Ok(match resource {
-        SyncResourceKey::Computer { computer_id } => {
-            let rows = tx
-                .query(
-                    "SELECT * FROM agent_nodes WHERE node_id = ?",
-                    &[computer_id],
-                )
-                .await?;
-            let Some(row) = rows.first() else {
-                return Ok(None);
-            };
-            let owner = row.get_string("owner_user_id");
-            // G owns Computer directory facts. A host alias only maps immutable Session bindings.
-            if computer_id == "embedded"
-                || owner.as_deref() != Some(&adapter.binding.scope.account_id)
-            {
-                return Ok(None);
-            }
-            Some(SyncResourceSnapshot::Computer(NodeInfo {
+) -> TalosResult<Option<MetadataSource>> {
+    let id = resource.id();
+    let user = &adapter.binding.source_user_id;
+    let account = &adapter.binding.scope.account_id;
+    let mut fields = match resource {
+        SyncResourceKey::Computer { .. } => tx.query(
+            "SELECT owner_user_id, display_name, mode, endpoint, status, created_at, updated_at, system_info
+             FROM agent_nodes WHERE node_id=? AND owner_user_id=? AND node_id<>'embedded'",
+            &[id, account],
+        ).await?,
+        SyncResourceKey::Project { .. } => tx.query(
+            "SELECT p.execution_node_id, p.name, p.directory, p.created_at, p.updated_at,
+                    (SELECT COUNT(*) FROM sessions s WHERE s.project_id=p.project_id) AS session_count
+             FROM projects p WHERE p.project_id=? AND p.user_id IN (?,?)",
+            &[id, user, account],
+        ).await?,
+        SyncResourceKey::File { .. } => tx.query(
+            "SELECT project_id, storage_peer_id, original_filename, mime_type, size_bytes, metadata_json,
+                    created_at, updated_at FROM files WHERE file_id=? AND owner_user_id IN (?,?) AND status='ready'",
+            &[id, user, account],
+        ).await?,
+        SyncResourceKey::Session { .. } => return Err(TalosError::internal("Session capture uses a history cut.")),
+    };
+    let Some(row) = fields.pop() else {
+        return Ok(None);
+    };
+    let embedded_project = matches!(resource, SyncResourceKey::Project { .. })
+        && row.get_string("execution_node_id").as_deref() == Some("embedded");
+    let mut fields = super::source::SourceFields::from(row);
+    if embedded_project {
+        if !TalosSync::captures_embedded_resource(tx, &adapter.binding, ResourceKind::Project, id)
+            .await?
+        {
+            return Ok(None);
+        }
+        // Freeze this registered association before the local alias can change.
+        fields.set_text("execution_node_id", adapter.computer("embedded"));
+    }
+    let tags = if matches!(resource, SyncResourceKey::File { .. }) {
+        tx.query(
+            "SELECT tag FROM file_tags WHERE file_id=? ORDER BY tag",
+            &[id],
+        )
+        .await?
+        .iter()
+        .map(|row| text(row, "tag"))
+        .collect::<TalosResult<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
+    Ok(Some(MetadataSource { fields, tags }))
+}
+
+impl MetadataSource {
+    pub(super) fn project(
+        self,
+        adapter: &StoreSyncAdapter,
+        resource: &SyncResourceKey,
+    ) -> TalosResult<SyncResourceSnapshot> {
+        let row = self.fields.row();
+        let id = resource.id();
+        Ok(match resource {
+            SyncResourceKey::Computer { .. } => SyncResourceSnapshot::Computer(NodeInfo {
                 managed_worker_phase: None,
                 system_info: row
                     .get_string("system_info")
@@ -45,112 +96,107 @@ pub(super) async fn read(
                             error,
                         )
                     })?,
-                node_id: computer_id.clone(),
-                display_name: text(row, "display_name")?,
-                mode: match text(row, "mode")?.as_str() {
+                node_id: id.into(),
+                display_name: text(&row, "display_name")?,
+                mode: match text(&row, "mode")?.as_str() {
                     "embedded" => NodeMode::Embedded,
                     "remote" => NodeMode::Remote,
                     _ => return Err(TalosError::internal("Invalid persisted Computer mode.")),
                 },
                 endpoint: row.get_string("endpoint"),
-                status: match text(row, "status")?.as_str() {
+                status: match text(&row, "status")?.as_str() {
                     "enabled" => NodeStatus::Enabled,
                     "disabled" => NodeStatus::Disabled,
                     _ => return Err(TalosError::internal("Invalid persisted Computer status.")),
                 },
-                owner_user_id: owner,
+                owner_user_id: row.get_string("owner_user_id"),
                 health: NodeHealth::Unknown,
                 lease_expires_at: None,
                 last_heartbeat_at: None,
                 credential_expires_at: None,
                 available: false,
-                created_at: number(row, "created_at")?,
-                updated_at: number(row, "updated_at")?,
-            }))
-        }
-        SyncResourceKey::Project { project_id } => {
-            let rows = tx.query("SELECT p.*, (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.project_id) AS session_count FROM projects p WHERE p.project_id = ? AND p.user_id IN (?, ?)", &[project_id, &adapter.binding.source_user_id, &adapter.binding.scope.account_id]).await?;
-            if rows.first().is_some_and(|row| {
-                row.get_string("execution_node_id").as_deref() == Some("embedded")
-            }) && !capture_local_resource(adapter, tx, "project", project_id).await?
-            {
-                return Ok(None);
-            }
-            rows.first()
-                .map(|row| {
-                    Ok::<_, TalosError>(SyncResourceSnapshot::Project(ProjectInfo {
-                        node_id: text(row, "execution_node_id")?,
-                        project_id: project_id.clone(),
-                        name: text(row, "name")?,
-                        directory: text(row, "directory")?.into(),
-                        status: ProjectStatus {
-                            state: ProjectStatusState::NodeUnavailable,
-                            reason: Some(ProjectUnavailableReason::NodeUnavailable),
-                        },
-                        created_at: number(row, "created_at")?,
-                        updated_at: number(row, "updated_at")?,
-                        session_count: number(row, "session_count")?,
-                    }))
-                })
-                .transpose()?
-        }
-        SyncResourceKey::Session { session_id } => {
-            let Some(row) = session_row(adapter, tx, session_id).await? else {
-                return Ok(None);
-            };
-            let record = crate::session::DatabaseSessionStore::parse_session_record(&row)?;
-            let memory_processed_through = session::key_at(
-                adapter,
-                tx,
-                session_id,
-                record.memory_processed_until_event_seq as i64,
-            )
-            .await?;
-            // The Service supplies the original projection for the bound Worker.
-            // A receiver preserves these fields and never uses its own defaults.
-            let shared = adapter
-                .sync
-                .session_snapshot(tx, &adapter.binding, session_id)
-                .await?;
-            let mut info = match shared {
-                Some(snapshot) => snapshot.session,
-                None => (adapter.session_projection)(&record)?,
-            };
-            info.title = record.title.clone();
-            info.last_activity = record.last_activity;
-            info.message_count = record.message_count;
-            info.usage = record.usage.clone();
-            info.current_directory = record.current_directory.clone();
-            if let Some(selection) = &record.conf.model_selection {
-                info.model_selection = selection.clone();
-            }
-            info.effective_mode = record
-                .conf
-                .user_permission_mode
-                .unwrap_or(info.configured_default_mode);
-            info.user_id = adapter.binding.scope.account_id.clone();
-            Some(SyncResourceSnapshot::Session(Box::new(
-                SyncSessionSnapshot {
-                    session: info,
-                    conf: record.conf,
-                    environment: record.environment,
-                    channel_id: record.channel_id,
-                    thread_id: record.thread_id,
-                    binding: SessionExecutionBinding {
-                        computer_id: record.execution_node_id,
-                        agent_id: record.agent_id,
-                        workspace_id: record.workspace_id,
-                        workspace_user_id: row
-                            .get_string("workspace_user_id")
-                            .unwrap_or(record.user_id),
-                    },
-                    tree_identity: record.tree_identity,
-                    memory_processed_through,
+                created_at: number(&row, "created_at")?,
+                updated_at: number(&row, "updated_at")?,
+            }),
+            SyncResourceKey::Project { .. } => SyncResourceSnapshot::Project(ProjectInfo {
+                node_id: text(&row, "execution_node_id")?,
+                project_id: id.into(),
+                name: text(&row, "name")?,
+                directory: text(&row, "directory")?.into(),
+                status: ProjectStatus {
+                    state: ProjectStatusState::NodeUnavailable,
+                    reason: Some(ProjectUnavailableReason::NodeUnavailable),
                 },
-            )))
-        }
-        SyncResourceKey::File { file_id } => super::file::read(adapter, tx, file_id).await?,
-    })
+                created_at: number(&row, "created_at")?,
+                updated_at: number(&row, "updated_at")?,
+                session_count: number(&row, "session_count")?,
+            }),
+            SyncResourceKey::File { .. } => super::file::project(adapter, id, &row, self.tags)?,
+            SyncResourceKey::Session { .. } => {
+                return Err(TalosError::internal("Session capture uses a history cut."))
+            }
+        })
+    }
+}
+
+pub(super) async fn project_session(
+    adapter: &StoreSyncAdapter,
+    tx: &mut dyn StorageTransaction,
+    session_id: &str,
+    generation: u64,
+    row: &talos_storage::Row,
+) -> TalosResult<SyncResourceSnapshot> {
+    let record = crate::session::DatabaseSessionStore::parse_session_record(row)?;
+    let memory_processed_through = session::key_at_generation(
+        adapter,
+        tx,
+        session_id,
+        generation,
+        record.memory_processed_until_event_seq as i64,
+    )
+    .await?;
+    // The Service supplies the original projection for the bound Worker.
+    // A receiver preserves these fields and never uses its own defaults.
+    let shared = adapter
+        .sync
+        .session_snapshot(tx, &adapter.binding, session_id)
+        .await?;
+    let mut info = match shared {
+        Some(snapshot) => snapshot.session,
+        None => (adapter.session_projection)(&record)?,
+    };
+    info.title = record.title.clone();
+    info.last_activity = record.last_activity;
+    info.message_count = record.message_count;
+    info.usage = record.usage.clone();
+    info.current_directory = record.current_directory.clone();
+    if let Some(selection) = &record.conf.model_selection {
+        info.model_selection = selection.clone();
+    }
+    info.effective_mode = record
+        .conf
+        .user_permission_mode
+        .unwrap_or(info.configured_default_mode);
+    info.user_id = adapter.binding.scope.account_id.clone();
+    Ok(SyncResourceSnapshot::Session(Box::new(
+        SyncSessionSnapshot {
+            session: info,
+            conf: record.conf,
+            environment: record.environment,
+            channel_id: record.channel_id,
+            thread_id: record.thread_id,
+            binding: SessionExecutionBinding {
+                computer_id: record.execution_node_id,
+                agent_id: record.agent_id,
+                workspace_id: record.workspace_id,
+                workspace_user_id: row
+                    .get_string("workspace_user_id")
+                    .unwrap_or(record.user_id),
+            },
+            tree_identity: record.tree_identity,
+            memory_processed_through,
+        },
+    )))
 }
 
 pub(super) async fn apply(
@@ -263,6 +309,21 @@ pub(super) async fn delete(
         }
         tx.execute("INSERT INTO computer_deletions(node_id, owner_user_id, deleted_at) VALUES (?, ?, ?) ON CONFLICT(node_id) DO NOTHING", &[computer_id, &adapter.binding.scope.account_id, &chrono::Utc::now().timestamp().to_string()]).await?;
     }
+    if let SyncResourceKey::Session { session_id } = resource {
+        let owned = tx
+            .query(
+                "SELECT 1 FROM sessions WHERE session_key=? AND user_id IN (?,?)",
+                &[
+                    session_id,
+                    &adapter.binding.source_user_id,
+                    &adapter.binding.scope.account_id,
+                ],
+            )
+            .await?;
+        if !owned.is_empty() {
+            super::source::retire_history(tx, session_id, /*deleted*/ true).await?;
+        }
+    }
     let (table, key, owner) = match resource {
         SyncResourceKey::Computer { .. } => ("agent_nodes", "node_id", "owner_user_id"),
         SyncResourceKey::Project { .. } => ("projects", "project_id", "user_id"),
@@ -307,39 +368,19 @@ pub(super) async fn session_row(
         return Ok(None);
     };
     if text(&row, "execution_node_id")? == "embedded"
-        && !capture_local_resource(adapter, tx, "session", session_id).await?
+        && !TalosSync::captures_embedded_resource(
+            tx,
+            &adapter.binding,
+            ResourceKind::Session,
+            session_id,
+        )
+        .await?
     {
         return Ok(None);
     }
     Ok(Some(row))
 }
 
-async fn capture_local_resource(
-    adapter: &StoreSyncAdapter,
-    tx: &mut dyn StorageTransaction,
-    kind: &str,
-    id: &str,
-) -> TalosResult<bool> {
-    let Some(alias) = adapter
-        .binding
-        .computers
-        .iter()
-        .find(|alias| alias.source_node_id == "embedded")
-    else {
-        return Ok(false);
-    };
-    if tx
-        .query(
-            "SELECT 1 FROM local_computer_retirements WHERE node_id = ? AND owner_user_id = ?",
-            &[&alias.computer_id, &adapter.binding.scope.account_id],
-        )
-        .await?
-        .is_empty()
-    {
-        return Ok(true);
-    }
-    Ok(!tx.query("SELECT 1 FROM local_computer_retirement_resources WHERE node_id = ? AND kind = ? AND resource_id = ?", &[&alias.computer_id, kind, id]).await?.is_empty())
-}
 pub(super) fn number(row: &talos_storage::Row, key: &str) -> TalosResult<i64> {
     row.get_i64(key)
         .ok_or_else(|| TalosError::internal("Missing persisted synchronization field."))

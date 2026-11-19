@@ -2,7 +2,10 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_sync_sdk::version_includes;
 use talos_sync_sdk::SyncClient;
 
-use super::{control::ControlCommand, transport, RunnerChannels};
+use super::{
+    control::{ControlCommand, FlushTarget},
+    transport, RunnerChannels,
+};
 use crate::{
     facade::sync_error, SyncBinding, SyncDataAdapter, SyncResourceKey, SyncVersion, TalosSync,
 };
@@ -37,21 +40,11 @@ pub(super) async fn execute<A: SyncDataAdapter>(
         }
         ControlCommand::Flush {
             resource,
-            cut,
-            minimum,
+            target,
             reply,
         } => {
             if !reply.is_closed() {
-                let result = flush(
-                    sync,
-                    adapter,
-                    binding,
-                    client,
-                    channels,
-                    &resource,
-                    (cut, minimum),
-                )
-                .await;
+                let result = flush(sync, binding, client, channels, &resource, target).await;
                 if result.is_ok() {
                     channels.failed_uploads.remove(&resource);
                 }
@@ -87,44 +80,49 @@ async fn catch_up<A: SyncDataAdapter>(
     result
 }
 
-async fn flush<A: SyncDataAdapter>(
+async fn flush(
     sync: &TalosSync,
-    adapter: &A,
     binding: &SyncBinding,
     client: &SyncClient,
     channels: &RunnerChannels,
     resource: &SyncResourceKey,
-    cut: (Option<i64>, SyncVersion),
+    target: FlushTarget,
 ) -> TalosResult<SyncVersion> {
-    let (cut, minimum) = cut;
+    let cut = match &target {
+        FlushTarget::Captured(sequence) => Some(*sequence),
+        FlushTarget::Outbox { cut, .. } => *cut,
+    };
+    let mut acknowledged = None;
     if let Some(cut) = cut {
-        let mut acknowledged = None;
         while sync.has_pending_through(binding, resource, cut).await? {
-            acknowledged = transport::upload_resource(
-                sync,
-                adapter,
-                binding,
-                client,
-                channels,
-                resource.clone(),
-            )
-            .await?;
+            acknowledged =
+                transport::upload_resource(sync, binding, client, channels, resource.clone(), cut)
+                    .await?;
             if acknowledged.is_none() {
-                // A confirmed H tombstone can supersede this pending cut while
-                // downloading. Recover its real version and verify below.
+                // A concurrent ACK or imported tombstone can remove pending rows.
+                // Verify Hub coverage even when the queue is already empty.
                 break;
             }
         }
-        if let Some(version) = acknowledged {
-            if version_includes(&version, &minimum).map_err(sync_error)? {
-                return Ok(version);
-            }
+    }
+    let minimum = match target {
+        FlushTarget::Captured(sequence) => {
+            sync.captured_version(binding, resource, sequence).await?
+        }
+        FlushTarget::Outbox { minimum, .. } => minimum,
+    };
+    if let Some(version) = acknowledged {
+        if version_includes(&version, &minimum).map_err(sync_error)? {
+            return Ok(version);
         }
     }
-    // The runner may already have acknowledged the fixed cut before servicing
-    // this request. Recover H's current complete cut rather than inventing an ACK.
-    let (document, hub_cut) =
-        transport::download(sync, adapter, binding, client, resource, &channels.changes).await?;
+    // Joined reports the durable Hub vector independently of whether a later
+    // inbound update is ready for local publication.
+    let committed = sync
+        .document_version(binding, resource)
+        .await?
+        .unwrap_or_default();
+    let (document, hub_cut) = transport::join_document(client, resource, &committed).await?;
     document.close().await.map_err(sync_error)?;
     if !version_includes(&hub_cut, &minimum).map_err(sync_error)? {
         return Err(TalosError::new(

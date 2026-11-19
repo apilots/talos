@@ -16,8 +16,8 @@ impl SyncDataAdapter for EmptyAdapter {
         &self,
         _: &mut dyn StorageTransaction,
         _: SyncExportParams,
-    ) -> TalosResult<Vec<SyncChange>> {
-        Ok(vec![])
+    ) -> TalosResult<SyncExportFacts> {
+        Ok(SyncExportFacts::default())
     }
     async fn apply(&self, _: &mut dyn StorageTransaction, _: &SyncImportBatch) -> TalosResult<()> {
         Ok(())

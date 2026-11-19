@@ -9,24 +9,12 @@ use talos_storage::StorageTransaction;
 use talos_sync::{SyncFileSnapshot, SyncImportBatch, SyncResourceSnapshot};
 use talos_types::{FileInfo, FileScope};
 
-pub(super) async fn read(
+pub(super) fn project(
     adapter: &StoreSyncAdapter,
-    tx: &mut dyn StorageTransaction,
     file_id: &str,
-) -> TalosResult<Option<SyncResourceSnapshot>> {
-    let rows = tx.query("SELECT * FROM files WHERE file_id = ? AND owner_user_id IN (?, ?) AND status = 'ready'", &[file_id, &adapter.binding.source_user_id, &adapter.binding.scope.account_id]).await?;
-    let Some(row) = rows.first() else {
-        return Ok(None);
-    };
-    let tags = tx
-        .query(
-            "SELECT tag FROM file_tags WHERE file_id = ? ORDER BY tag",
-            &[file_id],
-        )
-        .await?
-        .iter()
-        .map(|r| text(r, "tag"))
-        .collect::<TalosResult<Vec<_>>>()?;
+    row: &talos_storage::Row,
+    tags: Vec<String>,
+) -> TalosResult<SyncResourceSnapshot> {
     let metadata: BTreeMap<String, String> =
         serde_json::from_str(&text(row, "metadata_json")?).map_err(codec)?;
     let scope = row
@@ -34,7 +22,7 @@ pub(super) async fn read(
         .map_or(FileScope::Personal, |project_id| FileScope::Project {
             project_id,
         });
-    Ok(Some(SyncResourceSnapshot::File(SyncFileSnapshot {
+    Ok(SyncResourceSnapshot::File(SyncFileSnapshot {
         file: FileInfo {
             file_id: file_id.into(),
             scope,
@@ -51,7 +39,7 @@ pub(super) async fn read(
         storage_peer_id: row
             .get_string("storage_peer_id")
             .unwrap_or_else(|| adapter.binding.peer_id.clone()),
-    })))
+    }))
 }
 
 pub(super) async fn apply(

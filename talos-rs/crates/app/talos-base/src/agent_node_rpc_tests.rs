@@ -229,7 +229,7 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
     )
     .await
     .unwrap();
-    let store = Arc::new(DatabaseAgentNodeStore::new(storage.pool().clone()));
+    let store = Arc::new(DatabaseAgentNodeStore::new(&storage));
     let nodes = AgentNodeService::new(store.clone());
     let coordinator = Arc::new(CoordinatorImpl::new(
         Arc::new(talos_router::RouterImpl::new()),
@@ -474,7 +474,7 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     )
     .await
     .unwrap();
-    let store = Arc::new(DatabaseAgentNodeStore::new(storage.pool().clone()));
+    let store = Arc::new(DatabaseAgentNodeStore::new(&storage));
     let nodes = AgentNodeService::new(store.clone());
     let sessions = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let memory_progress: Arc<dyn KernelMemoryProgressStore> =

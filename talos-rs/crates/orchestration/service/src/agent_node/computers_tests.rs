@@ -21,9 +21,7 @@ async fn computer_directory_scopes_search_and_pagination_without_exposing_privat
     )
     .await
     .unwrap();
-    let service = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(
-        storage.pool().clone(),
-    )));
+    let service = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(&storage)));
     service.register_embedded(true).await.unwrap();
     let owner = Actor::regular("owner");
     let other = Actor::regular("other");
