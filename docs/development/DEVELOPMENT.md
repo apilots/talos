@@ -228,20 +228,23 @@ Chat endpoint requiring `reasoning_content` must opt in; do not change replay
 fields globally for unrelated providers.
 
 The shipped profiles select Responses for new official OpenAI connections.
-Configuration upgrades preserve saved protocols and model catalogs. The
-profiles list GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, and GPT-6 Luna with
-standard short-context rates and 30-minute cache-write rates.
+Configuration upgrades preserve saved protocols and model catalogs. The four
+default models are GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra, and GPT-6 Luna.
+The profiles use standard short-context rates and 30-minute cache-write rates.
 
-GPT-6 Astra, GPT-6.1 Sol, and GPT-6.1 Terra require Responses for tools.
-GPT-6 Luna and GPT-5.4 mini can use Chat Completions function tools with reasoning
-disabled.
+GPT-6.2 Astra, GPT-6.2 Sol, and GPT-6.1 Terra require Responses for tools.
+GPT-6 Luna and GPT-5.5 can use Chat Completions function tools with an explicit
+`reasoning_effort: none`. If an upgraded installation still uses Chat Completions
+for `https://api.openai.com/v1`, select Responses for OpenAI in model settings.
+For file-based configuration, set `llm.openai.protocol` to `responses` in
+`$TALOS_HOME/conf/talos.yaml` and restart Talos. Add the desired entries
+from the current profile to `llm.openai.models` to update an existing model
+catalog. Keep each third-party connection on its supported protocol.
 
 When reasoning is off, the official OpenAI connection sends `none` for
-`gpt-6-luna`, `gpt-6.1-terra`, and the older `gpt-6-sol`. The shipped
-`gpt-6.1-sol` and `gpt-6-astra` require reasoning. Talos omits the effort for
-these models when reasoning is set to off, so OpenAI uses the model's default.
-GPT-6.1 Sol defaults to `medium`. See [OpenAI model limitations](https://developers.openai.com/api/docs/guides/latest-model#gpt-6-astra-limitations)
-and the [GPT-6.1 Sol reference](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+`gpt-6-luna` and `gpt-6.1-terra`. GPT-6.2 Astra and Sol require reasoning.
+Talos omits the effort for these models when reasoning is set to off, so OpenAI
+uses the model's default. See the [OpenAI GPT-6.2 guide](https://developers.openai.com/api/docs/guides/latest-model).
 
 The built-in OpenAI connection uses `max_completion_tokens` for a Chat output
 limit on `https://api.openai.com`. Its Responses requests default to

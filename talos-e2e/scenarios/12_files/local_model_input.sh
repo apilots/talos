@@ -36,44 +36,28 @@ BASE_CONFIG="${REPO_ROOT}/conf/talos-dev.yaml" \
 CONFIG_TEMPLATE="${CONFIG_TEMPLATE}" \
 MOCK_BASE_URL="http://127.0.0.1:${MOCK_LLM_PORT}/v1" \
 python3 - <<'PY'
-import json
 import os
 from pathlib import Path
 
+import yaml
+
 source = Path(os.environ["BASE_CONFIG"])
 target = Path(os.environ["CONFIG_TEMPLATE"])
-lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
-in_llm = False
-in_openai = False
-updated = {"provider": False, "model": False, "base_url": False, "protocol": False}
-
-for index, line in enumerate(lines):
-    stripped = line.strip()
-    indent = len(line) - len(line.lstrip(" "))
-    if indent == 0:
-        in_llm = stripped == "llm:"
-        in_openai = False
-        continue
-    if in_llm and indent == 2:
-        in_openai = stripped == "openai:"
-        if stripped.startswith("provider:"):
-            lines[index] = "  provider: openai\n"
-            updated["provider"] = True
-        elif stripped.startswith("model:"):
-            lines[index] = "  model: gpt-5.4-mini\n"
-            updated["model"] = True
-        continue
-    if in_openai and indent == 4:
-        if stripped.startswith("base_url:"):
-            lines[index] = f"    base_url: {json.dumps(os.environ['MOCK_BASE_URL'])}\n"
-            updated["base_url"] = True
-        elif stripped.startswith("protocol:"):
-            lines[index] = "    protocol: chat\n"
-            updated["protocol"] = True
-
-if not all(updated.values()):
-    raise SystemExit(f"failed to configure mock OpenAI provider: {updated}")
-target.write_text("".join(lines), encoding="utf-8")
+config = yaml.safe_load(source.read_text(encoding="utf-8"))
+model_id = "files-e2e-model"
+llm = config["llm"]
+llm.update(provider="openai", model=model_id)
+llm["openai"].update(
+    base_url=os.environ["MOCK_BASE_URL"],
+    protocol="chat",
+    models=[{
+        "id": model_id,
+        "context_window": 400_000,
+        "reasoning": True,
+        "input": ["text", "image", "file"],
+    }],
+)
+target.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 PY
 
 MOCK_LLM_PORT="${MOCK_LLM_PORT}" MOCK_REQUEST_LOG="${MOCK_REQUEST_LOG}" \
