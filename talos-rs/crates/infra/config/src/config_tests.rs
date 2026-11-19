@@ -510,7 +510,7 @@ fn test_provider_protocol_defaults_by_provider() {
         default_llm_protocol("anthropic"),
         Some(LlmProtocol::Messages)
     );
-    assert_eq!(default_llm_protocol("openai"), Some(LlmProtocol::Chat));
+    assert_eq!(default_llm_protocol("openai"), Some(LlmProtocol::Responses));
     assert_eq!(default_llm_protocol("bailian"), Some(LlmProtocol::Chat));
     assert_eq!(default_llm_protocol("ollama"), Some(LlmProtocol::Chat));
     assert_eq!(default_llm_protocol("openrouter"), Some(LlmProtocol::Chat));
@@ -524,7 +524,11 @@ fn test_provider_protocol_support_is_provider_scoped() {
         "openai",
         LlmProtocol::Responses
     ));
-    assert!(llm_provider_supports_protocol("openai", LlmProtocol::Chat));
+    assert!(!llm_provider_supports_protocol("openai", LlmProtocol::Chat));
+    assert!(!llm_provider_supports_protocol(
+        "openai",
+        LlmProtocol::Messages
+    ));
     assert!(!llm_provider_supports_protocol(
         "anthropic",
         LlmProtocol::Chat
@@ -556,6 +560,13 @@ fn test_provider_protocol_support_is_provider_scoped() {
 
     let capabilities = provider_protocol_capabilities();
     assert_eq!(
+        capabilities["openai"],
+        ProviderProtocolCapabilities {
+            default_protocol: LlmProtocol::Responses,
+            protocols: vec![LlmProtocol::Responses],
+        }
+    );
+    assert_eq!(
         capabilities["deepseek"],
         ProviderProtocolCapabilities {
             default_protocol: LlmProtocol::Chat,
@@ -573,6 +584,32 @@ fn test_provider_protocol_support_is_provider_scoped() {
             ],
         }
     );
+}
+
+#[test]
+fn test_openai_configuration_requires_responses_for_any_base_url() {
+    for base_url in [
+        None,
+        Some("https://api.openai.com/v1".to_string()),
+        Some("https://gateway.example/v1".to_string()),
+    ] {
+        let mut llm = LlmConfig::default();
+        llm.openai.base_url = base_url;
+        assert_eq!(
+            effective_llm_protocol("openai", &llm.openai),
+            Some(LlmProtocol::Responses)
+        );
+        llm.validate_providers().unwrap();
+        llm.openai.protocol = Some(LlmProtocol::Responses);
+        llm.validate_providers().unwrap();
+        for protocol in [LlmProtocol::Chat, LlmProtocol::Messages] {
+            llm.openai.protocol = Some(protocol);
+            assert!(llm
+                .validate_providers()
+                .unwrap_err()
+                .is_code(talos_error::ErrorCode::InvalidRequest));
+        }
+    }
 }
 
 #[test]

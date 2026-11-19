@@ -5,7 +5,7 @@ import uuid
 
 import yaml
 
-from fixture import REPORT, ROOT, data, http, http_response, wait
+from fixture import MODEL_PROVIDER, REPORT, ROOT, data, http, http_response, wait
 from lifecycle import docker_create
 from media import Viewer
 
@@ -38,7 +38,7 @@ def verify_personal_capabilities(base, node):
     data(http(base + "/v1/turns/start", {
         "sessionId": session,
         "nodeId": node,
-        "modelSelection": {"modelRef": {"provider": "openai", "id": "browser-fixture"}, "reasoningEffort": None},
+        "modelSelection": {"modelRef": {"provider": MODEL_PROVIDER, "id": "browser-fixture"}, "reasoningEffort": None},
         "input": {"content": [{"type": "text", "text": "Personal Worker acceptance Turn"}]},
     }))
 
@@ -66,7 +66,7 @@ def verify_personal_capabilities(base, node):
 def docker_personal(files, base, worker_model, image, docker, container_args):
     config = yaml.safe_load((files / "talos.yaml").read_text())
     endpoint = config.pop("talos")["worker"]["runtime"]["control_plane_endpoint"]
-    model_url = worker_model["openai"]["base_url"]
+    model_url = worker_model["custom_providers"][MODEL_PROVIDER]["base_url"]
     config["llm"] = worker_model
     config["cloud"].update(api_base_url=model_url.removesuffix("/v1"), agent_base_url=endpoint,
                            agent_trusted_ca_file="/home/talos/.talos/conf/tls.crt")

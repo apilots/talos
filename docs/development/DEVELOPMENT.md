@@ -227,50 +227,38 @@ Select reasoning replay per model using its configured wire contract. A private
 Chat endpoint requiring `reasoning_content` must opt in; do not change replay
 fields globally for unrelated providers.
 
-Native OpenAI, OpenRouter, and custom Responses connections share output
-decoding for assistant text and refusals, reasoning, and function calls. The
-stream uses output indices and item IDs to match deltas with completed parts,
-items, and the terminal snapshot. An explicit assistant phase on a completed
-item resolves the same pending Agent text block, even after its text is
-complete. Function calls need a name before dispatch, and encrypted reasoning
-stays in the continuation. When reasoning is enabled, the native official
-OpenAI adapter requests `reasoning.summary: auto` for display. The Agent tracks
-reported `reasoning_tokens` as a breakdown of output tokens. The provider's
-output and total counts already include that breakdown.
-Provider-hosted tools, artifacts, and annotations require dedicated Talos
-mappings.
+The built-in OpenAI provider uses Responses. In a hand-managed config, omit
+`llm.openai.protocol` or set it to `responses`. A custom provider can select
+the protocol supported by its endpoint.
 
-The shipped profiles select Responses for new official OpenAI connections.
-Configuration upgrades preserve saved protocols and model catalogs. The four
-default models are GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra, and GPT-6 Luna.
-The profiles use standard short-context rates and 30-minute cache-write rates.
-
-GPT-6.2 Astra, GPT-6.2 Sol, and GPT-6.1 Terra require Responses for tools.
-GPT-6 Luna and GPT-5.5 can use Chat Completions function tools with an explicit
-`reasoning_effort: none`. If an upgraded installation still uses Chat Completions
-for `https://api.openai.com/v1`, select Responses for OpenAI in model settings.
-For file-based configuration, set `llm.openai.protocol` to `responses` in
-`$TALOS_HOME/conf/talos.yaml` and restart Talos. Add the desired entries
-from the current profile to `llm.openai.models` to update an existing model
-catalog. Keep each third-party connection on its supported protocol.
+The four default OpenAI models are GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra,
+and GPT-6 Luna. The profiles use standard short-context rates and 30-minute
+cache-write rates.
 
 When reasoning is off, the official OpenAI connection sends `none` for
 `gpt-6-luna` and `gpt-6.1-terra`. GPT-6.2 Astra and Sol require reasoning.
 Talos omits the effort for these models when reasoning is set to off, so OpenAI
 uses the model's default. See the [OpenAI GPT-6.2 guide](https://developers.openai.com/api/docs/guides/latest-model).
 
-The built-in OpenAI connection uses `max_completion_tokens` for a Chat output
-limit on `https://api.openai.com`. Its Responses requests default to
-`store: false` and request encrypted reasoning for manual history replay.
+The built-in OpenAI connection sends
+`store: false` and requests encrypted reasoning for manual history replay.
+It requests `reasoning.summary: auto` when it sends an enabled reasoning effort.
 Responses function tools set `strict: false` so optional tool arguments keep
 their declared semantics. Responses JSON and SSE retain refusal text, report
 text-only output limits as `length`, and propagate failed responses as errors.
 Official Responses requires a terminal event and checks finalized tool arguments.
-Compatible endpoints retain their existing reasoning replay and stream handling.
-OpenAI Chat and Responses map reported cache reads and writes to the existing
-usage counters in per-call and turn metrics. Output tokens include reasoning
-tokens reported by OpenAI. Talos does not expose a separate reasoning token
-counter.
+
+Native OpenAI, OpenRouter, and custom Responses connections share output decoding.
+Output indices and item IDs match deltas with completed parts, items, and the
+terminal snapshot. An explicit assistant phase resolves the same Agent text
+block, including when it arrives after that block's text is complete.
+Function calls need a name before dispatch, and encrypted reasoning stays in the
+continuation. Provider-hosted tools, artifacts, and annotations require dedicated
+Talos mappings.
+
+Responses maps reported cache reads and writes to per-call and turn metrics.
+The Agent records reported `reasoning_tokens` as a breakdown already included in
+the provider's output and total token counts.
 
 The native Bailian Chat adapter maps the explicit-cache fields documented in
 [Bailian Context Cache](https://help.aliyun.com/zh/model-studio/context-cache).

@@ -108,32 +108,26 @@ fixture/资源、配置及 CI 定义；全仓格式/错误/仓库检查使用更
 
 ## OpenAI 官方连接
 
-随附配置模板为 OpenAI 官方连接预设 Responses，升级保留已保存的协议和模型目录。
-默认目录包含 GPT-6.2 Astra、GPT-6.2 Sol、GPT-6.1 Terra 和 GPT-6 Luna 四个模型，费用使用标准
-短上下文与 30 分钟缓存写入费率。
+内置 OpenAI Provider 使用 Responses。手动管理配置时，可以省略
+`llm.openai.protocol` 或将其设为 `responses`。自定义 Provider 可选择端点支持的协议。
 
-GPT-6.2 Astra、GPT-6.2 Sol 和 GPT-6.1 Terra 的工具调用需要 Responses。
-GPT-6 Luna 和 GPT-5.5 在 Chat Completions 中使用函数工具时
-需要显式发送 `reasoning_effort: none`。如果升级后的安装仍通过 Chat Completions
-连接 `https://api.openai.com/v1`，请在模型设置中为 OpenAI 选择 Responses。
-使用配置文件时，在 `$TALOS_HOME/conf/talos.yaml` 中将 `llm.openai.protocol`
-设为 `responses` 并重启 Talos。要更新已有模型目录，可将当前模板中需要的条目加入
-`llm.openai.models`。第三方连接应使用各自支持的协议。
+默认目录包含 GPT-6.2 Astra、GPT-6.2 Sol、GPT-6.1 Terra 和 GPT-6 Luna 四个模型。
+费用使用标准短上下文与 30 分钟缓存写入费率。
 
 关闭推理时，OpenAI 官方连接为 `gpt-6-luna` 和 `gpt-6.1-terra` 显式发送 `none`。
 GPT-6.2 Astra 和 Sol 要求推理。关闭这两个模型的推理设置时，Talos 省略推理强度，
 由 OpenAI 使用模型默认值。参见 [OpenAI GPT-6.2 指南](https://developers.openai.com/api/docs/guides/latest-model)。
 
-内置 OpenAI Provider 连接 `https://api.openai.com` 时，Chat 使用
-`max_completion_tokens` 设置输出上限。Responses 默认发送 `store: false`，
+内置 OpenAI Provider 发送 `store: false`，
 并请求加密推理数据供本地历史回放。Responses 函数工具使用 `strict: false`，
 保留已声明的可选参数。Responses JSON 和 SSE 保留拒绝文本，纯文本达到
 输出上限时报告 `length`，上游失败以错误返回。
-Chat 和 Responses 将上游报告的缓存读取与写入映射到逐调用和回合用量字段。
-输出 token 包含 OpenAI 的推理 token，Talos 暂无单独的推理 token 计数。
+Responses 将上游报告的缓存读取与写入映射到逐调用和回合用量字段。
+Agent 会单独记录上游报告的 `reasoning_tokens`，上游的输出和总量已经包含这部分用量。
+内置 OpenAI 发送已启用的推理档位时，会请求 `reasoning.summary: auto`。
+上游明确给出的助手阶段会更新同一个 Agent 文本块，文本完成后到达的阶段也会生效。
 
 官方 Responses 要求流式响应包含终止事件，并校验工具参数的最终值。
-兼容端点沿用各自的推理回放和流式处理行为。
 
 ## 百炼连接
 

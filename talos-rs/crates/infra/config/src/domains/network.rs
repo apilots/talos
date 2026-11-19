@@ -349,24 +349,18 @@ impl std::fmt::Display for LlmProtocol {
     }
 }
 
-const CHAT_ONLY_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Chat];
-const OPENAI_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Chat, LlmProtocol::Responses];
-const MESSAGES_ONLY_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Messages];
-const DEEPSEEK_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Chat, LlmProtocol::Messages];
-const OPENROUTER_PROTOCOLS: &[LlmProtocol] = &[
-    LlmProtocol::Chat,
-    LlmProtocol::Responses,
-    LlmProtocol::Messages,
-];
+const PROVIDER_PROTOCOLS: &[(&str, LlmProtocol, &[LlmProtocol])] = {
+    use LlmProtocol::{Chat, Messages, Responses};
 
-const PROVIDER_PROTOCOLS: &[(&str, LlmProtocol, &[LlmProtocol])] = &[
-    ("anthropic", LlmProtocol::Messages, MESSAGES_ONLY_PROTOCOLS),
-    ("openai", LlmProtocol::Chat, OPENAI_PROTOCOLS),
-    ("bailian", LlmProtocol::Chat, CHAT_ONLY_PROTOCOLS),
-    ("deepseek", LlmProtocol::Chat, DEEPSEEK_PROTOCOLS),
-    ("ollama", LlmProtocol::Chat, CHAT_ONLY_PROTOCOLS),
-    ("openrouter", LlmProtocol::Chat, OPENROUTER_PROTOCOLS),
-];
+    &[
+        ("anthropic", Messages, &[Messages]),
+        ("openai", Responses, &[Responses]),
+        ("bailian", Chat, &[Chat]),
+        ("deepseek", Chat, &[Chat, Messages]),
+        ("ollama", Chat, &[Chat]),
+        ("openrouter", Chat, &[Chat, Responses, Messages]),
+    ]
+};
 
 /// Protocol capabilities exposed to configuration clients for one provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

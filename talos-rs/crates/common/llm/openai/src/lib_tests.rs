@@ -1,4 +1,5 @@
 use super::*;
+use talos_error::TalosError;
 use talos_llm_provider::{
     Attachment, AttachmentKind, CacheControl, CacheControlKind, ChatMessage, ModelBlockDelta,
     ModelBlockKind, ModelBlockStreamEvent, ModelOutputPhase, PromptCacheSupport,
@@ -71,14 +72,6 @@ fn test_openai_config_builder() {
 
     assert_eq!(config.api_key, "test-api-key");
     assert_eq!(config.base_url, "https://custom.openai.com/v1");
-    assert_eq!(config.protocol, OpenAIProtocol::Chat);
-}
-
-#[test]
-fn test_openai_config_can_select_responses_protocol() {
-    let config = OpenAIConfig::new("test-api-key").with_protocol(OpenAIProtocol::Responses);
-
-    assert_eq!(config.protocol, OpenAIProtocol::Responses);
 }
 
 #[test]
@@ -139,89 +132,24 @@ fn openai_accepts_normal_sized_images_and_configured_file_types() {
 }
 
 #[test]
-fn test_endpoint_url_appends_protocol_endpoint_to_base_url() {
+fn test_responses_url_appends_endpoint_to_base_url() {
     let provider = OpenAIProvider::new(
         OpenAIConfig::new("test-api-key")
             .with_base_url("https://dashscope.aliyuncs.com/compatible-mode/v1/"),
     );
 
     assert_eq!(
-        provider.endpoint_url("chat/completions"),
-        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    );
-    assert_eq!(
-        provider.endpoint_url("responses"),
+        provider.responses_url(),
         "https://dashscope.aliyuncs.com/compatible-mode/v1/responses"
     );
 }
 
 #[tokio::test]
-async fn test_stream_model_blocks_maps_chat_completion_chunks() {
-    let body = concat!(
-            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"think\"}}]}\n\n",
-            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n",
-            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\"\"}}]}}]}\n\n",
-            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\":\\\"/tmp/a\\\"}\"}}]}}]}\n\n",
-            "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
-            "data: [DONE]\n\n"
-        )
-        .to_string();
-    let base_url = spawn_sse_server(body).await;
-    let provider = OpenAIProvider::new(OpenAIConfig::new("test-api-key").with_base_url(base_url));
-    let stream = provider
-        .stream_model_blocks(ChatRequest::new_user("test", "gpt-test"))
-        .await
-        .expect("stream should start");
-
-    let events = collect_model_events(stream).await;
-
-    assert!(events.iter().any(|event| matches!(
-        event,
-        ModelBlockStreamEvent::BlockStarted(started)
-            if started.model_item_id == "openai-choice-0-reasoning"
-                && started.kind == ModelBlockKind::Reasoning
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        ModelBlockStreamEvent::BlockStarted(started)
-            if started.model_item_id == "openai-choice-0-assistant"
-                && started.output_phase == ModelOutputPhase::Unknown
-    )));
-    assert!(events.iter().any(|event| matches!(
-            event,
-            ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
-                if model_item_id == "openai-choice-0-assistant" && delta == "hello"
-        )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        ModelBlockStreamEvent::BlockStarted(started)
-            if started.model_item_id == "openai-tool-0"
-                && started.provider_item_id.as_deref() == Some("call_1")
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        ModelBlockStreamEvent::BlockCompleted(completed)
-            if completed.model_item_id == "openai-tool-0"
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        ModelBlockStreamEvent::ReasoningCompleted { output }
-            if output.display_text == vec!["think".to_string()]
-                && output.continuation == Some(ReasoningContinuation::Text("think".to_string()))
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        ModelBlockStreamEvent::Done { usage: Some(usage), .. }
-            if usage.total_tokens == 3
-    )));
-}
-
-#[tokio::test]
 async fn test_stream_model_blocks_buffers_split_sse_lines() {
     let chunks = vec![
-        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"he".to_string(),
-        "llo\"}}]}\n\n".to_string(),
-        "data: [DONE]\n\n".to_string(),
+        r#"data: {"type":"response.output_text.delta","output_index":0,"delta":"he"#.to_string(),
+        "llo\"}\n\n".to_string(),
+        "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n".to_string(),
     ];
     let base_url = spawn_sse_server_chunks(chunks).await;
     let provider = OpenAIProvider::new(OpenAIConfig::new("test-api-key").with_base_url(base_url));
@@ -235,7 +163,7 @@ async fn test_stream_model_blocks_buffers_split_sse_lines() {
     assert!(events.iter().any(|event| matches!(
             event,
             ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
-                if model_item_id == "openai-choice-0-assistant" && delta == "hello"
+                if model_item_id == "openai-response-0-text" && delta == "hello"
         )));
 }
 
@@ -250,18 +178,14 @@ async fn test_stream_model_blocks_maps_responses_events() {
             "data: {\"type\":\"response.output_item.added\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"read\"}}\n\n",
             "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"delta\":\"{\\\"path\\\"\"}\n\n",
             "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"delta\":\":\\\"/tmp/a\\\"}\"}\n\n",
-            "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"read\"}}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"/tmp/a\\\"}\"}}\n\n",
             "data: {\"type\":\"response.output_item.added\",\"output_index\":3,\"item\":{\"type\":\"message\",\"id\":\"msg_2\",\"phase\":\"final_answer\"}}\n\n",
             "data: {\"type\":\"response.output_text.delta\",\"output_index\":3,\"delta\":\"hello\"}\n\n",
             "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n"
         )
         .to_string();
     let base_url = spawn_sse_server(body).await;
-    let provider = OpenAIProvider::new(
-        OpenAIConfig::new("test-api-key")
-            .with_base_url(base_url)
-            .with_protocol(OpenAIProtocol::Responses),
-    );
+    let provider = OpenAIProvider::new(OpenAIConfig::new("test-api-key").with_base_url(base_url));
     let stream = provider
         .stream_model_blocks(ChatRequest::new_user("test", "gpt-test"))
         .await
@@ -353,68 +277,7 @@ async fn test_stream_model_blocks_fails_invalid_sse_json() {
 }
 
 #[test]
-fn test_convert_messages() {
-    let messages = vec![
-        ChatMessage::system("You are a helpful assistant"),
-        ChatMessage::user("Hello"),
-        ChatMessage::assistant("Hi there!"),
-    ];
-
-    let openai_msgs = chat_protocol::messages(
-        messages,
-        false,
-        chat_protocol::ChatReasoningContinuationFormat::Reasoning,
-    )
-    .expect("messages should map");
-
-    assert_eq!(openai_msgs.len(), 3);
-    assert_eq!(openai_msgs[0].role, "system");
-    assert!(matches!(
-        openai_msgs[0].content.as_ref(),
-        Some(chat_protocol::ChatCompletionMessageContent::Text(text))
-            if text == "You are a helpful assistant"
-    ));
-    assert_eq!(openai_msgs[1].role, "user");
-    assert!(matches!(
-        openai_msgs[1].content.as_ref(),
-        Some(chat_protocol::ChatCompletionMessageContent::Text(text)) if text == "Hello"
-    ));
-    assert_eq!(openai_msgs[2].role, "assistant");
-    assert!(matches!(
-        openai_msgs[2].content.as_ref(),
-        Some(chat_protocol::ChatCompletionMessageContent::Text(text)) if text == "Hi there!"
-    ));
-}
-
-#[test]
-fn test_openai_request_serialization_with_tools() {
-    let req = chat_protocol::request(
-        ChatRequest::builder()
-            .model("gpt-4o")
-            .messages(vec![ChatMessage::user("Hello")])
-            .temperature(0.7)
-            .max_tokens(100)
-            .tools(vec![ToolDefinition::new(
-                "read",
-                "Read file",
-                Some(serde_json::json!({"type": "object"})),
-            )])
-            .tool_choice(talos_llm_provider::ToolChoice::Auto)
-            .parallel_tool_calls(true)
-            .build(),
-        false,
-        chat_protocol::ChatCompletionRequestOptions::default(),
-    )
-    .expect("request should build");
-
-    let json = serde_json::to_string(&req).unwrap();
-    assert!(json.contains("\"model\":\"gpt-4o\""));
-    assert!(json.contains("\"tools\""));
-    assert!(json.contains("\"tool_choice\":\"auto\""));
-}
-
-#[test]
-fn test_build_request_maps_reasoning_effort() {
+fn test_responses_request_maps_reasoning_effort() {
     let provider = OpenAIProvider::new(OpenAIConfig::new(""));
     for (effort, expected) in [
         (ReasoningEffort::Light, "low"),
@@ -427,33 +290,16 @@ fn test_build_request_maps_reasoning_effort() {
             .message("hello")
             .reasoning_effort(Some(effort))
             .build();
-        let built = provider.build_request(request, false).unwrap();
-        assert_eq!(built.reasoning_effort.as_deref(), Some(expected));
+        let built = provider.responses_request(request, None).unwrap();
+        assert_eq!(built.reasoning.unwrap().effort, expected);
     }
 
     let request = ChatRequest::builder()
         .model("gpt-5")
         .message("hello")
         .build();
-    let built = provider.build_request(request, false).unwrap();
-    assert_eq!(built.reasoning_effort, None);
-}
-
-#[test]
-fn test_parse_tool_calls() {
-    let calls = vec![chat_protocol::ChatCompletionToolCall {
-        id: "call_1".to_string(),
-        r#type: "function".to_string(),
-        function: chat_protocol::ChatCompletionFunctionCall {
-            name: "read".to_string(),
-            arguments: "{\"path\":\"/tmp/a\"}".to_string(),
-        },
-    }];
-
-    let parsed = chat_protocol::tool_calls(Some(calls)).unwrap();
-    assert_eq!(parsed.len(), 1);
-    assert_eq!(parsed[0].name, "read");
-    assert_eq!(parsed[0].arguments["path"], "/tmp/a");
+    let built = provider.responses_request(request, None).unwrap();
+    assert!(built.reasoning.is_none());
 }
 
 #[test]
@@ -476,25 +322,17 @@ fn test_openai_request_does_not_serialize_cache_control_for_unsupported_provider
         kind: CacheControlKind::Ephemeral,
     });
     let request = provider
-        .build_request(
+        .responses_request(
             ChatRequest::builder()
                 .model("gpt-4o")
                 .messages(vec![msg])
                 .build(),
-            false,
+            None,
         )
         .expect("request should build");
 
     let json = serde_json::to_string(&request).expect("request should serialize");
     assert!(!json.contains("cache_control"));
-}
-
-#[test]
-fn test_extract_reasoning_delta_ignores_bailian_reasoning_content() {
-    let delta = serde_json::json!({
-        "reasoning_content": "bailian-only"
-    });
-    assert!(chat_protocol::reasoning_delta(&delta, &["reasoning"]).is_none());
 }
 
 #[test]
@@ -533,149 +371,6 @@ fn test_build_headers() {
 }
 
 #[test]
-fn test_convert_tools() {
-    let defs = vec![ToolDefinition::new(
-        "read",
-        "Read file",
-        Some(serde_json::json!({"type":"object"})),
-    )];
-    let converted = chat_protocol::tools(Some(defs)).unwrap();
-    assert_eq!(converted.len(), 1);
-    assert_eq!(converted[0].function.name, "read");
-}
-
-#[test]
-fn configured_boolean_thinking_preserves_effort_and_tool_reasoning_replay() {
-    let provider =
-        OpenAIProvider::new(OpenAIConfig::new("").with_base_url("https://compatible.example/v1"));
-    let mut request = ChatRequest::new_user("Continue", "model");
-    request.reasoning_effort = Some(ReasoningEffort::High);
-    let mut message = ChatMessage::assistant_with_tool_calls(
-        "",
-        vec![talos_llm_provider::FunctionCall::new(
-            "call-1",
-            "echo",
-            serde_json::json!({"text":"hello"}),
-        )],
-    );
-    message.reasoning_continuation =
-        Some(ReasoningContinuation::Text("Call echo first".to_owned()));
-    request.messages.push(message);
-    request
-        .messages
-        .push(ChatMessage::tool("call-1", "echo", "hello"));
-    for enabled in [false, true] {
-        request.request_parameters.insert(
-            "chat_template_kwargs".to_owned(),
-            serde_json::json!({"enable_thinking":enabled}),
-        );
-        let body = talos_llm_provider::serialize_with_parameters(
-            provider.build_request(request.clone(), false).unwrap(),
-            &request.request_parameters,
-        )
-        .unwrap();
-        assert_eq!(body["reasoning_effort"], "high");
-        assert_eq!(
-            body["chat_template_kwargs"],
-            serde_json::json!({"enable_thinking":enabled})
-        );
-        assert_eq!(body["messages"][1]["reasoning"], "Call echo first");
-        assert_eq!(body["messages"][2]["tool_call_id"], "call-1");
-    }
-}
-
-#[tokio::test]
-async fn openai_compatible_stream_retains_reasoning_content_continuation() {
-    let body = concat!(
-        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Think first\"},\"finish_reason\":null}]}\n\n",
-        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\n",
-        "data: [DONE]\n\n"
-    );
-    let base_url = spawn_sse_server(body.to_owned()).await;
-    let provider = OpenAIProvider::new(OpenAIConfig::new("").with_base_url(base_url));
-    let events = collect_model_events(
-        provider
-            .stream_model_blocks(ChatRequest::new_user("Hi", "model"))
-            .await
-            .unwrap(),
-    )
-    .await;
-    assert!(events.iter().any(|event| matches!(event, ModelBlockStreamEvent::ReasoningCompleted { output } if output.continuation == Some(ReasoningContinuation::Text("Think first".into())))));
-}
-
-#[test]
-fn compatible_chat_merges_initial_system_instructions_without_reordering_history() {
-    let provider =
-        OpenAIProvider::new(OpenAIConfig::new("").with_base_url("https://compatible.example/v1"));
-    let request = ChatRequest::builder()
-        .model("model")
-        .messages(vec![
-            ChatMessage::system("First policy"),
-            ChatMessage::system("Second policy"),
-            ChatMessage::user("Question"),
-            ChatMessage::assistant("Answer"),
-            ChatMessage::system("Later boundary"),
-            ChatMessage::user("Follow up"),
-        ])
-        .build();
-    let encoded = serde_json::to_value(provider.build_request(request, true).unwrap()).unwrap();
-    assert_eq!(
-        encoded["messages"],
-        serde_json::json!([
-            {"role":"system","content":"First policy\n\nSecond policy"},
-            {"role":"user","content":"Question"},
-            {"role":"assistant","content":"Answer"},
-            {"role":"system","content":"Later boundary"},
-            {"role":"user","content":"Follow up"},
-        ])
-    );
-}
-
-#[test]
-fn official_chat_uses_completion_cap_and_standard_history() {
-    let request = ChatRequest::builder()
-        .model("gpt-5.4-mini")
-        .messages(vec![ChatMessage::assistant("previous")
-            .with_reasoning_continuation(ReasoningContinuation::Text(
-                "private".into(),
-            ))])
-        .max_tokens(128)
-        .build();
-    for stream in [false, true] {
-        for (base_url, is_official) in [
-            ("https://api.openai.com/v1/", true),
-            ("https://api.openai.com.compatible.example/v1", false),
-        ] {
-            let provider = OpenAIProvider::new(OpenAIConfig::new("").with_base_url(base_url));
-            let body =
-                serde_json::to_value(provider.build_request(request.clone(), stream).unwrap())
-                    .unwrap();
-            if is_official {
-                assert_eq!(body["max_completion_tokens"], 128);
-                assert!(body.get("max_tokens").is_none());
-                assert!(body["messages"][0].get("reasoning").is_none());
-
-                let mut configured = request.clone();
-                configured
-                    .request_parameters
-                    .insert("max_tokens".to_owned(), serde_json::json!(64));
-                let body = talos_llm_provider::serialize_with_parameters(
-                    provider.build_request(configured.clone(), stream).unwrap(),
-                    &configured.request_parameters,
-                )
-                .unwrap();
-                assert_eq!(body["max_tokens"], 64);
-                assert!(body.get("max_completion_tokens").is_none());
-            } else {
-                assert_eq!(body["max_tokens"], 128);
-                assert!(body.get("max_completion_tokens").is_none());
-                assert_eq!(body["messages"][0]["reasoning"], "private");
-            }
-        }
-    }
-}
-
-#[test]
 fn official_responses_requests_stateless_reasoning_and_preserves_optional_tool_fields() {
     let schema = serde_json::json!({
         "type": "object",
@@ -703,13 +398,9 @@ fn official_responses_requests_stateless_reasoning_and_preserves_optional_tool_f
             ToolDefinition::new("no_args", "No arguments", None),
         ])
         .build();
-    let official = OpenAIProvider::new(OpenAIConfig::new(""));
-    let body = serde_json::to_value(
-        official
-            .responses_request(request.clone(), Some(true))
-            .unwrap(),
-    )
-    .unwrap();
+    let provider = OpenAIProvider::new(OpenAIConfig::new("").with_base_url("http://127.0.0.1/v1"));
+    let body =
+        serde_json::to_value(provider.responses_request(request, Some(true)).unwrap()).unwrap();
     assert_eq!(body["store"], false);
     assert_eq!(body["input"][1]["summary"], serde_json::json!([]));
     assert!(body.get("reasoning").is_none());
@@ -723,22 +414,13 @@ fn official_responses_requests_stateless_reasoning_and_preserves_optional_tool_f
         body["tools"][1].get("parameters"),
         Some(&serde_json::Value::Null)
     );
-
-    let compatible =
-        OpenAIProvider::new(OpenAIConfig::new("").with_base_url("https://compatible.example/v1"));
-    let body = serde_json::to_value(compatible.responses_request(request, None).unwrap()).unwrap();
-    assert!(body.get("store").is_none());
-    assert!(body["input"][1].get("summary").is_none());
-    assert!(body.get("include").is_none());
-    assert!(body["tools"][0].get("strict").is_none());
-    assert!(body["tools"][1].get("parameters").is_none());
 }
 
 #[test]
 fn official_responses_requests_summary_only_with_enabled_reasoning() {
-    let official = OpenAIProvider::new(OpenAIConfig::new(""));
-    let compatible =
-        OpenAIProvider::new(OpenAIConfig::new("").with_base_url("https://compatible.example/v1"));
+    let provider = OpenAIProvider::new(
+        OpenAIConfig::new("").with_base_url("https://openai-gateway.example/v1"),
+    );
     let request = ChatRequest::builder()
         .model("gpt-6-luna")
         .messages(vec![ChatMessage::user("hello")])
@@ -747,49 +429,31 @@ fn official_responses_requests_summary_only_with_enabled_reasoning() {
 
     for stream in [Some(true), None] {
         let body =
-            serde_json::to_value(official.responses_request(request.clone(), stream).unwrap())
+            serde_json::to_value(provider.responses_request(request.clone(), stream).unwrap())
                 .unwrap();
         assert_eq!(
             body["reasoning"],
             serde_json::json!({"effort": "medium", "summary": "auto"})
         );
-        assert_eq!(
-            body["include"],
-            serde_json::json!(["reasoning.encrypted_content"])
-        );
-
-        let body = serde_json::to_value(
-            compatible
-                .responses_request(request.clone(), stream)
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(body["reasoning"], serde_json::json!({"effort": "medium"}));
     }
 
     let off = ChatRequest::new_user("hello", "gpt-6-luna");
-    let body = serde_json::to_value(official.responses_request(off, Some(true)).unwrap()).unwrap();
+    let body = serde_json::to_value(provider.responses_request(off, Some(true)).unwrap()).unwrap();
     assert_eq!(body["reasoning"], serde_json::json!({"effort": "none"}));
 }
 
 #[test]
 fn official_reasoning_off_distinguishes_gpt6_sol_from_gpt61_sol() {
-    let official = OpenAIProvider::new(OpenAIConfig::new(""));
-    let compatible =
-        OpenAIProvider::new(OpenAIConfig::new("").with_base_url("https://compatible.example/v1"));
-    for (provider, model, expected) in [
-        (&official, "gpt-6-sol", Some("none")),
-        (&official, "gpt-6.1-sol", None),
-        (&official, "gpt-6-luna", Some("none")),
-        (&official, "gpt-6.1-terra", Some("none")),
-        (&official, "gpt-6-astra", None),
-        (&official, "gpt-4o", None),
-        (&compatible, "gpt-6-sol", None),
-        (&compatible, "gpt-6-luna", None),
+    let provider = OpenAIProvider::new(OpenAIConfig::new(""));
+    for (model, expected) in [
+        ("gpt-6-sol", Some("none")),
+        ("gpt-6.1-sol", None),
+        ("gpt-6-luna", Some("none")),
+        ("gpt-6.1-terra", Some("none")),
+        ("gpt-6.2-astra", None),
+        ("gpt-6.2-sol", None),
     ] {
         let request = ChatRequest::new_user("hello", model);
-        let chat = provider.build_request(request.clone(), true).unwrap();
-        assert_eq!(chat.reasoning_effort.as_deref(), expected, "{model}");
         let responses = provider.responses_request(request, Some(true)).unwrap();
         assert_eq!(
             responses
