@@ -15,6 +15,7 @@ pub(super) async fn usage_summary(
                COUNT(DISTINCT CASE WHEN usage_kind = 'turn' THEN session_id END) AS usage_session_count,
                SUM(input_tokens) AS input_tokens,
                SUM(output_tokens) AS output_tokens, SUM(total_tokens) AS total_tokens,
+               SUM(reasoning_tokens) AS reasoning_tokens,
                CASE WHEN COUNT(cache_creation_input_tokens) = COUNT(*)
                     THEN SUM(cache_creation_input_tokens) END AS cache_creation_input_tokens,
                CASE WHEN COUNT(cache_read_input_tokens) = COUNT(*)
@@ -68,6 +69,7 @@ pub(super) async fn daily_usage(
         r#"
         SELECT usage_date, SUM(input_tokens) AS input_tokens,
                SUM(output_tokens) AS output_tokens, SUM(total_tokens) AS total_tokens,
+               SUM(reasoning_tokens) AS reasoning_tokens,
                CASE WHEN COUNT(cache_creation_input_tokens) = COUNT(*)
                     THEN SUM(cache_creation_input_tokens) END AS cache_creation_input_tokens,
                CASE WHEN COUNT(cache_read_input_tokens) = COUNT(*)
@@ -120,6 +122,7 @@ pub(super) async fn model_usage(
                SUM(CASE WHEN usage_kind = 'turn' THEN 1 ELSE 0 END) AS turn_count,
                SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
                SUM(total_tokens) AS total_tokens,
+               SUM(reasoning_tokens) AS reasoning_tokens,
                CASE WHEN COUNT(cache_creation_input_tokens) = COUNT(*)
                     THEN SUM(cache_creation_input_tokens) END AS cache_creation_input_tokens,
                CASE WHEN COUNT(cache_read_input_tokens) = COUNT(*)

@@ -78,23 +78,65 @@ fn model_call(request_id: &str, usage: TokenUsage) -> ModelCallUsageUpdate {
 async fn model_call_usage_reuses_profile_aggregates_without_changing_session_count() {
     let store = store().await;
     store
-        .record_turn_usage(update("turn-request", StopReason::EndTurn, usage(10, 2)))
+        .record_turn_usage(update(
+            "turn-request",
+            StopReason::EndTurn,
+            TokenUsage {
+                reasoning_tokens: Some(2),
+                ..usage(10, 2)
+            },
+        ))
         .await
         .unwrap();
-    let dream = ProfileUsageUpdate::ModelCall(model_call("dream-request", usage(5, 1)));
-    store.record_usage(dream.clone()).await.unwrap();
-    store.record_usage(dream).await.unwrap();
+    let mut dream = model_call(
+        "dream-request",
+        TokenUsage {
+            reasoning_tokens: Some(1),
+            ..usage(5, 1)
+        },
+    );
+    let replay = ProfileUsageUpdate::ModelCall(dream.clone());
+    store.record_usage(replay.clone()).await.unwrap();
+    store.record_usage(replay).await.unwrap();
 
+    dream.usage.reasoning_tokens = Some(0);
+    let error = store
+        .record_usage(ProfileUsageUpdate::ModelCall(dream))
+        .await
+        .unwrap_err();
+    assert_eq!(error.error_code(), talos_error::ErrorCode::Conflict);
+
+    store
+        .record_usage(ProfileUsageUpdate::ModelCall(model_call(
+            "unreported-request",
+            usage(3, 2),
+        )))
+        .await
+        .unwrap();
+
+    let expected = TokenUsage {
+        reasoning_tokens: Some(3),
+        ..usage_with_cache(18, 5, 3, 6)
+    };
     let summary = store.usage_summary("user-1").await.unwrap();
-    assert_eq!(summary.usage, usage_with_cache(15, 3, 2, 4));
+    assert_eq!(summary.usage, expected);
     assert_eq!(summary.usage_session_count, 1);
+    let daily = store
+        .daily_usage("user-1", "2026-07-16", "2026-07-16")
+        .await
+        .unwrap();
+    assert_eq!(daily.len(), 1);
+    assert_eq!(daily[0].usage, expected);
+    let models = store.model_usage("user-1", 2).await.unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].usage, expected);
     let kinds = sqlx::query_scalar::<_, String>(
         "SELECT usage_kind FROM profile_turn_usage ORDER BY id ASC",
     )
     .fetch_all(store.storage.pool())
     .await
     .unwrap();
-    assert_eq!(kinds, vec!["turn".to_string(), "dream".to_string()]);
+    assert_eq!(kinds, ["turn", "dream", "dream"]);
 }
 
 #[tokio::test]
@@ -112,7 +154,11 @@ async fn model_usage_limit_ranks_all_usage_kinds_by_total_tokens() {
         store.record_turn_usage(turn).await.unwrap();
     }
 
-    let mut dream = model_call("dream-request", usage(100, 5));
+    let dream_usage = TokenUsage {
+        reasoning_tokens: Some(0),
+        ..usage(100, 5)
+    };
+    let mut dream = model_call("dream-request", dream_usage.clone());
     dream.model_ref.id = "inner-model".to_string();
     store
         .record_usage(ProfileUsageUpdate::ModelCall(dream))
@@ -128,7 +174,7 @@ async fn model_usage_limit_ranks_all_usage_kinds_by_total_tokens() {
                     id: "inner-model".to_string(),
                 },
                 turn_count: 0,
-                usage: usage(100, 5),
+                usage: dream_usage,
                 usage_available: true,
             },
             ProfileModelUsageSummary {
@@ -175,17 +221,21 @@ async fn waiting_usage_is_hidden_until_the_turn_finalizes() {
         0
     );
 
+    let final_usage = TokenUsage {
+        reasoning_tokens: Some(4),
+        ..usage_with_cache(30, 5, 2, 4)
+    };
     store
         .record_turn_usage(update(
             "request-2",
             StopReason::EndTurn,
-            usage_with_cache(30, 5, 2, 4),
+            final_usage.clone(),
         ))
         .await
         .unwrap();
 
     let summary = store.usage_summary("user-1").await.unwrap();
-    assert_eq!(summary.usage, usage_with_cache(30, 5, 2, 4));
+    assert_eq!(summary.usage, final_usage);
     assert!(summary.usage_available);
     assert_eq!(summary.usage_session_count, 1);
     assert_eq!(summary.usage_started_at_ms, Some(1_000));
@@ -195,7 +245,7 @@ async fn waiting_usage_is_hidden_until_the_turn_finalizes() {
         .await
         .unwrap();
     assert_eq!(daily.len(), 1);
-    assert_eq!(daily[0].usage, usage_with_cache(30, 5, 2, 4));
+    assert_eq!(daily[0].usage, final_usage);
 }
 
 #[tokio::test]

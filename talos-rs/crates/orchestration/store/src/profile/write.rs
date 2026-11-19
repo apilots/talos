@@ -94,7 +94,7 @@ pub(super) async fn record_turn_usage(
             r#"
             UPDATE profile_turn_usage
             SET last_request_id = ?, input_tokens = ?, output_tokens = ?, total_tokens = ?,
-                cache_creation_input_tokens = ?, cache_read_input_tokens = ?,
+                reasoning_tokens = ?, cache_creation_input_tokens = ?, cache_read_input_tokens = ?,
                 usage_available = ?, finalized = ?,
                 usage_date = CASE WHEN ? THEN ? ELSE usage_date END,
                 completed_at_ms = CASE WHEN ? THEN ? ELSE completed_at_ms END
@@ -105,6 +105,7 @@ pub(super) async fn record_turn_usage(
         .bind(i64::from(usage.input_tokens))
         .bind(i64::from(usage.output_tokens))
         .bind(i64::from(usage.total_tokens))
+        .bind(usage.reasoning_tokens.map(i64::from))
         .bind(usage.cache_creation_input_tokens.map(i64::from))
         .bind(usage.cache_read_input_tokens.map(i64::from))
         .bind(i64::from(u8::from(update.usage_available)))
@@ -123,10 +124,10 @@ pub(super) async fn record_turn_usage(
             r#"
             INSERT INTO profile_turn_usage (
                 user_id, usage_kind, session_id, turn_id, last_request_id, model_provider, model_id,
-                input_tokens, output_tokens, total_tokens,
+                input_tokens, output_tokens, total_tokens, reasoning_tokens,
                 cache_creation_input_tokens, cache_read_input_tokens, usage_available,
                 finalized, usage_date, timezone, completed_at_ms
-            ) VALUES (?, 'turn', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, 'turn', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&update.user_id)
@@ -138,6 +139,7 @@ pub(super) async fn record_turn_usage(
         .bind(i64::from(update.usage.input_tokens))
         .bind(i64::from(update.usage.output_tokens))
         .bind(i64::from(update.usage.total_tokens))
+        .bind(update.usage.reasoning_tokens.map(i64::from))
         .bind(update.usage.cache_creation_input_tokens.map(i64::from))
         .bind(update.usage.cache_read_input_tokens.map(i64::from))
         .bind(i64::from(u8::from(update.usage_available)))
@@ -186,7 +188,13 @@ async fn record_model_call_usage(
         ));
     }
     let existing = sqlx::query(
-        "SELECT session_id, model_provider, model_id, input_tokens, output_tokens, total_tokens, cache_creation_input_tokens, cache_read_input_tokens, usage_available, timezone, completed_at_ms, usage_date FROM profile_turn_usage WHERE user_id = ? AND usage_kind = ? AND last_request_id = ?",
+        r#"
+        SELECT session_id, model_provider, model_id, input_tokens, output_tokens, total_tokens,
+               reasoning_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+               usage_available, timezone, completed_at_ms, usage_date
+        FROM profile_turn_usage
+        WHERE user_id = ? AND usage_kind = ? AND last_request_id = ?
+        "#,
     )
     .bind(&update.user_id)
     .bind(update.kind.as_str())
@@ -238,10 +246,10 @@ async fn record_model_call_usage(
         r#"
         INSERT INTO profile_turn_usage (
             user_id, usage_kind, session_id, turn_id, last_request_id,
-            model_provider, model_id, input_tokens, output_tokens, total_tokens,
+            model_provider, model_id, input_tokens, output_tokens, total_tokens, reasoning_tokens,
             cache_creation_input_tokens, cache_read_input_tokens, usage_available,
             finalized, usage_date, timezone, completed_at_ms
-        ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+        ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
         "#,
     )
     .bind(&update.user_id)
@@ -253,6 +261,7 @@ async fn record_model_call_usage(
     .bind(i64::from(update.usage.input_tokens))
     .bind(i64::from(update.usage.output_tokens))
     .bind(i64::from(update.usage.total_tokens))
+    .bind(update.usage.reasoning_tokens.map(i64::from))
     .bind(update.usage.cache_creation_input_tokens.map(i64::from))
     .bind(update.usage.cache_read_input_tokens.map(i64::from))
     .bind(i64::from(u8::from(update.usage_available)))

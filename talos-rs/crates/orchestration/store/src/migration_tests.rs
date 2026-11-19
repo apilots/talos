@@ -683,7 +683,7 @@ async fn migration_creates_profile_usage_schema() {
     .await
     .unwrap();
     let legacy_row = sqlx::query(
-        "SELECT usage_kind, session_id, turn_id, total_tokens FROM profile_turn_usage WHERE last_request_id = 'request-1'",
+        "SELECT usage_kind, session_id, turn_id, total_tokens, reasoning_tokens FROM profile_turn_usage WHERE last_request_id = 'request-1'",
     )
     .fetch_one(&pool)
     .await
@@ -697,6 +697,7 @@ async fn migration_creates_profile_usage_schema() {
             legacy_row.get::<String, _>("session_id"),
             legacy_row.get::<String, _>("turn_id"),
             legacy_row.get::<i64, _>("total_tokens"),
+            legacy_row.get::<Option<i64>, _>("reasoning_tokens"),
         ),
         (
             1,
@@ -706,6 +707,7 @@ async fn migration_creates_profile_usage_schema() {
             "session-1".to_string(),
             "turn-1".to_string(),
             14,
+            None,
         )
     );
 }
