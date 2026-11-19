@@ -95,6 +95,12 @@ aggregate gates. Documentation and metadata changes skip heavy jobs while the
 policy and aggregate checks still report results.
 Draft PR pushes run the same checks; marking an unchanged head ready does not
 repeat business CI.
+WebUI and Desktop preview scenarios use the same [Office package lock](../../.github/scripts/preview-office.lock).
+The preview preparation job warms the runner cache from the signed Ubuntu 24.04
+snapshot. Each preview job installs the locked packages on its own runner, using
+the cached archives when available. Update the snapshot date and package versions
+together when refreshing this lock.
+
 Module and aggregate job conditions use `!cancelled()` so failures still reach
 their gates while a new PR push can cancel obsolete work immediately. Cleanup
 and evidence-upload steps may still use `always()`.

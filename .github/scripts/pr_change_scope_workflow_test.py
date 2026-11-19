@@ -69,20 +69,23 @@ class WorkflowTests(unittest.TestCase):
         import re
         workflow = (ROOT / '.github/workflows/pr-e2e.yml').read_text()
         jobs = dict(re.findall(r'^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)', workflow, re.M | re.S))
-        for job in ('webui', 'desktop', 'tui', 'server', 'frontend-gate', 'rust-gate', 'e2e-gate', 'installer-gate'):
+        for job in ('preview', 'webui', 'desktop', 'tui', 'server', 'frontend-gate', 'rust-gate', 'e2e-gate', 'installer-gate'):
             condition = re.search(r'^    if: \$\{\{ (.*?) \}\}', jobs[job], re.M).group(1)
             expression = condition.replace('&&', ' and ').replace('||', ' or ').replace('!', 'not ')
-            for cancelled, build, tests, scope, selected in itertools.product(
-                (False, True), ('success', 'skipped', 'failure'), ('success', 'skipped', 'failure'),
-                ('success', 'failure'), ('true', 'false')):
+            results = ('success', 'skipped', 'failure')
+            for cancelled, build, tests, preview, scope, selected in itertools.product(
+                (False, True), results, results, results, ('success', 'failure'), ('true', 'false')):
                 needs = SimpleNamespace(scope=SimpleNamespace(result=scope, outputs=SimpleNamespace(
-                    **{name: selected for name in ('webui', 'desktop', 'tui', 'server')})),
-                    build=SimpleNamespace(result=build), tests=SimpleNamespace(result=tests))
+                    **{name: selected for name in ('preview', 'webui', 'desktop', 'tui', 'server')})),
+                    build=SimpleNamespace(result=build), tests=SimpleNamespace(result=tests),
+                    preview=SimpleNamespace(result=preview))
                 actual = eval(expression, {'__builtins__': {}, 'cancelled': lambda: cancelled}, {'needs': needs})
                 expected = not cancelled and (job.endswith('-gate') or (
-                    scope == 'success' and selected == 'true' and build in ('success', 'skipped')
-                    and (job not in ('tui', 'server') or tests in ('success', 'skipped'))))
-                self.assertEqual(actual, expected, (job, cancelled, build, tests, scope, selected))
+                    scope == 'success' and selected == 'true'
+                    and (job == 'preview' or build in ('success', 'skipped'))
+                    and (job not in ('tui', 'server') or tests in ('success', 'skipped'))
+                    and (job not in ('webui', 'desktop') or preview in ('success', 'skipped'))))
+                self.assertEqual(actual, expected, (job, cancelled, build, tests, preview, scope, selected))
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=ROOT / 'output')

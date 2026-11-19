@@ -133,7 +133,9 @@ def main() -> int:
                        for category, task in selected["categories"].items()})
         values.update(installer=str(selected["installer"]).lower(),
                       build=str(bool(selected["build"]["binaries"])).lower(),
-                      tests=str(bool(selected["test_build"]["tests"])).lower())
+                      tests=str(bool(selected["test_build"]["tests"])).lower(),
+                      preview=str(any(task["office"] for category in ("webui", "desktop")
+                                      for task in selected["categories"][category]["scenarios"]["include"])).lower())
         summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary:
             with open(summary, "a") as stream:
