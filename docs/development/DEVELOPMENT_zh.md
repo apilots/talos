@@ -58,12 +58,6 @@ $TALOS_HOME/logs/talos.log
 Provider secret 保存在 `.env` 中，配置引用对应的 `TALOS_LLM_*_API_KEY` 环境变量。
 仓库默认配置位于 `conf/`，由 Runtime 复制或升级，不直接编辑用户 home 中的文件。
 
-会话标题、工作区记忆提炼和 Dream Memory 共用 `agent.inner_model`。模板默认选用
-DeepSeek Flash。仅配置 OpenAI 的安装可在 YAML 中将此项的 `provider` 设为 `openai`、
-`id` 设为 `gpt-6-luna`，然后重启 Talos。模型页面用于管理 Provider 连接和目录。
-会话上下文压缩默认使用会话模型，`agent.kernel.compaction.model` 可指定同一 Provider
-下的另一个模型。
-
 CI 的 Rust、Node 和 pnpm 版本统一来自 `.github/release-toolchain.env`。
 `pr-e2e.yml` 负责 PR/main 调度，命名复用工作流分别展示 WebUI、Desktop、TUI、
 Server 内部模块和轻量安装契约。`talos-webui.yml` 与 `talos-desktop.yml` 共享

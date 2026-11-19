@@ -315,14 +315,6 @@ Keep provider secrets in `.env`; configuration references the corresponding
 `TALOS_LLM_*_API_KEY` variables. Repository defaults live under `conf/` and are
 copied or upgraded by the runtime rather than edited in a user's home directly.
 
-Session titles, Workspace Memory reflection, and Dream Memory share the model
-selected by `agent.inner_model`. The templates select DeepSeek Flash. For an
-OpenAI-only installation, set its `provider` to `openai` and its `id` to
-`gpt-6-luna` in YAML and restart Talos. The Models page manages Provider
-connections and their catalogs. Session context compaction uses its own
-`agent.kernel.compaction.model` override within the Session's Provider and
-defaults to the Session model.
-
 Managed upgrades align saved keys with the current template before validating
 values. Valid configured groups are preserved together, including cross-field
 constraints; typed enum variants retain their own fields rather than the
