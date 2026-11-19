@@ -20,6 +20,7 @@ jobs:
       plan: ${{ steps.scope.outputs.plan }}
       build: ${{ steps.scope.outputs.build }}
       tests: ${{ steps.scope.outputs.tests }}
+      preview: ${{ steps.scope.outputs.preview }}
       webui: ${{ steps.scope.outputs.webui }}
       desktop: ${{ steps.scope.outputs.desktop }}
       tui: ${{ steps.scope.outputs.tui }}
@@ -51,17 +52,28 @@ jobs:
     uses: ./.github/workflows/ci-build.yml
     with:
       task: ${{ toJSON(fromJSON(needs.scope.outputs.plan).test_build) }}
+  preview:
+    name: Prepare · preview apt dependencies
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.preview == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/ci-preview-apt
+        with:
+          mode: download
   webui:
     name: WebUI
-    needs: [scope, build]
-    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.webui == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    needs: [scope, build, preview]
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.webui == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') && (needs.preview.result == 'success' || needs.preview.result == 'skipped') }}
     uses: ./.github/workflows/talos-webui.yml
     with:
       plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.webui) }}
   desktop:
     name: Desktop
-    needs: [scope, build]
-    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.desktop == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    needs: [scope, build, preview]
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.desktop == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') && (needs.preview.result == 'success' || needs.preview.result == 'skipped') }}
     uses: ./.github/workflows/talos-desktop.yml
     with:
       plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.desktop) }}

@@ -1,0 +1,33 @@
+name: Preview apt dependencies
+description: Share locked LibreOffice and fonts across Ubuntu 24.04 preview runners
+inputs:
+  mode:
+    description: Download the shared archive cache or install the locked packages
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Restore preview apt cache
+      id: cache
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          ${{ runner.temp }}/preview-apt/archives/*.deb
+          ${{ runner.temp }}/preview-apt/lists/*_Packages*
+          ${{ runner.temp }}/preview-apt/lists/*_InRelease
+        key: preview-apt-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('.github/scripts/preview-office.lock', '.github/scripts/ci_preview_apt.sh') }}
+    - name: Apply preview apt lock
+      if: inputs.mode == 'install' || steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        PREVIEW_APT_MODE: ${{ inputs.mode }}
+      run: bash .github/scripts/ci_preview_apt.sh "$PREVIEW_APT_MODE" "$RUNNER_TEMP/preview-apt"
+    - name: Save preview apt cache
+      if: inputs.mode == 'download' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: |
+          ${{ runner.temp }}/preview-apt/archives/*.deb
+          ${{ runner.temp }}/preview-apt/lists/*_Packages*
+          ${{ runner.temp }}/preview-apt/lists/*_InRelease
+        key: ${{ steps.cache.outputs.cache-primary-key }}

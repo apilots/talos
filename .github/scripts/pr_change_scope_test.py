@@ -489,6 +489,25 @@ class GitScopeTests(unittest.TestCase):
         self.assertFalse(selected['categories']['server']['scenarios']['include'])
         self.assertTrue(selected['categories']['webui']['quality'])
 
+    def test_office_lock_refresh_runs_both_preview_cases(self):
+        path = '.github/scripts/preview-office.lock'
+        self.write(path, '20261118T000000Z\n')
+        self.base = self.commit('chore(ci): initialize Office lock fixture')
+        self.write(path, '20261119T000000Z\n')
+        head = self.commit('chore(ci): refresh Office lock')
+        self.assertEqual(self.classify('pull_request', head, 'ci'), 'run_workflow=true')
+        values = dict(line.split('=', 1) for line in (self.root / 'scope.outputs').read_text().splitlines())
+        self.assertEqual(values['preview'], 'true')
+        selected = json.loads(values['plan'])
+        cases = {category: [case for task in tasks['scenarios']['include'] for case in task['cases']]
+                 for category, tasks in selected['categories'].items()}
+        self.assertEqual(cases, {
+            'webui': ['21_resource_preview/01_web_preview.sh'],
+            'desktop': ['21_resource_preview/02_desktop_preview.sh'],
+            'tui': [],
+            'server': [],
+        })
+
     def test_rename_and_delete_keep_old_and_new_owners(self):
         self.write('talos-rs/apps/tui/src/fixture.rs', 'pub fn fixture() {}\n')
         self.base = self.commit('test: initialize path')
