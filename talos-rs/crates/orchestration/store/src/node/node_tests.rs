@@ -52,7 +52,7 @@ async fn outbound_migration_preserves_registered_nodes_and_security_constraints(
     crate::migration::run_migrations(storage.pool(), &crate::migration::test_migrations_dir())
         .await
         .unwrap();
-    let nodes = DatabaseAgentNodeStore::new(storage.pool().clone());
+    let nodes = DatabaseAgentNodeStore::new(&storage);
     let after = nodes.get("existing-node").await.unwrap().unwrap();
     assert!(
         after == before,
@@ -122,7 +122,7 @@ async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease(
     )
     .await
     .unwrap();
-    let nodes = DatabaseAgentNodeStore::new(storage.pool().clone());
+    let nodes = DatabaseAgentNodeStore::new(&storage);
     let credential = [11; 32];
     let first_lease = [22; 32];
     let second_lease = [33; 32];
@@ -167,7 +167,7 @@ async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease(
     drop(storage);
 
     let reopened = SqliteStorage::new(database_path).await.unwrap();
-    let nodes = DatabaseAgentNodeStore::new(reopened.pool().clone());
+    let nodes = DatabaseAgentNodeStore::new(&reopened);
     let previous = nodes.get("laptop-1").await.unwrap().unwrap();
     assert_eq!(previous.owner_user_id.as_deref(), Some("user-1"));
     assert_eq!(previous.lease_token_hash, Some(first_lease));

@@ -64,7 +64,7 @@ pub(super) async fn commit_initial(
                 JOIN agent_active_turns turn ON turn.session_id = child.session_key
                 WHERE target.session_key = ?
                   AND NOT EXISTS (
-                      SELECT 1 FROM agent_events
+                      SELECT 1 FROM visible_agent_events
                       WHERE session_id = target.session_key
                         AND json_extract(payload_json, '$.type') IN ('turnCompleted', 'turnFailed')
                   )
@@ -259,7 +259,7 @@ async fn commit_running_batch(
         .identity
         .clone();
     let mut transaction = store
-        .begin_session_timeline_transaction(&identity.session_id)
+        .begin_session_transaction(&identity.session_id)
         .await?;
     let active = load_active_turn(transaction.as_mut(), &identity.session_id)
         .await?

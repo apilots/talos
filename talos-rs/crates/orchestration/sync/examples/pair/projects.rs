@@ -31,7 +31,7 @@ pub(super) async fn capture_project(peer: &Peer, project_id: &str) -> TalosResul
             SyncCaptureParams {
                 binding: peer.binding.clone(),
                 resource,
-                changes,
+                changes: changes.changes,
                 created_at: 100,
             },
         )
@@ -88,7 +88,7 @@ impl SyncDataAdapter for ProjectAdapter {
         &self,
         tx: &mut dyn StorageTransaction,
         params: SyncExportParams,
-    ) -> TalosResult<Vec<SyncChange>> {
+    ) -> TalosResult<talos_sync::SyncExportFacts> {
         let row = tx.query("SELECT project_id, execution_node_id, name, directory, created_at, updated_at FROM projects WHERE project_id = ? AND user_id = ?", &[params.resource.id(), &params.binding.source_user_id]).await?;
         let row = row.first().ok_or_else(|| {
             TalosError::new(ErrorCode::ResourceNotFound, "Project is unavailable.")
@@ -103,10 +103,13 @@ impl SyncDataAdapter for ProjectAdapter {
             updated_at: row.get_i64("updated_at").unwrap(),
             session_count: 0,
         };
-        Ok(vec![SyncChange::Metadata {
-            before: None,
-            after: Box::new(SyncResourceSnapshot::Project(project)),
-        }])
+        Ok(talos_sync::SyncExportFacts {
+            changes: vec![SyncChange::Metadata {
+                before: None,
+                after: Box::new(SyncResourceSnapshot::Project(project)),
+            }],
+            ..Default::default()
+        })
     }
 
     async fn apply(
@@ -166,8 +169,8 @@ pub(super) async fn rename(peer: &Peer, project_id: &str, name: &str) -> TalosRe
     .await?;
     let after = peer.adapter.export(&mut *tx, params).await?;
     let (SyncChange::Metadata { after: before, .. }, SyncChange::Metadata { after, .. }) = (
-        before.into_iter().next().unwrap(),
-        after.into_iter().next().unwrap(),
+        before.changes.into_iter().next().unwrap(),
+        after.changes.into_iter().next().unwrap(),
     ) else {
         unreachable!()
     };

@@ -317,7 +317,10 @@ impl DatabaseAutomationStore {
         decision: &LoopWakeDecision,
     ) -> TalosResult<()> {
         let changed = self.storage.execute(
-            "UPDATE agent_events SET automation_loop_decision_json=? WHERE session_id=? AND turn_id=? AND sequence=1 AND EXISTS (SELECT 1 FROM agent_active_turns a WHERE a.session_id=agent_events.session_id AND a.turn_id=agent_events.turn_id AND a.state='running')",
+            "UPDATE agent_events SET automation_loop_decision_json=?
+             WHERE event_seq=(SELECT e.event_seq FROM visible_agent_events e
+             JOIN agent_active_turns a ON a.session_id=e.session_id AND a.turn_id=e.turn_id AND a.state='running'
+             WHERE e.session_id=? AND e.turn_id=? AND e.sequence=1)",
             &[&encode(decision)?, &turn.session_id, &turn.turn_id],
         ).await?;
         if changed != 1 {
@@ -331,7 +334,7 @@ impl DatabaseAutomationStore {
         turn: &AgentTurnRef,
     ) -> TalosResult<Option<LoopWakeDecision>> {
         let rows = self.storage.query(
-            "SELECT automation_loop_decision_json FROM agent_events WHERE session_id=? AND turn_id=? AND sequence=1",
+            "SELECT automation_loop_decision_json FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=1",
             &[&turn.session_id, &turn.turn_id],
         ).await?;
         rows.first()
@@ -344,7 +347,7 @@ impl DatabaseAutomationStore {
     pub async fn pending_loop_terminal(&self, loop_id: &str) -> TalosResult<Option<AgentEvent>> {
         let rows = self.storage.query(
             "SELECT e.event_seq,e.session_id,e.turn_id,e.sequence,e.occurred_at,e.persisted_at,e.payload_json
-             FROM session_loops l JOIN agent_events e ON e.session_id=l.session_id AND e.turn_id=l.pending_turn_id
+             FROM session_loops l JOIN visible_agent_events e ON e.session_id=l.session_id AND e.turn_id=l.pending_turn_id
              WHERE l.id=? AND json_extract(e.payload_json,'$.type') IN ('turnCompleted','turnFailed')
              ORDER BY e.event_seq DESC LIMIT 1",
             &[loop_id],
@@ -390,7 +393,7 @@ impl DatabaseAutomationStore {
         tx.commit().await
     }
     pub async fn origin(&self, turn: &AgentTurnRef) -> TalosResult<Option<AutomationTurnOrigin>> {
-        let rows = self.storage.query("SELECT automation_origin_json FROM agent_events WHERE session_id=? AND turn_id=? AND sequence=1", &[&turn.session_id, &turn.turn_id]).await?;
+        let rows = self.storage.query("SELECT automation_origin_json FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=1", &[&turn.session_id, &turn.turn_id]).await?;
         rows.first()
             .and_then(|r| r.get_string("automation_origin_json"))
             .map(|raw| decode(&raw))
@@ -407,7 +410,7 @@ impl DatabaseAutomationStore {
         &self,
         turn: &AgentTurnRef,
     ) -> TalosResult<Option<AgentUserInput>> {
-        let rows = self.storage.query("SELECT payload_json FROM agent_events WHERE session_id=? AND turn_id=? AND sequence IS NOT NULL AND json_extract(payload_json,'$.type')='messageCompleted' AND json_extract(payload_json,'$.data.role')='user' ORDER BY sequence LIMIT 1", &[&turn.session_id, &turn.turn_id]).await?;
+        let rows = self.storage.query("SELECT payload_json FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence IS NOT NULL AND json_extract(payload_json,'$.type')='messageCompleted' AND json_extract(payload_json,'$.data.role')='user' ORDER BY sequence LIMIT 1", &[&turn.session_id, &turn.turn_id]).await?;
         rows.first()
             .map(|row| {
                 let payload = row.get_string("payload_json").ok_or_else(missing)?;
@@ -451,7 +454,7 @@ impl DatabaseAutomationStore {
             ));
         }
         let requested = encode(&turns)?;
-        let rows=self.storage.query("SELECT session_id,turn_id,automation_input_message_id,automation_origin_json FROM agent_events WHERE sequence=1 AND automation_origin_json IS NOT NULL AND (session_id,turn_id) IN (SELECT json_extract(value,'$.sessionId'),json_extract(value,'$.turnId') FROM json_each(?))", &[&requested]).await?;
+        let rows=self.storage.query("SELECT session_id,turn_id,automation_input_message_id,automation_origin_json FROM visible_agent_events WHERE sequence=1 AND automation_origin_json IS NOT NULL AND (session_id,turn_id) IN (SELECT json_extract(value,'$.sessionId'),json_extract(value,'$.turnId') FROM json_each(?))", &[&requested]).await?;
         rows.iter()
             .map(|row| {
                 Ok((
@@ -475,7 +478,7 @@ impl DatabaseAutomationStore {
     /// A later canonical text/file User message is the existing committed Steer
     /// fact. An approval/question response by itself is not management input.
     pub async fn has_user_steer(&self, turn: &AgentTurnRef) -> TalosResult<bool> {
-        Ok(!self.storage.query("SELECT 1 FROM agent_events e JOIN agent_events b ON b.session_id=e.session_id AND b.turn_id=e.turn_id AND b.sequence=1 WHERE e.session_id=? AND e.turn_id=? AND json_extract(e.payload_json,'$.type')='messageCompleted' AND json_extract(e.payload_json,'$.data.role')='user' AND json_extract(e.payload_json,'$.data.messageId')<>b.automation_input_message_id AND EXISTS (SELECT 1 FROM json_each(e.payload_json,'$.data.blocks') block WHERE json_extract(block.value,'$.content.type')='userContent' AND json_extract(block.value,'$.content.data.type') IN ('text','file')) LIMIT 1", &[&turn.session_id,&turn.turn_id]).await?.is_empty())
+        Ok(!self.storage.query("SELECT 1 FROM visible_agent_events e JOIN visible_agent_events b ON b.session_id=e.session_id AND b.turn_id=e.turn_id AND b.sequence=1 WHERE e.session_id=? AND e.turn_id=? AND json_extract(e.payload_json,'$.type')='messageCompleted' AND json_extract(e.payload_json,'$.data.role')='user' AND json_extract(e.payload_json,'$.data.messageId')<>b.automation_input_message_id AND EXISTS (SELECT 1 FROM json_each(e.payload_json,'$.data.blocks') block WHERE json_extract(block.value,'$.content.type')='userContent' AND json_extract(block.value,'$.content.data.type') IN ('text','file')) LIMIT 1", &[&turn.session_id,&turn.turn_id]).await?.is_empty())
     }
     /// Only already persisted metrics may contribute after recovery. Absence is
     /// unknown, never proof of zero work or a missing model declaration.
@@ -483,7 +486,7 @@ impl DatabaseAutomationStore {
         &self,
         turn: &AgentTurnRef,
     ) -> TalosResult<Option<talos_agent_api::AgentRunMetrics>> {
-        let rows=self.storage.query("SELECT payload_json FROM agent_events WHERE session_id=? AND turn_id=? AND sequence IS NOT NULL AND json_extract(payload_json,'$.type')='metricsUpdated' ORDER BY event_seq DESC LIMIT 1", &[&turn.session_id,&turn.turn_id]).await?;
+        let rows=self.storage.query("SELECT payload_json FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence IS NOT NULL AND json_extract(payload_json,'$.type')='metricsUpdated' ORDER BY event_seq DESC LIMIT 1", &[&turn.session_id,&turn.turn_id]).await?;
         match rows.first().and_then(|r| r.get_string("payload_json")) {
             Some(raw) => match decode::<talos_agent_api::AgentEventPayload>(&raw)? {
                 talos_agent_api::AgentEventPayload::MetricsUpdated(metrics) => Ok(Some(metrics)),
@@ -503,7 +506,7 @@ impl DatabaseAutomationStore {
     ) -> TalosResult<()> {
         let tokens = i64::try_from(tokens).map_err(|_| conflict())?;
         let mut tx = self.storage.begin_transaction().await?;
-        let rows = tx.query("SELECT automation_origin_json,automation_accounted_tokens FROM agent_events WHERE session_id=? AND turn_id=? AND sequence=1", &[&turn.session_id, &turn.turn_id]).await?;
+        let rows = tx.query("SELECT automation_origin_json,automation_accounted_tokens FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=1", &[&turn.session_id, &turn.turn_id]).await?;
         if let Some(row) = rows.first() {
             let previous = row.get_i64("automation_accounted_tokens").unwrap_or(0);
             if tokens > previous {
@@ -511,7 +514,7 @@ impl DatabaseAutomationStore {
                     if let AutomationTurnOrigin::Goal { goal_id, .. } = decode(&raw)? {
                         tx.execute("UPDATE session_goals SET tokens_used=tokens_used+?,updated_at=CASE WHEN status='complete' THEN updated_at ELSE ? END WHERE id=? AND session_id=?", &[&(tokens-previous).to_string(), &now.to_string(), &goal_id, &turn.session_id]).await?;
                     }
-                    tx.execute("UPDATE agent_events SET automation_accounted_tokens=? WHERE session_id=? AND turn_id=? AND sequence=1 AND automation_accounted_tokens=?", &[&tokens.to_string(), &turn.session_id, &turn.turn_id, &previous.to_string()]).await?;
+                    tx.execute("UPDATE agent_events SET automation_accounted_tokens=? WHERE event_seq=(SELECT event_seq FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=1 AND automation_accounted_tokens=?)", &[&tokens.to_string(), &turn.session_id, &turn.turn_id, &previous.to_string()]).await?;
                 }
             }
         }

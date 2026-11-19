@@ -26,6 +26,69 @@ fn reservation(session: &str) -> CommandReservation {
         record_expires_at: Some(i64::MAX),
     }
 }
+
+#[tokio::test]
+async fn a_repaired_command_is_shared_after_its_event_was_already_acknowledged() {
+    let source = peer(true).await;
+    let destination = peer(false).await;
+    directory(&source, &destination).await;
+    let id = "repair-old-command";
+    source
+        .sessions
+        .insert_session_record(&record(id))
+        .await
+        .unwrap();
+    let mut request = reservation(id);
+    request.message_id = format!("message-{}", request.turn_id);
+    assert!(matches!(
+        source
+            .sessions
+            .reserve_command(request.clone())
+            .await
+            .unwrap(),
+        IdempotencyReservation::Reserved(_)
+    ));
+    run(&source, id, &request.turn_id).await;
+    let resource = SyncResourceKey::Session {
+        session_id: id.into(),
+    };
+    exchange(&source, &destination, resource.clone()).await;
+    let before = source
+        .sessions
+        .get_latest_agent_event_seq(id)
+        .await
+        .unwrap();
+
+    request.now = request.lease_expires_at;
+    request.lease_expires_at += 10;
+    assert!(matches!(
+        source
+            .sessions
+            .reserve_command(request.clone())
+            .await
+            .unwrap(),
+        IdempotencyReservation::Completed(_)
+    ));
+    assert_eq!(
+        source
+            .sessions
+            .get_latest_agent_event_seq(id)
+            .await
+            .unwrap(),
+        before
+    );
+    exchange(&source, &destination, resource).await;
+    let IdempotencyReservation::Completed(replayed) = destination
+        .sessions
+        .reserve_command(request.clone())
+        .await
+        .unwrap()
+    else {
+        panic!("the destination must replay the repaired command");
+    };
+    assert_eq!(replayed.request_id, request.request_id);
+    assert_eq!(replayed.outcome, Some(TurnCommandStatus::Accepted));
+}
 #[tokio::test]
 async fn cancellation_is_display_only_and_command_replay_retains_original_response() {
     let a = peer(true).await;
@@ -98,6 +161,14 @@ async fn cancellation_is_display_only_and_command_replay_retains_original_respon
         .is_none());
     let cancelling = a.sessions.begin_cancellation(&identity).await.unwrap();
     exchange(&a, &b, resource.clone()).await;
+    let retained: Vec<u8> = sqlx::query_scalar(
+        "SELECT snapshot_blob FROM sync_documents WHERE kind='session' AND resource_id='session-cancel'",
+    )
+    .fetch_one(b.storage.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE sync_documents SET snapshot_blob=x'01' WHERE kind='session' AND resource_id='session-cancel'")
+        .execute(b.storage.pool()).await.unwrap();
     let display = b
         .sessions
         .get_shared_active_turn("session-cancel")
@@ -105,6 +176,8 @@ async fn cancellation_is_display_only_and_command_replay_retains_original_respon
         .unwrap()
         .unwrap();
     assert_eq!(display.state, ActiveTurnState::Cancelling);
+    sqlx::query("UPDATE sync_documents SET snapshot_blob=? WHERE kind='session' AND resource_id='session-cancel'")
+        .bind(retained).execute(b.storage.pool()).await.unwrap();
     assert_eq!(
         b.sessions
             .active_session_ids(&["session-cancel".into()])
@@ -314,14 +387,46 @@ async fn enabling_capture_preserves_a_large_existing_history_at_the_pre_mutation
         })
         .await
         .unwrap();
-    exchange(
-        &a,
-        &b,
-        SyncResourceKey::Session {
-            session_id: "large-history".into(),
-        },
-    )
-    .await;
+    let resource = SyncResourceKey::Session {
+        session_id: "large-history".into(),
+    };
+    a.storage.execute(
+        "CREATE TRIGGER fail_later_capture_map BEFORE INSERT ON sync_event_map
+         WHEN NEW.capture_id<>'' AND (SELECT COUNT(*) FROM sync_event_map WHERE capture_id=NEW.capture_id)>=128
+         BEGIN SELECT RAISE(ABORT, 'test later capture batch failure'); END",
+        &[],
+    ).await.unwrap();
+    assert!(a.adapter.collect_revision(&resource).await.is_err());
+    let staged: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sync_outbox WHERE resource_id='large-history'")
+            .fetch_one(a.storage.pool())
+            .await
+            .unwrap();
+    assert!(
+        staged > 1,
+        "the fixture must have persisted multiple hidden batches"
+    );
+    assert!(a
+        .sync
+        .pending_resources(a.adapter.binding(), 10)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        a.sessions
+            .get_session_record("large-history")
+            .await
+            .unwrap()
+            .unwrap()
+            .conf
+            .user_permission_mode,
+        Some(UserPermissionMode::FullAccess),
+    );
+    a.storage
+        .execute("DROP TRIGGER fail_later_capture_map", &[])
+        .await
+        .unwrap();
+    exchange(&a, &b, resource).await;
     let facts = b
         .sessions
         .list_timeline_events_after("large-history", 0, 1_000)

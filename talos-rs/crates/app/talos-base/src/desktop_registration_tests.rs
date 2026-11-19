@@ -51,7 +51,7 @@ impl DesktopFixture {
         )
         .await
         .unwrap();
-        let store = Arc::new(DatabaseAgentNodeStore::new(storage.pool().clone()));
+        let store = Arc::new(DatabaseAgentNodeStore::new(&storage));
         let nodes = AgentNodeService::new(store.clone());
         let sessions = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
         let coordinator = Arc::new(CoordinatorImpl::new(

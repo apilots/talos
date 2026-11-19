@@ -129,7 +129,7 @@ pub(super) async fn release(store: &DatabaseSessionStore, lease: CommandLease) -
             WHERE session_id = ? AND command = ? AND idempotency_key = ?
               AND status = 'reserved' AND lease_id = ?
               AND NOT EXISTS (
-                  SELECT 1 FROM agent_events
+                  SELECT 1 FROM visible_agent_events
                   WHERE session_id = ? AND turn_id = ? AND sequence = 1
               )
             "#
@@ -206,7 +206,13 @@ pub(super) async fn complete_command(
             "idempotency lease changed before Turn admission commit",
         ));
     }
-    Ok(())
+    record_completion(
+        transaction,
+        &lease.session_id,
+        lease.command,
+        &lease.idempotency_key,
+    )
+    .await
 }
 
 async fn load(
@@ -273,7 +279,7 @@ async fn committed_admission(
     let rows = transaction
         .query(
             r#"
-            SELECT event_seq FROM agent_events
+            SELECT event_seq FROM visible_agent_events
             WHERE session_id = ? AND turn_id = ? AND sequence = 1
             "#,
             &[session_id, turn_id],
@@ -317,7 +323,34 @@ async fn repair_completed(
     record.committed_event_seq = Some(committed_event_seq);
     record.lease_expires_at = None;
     record.updated_at = updated_at;
+    record_completion(
+        transaction,
+        &record.session_id,
+        record.command,
+        &record.idempotency_key,
+    )
+    .await?;
     Ok(record)
+}
+
+async fn record_completion(
+    transaction: &mut dyn StorageTransaction,
+    session_id: &str,
+    command: IdempotentCommand,
+    key: &str,
+) -> TalosResult<()> {
+    transaction.execute(
+        "INSERT INTO session_command_revisions(
+            session_id, owner_user_id, history_generation, command, idempotency_key,
+            request_id, request_hash, turn_id, message_id, outcome, committed_event_seq, record_expires_at
+         )
+         SELECT i.session_id, s.user_id, s.history_generation, i.command, i.idempotency_key,
+                i.request_id, i.request_hash, i.turn_id, i.message_id, i.outcome, i.committed_event_seq, i.record_expires_at
+         FROM agent_command_idempotency i JOIN sessions s ON s.session_key = i.session_id
+         WHERE i.session_id = ? AND i.command = ? AND i.idempotency_key = ?",
+        &[session_id, command.as_str(), key],
+    ).await?;
+    Ok(())
 }
 
 async fn reclaim(

@@ -30,7 +30,7 @@ flowchart TB
 | 当前协调者原Service/Store | 授权、Turn准入、结果/Timeline落库、发布实时进展。结果先本端commit，再异步共享。 |
 | Worker / Harness | 模型/工具、所有Workspace文件/配置、最终排他及最小历史游标恢复标记。没有产品Session DB。 |
 | agent-client / 中心G | 屏蔽loopback/direct/Connect；注册/租约只在G；RPC与资源返回当前协调者，不代执行、不代写其Session。 |
-| Talos同步集成lib/Store adapter | 原事务capture/outbox、导入原Store、event-map/稳定水位及共享确认；不调用Agent或复制活动锁。 |
+| Talos同步集成lib/Store adapter | 从本地事实补采到现有 outbox，分批导入原 Store，维护 event-map、水位和共享确认。 |
 | 独立Sync SDK/types/server | 唯一WSS+Loro同步协议、账号隔离、持久Ack/增量恢复；不处理执行RPC。 |
 | 原SDK/UI | 原Computer/Project/Session/API；独立Computer管理组件、相对当前宿主的本机标识、真实在线状态。 |
 
@@ -43,7 +43,9 @@ flowchart TB
 
 ## 持久化与可执行边界
 
-原Store事务与outbox共提交；文档、事实、event-map和下载cursor同事务导入；导入不计费、不重发工具或反思。稳定事件键与原reducer重建展示，原活动锁/claim/内存queue不复制。跨端Input/Interrupt/queue仅路由当前执行协调者。
+原 Store 事务保留业务事实及其必要的版本记录。后台采集从持久水位读取已提交的事实，失败后仍可重新采集。入站长历史分批暂存，分批事务之间让出本地写锁。最终事务一并发布文档、事实、event-map 和下载游标。
+
+导入不计费、不重发工具或反思。稳定事件键与原 reducer 重建展示，原活动锁、claim 和内存 queue 留在执行端。跨端 Input、Interrupt 和 queue 仅路由当前执行协调者。
 
 Worker核对`SessionHistoryCursor`并排他准入：history_generation、completed_turn_id、completed_event_sequence（最后完成Turn内事件offset）。同一协调者连续执行不依赖H；其他协调者必须拥有完整已共享事实。未知清理或旧历史不能伪装idle；clear/delete与恢复使用原Gate/Commit路径。
 

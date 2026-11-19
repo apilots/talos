@@ -44,9 +44,7 @@ async fn automation_uses_original_host_auth_and_exact_reverse_invocation() {
     .await
     .unwrap();
     let pool = storage.pool().clone();
-    let nodes = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(
-        storage.pool().clone(),
-    )));
+    let nodes = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(&storage)));
     let sessions = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
     let record = session_record();
     sessions.insert_session_record(&record).await.unwrap();

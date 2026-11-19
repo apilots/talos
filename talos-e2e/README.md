@@ -284,6 +284,15 @@ actual credential enforcement, SIGTERM replacement, exact delivered/history even
 parity, unchanged Computer/Session, a subsequent controlled turn and the original
 unsubscribe handle. It also verifies Cloud-offline local metadata, complete History,
 status, Live subscriptions and idle deletion without additional Cloud requests.
+Set `TALOS_E2E_SYNC_HUB_BIN` to the independent Hub executable to exercise real
+WSS isolation with the same controlled local account and model. The scenario
+stops the Hub, then holds the restarted Hub's SQLite writer with 379 batches in
+the Desktop outbox. Both cases verify local completion, cancellation through
+`turn/interrupt`, closure of the model stream, and a successful following Turn.
+Add `TALOS_E2E_SYNC_STRESS=1` for local acceptance with 12,128 synthetic Timeline
+facts. After the Hub starts acknowledging the original batches, the same
+foreground checks run while some of those batches remain. The backlog must
+clear within 120 seconds of unlocking the Hub.
 This gated scenario replaces the former opt-in real-model Desktop stdio restart
 test; renderer/SDK forwarding remains covered by the controller unit suite.
 It needs no private source or provider credentials. Native

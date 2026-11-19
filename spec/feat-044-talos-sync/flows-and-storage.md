@@ -13,7 +13,7 @@ Status: Implemented；新开关专项已通过，统一8/8验收通过，见[本
 | `sync_bindings` | PK hub/account/source_user；typed ComputerAlias[]；download_cursor | 已验证账号与本地用户/节点别名关联、下载水位；不另存登录Token。 |
 | `sync_account_preferences` | account_id PK；enabled 0/1 | 当前管理宿主的已验证账号选择，独立于hub/binding；未保存默认沿登录启用；不作为同步事实上传。 |
 | `sync_documents` | PK hub/account/kind/resource_id；computer_id?；generation；deleted；snapshot_blob；VV；ack_VV | 唯一Loro持久文档与本地/共享版本；查询业务目录仍复用原Store，不建第二套列表索引。 |
-| `sync_outbox` | seq PK；binding/resource key；typed SyncChange[]；exported_version?；created_at | 原事务实际变更，进程崩溃也可导出；不记录RPC调用/回应。 |
+| `sync_outbox` | seq PK, binding/resource key, typed SyncChange[], exported_version?, created_at | 后台从已提交的本地事实补采，重启后可以继续发送。 |
 | `sync_event_map` | PK hub/account/session/generation/stable_event_key；local_event_id；local_event_seq；UNIQUE local_event_id | 去重导入、源notice识别、History分页与memory/幂等水位转换。因DB整数不能跨节点复制，这张映射有真实用途。 |
 
 event map 的 key 为版本化闭合 SyncEventKey 编码，不是临时字符串约定。
@@ -53,12 +53,12 @@ Worker读取本机最小持久历史游标标记；若最新Local事实只在B�
 
 ## 5. 原子提交、排序和恢复
 
-1. 业务写入与typed capture同事务；先后快照diff只改实际变化字段，不能把旧完整snapshot当远端整行覆盖。
-2. exporter按outbox次序形成Loro操作。同步先在SQLite只读快照中固定文档及outbox水位，在事务外构建Loro候选，写事务内复核文档和ACK版本，再原子持久化文档与导出水位。导入还需复核本地outbox水位，避免覆盖并发追加的本地事实。
+1. 业务事务提交本地事实和必要的版本记录。后台按持久水位采集并发布 outbox 批次，失败时从原水位重试。先后版本的 diff 只改实际变化字段。
+2. exporter 先在 SQLite 只读快照中固定文档和 outbox 水位，再于写事务外构建 Loro 候选。每批保留其精确前缀版本。写事务复核文档和确认版本，再原子保存文档和导出水位。导入还需复核本地 outbox，避免覆盖并行提交的事实。
 3. hub/client接收后暂存import，验证scope/immutable binding、事件一致性、前驱/generation；依赖缺失先补齐，不能发布不完整terminal快照。
-4. hub的document/update/feed、client的document/业务事实/event map/cursor分别同事务持久化。
+4. Hub 的 document、update 和 feed 同事务持久化。客户端分批暂存长历史并在批次间让出写锁，最终事务一并发布 document、业务事实、event map 和 cursor。
 5. commit成功后替换可见文档/通知；hub提交后发上传成功Ack，client提交后只mark_committed本地恢复水位，不发送下载成功Ack。失败不推进VV/cursor，不开放跨端handoff。
-6. ACK丢失按VV对账；source commit后crash从outbox恢复；import不得重新触发模型/工具/副作用。
+6. ACK 丢失按 VV 对账。重启后从已提交的源水位及 outbox 恢复。导入不得重新触发模型、工具或其他副作用。
 
 只有H已提交cut确认为terminal Delete，导入事务才同时淘汰该资源被删除终态覆盖的离线pending patch；这是终态覆盖，不伪造上传ACK，不能因本端候选文档含未上传Delete就清空outbox。本地未ACK Delete遇H并发patch仍保留pending并上传Delete，不阻塞其他资源。flush固定调用时原事务的seq与VV，只有H durable cut包含该VV才成功；被远端Delete覆盖则返回Conflict，不能把outbox为空当ACK成功。
 Loro VV的官方编码不保证map迭代顺序；持久snapshot校验、checkpoint相等/去重使用官方decode后的版本语义及准确generation，不比较二进制bytes或另造canonical排序编码。真正不一致或损坏仍明确失败。

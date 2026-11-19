@@ -92,7 +92,7 @@ impl TestFiles {
     async fn new(configure: impl FnOnce(&mut FileStorageConfig)) -> Self {
         let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
         run_test_migrations(storage.pool()).await;
-        let store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
+        let store = Arc::new(DatabaseFileStore::new(&storage));
         let project_store = Arc::new(StorageProjectStore::new(storage.clone()).await.unwrap());
         let root = tempfile::tempdir().unwrap();
         let operator = Operator::new(Fs::default().root(root.path().to_str().unwrap()))

@@ -24,9 +24,7 @@ async fn fixture() -> (
     )
     .await
     .unwrap();
-    let service = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(
-        storage.pool().clone(),
-    )));
+    let service = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(&storage)));
     service.register_embedded(true).await.unwrap();
     let created = service
         .create_node(

@@ -37,7 +37,7 @@ Status: Implemented；本轮账号选择专项已自测，统一8/8验收通过�
 服务端ACK仍由`SyncHub`持久事务决定，SDK不能提前替hub确认；认证使用现有账号Token，不增加SDK专属Token租约。
 `SyncVersion.version_vector`始终保存/传输官方不透明编码；相等、包含与并集使用SDK的`version_equal`/`version_includes`/`version_union`解码后调用官方VersionVector语义，不能以字节相等、字节哈希或自造排序判定共享历史游标。
 
-纯本地未绑定时沿用原Store/API，不调用catch_up/flush，也不为请求建立账号绑定。已绑定但H不可达时capture持久outbox，不能等待网络才提交本机业务。
+纯本地未绑定时沿用原 Store 和 API。已绑定时先提交本机业务，后台采集已提交的事实并保留在现有 outbox，直至 Hub 确认。
 当前控制面已持有所需历史游标的完整事实时不必每次Start访问H；flush仅为把本端新事实开放给另一协调者，不是同一协调者继续执行的前置条件。
 
 ```rust
@@ -67,7 +67,7 @@ pub trait SyncDataAdapter: Send + Sync {
 ```
 
 scan 按 sourceUser/既有 keyset 返回资源键和 nextCursor；export固定原事务的generation/high-water cut；分页不拼接reset前后。已有资源初次绑定须在启用增量业务hook前完成baseline capture，不能用缺少原字段的diff重建空文档。
-apply 在文档/cursor 同一事务中调用原 Store 的导入路径；导入标记禁止再次 capture，不能触发业务工作流。
+apply 复用原 Store 的导入路径。长历史分批暂存，最终事务一并发布事实、文档和 cursor。导入标记禁止再次采集和触发业务工作流。
 完成 Session 所需 Project/Computer/tree/File metadata 一并补齐；确有未到的数据明确不可执行，不用空对象兜底。
 active 展示从同步文档读取，原 agent_active_turns 只保留本端实际协调任务；导入 running 不安装假执行任务。
 本地 accounting/反思等副作用只由实际执行该 Turn 的原 owner 运行，导入采用事实替换/去重。

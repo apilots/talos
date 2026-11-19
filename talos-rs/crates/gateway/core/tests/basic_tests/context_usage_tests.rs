@@ -306,9 +306,7 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
         talos_config::ReservedOutputPolicy::Fixed { tokens: 32 };
     let (storage, store) = test_session_storage().await;
     let agent = build_agent(&config, store.clone());
-    let node_store = Arc::new(talos_store::node::DatabaseAgentNodeStore::new(
-        storage.pool().clone(),
-    ));
+    let node_store = Arc::new(talos_store::node::DatabaseAgentNodeStore::new(&storage));
     talos_service::AgentNodeService::new(node_store.clone())
         .register_embedded(true)
         .await

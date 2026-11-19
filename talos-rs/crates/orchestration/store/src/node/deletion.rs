@@ -38,7 +38,7 @@ impl DatabaseAgentNodeStore {
     pub(super) async fn read_deletion_owner(&self, node_id: &str) -> TalosResult<Option<String>> {
         sqlx::query_scalar("SELECT owner_user_id FROM computer_deletions WHERE node_id = ?")
             .bind(node_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.storage.pool())
             .await
             .map_err(|error| database_error("read Computer deletion", error))
     }

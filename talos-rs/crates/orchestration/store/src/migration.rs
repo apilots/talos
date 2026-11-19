@@ -41,3 +41,7 @@ mod tests;
 #[cfg(test)]
 #[path = "error_migration_tests.rs"]
 mod error_tests;
+
+#[cfg(test)]
+#[path = "event_generation_tests.rs"]
+mod event_generation_tests;

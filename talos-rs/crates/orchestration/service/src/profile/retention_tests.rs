@@ -41,7 +41,7 @@ async fn retention_stops_after_configured_batch_limit() {
         .unwrap();
     let pool = storage.pool().clone();
     run_test_migrations(&pool).await;
-    let store = Arc::new(DatabaseProfileStore::new(pool.clone()));
+    let store = Arc::new(DatabaseProfileStore::new(&storage));
     for id in ["one", "two", "three"] {
         store.record_turn_usage(update(id, 1_000)).await.unwrap();
     }

@@ -52,9 +52,9 @@ pub(super) async fn append(
     // Pending progress writes must finish rather than silently discard this Turn.
     let mut tx = store.storage.begin_transaction().await?;
     let id = &incoming.identity;
-    let rows = tx.query("SELECT event_seq, execution_capture_json FROM agent_events WHERE session_id=? AND turn_id=? AND sequence=1 AND json_extract(payload_json,'$.type')='turnStarted' AND EXISTS (SELECT 1 FROM sessions WHERE session_key=agent_events.session_id)", &[&id.session_id,&id.turn_id]).await?;
+    let rows = tx.query("SELECT event_seq, execution_capture_json FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=1 AND json_extract(payload_json,'$.type')='turnStarted'", &[&id.session_id,&id.turn_id]).await?;
     let row = rows.first().ok_or_else(missing)?;
-    if !tx.query("SELECT 1 FROM agent_events WHERE session_id=? AND turn_id=? AND json_extract(payload_json,'$.type') IN ('turnCompleted','turnFailed') LIMIT 1", &[&id.session_id,&id.turn_id]).await?.is_empty() {
+    if !tx.query("SELECT 1 FROM visible_agent_events WHERE session_id=? AND turn_id=? AND json_extract(payload_json,'$.type') IN ('turnCompleted','turnFailed') LIMIT 1", &[&id.session_id,&id.turn_id]).await?.is_empty() {
         return Err(TalosError::new(ErrorCode::Conflict, "Completed Turn execution facts are immutable."));
     }
     let previous = row.get_string("execution_capture_json");
@@ -80,7 +80,9 @@ pub(super) async fn read_terminal(
     store: &DatabaseSessionStore,
     id: &AgentTurnRef,
 ) -> TalosResult<Option<SessionHistorySupplement>> {
-    let rows = store.storage.query("SELECT CASE WHEN execution_capture_json IS NULL THEN NULL ELSE json_set(execution_capture_json,'$.payloads',json('{}')) END AS execution_capture_json FROM agent_events WHERE session_id=? AND turn_id=? AND sequence=1 AND json_extract(payload_json,'$.type')='turnStarted' AND EXISTS (SELECT 1 FROM sessions WHERE session_key=agent_events.session_id) AND EXISTS (SELECT 1 FROM agent_events terminal WHERE terminal.session_id=agent_events.session_id AND terminal.turn_id=agent_events.turn_id AND json_extract(terminal.payload_json,'$.type') IN ('turnCompleted','turnFailed'))", &[&id.session_id,&id.turn_id]).await?;
+    let rows = store.storage.query("SELECT CASE WHEN e.execution_capture_json IS NULL THEN NULL ELSE json_set(e.execution_capture_json,'$.payloads',json('{}')) END AS execution_capture_json
+         FROM visible_agent_events e WHERE e.session_id=? AND e.turn_id=? AND e.sequence=1 AND json_extract(e.payload_json,'$.type')='turnStarted'
+         AND EXISTS (SELECT 1 FROM visible_agent_events terminal WHERE terminal.session_id=e.session_id AND terminal.turn_id=e.turn_id AND json_extract(terminal.payload_json,'$.type') IN ('turnCompleted','turnFailed'))", &[&id.session_id,&id.turn_id]).await?;
     let row = rows.first().ok_or_else(missing)?;
     row.get_string("execution_capture_json")
         .map(|body| {
@@ -100,7 +102,9 @@ pub(super) async fn read_payload(
     id: &AgentTurnRef,
     payload_id: &str,
 ) -> TalosResult<Option<String>> {
-    let rows=store.storage.query("SELECT payload.value AS body FROM agent_events, json_each(agent_events.execution_capture_json,'$.payloads') AS payload WHERE agent_events.session_id=? AND agent_events.turn_id=? AND agent_events.sequence=1 AND json_extract(agent_events.payload_json,'$.type')='turnStarted' AND payload.key=? AND EXISTS (SELECT 1 FROM sessions WHERE session_key=agent_events.session_id) AND EXISTS (SELECT 1 FROM agent_events terminal WHERE terminal.session_id=agent_events.session_id AND terminal.turn_id=agent_events.turn_id AND json_extract(terminal.payload_json,'$.type') IN ('turnCompleted','turnFailed'))",&[&id.session_id,&id.turn_id,payload_id]).await?;
+    let rows = store.storage.query("SELECT payload.value AS body FROM visible_agent_events e, json_each(e.execution_capture_json,'$.payloads') AS payload
+         WHERE e.session_id=? AND e.turn_id=? AND e.sequence=1 AND json_extract(e.payload_json,'$.type')='turnStarted' AND payload.key=?
+         AND EXISTS (SELECT 1 FROM visible_agent_events terminal WHERE terminal.session_id=e.session_id AND terminal.turn_id=e.turn_id AND json_extract(terminal.payload_json,'$.type') IN ('turnCompleted','turnFailed'))",&[&id.session_id,&id.turn_id,payload_id]).await?;
     let body = rows.first().and_then(|row| row.get_string("body"));
     if let Some(body) = &body {
         // Validate against the shared domain type; keep the saved text for paging.

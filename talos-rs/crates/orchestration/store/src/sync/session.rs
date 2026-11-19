@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use super::{codec, transcode, StoreSyncAdapter};
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_storage::StorageTransaction;
-use talos_sync::{SyncEventKey, SyncEventMapping, SyncImportBatch};
+use talos_storage::{Row, StorageTransaction};
+use talos_sync::{SyncEventKey, SyncImportBatch};
 use talos_sync_types::{SyncChange, SyncSessionSnapshot, SyncTimelineEntry};
 
 pub(crate) async fn key_at(
@@ -10,9 +12,6 @@ pub(crate) async fn key_at(
     session_id: &str,
     seq: i64,
 ) -> TalosResult<Option<SyncEventKey>> {
-    if seq == 0 {
-        return Ok(None);
-    }
     let generation = adapter
         .generation(
             tx,
@@ -21,14 +20,27 @@ pub(crate) async fn key_at(
             },
         )
         .await?;
-    let mapped = tx.query("SELECT stable_event_key FROM sync_event_map WHERE hub_id = ? AND account_id = ? AND session_id = ? AND generation = ? AND local_event_seq = ?", &[&adapter.binding.scope.hub_id, &adapter.binding.scope.account_id, session_id, &generation.to_string(), &seq.to_string()]).await?;
+    key_at_generation(adapter, tx, session_id, generation, seq).await
+}
+
+pub(super) async fn key_at_generation(
+    adapter: &StoreSyncAdapter,
+    tx: &mut dyn StorageTransaction,
+    session_id: &str,
+    generation: u64,
+    seq: i64,
+) -> TalosResult<Option<SyncEventKey>> {
+    if seq == 0 {
+        return Ok(None);
+    }
+    let mapped = tx.query("SELECT stable_event_key FROM visible_sync_event_map WHERE hub_id = ? AND account_id = ? AND session_id = ? AND generation = ? AND local_event_seq = ?", &[&adapter.binding.scope.hub_id, &adapter.binding.scope.account_id, session_id, &generation.to_string(), &seq.to_string()]).await?;
     if let Some(raw) = mapped
         .first()
         .and_then(|r| r.get_string("stable_event_key"))
     {
         return serde_json::from_str(&raw).map(Some).map_err(codec);
     }
-    let rows = tx.query("SELECT session_id, turn_id, sequence FROM agent_events WHERE session_id = ? AND event_seq = ?", &[session_id, &seq.to_string()]).await?;
+    let rows = tx.query("SELECT session_id, turn_id, sequence FROM committed_agent_events WHERE session_id = ? AND history_generation = ? AND event_seq = ?", &[session_id, &generation.to_string(), &seq.to_string()]).await?;
     Ok(rows.first().and_then(|row| {
         row.get_i64("sequence").map(|sequence| SyncEventKey::Agent {
             identity: talos_types::AgentTurnRef::new(
@@ -117,45 +129,27 @@ pub(super) async fn apply_metadata(
 }
 
 pub(super) async fn apply(
-    adapter: &StoreSyncAdapter,
     tx: &mut dyn StorageTransaction,
     batch: &SyncImportBatch,
+    staged: bool,
 ) -> TalosResult<()> {
     let session_id = batch.resource.id();
     let generation = batch.version.history_generation;
-    // Every local generation's map is preserved until reset removes its facts.
-    let old = tx.query("SELECT MIN(generation) AS generation FROM sync_event_map WHERE hub_id = ? AND account_id = ? AND session_id = ?", &[&batch.scope.hub_id, &batch.scope.account_id, session_id]).await?;
+    let old = tx
+        .query(
+            "SELECT history_generation AS generation FROM sessions WHERE session_key=?",
+            &[session_id],
+        )
+        .await?;
     if old
         .first()
         .and_then(|r| r.get_i64("generation"))
         .is_some_and(|g| (g as u64) < generation)
     {
-        if !tx
-            .query(
-                "SELECT 1 FROM agent_active_turns WHERE session_id = ?",
-                &[session_id],
-            )
-            .await?
-            .is_empty()
-        {
-            return Err(TalosError::new(
-                ErrorCode::ActiveTurnRunning,
-                "Cannot reset locally executing Session facts.",
-            ));
-        }
-        tx.execute(
-            "DELETE FROM agent_events WHERE session_id = ?",
-            &[session_id],
-        )
-        .await?;
+        super::source::retire_history(tx, session_id, /*deleted*/ false).await?;
         tx.execute(
             "DELETE FROM agent_command_idempotency WHERE session_id = ?",
             &[session_id],
-        )
-        .await?;
-        tx.execute(
-            "DELETE FROM sync_event_map WHERE hub_id = ? AND account_id = ? AND session_id = ?",
-            &[&batch.scope.hub_id, &batch.scope.account_id, session_id],
         )
         .await?;
     }
@@ -164,9 +158,10 @@ pub(super) async fn apply(
         &[&generation.to_string(), session_id],
     )
     .await?;
-    let ordered = ordered_events(&batch.changes)?;
-    for entry in ordered {
-        import_event(adapter, tx, batch, entry).await?;
+    if !staged {
+        for entry in ordered_events(&batch.changes)? {
+            import_event(tx, batch, entry).await?;
+        }
     }
     let latest_turn_seq = batch.changes.iter().filter(|c| matches!(c, SyncChange::Event(e) if matches!(&e.event, talos_sync_types::generated::TimelineEventPayload::Agent(a) if matches!(a.payload, talos_sync_types::generated::AgentEventPayload::TurnCompleted(_))))).count();
     tx.execute(
@@ -174,30 +169,21 @@ pub(super) async fn apply(
         &[&latest_turn_seq.to_string(), session_id],
     )
     .await?;
-    let mut changes = batch.changes.iter().collect::<Vec<_>>();
     // Reused idempotency keys follow the canonical committed event order.
     // They retain each original request ID in the shared append-only facts.
-    let mut command_sequences = std::collections::HashMap::new();
-    for change in &changes {
+    let mut commands = Vec::new();
+    for change in &batch.changes {
         if let SyncChange::AcceptedCommand(command) = change {
-            command_sequences.insert(
-                command.request_id.as_str(),
-                local_seq(tx, batch, &command.committed_event)
-                    .await?
-                    .ok_or_else(|| {
-                        TalosError::new(
-                            ErrorCode::Conflict,
-                            "Accepted command depends on missing synchronized facts.",
-                        )
-                    })?,
-            );
+            let seq = local_seq(tx, batch, &command.committed_event)
+                .await?
+                .ok_or_else(|| {
+                    TalosError::new(
+                        ErrorCode::Conflict,
+                        "Accepted command depends on missing synchronized facts.",
+                    )
+                })?;
+            commands.push((seq, command));
         }
-    }
-    changes.sort_by_key(|change| match change {
-        SyncChange::AcceptedCommand(command) => command_sequences[command.request_id.as_str()],
-        _ => 0,
-    });
-    for change in changes {
         if let SyncChange::Metadata { after, .. } = change {
             if let talos_sync_types::SyncResourceSnapshot::Session(snapshot) = after.as_ref() {
                 let through = match &snapshot.memory_processed_through {
@@ -212,97 +198,90 @@ pub(super) async fn apply(
                 tx.execute("UPDATE sessions SET memory_processed_until_event_seq = ? WHERE session_key = ?", &[&through.to_string(), session_id]).await?;
             }
         }
-        if let SyncChange::AcceptedCommand(command) = change {
-            let seq = local_seq(tx, batch, &command.committed_event)
-                .await?
-                .ok_or_else(|| {
-                    TalosError::new(
-                        ErrorCode::Conflict,
-                        "Accepted command depends on missing synchronized facts.",
-                    )
-                })?;
-            let command_name = match command.command {
-                talos_sync_types::generated::IdempotentCommand::TurnSubmission => "turn_submission",
-                talos_sync_types::generated::IdempotentCommand::TurnInput => "turn_input",
-            };
-            let outcome = match command.status {
-                talos_sync_types::generated::TurnCommandStatus::Pending => {
-                    return Err(TalosError::new(
-                        ErrorCode::Conflict,
-                        "Pending command is not a completed synchronization fact.",
-                    ))
-                }
-                talos_sync_types::generated::TurnCommandStatus::Accepted => "accepted",
-                talos_sync_types::generated::TurnCommandStatus::Failed => "failed",
-                talos_sync_types::generated::TurnCommandStatus::FailedNoFirstEvent => {
-                    "failed_no_first_event"
-                }
-            };
-            let current = tx.query("SELECT request_id, request_hash, turn_id, status, committed_event_seq, record_expires_at FROM agent_command_idempotency WHERE session_id = ? AND command = ? AND idempotency_key = ?", &[session_id, command_name, &command.idempotency_key]).await?;
-            let persisted_at = tx
+    }
+    commands.sort_by_key(|(seq, _)| *seq);
+    for (seq, command) in commands {
+        let command_name = match command.command {
+            talos_sync_types::generated::IdempotentCommand::TurnSubmission => "turn_submission",
+            talos_sync_types::generated::IdempotentCommand::TurnInput => "turn_input",
+        };
+        let outcome = match command.status {
+            talos_sync_types::generated::TurnCommandStatus::Pending => {
+                return Err(TalosError::new(
+                    ErrorCode::Conflict,
+                    "Pending command is not a completed synchronization fact.",
+                ))
+            }
+            talos_sync_types::generated::TurnCommandStatus::Accepted => "accepted",
+            talos_sync_types::generated::TurnCommandStatus::Failed => "failed",
+            talos_sync_types::generated::TurnCommandStatus::FailedNoFirstEvent => {
+                "failed_no_first_event"
+            }
+        };
+        let current = tx.query("SELECT request_id, request_hash, turn_id, status, committed_event_seq, record_expires_at FROM agent_command_idempotency WHERE session_id = ? AND command = ? AND idempotency_key = ?", &[session_id, command_name, &command.idempotency_key]).await?;
+        let persisted_at = tx
                 .query(
-                    "SELECT persisted_at FROM agent_events WHERE session_id = ? AND event_seq = ?",
+                    "SELECT persisted_at FROM visible_agent_events WHERE session_id = ? AND event_seq = ?",
                     &[session_id, &seq.to_string()],
                 )
                 .await?
                 .first()
                 .and_then(|r| r.get_i64("persisted_at"))
                 .ok_or_else(|| TalosError::internal("Accepted command event is unavailable."))?;
-            if let Some(row) = current.first() {
-                let same_request = row.get_string("request_id").as_deref()
-                    == Some(&command.request_id)
-                    && row.get_string("request_hash").as_deref() == Some(&command.request_hash)
-                    && row.get_string("turn_id").as_deref() == Some(&command.identity.turn_id);
-                if !same_request {
-                    if row
-                        .get_i64("committed_event_seq")
-                        .is_some_and(|current| current >= seq)
-                    {
-                        continue;
-                    }
-                    if row
-                        .get_i64("record_expires_at")
-                        .is_none_or(|expiry| expiry > persisted_at)
-                    {
-                        return Err(TalosError::new(
-                            ErrorCode::IdempotencyConflict,
-                            "Synchronized command conflicts with an existing request.",
-                        ));
-                    }
+        if let Some(row) = current.first() {
+            let same_request = row.get_string("request_id").as_deref() == Some(&command.request_id)
+                && row.get_string("request_hash").as_deref() == Some(&command.request_hash)
+                && row.get_string("turn_id").as_deref() == Some(&command.identity.turn_id);
+            if !same_request {
+                if row
+                    .get_i64("committed_event_seq")
+                    .is_some_and(|current| current >= seq)
+                {
+                    continue;
+                }
+                if row
+                    .get_i64("record_expires_at")
+                    .is_none_or(|expiry| expiry > persisted_at)
+                {
+                    return Err(TalosError::new(
+                        ErrorCode::IdempotencyConflict,
+                        "Synchronized command conflicts with an existing request.",
+                    ));
                 }
             }
-            tx.execute("INSERT INTO agent_command_idempotency(session_id, command, idempotency_key, request_id, request_hash, turn_id, message_id, status, outcome, committed_event_seq, created_at, updated_at, record_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, NULLIF(?, '')) ON CONFLICT(session_id, command, idempotency_key) DO UPDATE SET request_id = excluded.request_id, request_hash = excluded.request_hash, turn_id = excluded.turn_id, message_id = excluded.message_id, status = 'completed', outcome = excluded.outcome, committed_event_seq = excluded.committed_event_seq, updated_at = excluded.updated_at, record_expires_at = excluded.record_expires_at, lease_id = NULL, lease_expires_at = NULL", &[session_id, command_name, &command.idempotency_key, &command.request_id, &command.request_hash, &command.identity.turn_id, &command.message_id, outcome, &seq.to_string(), &persisted_at.to_string(), &persisted_at.to_string(), &command.expires_at.map(|n| n.to_string()).unwrap_or_default()]).await?;
         }
+        tx.execute("INSERT INTO agent_command_idempotency(session_id, command, idempotency_key, request_id, request_hash, turn_id, message_id, status, outcome, committed_event_seq, created_at, updated_at, record_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, NULLIF(?, '')) ON CONFLICT(session_id, command, idempotency_key) DO UPDATE SET request_id = excluded.request_id, request_hash = excluded.request_hash, turn_id = excluded.turn_id, message_id = excluded.message_id, status = 'completed', outcome = excluded.outcome, committed_event_seq = excluded.committed_event_seq, updated_at = excluded.updated_at, record_expires_at = excluded.record_expires_at, lease_id = NULL, lease_expires_at = NULL", &[session_id, command_name, &command.idempotency_key, &command.request_id, &command.request_hash, &command.identity.turn_id, &command.message_id, outcome, &seq.to_string(), &persisted_at.to_string(), &persisted_at.to_string(), &command.expires_at.map(|n| n.to_string()).unwrap_or_default()]).await?;
     }
     Ok(())
 }
 
-fn ordered_events(changes: &[SyncChange]) -> TalosResult<Vec<&SyncTimelineEntry>> {
-    let turns = changes
-        .iter()
-        .filter_map(|c| {
-            if let SyncChange::Turn(t) = c {
-                Some(t)
-            } else {
-                None
+pub(super) fn ordered_events(changes: &[SyncChange]) -> TalosResult<Vec<&SyncTimelineEntry>> {
+    let mut children = std::collections::HashMap::new();
+    let invalid_chain = || {
+        TalosError::new(
+            ErrorCode::Conflict,
+            "Synchronized Turn predecessor chain is incomplete or branched.",
+        )
+    };
+    for change in changes {
+        if let SyncChange::Turn(turn) = change {
+            let previous = turn.previous_turn_id.as_deref();
+            if children
+                .insert(previous, turn.identity.turn_id.as_str())
+                .is_some()
+            {
+                return Err(invalid_chain());
             }
-        })
-        .collect::<Vec<_>>();
-    let mut order = Vec::new();
-    let mut previous = None;
-    while order.len() < turns.len() {
-        let next = turns
-            .iter()
-            .filter(|t| t.previous_turn_id.as_deref() == previous)
-            .collect::<Vec<_>>();
-        if next.len() != 1 {
-            return Err(TalosError::new(
-                ErrorCode::Conflict,
-                "Synchronized Turn predecessor chain is incomplete or branched.",
-            ));
         }
-        previous = Some(next[0].identity.turn_id.as_str());
-        order.push(previous.expect("Turn identity"));
+    }
+    let mut order = std::collections::HashMap::with_capacity(children.len());
+    let mut previous = None;
+    while let Some(turn) = children.remove(&previous) {
+        order.insert(turn, order.len());
+        previous = Some(turn);
+    }
+    if !children.is_empty() {
+        return Err(invalid_chain());
     }
     let mut events = changes
         .iter()
@@ -327,10 +306,7 @@ fn ordered_events(changes: &[SyncChange]) -> TalosResult<Vec<&SyncTimelineEntry>
             },
         };
         (
-            order
-                .iter()
-                .position(|id| *id == turn)
-                .unwrap_or(usize::MAX),
+            order.get(turn).copied().unwrap_or(usize::MAX),
             sequence,
             e.persisted_at,
         )
@@ -338,72 +314,145 @@ fn ordered_events(changes: &[SyncChange]) -> TalosResult<Vec<&SyncTimelineEntry>
     Ok(events)
 }
 
-pub(super) async fn local_seq(
+async fn local_seq(
     tx: &mut dyn StorageTransaction,
     batch: &SyncImportBatch,
     key: &talos_sync_types::SyncEventKey,
 ) -> TalosResult<Option<i64>> {
     let key = serde_json::to_string(key).map_err(codec)?;
-    Ok(tx.query("SELECT local_event_seq FROM sync_event_map WHERE hub_id = ? AND account_id = ? AND session_id = ? AND generation = ? AND stable_event_key = ?", &[&batch.scope.hub_id, &batch.scope.account_id, batch.resource.id(), &batch.version.history_generation.to_string(), &key]).await?.first().and_then(|r| r.get_i64("local_event_seq")))
+    Ok(tx.query("SELECT local_event_seq FROM visible_sync_event_map WHERE hub_id = ? AND account_id = ? AND session_id = ? AND generation = ? AND stable_event_key = ?", &[&batch.scope.hub_id, &batch.scope.account_id, batch.resource.id(), &batch.version.history_generation.to_string(), &key]).await?.first().and_then(|r| r.get_i64("local_event_seq")))
 }
 
 async fn import_event(
-    adapter: &StoreSyncAdapter,
     tx: &mut dyn StorageTransaction,
     batch: &SyncImportBatch,
     entry: &SyncTimelineEntry,
 ) -> TalosResult<()> {
-    if let Some(seq) = local_seq(tx, batch, &entry.key).await? {
-        let row = tx
-            .query(
-                "SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE event_seq = ? AND session_id = ?",
-                &[&seq.to_string(), batch.resource.id()],
-            )
-            .await?;
-        let existing = row
-            .first()
-            .map(crate::session::agent_execution::notice::parse)
-            .transpose()?
-            .ok_or_else(|| TalosError::internal("Synchronized event cursor has no fact."))?;
-        if transcode::<_, talos_sync_types::generated::TimelineEventPayload>(&existing.event)?
-            != entry.event
-        {
-            return Err(TalosError::new(
-                ErrorCode::Conflict,
-                "Stable event identity has different contents.",
-            ));
-        }
-        return Ok(());
+    let mut events = new_events(tx, batch, &[entry]).await?;
+    if let Some(event) = events.pop() {
+        event.insert(tx, batch, 0).await?;
     }
-    let event: talos_agent_api::TimelineEventPayload = transcode(&entry.event)?;
-    let (identity, sequence, occurred, payload) = match &event {
-        talos_agent_api::TimelineEventPayload::Agent(e) => (
-            &e.identity,
-            Some(e.sequence),
-            e.occurred_at,
-            serde_json::to_string(&e.payload).map_err(codec)?,
-        ),
-        talos_agent_api::TimelineEventPayload::SystemNotice(e) => (
-            &e.identity,
-            None,
-            e.occurred_at,
-            serde_json::to_string(&e.notice).map_err(codec)?,
-        ),
-    };
-    let rows = tx.query("INSERT INTO agent_events(session_id, turn_id, sequence, occurred_at, persisted_at, payload_json) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?) RETURNING event_seq", &[&identity.session_id, &identity.turn_id, &sequence.map(|n| n.to_string()).unwrap_or_default(), &occurred.to_string(), &entry.persisted_at.to_string(), &payload]).await?;
-    let seq = super::metadata::number(&rows[0], "event_seq")?;
-    adapter
-        .sync
-        .map_event(
-            tx,
-            SyncEventMapping {
-                scope: batch.scope.clone(),
-                session_id: batch.resource.id().into(),
-                generation: batch.version.history_generation,
-                key: transcode(&entry.key)?,
-                local_event_id: talos_types::TimelineEventId::from_seq(seq).to_string(),
-                local_event_seq: seq,
-            },
+    Ok(())
+}
+
+pub(super) async fn new_events(
+    tx: &mut dyn StorageTransaction,
+    batch: &SyncImportBatch,
+    entries: &[&SyncTimelineEntry],
+) -> TalosResult<Vec<ImportEvent>> {
+    let keys = entries
+        .iter()
+        .map(|entry| serde_json::to_string(&entry.key).map_err(codec))
+        .collect::<TalosResult<Vec<_>>>()?;
+    let keys_json = serde_json::to_string(&keys).map_err(codec)?;
+    let existing = tx
+        .query(
+            "SELECT m.stable_event_key, e.event_seq, e.session_id, e.turn_id, e.sequence,
+                e.occurred_at, e.persisted_at, e.payload_json
+         FROM visible_sync_event_map m
+         LEFT JOIN committed_agent_events e
+           ON e.event_seq = m.local_event_seq AND e.session_id = m.session_id
+         WHERE m.hub_id = ? AND m.account_id = ? AND m.session_id = ? AND m.generation = ?
+           AND m.stable_event_key IN (SELECT value FROM json_each(?))",
+            &[
+                &batch.scope.hub_id,
+                &batch.scope.account_id,
+                batch.resource.id(),
+                &batch.version.history_generation.to_string(),
+                &keys_json,
+            ],
         )
-        .await
+        .await?;
+    let existing = existing
+        .into_iter()
+        .map(|row| Ok((super::metadata::text(&row, "stable_event_key")?, row)))
+        .collect::<TalosResult<HashMap<_, _>>>()?;
+    let mut missing = Vec::new();
+    for (entry, key) in entries.iter().zip(keys) {
+        if let Some(row) = existing.get(&key) {
+            verify_existing_event(entry, row)?;
+        } else {
+            missing.push(ImportEvent::from_entry(entry)?);
+        }
+    }
+    Ok(missing)
+}
+
+fn verify_existing_event(entry: &SyncTimelineEntry, row: &Row) -> TalosResult<()> {
+    if row.get_i64("event_seq").is_none() {
+        return Err(TalosError::internal(
+            "Synchronized event cursor has no fact.",
+        ));
+    }
+    let existing = crate::session::agent_execution::notice::parse(row)?;
+    if transcode::<_, talos_sync_types::generated::TimelineEventPayload>(&existing.event)?
+        != entry.event
+    {
+        return Err(TalosError::new(
+            ErrorCode::Conflict,
+            "Stable event identity has different contents.",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) struct ImportEvent {
+    identity: talos_types::AgentTurnRef,
+    sequence: String,
+    occurred_at: i64,
+    persisted_at: i64,
+    payload: String,
+    key: String,
+}
+
+impl ImportEvent {
+    fn from_entry(entry: &SyncTimelineEntry) -> TalosResult<Self> {
+        let event: talos_agent_api::TimelineEventPayload = transcode(&entry.event)?;
+        let (identity, sequence, occurred_at, payload) = match event {
+            talos_agent_api::TimelineEventPayload::Agent(e) => (
+                e.identity,
+                e.sequence.to_string(),
+                e.occurred_at,
+                serde_json::to_string(&e.payload).map_err(codec)?,
+            ),
+            talos_agent_api::TimelineEventPayload::SystemNotice(e) => (
+                e.identity,
+                String::new(),
+                e.occurred_at,
+                serde_json::to_string(&e.notice).map_err(codec)?,
+            ),
+        };
+        Ok(Self {
+            identity,
+            sequence,
+            occurred_at,
+            persisted_at: entry.persisted_at,
+            payload,
+            key: serde_json::to_string(&entry.key).map_err(codec)?,
+        })
+    }
+
+    pub(super) fn bytes(&self) -> usize {
+        self.payload.len() + self.key.len()
+    }
+
+    pub(super) async fn insert(
+        &self,
+        tx: &mut dyn StorageTransaction,
+        batch: &SyncImportBatch,
+        import_id: i64,
+    ) -> TalosResult<()> {
+        let rows = tx.query(
+            "INSERT INTO agent_events(session_id, turn_id, sequence, occurred_at, persisted_at, payload_json, history_generation, import_id)
+             VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?) RETURNING event_seq",
+            &[&self.identity.session_id, &self.identity.turn_id, &self.sequence, &self.occurred_at.to_string(), &self.persisted_at.to_string(), &self.payload, &batch.version.history_generation.to_string(), &import_id.to_string()],
+        ).await?;
+        let seq = super::metadata::number(&rows[0], "event_seq")?;
+        tx.execute(
+            "INSERT INTO sync_event_map(hub_id, account_id, session_id, generation, stable_event_key, local_event_id, local_event_seq, import_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            &[&batch.scope.hub_id, &batch.scope.account_id, batch.resource.id(), &batch.version.history_generation.to_string(), &self.key, &talos_types::TimelineEventId::from_seq(seq).to_string(), &seq.to_string(), &import_id.to_string()],
+        ).await?;
+        Ok(())
+    }
 }

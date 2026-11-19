@@ -602,12 +602,11 @@ async fn test_application_with_environment(
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     run_test_migrations(storage.pool()).await;
-    let profile_store: Arc<dyn ProfileStore> =
-        Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
+    let profile_store: Arc<dyn ProfileStore> = Arc::new(DatabaseProfileStore::new(&storage));
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
-    let file_store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
+    let file_store = Arc::new(DatabaseFileStore::new(&storage));
     let nodes = crate::AgentNodeService::new(Arc::new(
-        talos_store::node::DatabaseAgentNodeStore::new(storage.pool().clone()),
+        talos_store::node::DatabaseAgentNodeStore::new(&storage),
     ));
     let project_store = Arc::new(StorageProjectStore::new(storage).await.unwrap());
     let file_operator = Operator::new(Memory::default()).unwrap().finish();

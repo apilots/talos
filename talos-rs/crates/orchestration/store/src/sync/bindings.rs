@@ -2,7 +2,6 @@ use std::sync::{Arc, RwLock};
 
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::StorageTransaction;
-use talos_sync::SyncResourceKey;
 
 use super::StoreSyncAdapter;
 
@@ -37,15 +36,16 @@ impl StoreSyncBindings {
         Ok(())
     }
 
-    pub(crate) async fn resource(
+    /// Select the authorized association using only the original Session row.
+    pub(crate) async fn session(
         &self,
         tx: &mut dyn StorageTransaction,
-        resource: &SyncResourceKey,
+        session_id: &str,
     ) -> TalosResult<Option<Arc<StoreSyncAdapter>>> {
         let bindings = self.0.read().expect("Store sync bindings lock").clone();
         let mut selected = None;
         for adapter in bindings {
-            if super::metadata::read(&adapter, tx, resource)
+            if super::metadata::session_row(&adapter, tx, session_id)
                 .await?
                 .is_some()
             {
@@ -63,5 +63,15 @@ impl StoreSyncBindings {
 
     pub(crate) fn all(&self) -> Vec<Arc<StoreSyncAdapter>> {
         self.0.read().expect("Store sync bindings lock").clone()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.read().expect("Store sync bindings lock").is_empty()
+    }
+
+    pub(crate) fn wake_capture(&self) {
+        for adapter in self.all() {
+            adapter.wake_capture();
+        }
     }
 }

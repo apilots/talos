@@ -1,23 +1,26 @@
-use sqlx::{Row, SqlitePool};
+use sqlx::Row;
 use talos_error::{TalosError, TalosResult};
-use talos_storage::SqliteWriteTransaction;
+use talos_storage::SqliteStorage;
 
 use super::usage::{storage_error, usage_from_row};
 use super::{ModelCallUsageUpdate, ProfileUsageUpdate, TurnUsageUpdate};
 
 /// Routes a shared Profile usage update to its lifecycle-specific persistence path.
-pub(super) async fn record_usage(pool: &SqlitePool, update: ProfileUsageUpdate) -> TalosResult<()> {
+pub(super) async fn record_usage(
+    storage: &SqliteStorage,
+    update: ProfileUsageUpdate,
+) -> TalosResult<()> {
     match update {
-        ProfileUsageUpdate::Turn(update) => record_turn_usage(pool, update).await,
-        ProfileUsageUpdate::ModelCall(update) => record_model_call_usage(pool, update).await,
+        ProfileUsageUpdate::Turn(update) => record_turn_usage(storage, update).await,
+        ProfileUsageUpdate::ModelCall(update) => record_model_call_usage(storage, update).await,
     }
 }
 
 pub(super) async fn record_turn_usage(
-    pool: &SqlitePool,
+    storage: &SqliteStorage,
     update: TurnUsageUpdate,
 ) -> TalosResult<()> {
-    let mut transaction = SqliteWriteTransaction::begin(pool).await.map_err(|error| {
+    let mut transaction = storage.write_transaction().await.map_err(|error| {
         TalosError::internal_with_source(
             "begin profile usage update; technical details were withheld.",
             error,
@@ -156,14 +159,15 @@ pub(super) async fn record_turn_usage(
 }
 
 pub(super) async fn discard_turn_usage(
-    pool: &SqlitePool,
+    storage: &SqliteStorage,
     session_id: &str,
     turn_id: &str,
 ) -> TalosResult<()> {
+    let _writer = storage.lock_writer().await;
     sqlx::query("DELETE FROM profile_turn_usage WHERE usage_kind = 'turn' AND session_id = ? AND turn_id = ?")
         .bind(session_id)
         .bind(turn_id)
-        .execute(pool)
+        .execute(storage.pool())
         .await
         .map_err(storage_error("discard failed profile turn usage"))?;
     Ok(())
@@ -171,9 +175,10 @@ pub(super) async fn discard_turn_usage(
 
 /// Inserts one finalized non-Turn model call with request-id idempotency.
 async fn record_model_call_usage(
-    pool: &SqlitePool,
+    storage: &SqliteStorage,
     update: ModelCallUsageUpdate,
 ) -> TalosResult<()> {
+    let _writer = storage.lock_writer().await;
     if update.kind == talos_types::ModelUsageKind::Turn {
         return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
@@ -186,7 +191,7 @@ async fn record_model_call_usage(
     .bind(&update.user_id)
     .bind(update.kind.as_str())
     .bind(&update.request_id)
-    .fetch_optional(pool)
+    .fetch_optional(storage.pool())
     .await
     .map_err(storage_error("read profile model-call usage"))?;
     if let Some(row) = existing {
@@ -254,17 +259,18 @@ async fn record_model_call_usage(
     .bind(&update.usage_date)
     .bind(&update.timezone)
     .bind(update.completed_at_ms)
-    .execute(pool)
+    .execute(storage.pool())
     .await
     .map_err(storage_error("insert profile model-call usage"))?;
     Ok(())
 }
 
 pub(super) async fn delete_finalized_before(
-    pool: &SqlitePool,
+    storage: &SqliteStorage,
     completed_before_ms: i64,
     limit: usize,
 ) -> TalosResult<u64> {
+    let _writer = storage.lock_writer().await;
     if limit == 0 {
         return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
@@ -291,7 +297,7 @@ pub(super) async fn delete_finalized_before(
     )
     .bind(completed_before_ms)
     .bind(limit)
-    .execute(pool)
+    .execute(storage.pool())
     .await
     .map_err(storage_error("delete expired profile usage"))?;
     Ok(result.rows_affected())

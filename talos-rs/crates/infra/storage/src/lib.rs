@@ -74,6 +74,12 @@ pub trait Storage: Send + Sync {
     /// Begin one database transaction pinned to a single connection.
     async fn begin_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>>;
 
+    /// Give already waiting foreground writers priority over this bounded
+    /// background transaction.
+    async fn begin_background_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>> {
+        self.begin_transaction().await
+    }
+
     /// Execute a query and return rows
     async fn query(&self, sql: &str, params: &[&str]) -> TalosResult<Vec<Row>>;
 

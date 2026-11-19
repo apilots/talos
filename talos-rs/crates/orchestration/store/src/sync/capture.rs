@@ -1,48 +1,25 @@
-use super::{metadata, timeline, StoreSyncAdapter, StoreSyncBindings};
+use super::{codec, metadata, StoreSyncAdapter, StoreSyncBindings};
 use async_trait::async_trait;
 use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_storage::{Row, StorageTransaction};
-use talos_sync::{SyncCaptureParams, SyncChange, SyncResourceKey, SyncResourceSnapshot};
+use talos_sync::{SyncChange, SyncExportFacts, SyncResourceKey};
 
 pub(crate) struct ResourceCut {
     resource: SyncResourceKey,
-    metadata: CapturedMetadata,
-    tail: i64,
-    generation: u64,
-    active: Option<talos_sync::SyncActiveTurnMetadata>,
-}
-
-enum CapturedMetadata {
-    UnchangedSession,
-    Resource(Option<Box<SyncResourceSnapshot>>),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CaptureScope {
-    Resource,
-    SessionTimeline,
+    metadata: Option<metadata::MetadataSource>,
 }
 
 /// Decorate exactly the Store's existing transaction, not SQL or a second DB.
 /// Scope and resource keys come from the Store command, never from SQL parsing.
 pub(crate) async fn transaction(
-    tx: Box<dyn StorageTransaction>,
-    bindings: Arc<StoreSyncBindings>,
-    resources: Vec<SyncResourceKey>,
-) -> TalosResult<Box<dyn StorageTransaction>> {
-    transaction_with_scope(tx, bindings, resources, CaptureScope::Resource).await
-}
-
-pub(crate) async fn transaction_with_scope(
     mut tx: Box<dyn StorageTransaction>,
     bindings: Arc<StoreSyncBindings>,
     resources: Vec<SyncResourceKey>,
-    scope: CaptureScope,
 ) -> TalosResult<Box<dyn StorageTransaction>> {
     let mut cuts = Vec::new();
     for adapter in bindings.all() {
-        let prepared = prepare(&adapter, &mut *tx, resources.clone(), scope).await?;
+        let prepared = prepare(&adapter, &mut *tx, resources.clone()).await?;
         cuts.push((adapter, prepared));
     }
     if cuts.is_empty() {
@@ -55,65 +32,16 @@ pub(crate) async fn prepare(
     adapter: &StoreSyncAdapter,
     tx: &mut dyn StorageTransaction,
     resources: Vec<SyncResourceKey>,
-    scope: CaptureScope,
 ) -> TalosResult<Vec<ResourceCut>> {
     let mut cuts = Vec::new();
     for resource in resources {
-        let has_baseline = has_baseline(adapter, tx, &resource).await?;
-        let metadata = match &resource {
-            SyncResourceKey::Session { session_id }
-                if scope == CaptureScope::SessionTimeline && has_baseline =>
-            {
-                if metadata::session_row(adapter, tx, session_id)
-                    .await?
-                    .is_none()
-                {
-                    continue;
-                }
-                CapturedMetadata::UnchangedSession
-            }
-            _ => CapturedMetadata::Resource(
-                metadata::read(adapter, tx, &resource).await?.map(Box::new),
-            ),
-        };
-        let generation = adapter.generation(tx, &resource).await?;
-        let tail = timeline::tail(tx, &resource).await?;
-        // A newly bound resource still needs its complete pre-mutation baseline.
-        if let CapturedMetadata::Resource(Some(before)) = &metadata {
-            if !has_baseline {
-                append(
-                    adapter,
-                    tx,
-                    &resource,
-                    vec![SyncChange::Metadata {
-                        before: None,
-                        after: before.clone(),
-                    }],
-                )
-                .await?;
-                if let SyncResourceKey::Session { session_id } = &resource {
-                    let facts = timeline::export(adapter, tx, session_id, 0).await?;
-                    append(adapter, tx, &resource, facts).await?;
-                }
-            }
-        }
-        let active = if matches!(resource, SyncResourceKey::Session { .. }) {
-            timeline::active_metadata(adapter, tx, resource.id()).await?
-        } else {
-            None
-        };
-        cuts.push(ResourceCut {
-            resource,
-            metadata,
-            tail,
-            generation,
-            active,
-        });
+        let metadata = metadata::read_source(adapter, tx, &resource).await?;
+        cuts.push(ResourceCut { resource, metadata });
     }
     Ok(cuts)
 }
 
-async fn has_baseline(
+pub(super) async fn has_baseline(
     adapter: &StoreSyncAdapter,
     tx: &mut dyn StorageTransaction,
     resource: &SyncResourceKey,
@@ -122,40 +50,49 @@ async fn has_baseline(
         SyncResourceKey::Computer { computer_id } => adapter.computer(computer_id),
         _ => resource.id().to_owned(),
     };
-    let rows = tx.query("SELECT 1 AS present FROM sync_documents WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? UNION ALL SELECT 1 FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? LIMIT 1", &[&adapter.binding.scope.hub_id, &adapter.binding.scope.account_id, resource.kind().as_str(), &canonical_id, &adapter.binding.scope.hub_id, &adapter.binding.scope.account_id, resource.kind().as_str(), &canonical_id]).await?;
+    let rows = tx.query("SELECT 1 AS present FROM sync_documents WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? UNION ALL SELECT 1 FROM visible_sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? LIMIT 1", &[&adapter.binding.scope.hub_id, &adapter.binding.scope.account_id, resource.kind().as_str(), &canonical_id, &adapter.binding.scope.hub_id, &adapter.binding.scope.account_id, resource.kind().as_str(), &canonical_id]).await?;
     Ok(!rows.is_empty())
 }
 
-async fn append(
-    adapter: &StoreSyncAdapter,
-    tx: &mut dyn StorageTransaction,
-    resource: &SyncResourceKey,
-    changes: Vec<SyncChange>,
-) -> TalosResult<()> {
-    if changes.is_empty() {
-        return Ok(());
-    }
-    capture(adapter, tx, resource, changes).await
+#[derive(serde::Serialize, serde::Deserialize)]
+struct MetadataRevision {
+    before: Option<metadata::MetadataSource>,
+    after: Option<metadata::MetadataSource>,
 }
 
-async fn capture(
+pub(super) fn project_revision(
     adapter: &StoreSyncAdapter,
-    tx: &mut dyn StorageTransaction,
     resource: &SyncResourceKey,
-    changes: Vec<SyncChange>,
-) -> TalosResult<()> {
-    adapter
-        .sync
-        .capture(
-            tx,
-            SyncCaptureParams {
-                binding: adapter.binding.clone(),
-                resource: resource.clone(),
-                changes,
-                created_at: chrono::Utc::now().timestamp(),
+    known: bool,
+    raw: &str,
+) -> TalosResult<SyncExportFacts> {
+    let revision: MetadataRevision = serde_json::from_str(raw).map_err(codec)?;
+    let before = revision
+        .before
+        .map(|source| source.project(adapter, resource))
+        .transpose()?;
+    let after = revision
+        .after
+        .map(|source| source.project(adapter, resource))
+        .transpose()?;
+    let mut facts = SyncExportFacts::default();
+    if let Some(baseline) = before.as_ref().filter(|_| !known) {
+        facts.changes.push(SyncChange::Metadata {
+            before: None,
+            after: Box::new(baseline.clone()),
+        });
+    }
+    if before != after {
+        let change = match after {
+            Some(after) => SyncChange::Metadata {
+                before: before.map(Box::new),
+                after: Box::new(after),
             },
-        )
-        .await
+            None => SyncChange::Delete,
+        };
+        facts.changes.push(change);
+    }
+    Ok(facts)
 }
 
 struct CaptureTransaction {
@@ -180,7 +117,7 @@ impl StorageTransaction for CaptureTransaction {
         }
         self.tx.commit().await?;
         for (adapter, _) in &self.cuts {
-            adapter.committed();
+            adapter.wake_capture();
         }
         Ok(())
     }
@@ -192,43 +129,19 @@ pub(crate) async fn finish(
     cuts: &[ResourceCut],
 ) -> TalosResult<()> {
     for cut in cuts {
-        let mut changes = Vec::new();
-        let include_timeline = match &cut.metadata {
-            CapturedMetadata::UnchangedSession => true,
-            CapturedMetadata::Resource(before) => {
-                let after = metadata::read(adapter, tx, &cut.resource).await?;
-                match (before.as_deref(), after) {
-                    (Some(_), None) => {
-                        changes.push(SyncChange::Delete);
-                        false
-                    }
-                    (before, Some(after)) => {
-                        if before != Some(&after) {
-                            changes.push(SyncChange::Metadata {
-                                before: before.cloned().map(Box::new),
-                                after: Box::new(after),
-                            });
-                        }
-                        true
-                    }
-                    (None, None) => false,
-                }
-            }
-        };
-        if include_timeline {
-            if let SyncResourceKey::Session { session_id } = &cut.resource {
-                let tail = timeline::tail(tx, &cut.resource).await?;
-                let generation = adapter.generation(tx, &cut.resource).await?;
-                let after = if generation > cut.generation {
-                    0
-                } else {
-                    cut.tail.min(tail)
-                };
-                changes.extend(timeline::export(adapter, tx, session_id, after).await?);
-            }
+        let after = metadata::read_source(adapter, tx, &cut.resource).await?;
+        if cut.metadata == after {
+            continue;
         }
-        changes.retain(|change| !matches!(change, SyncChange::ActiveTurnMetadata(active) if cut.active.as_ref() == Some(active)));
-        append(adapter, tx, &cut.resource, changes).await?;
+        let raw = serde_json::to_string(&MetadataRevision {
+            before: cut.metadata.clone(),
+            after,
+        })
+        .map_err(codec)?;
+        tx.execute(
+            "INSERT INTO resource_revisions(kind, resource_id, owner_user_id, execution_node_id, changes_json) VALUES (?, ?, ?, '', ?)",
+            &[cut.resource.kind().as_str(), cut.resource.id(), &adapter.binding.scope.account_id, &raw],
+        ).await?;
     }
     Ok(())
 }
@@ -240,20 +153,14 @@ pub(crate) struct SqliteCaptureTransaction {
 }
 impl SqliteCaptureTransaction {
     pub(crate) async fn begin(
-        pool: &sqlx::SqlitePool,
+        storage: &talos_storage::SqliteStorage,
         bindings: Arc<StoreSyncBindings>,
         resources: Vec<SyncResourceKey>,
     ) -> TalosResult<Self> {
-        let mut transaction = talos_storage::SqliteWriteTransaction::begin(pool).await?;
+        let mut transaction = storage.write_transaction().await?;
         let mut cuts = Vec::new();
         for adapter in bindings.all() {
-            let prepared = prepare(
-                &adapter,
-                &mut transaction,
-                resources.clone(),
-                CaptureScope::Resource,
-            )
-            .await?;
+            let prepared = prepare(&adapter, &mut transaction, resources.clone()).await?;
             cuts.push((adapter, prepared));
         }
         Ok(Self { transaction, cuts })
@@ -264,7 +171,7 @@ impl SqliteCaptureTransaction {
         }
         self.transaction.commit().await?;
         for (adapter, _) in &self.cuts {
-            adapter.committed();
+            adapter.wake_capture();
         }
         Ok(())
     }

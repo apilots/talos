@@ -80,7 +80,7 @@ pub(super) async fn ensure_node_has_no_active_turn(
     let active: i64 = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM sessions s WHERE s.execution_node_id = ? AND (
             EXISTS(SELECT 1 FROM agent_active_turns a WHERE a.session_id = s.session_key)
-            OR (SELECT json_extract(e.payload_json, '$.type') FROM agent_events e
+            OR (SELECT json_extract(e.payload_json, '$.type') FROM visible_agent_events e
                 WHERE e.session_id = s.session_key AND e.sequence IS NOT NULL
                 ORDER BY e.event_seq DESC LIMIT 1) NOT IN ('turnCompleted', 'turnFailed')))",
     )

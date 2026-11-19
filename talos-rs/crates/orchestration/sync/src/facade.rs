@@ -7,10 +7,11 @@ use talos_sync_sdk::{version_equal, SyncReplica};
 use talos_sync_types::SyncError;
 
 use crate::{
-    projection, store, SyncBindParams, SyncBinding, SyncCaptureParams, SyncEventMapping,
-    SyncExportBatch, SyncOptions, SyncResourceKey, SyncScope, SyncVersion,
+    projection, store, SyncBindParams, SyncBinding, SyncEventMapping, SyncExportBatch, SyncOptions,
+    SyncResourceKey, SyncScope, SyncVersion,
 };
 
+mod capture;
 mod materialize;
 mod state;
 
@@ -49,6 +50,16 @@ impl TalosSync {
         }
         let mut tx = storage.begin_transaction().await?;
         let (peer_id, writer_id) = store::identity(&mut *tx).await?;
+        tx.execute(
+            "UPDATE sync_snapshots SET state='retired' WHERE state='staged'",
+            &[],
+        )
+        .await?;
+        tx.execute(
+            "UPDATE sync_capture_batches SET state='retired' WHERE state='staged'",
+            &[],
+        )
+        .await?;
         tx.commit().await?;
         Ok(Self {
             storage,
@@ -65,13 +76,18 @@ impl TalosSync {
         &self.options.hub_endpoint
     }
 
+    /// Allow the host's background collector to reclaim one retired snapshot chunk.
+    pub async fn reclaim_snapshot(&self) -> TalosResult<bool> {
+        store::snapshot::reclaim(&*self.storage).await
+    }
+
     /// Restore an installed association after the host verifies the account again.
     pub async fn binding(
         &self,
         scope: &SyncScope,
         source_user_id: &str,
     ) -> TalosResult<Option<SyncBinding>> {
-        let mut tx = self.storage.begin_transaction().await?;
+        let mut tx = self.storage.begin_read_transaction().await?;
         let binding = store::binding(&mut *tx, scope, source_user_id, &self.peer_id).await?;
         tx.commit().await?;
         Ok(binding)
@@ -107,7 +123,7 @@ impl TalosSync {
         }
         let mut tx = self.storage.begin_read_transaction().await?;
         self.require_binding(&mut *tx, binding).await?;
-        let rows = tx.query("SELECT kind, resource_id, MIN(seq) AS first_seq FROM sync_outbox WHERE hub_id = ? AND account_id = ? GROUP BY kind, resource_id HAVING MIN(seq) > CAST(? AS INTEGER) AND MIN(seq) <= CAST(? AS INTEGER) ORDER BY MIN(seq) LIMIT ?", &[&binding.scope.hub_id, &binding.scope.account_id, &after.to_string(), &through.to_string(), &limit.to_string()]).await?;
+        let rows = tx.query("SELECT kind, resource_id, MIN(seq) AS first_seq FROM visible_sync_outbox WHERE hub_id = ? AND account_id = ? GROUP BY kind, resource_id HAVING MIN(seq) > CAST(? AS INTEGER) AND MIN(seq) <= CAST(? AS INTEGER) ORDER BY MIN(seq) LIMIT ?", &[&binding.scope.hub_id, &binding.scope.account_id, &after.to_string(), &through.to_string(), &limit.to_string()]).await?;
         let resources = rows
             .iter()
             .map(|row| {
@@ -204,6 +220,14 @@ impl TalosSync {
             source_user_id: params.source_user_id,
             computers: params.computers,
         };
+        if self
+            .binding(&binding.scope, &binding.source_user_id)
+            .await?
+            .as_ref()
+            == Some(&binding)
+        {
+            return Ok(binding);
+        }
         let mut tx = self.storage.begin_transaction().await?;
         store::save_binding(&mut *tx, &binding).await?;
         tx.commit().await?;
@@ -283,7 +307,7 @@ impl TalosSync {
         let rows = self
             .storage
             .query(
-                "SELECT COUNT(*) AS count FROM sync_outbox WHERE hub_id = ? AND account_id = ?",
+                "SELECT COUNT(*) AS count FROM visible_sync_outbox WHERE hub_id = ? AND account_id = ?",
                 &[&binding.scope.hub_id, &binding.scope.account_id],
             )
             .await?;
@@ -307,50 +331,9 @@ impl TalosSync {
         tx.commit().await
     }
 
-    /// Capture canonical facts inside the caller's transaction, with no I/O to H.
-    pub async fn capture(
-        &self,
-        tx: &mut dyn StorageTransaction,
-        params: SyncCaptureParams,
-    ) -> TalosResult<()> {
-        self.require_binding(tx, &params.binding).await?;
-        let resource = projection::resource(&params.binding, &params.resource);
-        resource.validate().map_err(sync_error)?;
-        let changes = params
-            .changes
-            .into_iter()
-            .map(|change| projection::change(&params.binding, change))
-            .collect::<TalosResult<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-        let mut batch = Vec::new();
-        let mut bytes = 0;
-        for change in changes {
-            let size = store::encode(&change)?.len();
-            if size > 8 * 1024 * 1024 {
-                return Err(TalosError::new(
-                    ErrorCode::UploadTooLarge,
-                    "A synchronization fact exceeds the limit.",
-                ));
-            }
-            if bytes + size > 8 * 1024 * 1024 && !batch.is_empty() {
-                store::append(tx, &params.binding, &resource, &batch, params.created_at).await?;
-                batch.clear();
-                bytes = 0;
-            }
-            bytes += size;
-            batch.push(change);
-        }
-        if !batch.is_empty() {
-            store::append(tx, &params.binding, &resource, &batch, params.created_at).await?;
-        }
-        Ok(())
-    }
-
     /// Called only for the hub's durable upload ACK of this exact exported cut.
     pub async fn acknowledge(&self, batch: &SyncExportBatch) -> TalosResult<()> {
-        let mut tx = self.storage.begin_transaction().await?;
+        let mut tx = self.storage.begin_background_transaction().await?;
         let Some(record) = store::acknowledgement(&mut *tx, batch).await? else {
             tx.commit().await?;
             return Ok(());
@@ -390,11 +373,20 @@ impl TalosSync {
         tx: &mut dyn StorageTransaction,
         mapping: SyncEventMapping,
     ) -> TalosResult<()> {
+        self.map_event_for_capture(tx, mapping, "").await
+    }
+
+    async fn map_event_for_capture(
+        &self,
+        tx: &mut dyn StorageTransaction,
+        mapping: SyncEventMapping,
+        capture_id: &str,
+    ) -> TalosResult<()> {
         let key = store::encode(&mapping.key)?;
         let generation = i64::try_from(mapping.generation)
             .map_err(|_| TalosError::new(ErrorCode::InvalidRequest, "Invalid history generation."))?
             .to_string();
-        let rows = tx.query("SELECT local_event_id, local_event_seq FROM sync_event_map WHERE hub_id = ? AND account_id = ? AND session_id = ? AND generation = ? AND stable_event_key = ?", &[&mapping.scope.hub_id, &mapping.scope.account_id, &mapping.session_id, &generation, &key]).await?;
+        let rows = tx.query("SELECT local_event_id, local_event_seq FROM visible_sync_event_map WHERE hub_id = ? AND account_id = ? AND session_id = ? AND generation = ? AND stable_event_key = ?", &[&mapping.scope.hub_id, &mapping.scope.account_id, &mapping.session_id, &generation, &key]).await?;
         if let Some(row) = rows.first() {
             if store::text(row, "local_event_id")? != mapping.local_event_id
                 || row.get_i64("local_event_seq") != Some(mapping.local_event_seq)
@@ -406,7 +398,7 @@ impl TalosSync {
             }
             return Ok(());
         }
-        tx.execute("INSERT INTO sync_event_map(hub_id, account_id, session_id, generation, stable_event_key, local_event_id, local_event_seq) VALUES (?, ?, ?, ?, ?, ?, ?)", &[&mapping.scope.hub_id, &mapping.scope.account_id, &mapping.session_id, &generation, &key, &mapping.local_event_id, &mapping.local_event_seq.to_string()]).await?;
+        tx.execute("INSERT INTO sync_event_map(hub_id, account_id, session_id, generation, stable_event_key, local_event_id, local_event_seq, capture_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", &[&mapping.scope.hub_id, &mapping.scope.account_id, &mapping.session_id, &generation, &key, &mapping.local_event_id, &mapping.local_event_seq.to_string(), capture_id]).await?;
         Ok(())
     }
 

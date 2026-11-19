@@ -1,14 +1,20 @@
 use serde::{de::DeserializeOwned, Serialize};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::{Row, StorageTransaction};
-use talos_sync_types::{ComputerAlias, SyncBinding, SyncResourceKey, SyncScope, SyncVersion};
+use talos_sync_types::{
+    ComputerAlias, SyncBinding, SyncResourceKey, SyncResourceSummary, SyncScope, SyncVersion,
+};
 
 use crate::projection::codec_error;
+
+pub(crate) mod snapshot;
+pub(crate) mod staged_write;
 
 pub(crate) struct DocumentRecord {
     pub snapshot: Vec<u8>,
     pub version: SyncVersion,
     pub acknowledged: SyncVersion,
+    pub has_session_projection: bool,
 }
 
 pub(crate) struct AcknowledgementRecord {
@@ -95,28 +101,26 @@ pub(crate) async fn append(
     tx: &mut dyn StorageTransaction,
     binding: &SyncBinding,
     resource: &SyncResourceKey,
-    changes: &[talos_sync_types::SyncChange],
+    changes_json: &str,
     created_at: i64,
+    capture_id: &str,
 ) -> TalosResult<()> {
-    tx.execute("INSERT INTO sync_outbox(hub_id, account_id, source_user_id, kind, resource_id, changes_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", &[&binding.scope.hub_id, &binding.scope.account_id, &binding.source_user_id, resource.kind().as_str(), resource.id(), &encode(changes)?, &created_at.to_string()]).await?;
+    tx.execute("INSERT INTO sync_outbox(hub_id, account_id, source_user_id, kind, resource_id, changes_json, created_at, capture_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", &[&binding.scope.hub_id, &binding.scope.account_id, &binding.source_user_id, resource.kind().as_str(), resource.id(), changes_json, &created_at.to_string(), capture_id]).await?;
     Ok(())
 }
 
-pub(crate) async fn has_outbox(
+pub(crate) async fn has_capture_baseline(
     tx: &mut dyn StorageTransaction,
     scope: &SyncScope,
     resource: &SyncResourceKey,
 ) -> TalosResult<bool> {
-    let rows = tx.query("SELECT 1 FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? LIMIT 1", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
-    Ok(!rows.is_empty())
-}
-
-pub(crate) async fn has_document(
-    tx: &mut dyn StorageTransaction,
-    scope: &SyncScope,
-    resource: &SyncResourceKey,
-) -> TalosResult<bool> {
-    let rows = tx.query("SELECT 1 FROM sync_documents WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? LIMIT 1", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
+    let rows = tx.query(
+        "SELECT 1 FROM visible_sync_outbox WHERE hub_id = ?1 AND account_id = ?2 AND kind = ?3 AND resource_id = ?4
+         UNION ALL
+         SELECT 1 FROM sync_documents WHERE hub_id = ?1 AND account_id = ?2 AND kind = ?3 AND resource_id = ?4
+         LIMIT 1",
+        &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()],
+    ).await?;
     Ok(!rows.is_empty())
 }
 
@@ -126,7 +130,7 @@ pub(crate) async fn exported_rows_through(
     resource: &SyncResourceKey,
     through: i64,
 ) -> TalosResult<Vec<(i64, SyncVersion)>> {
-    let rows = tx.query("SELECT seq, exported_version_json FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? AND seq <= ? AND exported_version_json IS NOT NULL ORDER BY seq LIMIT 1024", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id(), &through.to_string()]).await?;
+    let rows = tx.query("SELECT seq, exported_version_json FROM visible_sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? AND seq <= ? AND exported_version_json IS NOT NULL ORDER BY seq LIMIT 1024", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id(), &through.to_string()]).await?;
     rows.iter()
         .map(|row| {
             Ok((
@@ -145,7 +149,7 @@ pub(crate) async fn outbox_through(
     through: i64,
     limit: usize,
 ) -> TalosResult<Vec<OutboxRecord>> {
-    let rows = tx.query("SELECT seq, changes_json, exported_version_json FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id(), &after.to_string(), &through.to_string(), &limit.to_string()]).await?;
+    let rows = tx.query("SELECT seq, changes_json, exported_version_json FROM visible_sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id(), &after.to_string(), &through.to_string(), &limit.to_string()]).await?;
     rows.iter()
         .map(|row| {
             Ok(OutboxRecord {
@@ -165,7 +169,7 @@ pub(crate) async fn outbox_tail(
     scope: &SyncScope,
     resource: &SyncResourceKey,
 ) -> TalosResult<Option<i64>> {
-    let rows = tx.query("SELECT MAX(seq) AS tail FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
+    let rows = tx.query("SELECT MAX(seq) AS tail FROM visible_sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
     Ok(rows.first().and_then(|row| row.get_i64("tail")))
 }
 
@@ -189,29 +193,55 @@ pub(crate) async fn document_version(
     rows.first().map(version).transpose()
 }
 
+pub(crate) async fn resource_summary(
+    tx: &mut dyn StorageTransaction,
+    scope: &SyncScope,
+    resource: &SyncResourceKey,
+) -> TalosResult<Option<SyncResourceSummary>> {
+    let rows = tx.query(
+        "SELECT computer_id, deleted, hex(version_vector) AS vector, generation FROM sync_documents WHERE hub_id=? AND account_id=? AND kind=? AND resource_id=?",
+        &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()],
+    ).await?;
+    rows.first()
+        .map(|row| {
+            Ok(SyncResourceSummary {
+                resource: resource.clone(),
+                computer_id: row.get_string("computer_id").filter(|id| !id.is_empty()),
+                version: version(row)?,
+                deleted: row.get_i64("deleted") == Some(1),
+            })
+        })
+        .transpose()
+}
+
 pub(crate) async fn document(
     tx: &mut dyn StorageTransaction,
     scope: &SyncScope,
     resource: &SyncResourceKey,
 ) -> TalosResult<Option<DocumentRecord>> {
-    let rows = tx.query("SELECT hex(snapshot_blob) AS snapshot, hex(version_vector) AS vector, generation, hex(acknowledged_vector) AS acknowledged, acknowledged_generation FROM sync_documents WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
-    rows.first()
-        .map(|row| {
-            Ok(DocumentRecord {
-                snapshot: unhex(&text(row, "snapshot")?)?,
-                version: version(row)?,
-                acknowledged: acknowledged_version(row)?,
-            })
-        })
-        .transpose()
+    let rows = tx.query("SELECT snapshot_id, hex(snapshot_blob) AS snapshot, hex(version_vector) AS vector, generation, hex(acknowledged_vector) AS acknowledged, acknowledged_generation, session_projection_json IS NOT NULL AS has_session_projection FROM sync_documents WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
+    let Some(row) = rows.first() else {
+        return Ok(None);
+    };
+    let snapshot = match row.get_string("snapshot_id") {
+        Some(id) => snapshot::read(tx, &id).await?,
+        None => unhex(&text(row, "snapshot")?)?,
+    };
+    Ok(Some(DocumentRecord {
+        snapshot,
+        version: version(row)?,
+        acknowledged: acknowledged_version(row)?,
+        has_session_projection: row.get_i64("has_session_projection") == Some(1),
+    }))
 }
 
 pub(crate) async fn save_document(
     tx: &mut dyn StorageTransaction,
     scope: &SyncScope,
     summary: &talos_sync_types::SyncResourceSummary,
-    snapshot: &[u8],
+    snapshot: &snapshot::Snapshot,
     acknowledged: &SyncVersion,
+    session_projection: Option<&str>,
 ) -> TalosResult<()> {
     let generation = i64::try_from(summary.version.history_generation).map_err(|_| {
         TalosError::new(
@@ -219,9 +249,22 @@ pub(crate) async fn save_document(
             "History generation exceeds the persistence limit.",
         )
     })?;
+    snapshot.publish(tx, scope, &summary.resource).await?;
     // Talos's bundled SQLite 3.44 accepts bound hexadecimal bytes through
     // unhex(); the legacy transaction interface otherwise binds text only.
-    let sql = "INSERT INTO sync_documents(hub_id, account_id, kind, resource_id, computer_id, generation, deleted, snapshot_blob, version_vector, acknowledged_vector, acknowledged_generation) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, unhex(?), unhex(?), unhex(?), ?) ON CONFLICT(hub_id, account_id, kind, resource_id) DO UPDATE SET computer_id = excluded.computer_id, generation = excluded.generation, deleted = excluded.deleted, snapshot_blob = excluded.snapshot_blob, version_vector = excluded.version_vector, acknowledged_vector = excluded.acknowledged_vector, acknowledged_generation = excluded.acknowledged_generation";
+    let sql = "
+        INSERT INTO sync_documents(
+            hub_id, account_id, kind, resource_id, computer_id, generation, deleted,
+            snapshot_blob, snapshot_id, version_vector, acknowledged_vector,
+            acknowledged_generation, session_projection_json
+        ) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, unhex(?), NULLIF(?, ''), unhex(?), unhex(?), ?, NULLIF(?, ''))
+        ON CONFLICT(hub_id, account_id, kind, resource_id) DO UPDATE SET
+            computer_id = excluded.computer_id, generation = excluded.generation,
+            deleted = excluded.deleted, snapshot_blob = excluded.snapshot_blob,
+            snapshot_id = excluded.snapshot_id, version_vector = excluded.version_vector,
+            acknowledged_vector = excluded.acknowledged_vector,
+            acknowledged_generation = excluded.acknowledged_generation,
+            session_projection_json = COALESCE(excluded.session_projection_json, sync_documents.session_projection_json)";
     let acknowledged_generation =
         i64::try_from(acknowledged.history_generation).map_err(|_| corrupt_record())?;
     tx.execute(
@@ -234,10 +277,12 @@ pub(crate) async fn save_document(
             summary.computer_id.as_deref().unwrap_or_default(),
             &generation.to_string(),
             if summary.deleted { "1" } else { "0" },
-            &hex(snapshot),
+            snapshot.inline_hex(),
+            snapshot.id(),
             &hex(&summary.version.version_vector),
             &hex(&acknowledged.version_vector),
             &acknowledged_generation.to_string(),
+            session_projection.unwrap_or_default(),
         ],
     )
     .await?;
@@ -250,7 +295,7 @@ pub(crate) async fn acknowledgement(
 ) -> TalosResult<Option<AcknowledgementRecord>> {
     // A missing outbox row is an already committed ACK. A missing document for
     // an existing row is corrupt state, so keep the LEFT JOIN and validate it.
-    let rows = tx.query("SELECT o.exported_version_json, hex(d.version_vector) AS vector, d.generation, hex(d.acknowledged_vector) AS acknowledged, d.acknowledged_generation FROM sync_outbox o LEFT JOIN sync_documents d ON d.hub_id = o.hub_id AND d.account_id = o.account_id AND d.kind = o.kind AND d.resource_id = o.resource_id WHERE o.seq = ? AND o.hub_id = ? AND o.account_id = ? AND o.kind = ? AND o.resource_id = ?", &[&batch.through_sequence.to_string(), &batch.scope.hub_id, &batch.scope.account_id, batch.resource.kind().as_str(), batch.resource.id()]).await?;
+    let rows = tx.query("SELECT o.exported_version_json, hex(d.version_vector) AS vector, d.generation, hex(d.acknowledged_vector) AS acknowledged, d.acknowledged_generation FROM visible_sync_outbox o LEFT JOIN sync_documents d ON d.hub_id = o.hub_id AND d.account_id = o.account_id AND d.kind = o.kind AND d.resource_id = o.resource_id WHERE o.seq = ? AND o.hub_id = ? AND o.account_id = ? AND o.kind = ? AND o.resource_id = ?", &[&batch.through_sequence.to_string(), &batch.scope.hub_id, &batch.scope.account_id, batch.resource.kind().as_str(), batch.resource.id()]).await?;
     rows.first()
         .map(|row| {
             Ok(AcknowledgementRecord {
@@ -312,7 +357,7 @@ fn corrupt_record() -> TalosError {
     TalosError::internal("Read synchronization state; technical details were withheld.")
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8] = b"0123456789ABCDEF";
     let mut result = String::with_capacity(bytes.len() * 2);
     for byte in bytes {

@@ -9,9 +9,7 @@ async fn seeded_service() -> (AgentNodeService, ManagedWorkerRecord) {
         .await
         .unwrap();
     crate::test_support::run_test_migrations(storage.pool()).await;
-    let service = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(
-        storage.pool().clone(),
-    )));
+    let service = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(&storage)));
     let record = ManagedWorkerRecord {
         instance_id: "instance".into(),
         owner_user_id: "owner".into(),

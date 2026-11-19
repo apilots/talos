@@ -213,14 +213,14 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             .expect("inner model client"),
     );
     let nodes = talos_service::AgentNodeService::new(Arc::new(
-        talos_store::node::DatabaseAgentNodeStore::new(storage.pool().clone()),
+        talos_store::node::DatabaseAgentNodeStore::new(&storage),
     ));
     let project_store = Arc::new(
         StorageProjectStore::new(storage.clone())
             .await
             .expect("project store"),
     );
-    let file_store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
+    let file_store = Arc::new(DatabaseFileStore::new(&storage));
     let file_operator = Operator::new(Memory::default())
         .expect("memory file operator")
         .finish();
@@ -236,9 +236,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     let coordinator = Arc::new(CoordinatorImpl::new(
         Arc::new(talos_router::RouterImpl::new()),
         sessions.clone(),
-        Arc::new(talos_store::node::DatabaseAgentNodeStore::new(
-            storage.pool().clone(),
-        )),
+        Arc::new(talos_store::node::DatabaseAgentNodeStore::new(&storage)),
     ));
     let runtime_home = tempfile::tempdir().unwrap();
     let mut worker_config = config.clone();

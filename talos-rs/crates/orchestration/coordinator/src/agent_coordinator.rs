@@ -409,7 +409,7 @@ mod affinity_tests {
         )
         .await
         .unwrap();
-        let node_store = Arc::new(DatabaseAgentNodeStore::new(storage.pool().clone()));
+        let node_store = Arc::new(DatabaseAgentNodeStore::new(&storage));
         let now = chrono::Utc::now().timestamp();
         node_store
             .upsert_embedded(NodeStatus::Enabled, now)
