@@ -188,7 +188,7 @@ walk(root)
         worker = base.config(fixture, base.free_port(), self.mock.server_port)
         worker['cloud'].update(api_base_url=f'http://host.docker.internal:{self.mock.server_port}',
             agent_base_url=f'https://host.docker.internal:{self.rpc}', agent_trusted_ca_file='/home/talos/.talos/conf/tls.crt')
-        worker['llm']['openai']['base_url'] = f'http://host.docker.internal:{self.mock.server_port}/v1'
+        worker['llm']['custom_providers'][base.MODEL_PROVIDER]['base_url'] = f'http://host.docker.internal:{self.mock.server_port}/v1'
         worker['agent']['kernel']['tools']['bash']['output_log']['cleanup_interval_secs'] = 1
         worker['agent_node'] = {'runner': {'node_id': self.node, 'control_plane_endpoint': f'https://host.docker.internal:{self.rpc}',
             'credential_file': '/home/talos/.talos/conf/node.credential', 'trusted_ca_file': '/home/talos/.talos/conf/tls.crt', 'transport': 'outbound'}}
@@ -225,7 +225,7 @@ walk(root)
     def turn(self, tool, args, session=None, wait=True, allow_error=False):
         session = session or 'sess_output_logs_' + uuid.uuid4().hex
         ack = base.data(base.http(self.url + '/v1/turns/start', {'sessionId': session, 'nodeId': self.node,
-            'userPermissionMode': 'fullAccess', 'modelSelection': {'modelRef': {'provider': 'openai', 'id': base.MODEL['id']}, 'reasoningEffort': None},
+            'userPermissionMode': 'fullAccess', 'modelSelection': {'modelRef': {'provider': base.MODEL_PROVIDER, 'id': base.MODEL['id']}, 'reasoningEffort': None},
             'input': {'content': [{'type': 'text', 'text': 'OUTPUT_LOG_TASK=' + json.dumps({'tool': tool, 'args': args})}]}}))
         if not wait:
             return session, ack

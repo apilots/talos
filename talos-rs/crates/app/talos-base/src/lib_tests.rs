@@ -10,8 +10,7 @@ use std::sync::{
     Arc,
 };
 use talos_config::{
-    AgentDefinitionConfig, AgentProviderConfig, Config, LlmProtocol, ProviderModelConfig,
-    TalosPaths,
+    AgentDefinitionConfig, AgentProviderConfig, Config, ProviderModelConfig, TalosPaths,
 };
 use talos_coordinator::AgentCoordinator;
 use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
@@ -368,7 +367,7 @@ async fn openrouter_provider_uses_chat_completions_path_and_concrete_provider() 
 }
 
 #[tokio::test]
-async fn openai_provider_uses_responses_path_when_protocol_selected() {
+async fn openai_provider_uses_responses_without_protocol_configuration() {
     let body = r#"{"id":"resp_1","model":"gpt-test","status":"completed","output_text":"ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
     let (base_url, path_rx) = spawn_json_server(body).await;
 
@@ -377,7 +376,6 @@ async fn openai_provider_uses_responses_path_when_protocol_selected() {
     config.llm.model = "gpt-test".to_string();
     config.llm.openai.api_key = Some("test-key".to_string());
     config.llm.openai.base_url = Some(base_url);
-    config.llm.openai.protocol = Some(LlmProtocol::Responses);
     config.llm.openai.models = vec![provider_model("gpt-test")];
 
     let provider = create_llm_provider(&config).expect("provider should be created");

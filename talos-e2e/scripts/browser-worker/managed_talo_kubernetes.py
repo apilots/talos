@@ -12,7 +12,7 @@ import time
 
 import yaml
 
-from fixture import ACCOUNTS, REPORT, ROOT, TOKEN, configure, data, free_port, http, http_response, wait
+from fixture import MODEL_PROVIDER, ACCOUNTS, REPORT, ROOT, TOKEN, configure, data, free_port, http, http_response, wait
 from managed_talo import FIXTURE_PROGRAM, LABEL, RECOVERY, SERVER_IMAGE, WORKER_IMAGE, exercise
 from managed_talo_personal import create_computer, remove_computer, verify_personal_capabilities, wait_available
 
@@ -199,7 +199,7 @@ class Fixture:
         config = self.files / "talos.yaml"
         config.write_text(yaml.safe_dump(profile, sort_keys=False))
         self.worker_model = profile["llm"]
-        self.worker_model["openai"]["base_url"] = f"http://{HOST}:18080/v1"
+        self.worker_model["custom_providers"][MODEL_PROVIDER]["base_url"] = f"http://{HOST}:18080/v1"
         self.create("configmap", SERVICE + "-bootstrap", f"--from-file={config}")
         self.create("secret", "generic", SERVICE + "-tls", "--type=kubernetes.io/tls",
                     f"--from-file=tls.crt={cert}", f"--from-file=tls.key={key}", f"--from-file=ca.crt={cert}")

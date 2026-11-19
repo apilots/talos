@@ -49,7 +49,7 @@ llm = config["llm"]
 llm.update(provider="openai", model=model_id)
 llm["openai"].update(
     base_url=os.environ["MOCK_BASE_URL"],
-    protocol="chat",
+    protocol="responses",
     models=[{
         "id": model_id,
         "context_window": 400_000,
@@ -77,18 +77,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"ok")
 
     def do_POST(self):
-        if self.path != "/v1/chat/completions":
-            self.send_error(404, "Expected Chat Completions")
+        if self.path != "/v1/responses":
+            self.send_error(404, "Expected Responses")
             return
         length = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(length))
         with open(request_log, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, separators=(",", ":")) + "\n")
         body = (
-            'data: {"choices":[{"index":0,"delta":{"content":"FILES_E2E_OK"}}]}\n\n'
-            'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],'
-            '"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}\n\n'
-            'data: [DONE]\n\n'
+            'data: {"type":"response.output_text.delta","output_index":0,"delta":"FILES_E2E_OK"}\n\n'
+            'data: {"type":"response.completed","response":{"status":"completed","output":[],'
+            '"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}\n\n'
         ).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -214,14 +213,14 @@ requests = [
 ]
 matched = False
 for request in requests:
-    for message in request.get("messages", []):
+    for message in request.get("input", []):
         content = message.get("content")
         if message.get("role") != "user" or not isinstance(content, list):
             continue
         types = [block.get("type") for block in content]
-        if types != ["text", "image_url"]:
+        if types != ["input_text", "input_image"]:
             continue
-        image_url = content[1].get("image_url", {}).get("url")
+        image_url = content[1].get("image_url")
         prefix = "data:image/png;base64,"
         if (
             isinstance(image_url, str)

@@ -32,6 +32,7 @@ USER = {'user_id': 'browser-alice', 'email': 'alice@example.test', 'username': '
         'set_password_required': False, 'disabled': False, 'created_at_ms': 1, 'updated_at_ms': 1}
 ACCOUNTS = {TOKEN: USER, 'browser-contract-bob': {
     **USER, 'user_id': 'browser-bob', 'username': 'bob', 'email': 'bob@example.test'}}
+MODEL_PROVIDER = 'browser-fixture'
 MODEL = {'id': 'browser-fixture', 'name': 'Browser fixture', 'context_window': 131072,
          'reasoning': False, 'reasoning_effort': 'medium', 'speed': 'standard', 'input': ['text', 'image'],
          'cost': {'input': 0.0, 'output': 0.0, 'cache_read': 0.0, 'cache_write': 0.0}}
@@ -272,12 +273,15 @@ def configure(document, home, http_port, mock_port):
     document = copy.deepcopy(document)
     document['gateway'].update(port=http_port, host='127.0.0.1', auth=True)
     document['cloud'].update(api_base_url=f'http://127.0.0.1:{mock_port}', web_base_url=f'http://127.0.0.1:{mock_port}')
-    document['llm'].update(provider='openai', model='browser-fixture')
+    document['llm'].update(provider=MODEL_PROVIDER, model=MODEL['id'])
     for key, provider in document['llm'].items():
         if isinstance(provider, dict) and 'models' in provider:
             provider.update(models=[], api_key=None)
-    document['llm']['openai'].update(models=[MODEL], api_key='fixture', base_url=f'http://127.0.0.1:{mock_port}/v1', protocol='chat')
-    document['agent']['inner_model'] = {'provider': 'openai', 'id': 'browser-fixture'}
+    document['llm']['custom_providers'] = {MODEL_PROVIDER: {
+        'name': 'Browser fixture', 'models': [MODEL], 'api_key': 'fixture',
+        'base_url': f'http://127.0.0.1:{mock_port}/v1', 'protocol': 'chat',
+    }}
+    document['agent']['inner_model'] = {'provider': MODEL_PROVIDER, 'id': MODEL['id']}
     document['agent']['kernel']['plugins'].update(sources=[], roots=[])
     document['sync']['enabled'] = False
     home.mkdir(parents=True, exist_ok=True)
@@ -288,7 +292,7 @@ def browser_task(url,node,attachment,label,verify_cookie=False):
     calls.clear()
     session = 'sess_browser_' + uuid.uuid4().hex
     ack = data(http(url + '/v1/turns/start', {'sessionId': session, 'nodeId': node, 'userPermissionMode': 'fullAccess',
-        'modelSelection': {'modelRef': {'provider': 'openai', 'id': 'browser-fixture'}, 'reasoningEffort': None},
+        'modelSelection': {'modelRef': {'provider': MODEL_PROVIDER, 'id': MODEL['id']}, 'reasoningEffort': None},
         'input': {'content': [{'type': 'text', 'text': 'BROWSER_WORKER_ACCEPTANCE BROWSER_KEEP_HOME '+('BROWSER_VERIFY_COOKIE ' if verify_cookie else '')+'BROWSER_UPLOAD_FILE_ID='+attachment},{'type':'file','fileId':attachment}]}}))
     req = urllib.request.Request(url + f'/v1/sessions/{session}/events?limit=10000&turn_id=' + ack['turnId'], headers={'Authorization': 'Bearer ' + TOKEN})
     events = []
@@ -417,7 +421,7 @@ def run(plugin_packages_only=False):
         worker = config(RUN / 'worker-fixture', http_port, mock.server_port)
         worker['cloud'].update(api_base_url=f'http://host.docker.internal:{mock.server_port}',
             agent_base_url=f'https://host.docker.internal:{rpc_port}', agent_trusted_ca_file='/home/talos/.talos/conf/tls.crt')
-        worker['llm']['openai']['base_url'] = f'http://host.docker.internal:{mock.server_port}/v1'
+        worker['llm']['custom_providers'][MODEL_PROVIDER]['base_url'] = f'http://host.docker.internal:{mock.server_port}/v1'
         worker['agent_node'] = {'runner': {'node_id': node, 'control_plane_endpoint': f'https://host.docker.internal:{rpc_port}',
             'credential_file': '/home/talos/.talos/conf/node.credential', 'trusted_ca_file': '/home/talos/.talos/conf/tls.crt', 'transport': 'outbound'}}
         fixture = RUN / 'worker-fixture'

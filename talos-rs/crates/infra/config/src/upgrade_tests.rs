@@ -111,11 +111,9 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
             Some("responses"),
             "{profile}"
         );
-        // A saved OpenAI catalog and selection can predate the shipped GPT-6 entries.
-        saved["llm"]["openai"]["models"]
-            .as_sequence_mut()
-            .unwrap()
-            .retain(|model| !model["id"].as_str().unwrap().starts_with("gpt-6"));
+        // The saved model catalog can differ from the shipped catalog.
+        saved["llm"]["openai"]["models"] =
+            serde_yaml::from_str("[{id: gpt-5.4-mini, context_window: 400000}]").unwrap();
         // Managed upgrades preserve the operator's previously saved Bailian catalog.
         saved["llm"]["bailian"]["models"]
             .as_sequence_mut()
@@ -178,12 +176,14 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
         }
         // A newly introduced nullable setting triggers normalization of a saved home.
         remove_path_for_test(&mut saved, &["sync", "trusted_ca_file"]);
-        let expected: Config = serde_yaml::from_value(saved.clone()).unwrap();
+        let mut expected: Config = serde_yaml::from_value(saved.clone()).unwrap();
+        expected.llm.openai.protocol = Some(crate::LlmProtocol::Responses);
         expected.validate_runtime().unwrap();
         write_existing(&paths, &saved);
 
         let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
         assert!(report.changed, "{profile}");
+        assert_eq!(report.defaulted_paths, ["llm.openai.protocol"], "{profile}");
         assert!(
             report
                 .removed_paths
