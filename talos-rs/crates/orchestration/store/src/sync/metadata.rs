@@ -3,8 +3,9 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::StorageTransaction;
 use talos_sync::{
     SessionExecutionBinding, SyncImportBatch, SyncResourceKey, SyncResourceSnapshot,
-    SyncSessionSnapshot,
+    SyncSessionSnapshot, TalosSync,
 };
+use talos_sync_types::ResourceKind;
 use talos_types::{
     NodeHealth, NodeInfo, NodeMode, NodeStatus, ProjectInfo, ProjectStatus, ProjectStatusState,
     ProjectUnavailableReason,
@@ -51,7 +52,9 @@ pub(super) async fn read_source(
         && row.get_string("execution_node_id").as_deref() == Some("embedded");
     let mut fields = super::source::SourceFields::from(row);
     if embedded_project {
-        if !capture_local_resource(adapter, tx, "project", id).await? {
+        if !TalosSync::captures_embedded_resource(tx, &adapter.binding, ResourceKind::Project, id)
+            .await?
+        {
             return Ok(None);
         }
         // Freeze this registered association before the local alias can change.
@@ -365,39 +368,19 @@ pub(super) async fn session_row(
         return Ok(None);
     };
     if text(&row, "execution_node_id")? == "embedded"
-        && !capture_local_resource(adapter, tx, "session", session_id).await?
+        && !TalosSync::captures_embedded_resource(
+            tx,
+            &adapter.binding,
+            ResourceKind::Session,
+            session_id,
+        )
+        .await?
     {
         return Ok(None);
     }
     Ok(Some(row))
 }
 
-pub(super) async fn capture_local_resource(
-    adapter: &StoreSyncAdapter,
-    tx: &mut dyn StorageTransaction,
-    kind: &str,
-    id: &str,
-) -> TalosResult<bool> {
-    let Some(alias) = adapter
-        .binding
-        .computers
-        .iter()
-        .find(|alias| alias.source_node_id == "embedded")
-    else {
-        return Ok(false);
-    };
-    if tx
-        .query(
-            "SELECT 1 FROM local_computer_retirements WHERE node_id = ? AND owner_user_id = ?",
-            &[&alias.computer_id, &adapter.binding.scope.account_id],
-        )
-        .await?
-        .is_empty()
-    {
-        return Ok(true);
-    }
-    Ok(!tx.query("SELECT 1 FROM local_computer_retirement_resources WHERE node_id = ? AND kind = ? AND resource_id = ?", &[&alias.computer_id, kind, id]).await?.is_empty())
-}
 pub(super) fn number(row: &talos_storage::Row, key: &str) -> TalosResult<i64> {
     row.get_i64(key)
         .ok_or_else(|| TalosError::internal("Missing persisted synchronization field."))

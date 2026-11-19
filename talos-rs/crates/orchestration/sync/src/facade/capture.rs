@@ -1,5 +1,6 @@
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::StorageTransaction;
+use talos_sync_types::ResourceKind;
 
 use super::{sync_error, TalosSync};
 use crate::{
@@ -8,14 +9,90 @@ use crate::{
         self,
         staged_write::{Kind, StagedWrite},
     },
-    PreparedSyncCapture, SyncCaptureParams, SyncEventMapping,
+    PreparedSyncCapture, SyncBinding, SyncCaptureParams, SyncEventMapping,
 };
 
 const MAX_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const WRITE_BATCH_BYTES: usize = 256 * 1024;
 const WRITE_BATCH_ROWS: usize = 128;
 
+const EMBEDDED_CAPTURE_ELIGIBLE: &str = "
+    scope.embedded_computer <> '' AND (
+        NOT EXISTS (
+            SELECT 1 FROM local_computer_retirements
+            WHERE node_id = scope.embedded_computer AND owner_user_id = scope.account_id
+        ) OR EXISTS (
+            SELECT 1 FROM local_computer_retirement_resources
+            WHERE node_id = scope.embedded_computer
+              AND kind = resource.kind AND resource_id = resource.resource_id
+        )
+    )";
+
+fn embedded_computer(binding: &SyncBinding) -> &str {
+    binding
+        .computers
+        .iter()
+        .find(|alias| alias.source_node_id == "embedded")
+        .map_or("", |alias| alias.computer_id.as_str())
+}
+
 impl TalosSync {
+    /// Check the binding's existing capture eligibility for an embedded resource.
+    pub async fn captures_embedded_resource(
+        tx: &mut dyn StorageTransaction,
+        binding: &SyncBinding,
+        kind: ResourceKind,
+        id: &str,
+    ) -> TalosResult<bool> {
+        let computer = embedded_computer(binding);
+        if computer.is_empty() {
+            return Ok(false);
+        }
+        let rows = tx
+            .query(
+                &format!(
+                    "WITH scope(account_id, embedded_computer) AS (VALUES (?, ?)),
+                          resource(kind, resource_id) AS (VALUES (?, ?))
+                     SELECT 1 FROM scope CROSS JOIN resource WHERE {EMBEDDED_CAPTURE_ELIGIBLE}"
+                ),
+                &[&binding.scope.account_id, computer, kind.as_str(), id],
+            )
+            .await?;
+        Ok(!rows.is_empty())
+    }
+
+    /// Count eligible uncollected revisions and published outbox entries in one read.
+    pub async fn pending_changes(&self, binding: &SyncBinding) -> TalosResult<u64> {
+        let rows = self.storage.query(
+            &format!(
+                "WITH scope(hub_id, account_id, source_user_id, embedded_computer) AS (VALUES (?, ?, ?, ?))
+                 SELECT
+                    (SELECT COUNT(*) FROM visible_sync_outbox o
+                     WHERE o.hub_id = scope.hub_id AND o.account_id = scope.account_id)
+                  + (SELECT COUNT(*) FROM resource_revisions resource
+                     WHERE resource.owner_user_id IN (scope.account_id, scope.source_user_id)
+                       AND NOT EXISTS (
+                           SELECT 1 FROM sync_resource_capture c
+                           WHERE c.hub_id = scope.hub_id AND c.account_id = scope.account_id
+                             AND c.kind = resource.kind AND c.resource_id = resource.resource_id
+                             AND c.revision >= resource.revision
+                       )
+                       AND (resource.execution_node_id <> 'embedded' OR ({EMBEDDED_CAPTURE_ELIGIBLE})))
+                  AS count FROM scope"
+            ),
+            &[
+                &binding.scope.hub_id,
+                &binding.scope.account_id,
+                &binding.source_user_id,
+                embedded_computer(binding),
+            ],
+        ).await?;
+        rows.first()
+            .and_then(|row| row.get_i64("count"))
+            .and_then(|value| u64::try_from(value).ok())
+            .ok_or_else(|| TalosError::internal("Invalid synchronization pending count."))
+    }
+
     /// Project and encode source facts without acquiring a database writer.
     pub fn prepare_capture(params: SyncCaptureParams) -> TalosResult<PreparedSyncCapture> {
         let resource = projection::resource(&params.binding, &params.resource);

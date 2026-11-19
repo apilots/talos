@@ -159,8 +159,13 @@ impl StoreSyncAdapter {
         row: &Row,
     ) -> TalosResult<bool> {
         Ok(metadata::text(row, "execution_node_id")? != "embedded"
-            || metadata::capture_local_resource(self, tx, resource.kind().as_str(), resource.id())
-                .await?)
+            || TalosSync::captures_embedded_resource(
+                tx,
+                &self.binding,
+                resource.kind(),
+                resource.id(),
+            )
+            .await?)
     }
 
     pub(super) async fn collect_revision(&self, resource: &SyncResourceKey) -> TalosResult<bool> {

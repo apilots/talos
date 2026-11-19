@@ -103,6 +103,15 @@ async fn outbox_failure_preserves_committed_session_and_replays_after_reopening(
     .await
     .unwrap();
     assert_eq!(watermark, 0);
+    assert!(
+        source
+            .sync
+            .pending_changes(source.adapter.binding())
+            .await
+            .unwrap()
+            > 0,
+        "a failed capture still leaves pending work"
+    );
 
     let storage = Arc::new(
         SqliteStorage::new(source._home.path().join("facts.db").to_str().unwrap())
@@ -186,9 +195,12 @@ async fn outbox_failure_preserves_committed_session_and_replays_after_reopening(
         .await
         .unwrap();
     assert_eq!(mapped, 4);
-    assert!(sync
+    let project = sync
         .export_pending(adapter.binding(), project_resource, 128)
         .await
         .unwrap()
-        .is_some());
+        .unwrap();
+    assert!(sync.pending_changes(adapter.binding()).await.unwrap() > 0);
+    sync.acknowledge(&project).await.unwrap();
+    assert_eq!(sync.pending_changes(adapter.binding()).await.unwrap(), 0);
 }

@@ -226,18 +226,7 @@ async fn session<A: SyncDataAdapter>(
             }
         }
         *phase = ConnectionPhase::LocalStatus;
-        let rows = sync
-            .storage
-            .query(
-                "SELECT COUNT(*) AS count FROM visible_sync_outbox WHERE hub_id = ? AND account_id = ?",
-                &[&binding.scope.hub_id, &binding.scope.account_id],
-            )
-            .await?;
-        let pending = rows
-            .first()
-            .and_then(|row| row.get_i64("count"))
-            .and_then(|value| u64::try_from(value).ok())
-            .ok_or_else(|| TalosError::internal("Invalid synchronization pending count."))?;
+        let pending = sync.pending_changes(binding).await?;
         channels.status.send_modify(|value| {
             value.pending_changes = pending;
             value.last_error = channels

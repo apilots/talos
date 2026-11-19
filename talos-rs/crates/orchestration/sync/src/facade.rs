@@ -302,21 +302,6 @@ impl TalosSync {
         Ok(binding)
     }
 
-    /// Read durable pending work even while the transport is explicitly disabled.
-    pub async fn pending_changes(&self, binding: &SyncBinding) -> TalosResult<u64> {
-        let rows = self
-            .storage
-            .query(
-                "SELECT COUNT(*) AS count FROM visible_sync_outbox WHERE hub_id = ? AND account_id = ?",
-                &[&binding.scope.hub_id, &binding.scope.account_id],
-            )
-            .await?;
-        Ok(rows
-            .first()
-            .and_then(|row| row.get_i64("count"))
-            .unwrap_or(0) as u64)
-    }
-
     /// Persist this host's verified account choice before or after hub discovery.
     /// The caller owns authentication. Disabling retains bindings and captured facts.
     pub async fn set_enabled(&self, account_id: &str, enabled: bool) -> TalosResult<()> {
