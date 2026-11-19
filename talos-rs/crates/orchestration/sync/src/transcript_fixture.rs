@@ -7,6 +7,13 @@ pub(super) fn session_and_events(
     computer_id: &str,
 ) -> (SyncSessionSnapshot, Vec<TimelineEventPayload>) {
     let identity = AgentTurnRef::new("session-1", "turn-1");
+    let usage = TokenUsage {
+        input_tokens: 20,
+        output_tokens: 8,
+        total_tokens: 28,
+        reasoning_tokens: Some(3),
+        ..TokenUsage::default()
+    };
     let session = SyncSessionSnapshot {
         session: SessionInfo {
             node_id: computer_id.into(),
@@ -24,7 +31,10 @@ pub(super) fn session_and_events(
             created_at: 1,
             last_activity: 101,
             message_count: 1,
-            usage: SessionUsage::default(),
+            usage: SessionUsage {
+                tokens: usage.clone(),
+                ..SessionUsage::default()
+            },
             project_id: None,
             current_directory: Some("/worker/work".into()),
         },
@@ -164,6 +174,10 @@ pub(super) fn session_and_events(
             blocks,
             created_at: 100,
             completed_at: Some(101),
+        }),
+        AgentEventPayload::MetricsUpdated(AgentRunMetrics {
+            usage,
+            ..AgentRunMetrics::default()
         }),
         AgentEventPayload::TurnFailed(AgentTurnFailed {
             error: talos_error::ApiError::with_message(

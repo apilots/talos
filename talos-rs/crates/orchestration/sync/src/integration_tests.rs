@@ -418,6 +418,7 @@ async fn transcript_import_cursor_and_event_mapping_share_the_business_commit() 
     let source = fixture().await;
     let target = fixture().await;
     let (session, events) = transcript::session_and_events(COMPUTER);
+    let expected_usage = session.session.usage.tokens.clone();
     let resource = SyncResourceKey::Session {
         session_id: session.session.id.clone(),
     };
@@ -484,6 +485,19 @@ async fn transcript_import_cursor_and_event_mapping_share_the_business_commit() 
         )
         .await
         .unwrap();
+    let imported_session = imported.iter().find_map(|change| match change {
+        talos_sync_types::SyncChange::Metadata { after, .. } => {
+            match projection::transcode::<_, SyncResourceSnapshot>(after.as_ref()).unwrap() {
+                SyncResourceSnapshot::Session(session) => Some(session),
+                _ => None,
+            }
+        }
+        _ => None,
+    });
+    assert_eq!(
+        imported_session.unwrap().session.usage.tokens,
+        expected_usage
+    );
     for (index, expected) in events.iter().enumerate() {
         let entry = imported
             .iter()
