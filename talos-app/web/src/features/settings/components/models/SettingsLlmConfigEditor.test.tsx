@@ -107,7 +107,7 @@ describe("SettingsLlmConfigEditor", () => {
     expect(screen.queryByText(/Loading configuration|加载配置中/)).toBeNull();
   });
 
-  it("offers provider-specific protocols for DeepSeek and OpenRouter", async () => {
+  it("fixes OpenAI to Responses and offers provider-specific protocols elsewhere", async () => {
     const provider = (protocol?: "chat" | "responses" | "messages") => ({
       api_key: "",
       base_url: "https://example.com",
@@ -120,7 +120,7 @@ describe("SettingsLlmConfigEditor", () => {
         provider: "deepseek",
         model: "deepseek-v4-pro",
         anthropic: provider("messages"),
-        openai: provider("chat"),
+        openai: provider(),
         bailian: provider("chat"),
         deepseek: provider(),
         ollama: provider("chat"),
@@ -135,7 +135,7 @@ describe("SettingsLlmConfigEditor", () => {
       provider_keys: {},
       provider_capabilities: {
         anthropic: { default_protocol: "messages", protocols: ["messages"] },
-        openai: { default_protocol: "chat", protocols: ["chat", "responses"] },
+        openai: { default_protocol: "responses", protocols: ["responses"] },
         bailian: { default_protocol: "chat", protocols: ["chat"] },
         deepseek: { default_protocol: "messages", protocols: ["messages", "chat"] },
         ollama: { default_protocol: "chat", protocols: ["chat"] },
@@ -148,8 +148,12 @@ describe("SettingsLlmConfigEditor", () => {
 
     render(<SettingsLlmConfigEditor />, { wrapper: createWrapper() });
 
-    const deepseekTab = await screen.findByRole("button", { name: "DeepSeek" });
-    fireEvent.click(deepseekTab);
+    const openaiTab = await screen.findByRole("button", { name: "OpenAI" });
+    fireEvent.click(openaiTab);
+    expect(screen.getByText("Responses")).toBeVisible();
+    expect(screen.queryByRole("combobox", { name: "Protocol" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "DeepSeek" }));
     let protocolSelect = screen.getByDisplayValue("Messages");
     expect(within(protocolSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "Messages",

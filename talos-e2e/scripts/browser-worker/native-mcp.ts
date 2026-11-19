@@ -38,7 +38,7 @@ async function run(){console.log("NATIVE_MCP_START");await app.whenReady();conso
   async function task(mode:P.BrowserTargetKind,historyFile:string){
     const before=await idleSnapshot();assert.equal(before.selectedTargetId,mode);
     const sessionId=randomUUID();
-    await controller.invoke('turn/start',{nodeId:'embedded',sessionId,input:{content:[{type:'text',text:'Run the deterministic browser acceptance in '+mode+'. BROWSER_UPLOAD_FILE_ID='+upload.file.fileId},{type:'file',fileId:upload.file.fileId}]},modelSelection:{modelRef:{provider:'openai',id:'browser-fixture'},reasoningEffort:null},projectId:null,currentDirectory:null,userPermissionMode:'fullAccess',clientRequestId:randomUUID()});
+    await controller.invoke('turn/start',{nodeId:'embedded',sessionId,input:{content:[{type:'text',text:'Run the deterministic browser acceptance in '+mode+'. BROWSER_UPLOAD_FILE_ID='+upload.file.fileId},{type:'file',fileId:upload.file.fileId}]},modelSelection:{modelRef:{provider:'browser-fixture',id:'browser-fixture'},reasoningEffort:null},projectId:null,currentDirectory:null,userPermissionMode:'fullAccess',clientRequestId:randomUUID()});
     await controller.invoke('event/subscribe',{sessionId,turnId:null,sinceEventId:null,replayLimit:50,closeWhenIdle:false,closeOnTerminal:false});
     const deadline=Date.now()+90000;let history:P.SessionHistoryResponse|undefined;
     while(Date.now()<deadline){history=await controller.invoke<P.SessionHistoryResponse>('session/history',{sessionId,limit:100,cursor:null});if(JSON.stringify(history).includes('BROWSER_WORKER_ACCEPTANCE_OK'))break;await new Promise(resolve=>setTimeout(resolve,200));}

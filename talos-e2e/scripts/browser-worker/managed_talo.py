@@ -13,7 +13,7 @@ import uuid
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fixture import ACCOUNTS, REPORT, ROOT, TOKEN, configure, data, free_port, http, wait
+from fixture import MODEL_PROVIDER, ACCOUNTS, REPORT, ROOT, TOKEN, configure, data, free_port, http, wait
 from lifecycle import container_args
 from media import media
 from managed_talo_access import configure_accounts, exercise_access
@@ -137,7 +137,7 @@ def server_files(files, gateway, rpc_port, model_port, worker_image):
         "server": {"runtime": {"idle_timeout_seconds": 12}},
     }
     (files / "talos.yaml").write_text(yaml.safe_dump(profile, sort_keys=False))
-    profile["llm"]["openai"]["base_url"] = f"http://{gateway}:{model_port}/v1"
+    profile["llm"]["custom_providers"][MODEL_PROVIDER]["base_url"] = f"http://{gateway}:{model_port}/v1"
     return profile["llm"]
 
 
@@ -262,7 +262,7 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
     assert http(base + f"/v1/sessions/{session}")["error"]["code"] == "resourceNotFound"
     start_payload = {
         "sessionId": session,
-        "modelSelection": {"modelRef": {"provider": "openai", "id": "browser-fixture"}, "reasoningEffort": None},
+        "modelSelection": {"modelRef": {"provider": MODEL_PROVIDER, "id": "browser-fixture"}, "reasoningEffort": None},
         "input": {"content": [
             {"type": "skillSelection", "name": "goal", "path": ""},
             {"type": "text", "text": "pause the deployment until the tests pass"},
@@ -442,7 +442,7 @@ def recovery(base, faults, instance, node, ready, action, worker_model, session,
     assert ready["nodeId"] == node and ready["instanceId"] == instance
     assert observed.execute(replacement, "/bin/bash", "-ec", 'cat "$TALOS_HOME/e2e-retain"') == "t"
     llm = data(http(base + f"/v1/llm?nodeId={node}"))["config"]
-    assert llm["openai"]["base_url"] == worker_model["openai"]["base_url"]
+    assert llm["custom_providers"][MODEL_PROVIDER]["base_url"] == worker_model["custom_providers"][MODEL_PROVIDER]["base_url"]
     assert data(http(base + f"/v1/sessions/{session}"))["session"]["nodeId"] == node
     evidence.append({"case": "offline-reset", "newCompute": True, "sameHome": True,
                      "sameNode": True, "fileRetained": True, "providerRetained": True, "sessionRetained": True})

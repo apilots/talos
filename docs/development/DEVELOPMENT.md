@@ -227,34 +227,26 @@ Select reasoning replay per model using its configured wire contract. A private
 Chat endpoint requiring `reasoning_content` must opt in; do not change replay
 fields globally for unrelated providers.
 
-The shipped profiles select Responses for new official OpenAI connections.
-Configuration upgrades preserve saved protocols and model catalogs. The four
-default models are GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra, and GPT-6 Luna.
-The profiles use standard short-context rates and 30-minute cache-write rates.
+The built-in OpenAI provider uses Responses. In a hand-managed config, omit
+`llm.openai.protocol` or set it to `responses`. A custom provider can select
+the protocol supported by its endpoint.
 
-GPT-6.2 Astra, GPT-6.2 Sol, and GPT-6.1 Terra require Responses for tools.
-GPT-6 Luna and GPT-5.5 can use Chat Completions function tools with an explicit
-`reasoning_effort: none`. If an upgraded installation still uses Chat Completions
-for `https://api.openai.com/v1`, select Responses for OpenAI in model settings.
-For file-based configuration, set `llm.openai.protocol` to `responses` in
-`$TALOS_HOME/conf/talos.yaml` and restart Talos. Add the desired entries
-from the current profile to `llm.openai.models` to update an existing model
-catalog. Keep each third-party connection on its supported protocol.
+The four default OpenAI models are GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra,
+and GPT-6 Luna. The profiles use standard short-context rates and 30-minute
+cache-write rates.
 
 When reasoning is off, the official OpenAI connection sends `none` for
 `gpt-6-luna` and `gpt-6.1-terra`. GPT-6.2 Astra and Sol require reasoning.
 Talos omits the effort for these models when reasoning is set to off, so OpenAI
 uses the model's default. See the [OpenAI GPT-6.2 guide](https://developers.openai.com/api/docs/guides/latest-model).
 
-The built-in OpenAI connection uses `max_completion_tokens` for a Chat output
-limit on `https://api.openai.com`. Its Responses requests default to
-`store: false` and request encrypted reasoning for manual history replay.
+The built-in OpenAI connection sends
+`store: false` and requests encrypted reasoning for manual history replay.
 Responses function tools set `strict: false` so optional tool arguments keep
 their declared semantics. Responses JSON and SSE retain refusal text, report
 text-only output limits as `length`, and propagate failed responses as errors.
 Official Responses requires a terminal event and checks finalized tool arguments.
-Compatible endpoints retain their existing reasoning replay and stream handling.
-OpenAI Chat and Responses map reported cache reads and writes to the existing
+OpenAI Responses maps reported cache reads and writes to the existing
 usage counters in per-call and turn metrics. Output tokens include reasoning
 tokens reported by OpenAI. Talos does not expose a separate reasoning token
 counter.

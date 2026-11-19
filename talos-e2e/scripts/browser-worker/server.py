@@ -97,7 +97,7 @@ def browser_task(report):
     session = 'packaged-server-' + uuid.uuid4().hex
     ack = api('/v1/turns/start', {
         'sessionId': session, 'nodeId': 'embedded', 'userPermissionMode': 'fullAccess',
-        'modelSelection': {'modelRef': {'provider': 'openai', 'id': 'browser-fixture'}, 'reasoningEffort': None},
+        'modelSelection': {'modelRef': {'provider': fixture.MODEL_PROVIDER, 'id': 'browser-fixture'}, 'reasoningEffort': None},
         'input': {'content': [{'type': 'text', 'text': 'Verify the local browser page.'}]},
     })
     events = []
@@ -275,10 +275,10 @@ def run():
         subprocess.run(['talos', 'status'], env=env, check=True, capture_output=True, timeout=45)
         tui(env)
         llm = api('/v1/llm?nodeId=embedded')['config']
-        llm['openai']['models'][0]['name'] = 'Edited after shared TUI'
-        added = copy.deepcopy(llm['openai']['models'][0])
+        llm['custom_providers'][fixture.MODEL_PROVIDER]['models'][0]['name'] = 'Edited after shared TUI'
+        added = copy.deepcopy(llm['custom_providers'][fixture.MODEL_PROVIDER]['models'][0])
         added.update(id='shared-home-model', name='Added after shared TUI')
-        llm['openai']['models'].append(added)
+        llm['custom_providers'][fixture.MODEL_PROVIDER]['models'].append(added)
         # The HTTP API accepts the LlmConfig itself; Computer targeting is a query parameter.
         api('/v1/llm?nodeId=embedded', llm, method='PUT')
         process.terminate()

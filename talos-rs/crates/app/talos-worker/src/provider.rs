@@ -6,7 +6,7 @@ use talos_llm_anthropic::AnthropicProvider;
 use talos_llm_bailian::BailianProvider;
 use talos_llm_deepseek::{DeepSeekConfig, DeepSeekProtocol, DeepSeekProvider};
 use talos_llm_ollama::{OllamaConfig, OllamaProvider};
-use talos_llm_openai::{OpenAIProtocol, OpenAIProvider};
+use talos_llm_openai::OpenAIProvider;
 use talos_llm_openrouter::{OpenRouterConfig, OpenRouterProtocol, OpenRouterProvider};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider};
 use tracing::warn;
@@ -89,8 +89,7 @@ fn create_adapter(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
             })?;
             let mut openai_config = talos_llm_openai::OpenAIConfig::new(&api_key)
                 .with_http_timeouts(config.llm.openai.http_timeouts.clone())
-                .with_default_model(&config.llm.model)
-                .with_protocol(openai_protocol("openai", &config.llm.openai)?);
+                .with_default_model(&config.llm.model);
             if let Some(base_url) = config.llm.openai.base_url.as_deref() {
                 openai_config = openai_config.with_base_url(base_url);
             }
@@ -171,25 +170,6 @@ fn create_adapter(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
         _ => Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("unsupported provider '{}'", config.llm.provider),
-        )),
-    }
-}
-
-fn openai_protocol(
-    provider: &str,
-    provider_config: &ProviderConfig,
-) -> TalosResult<OpenAIProtocol> {
-    match effective_llm_protocol(provider, provider_config).ok_or_else(|| {
-        TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            format!("llm.{provider}.protocol is required"),
-        )
-    })? {
-        LlmProtocol::Chat => Ok(OpenAIProtocol::Chat),
-        LlmProtocol::Responses => Ok(OpenAIProtocol::Responses),
-        protocol => Err(TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            format!("llm.{provider}.protocol does not support {protocol}"),
         )),
     }
 }
