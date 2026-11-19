@@ -580,6 +580,8 @@ pub struct SessionHistoryCompaction {
     pub compaction_cache_creation_input_tokens: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compaction_cache_read_input_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_reasoning_tokens: Option<u32>,
 }
 
 impl PromptWindowUsage {

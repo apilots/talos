@@ -450,6 +450,7 @@ async fn test_clear_command_resets_local_chat_and_session_usage() {
     app.session_usage = TokenUsage {
         input_tokens: 20,
         output_tokens: 10,
+        reasoning_tokens: None,
         total_tokens: 30,
         cache_creation_input_tokens: Some(4),
         cache_read_input_tokens: Some(6),
@@ -495,6 +496,7 @@ async fn test_status_command_displays_cache_usage_metrics() {
     client.state.lock().unwrap().session_usage = TokenUsage {
         input_tokens: 120,
         output_tokens: 45,
+        reasoning_tokens: None,
         total_tokens: 165,
         cache_creation_input_tokens: Some(9),
         cache_read_input_tokens: Some(21),
@@ -506,6 +508,7 @@ async fn test_status_command_displays_cache_usage_metrics() {
     app.session_usage = TokenUsage {
         input_tokens: 12,
         output_tokens: 5,
+        reasoning_tokens: None,
         total_tokens: 17,
         cache_creation_input_tokens: Some(2),
         cache_read_input_tokens: Some(3),

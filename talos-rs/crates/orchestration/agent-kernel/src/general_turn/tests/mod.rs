@@ -609,6 +609,7 @@ impl LlmProvider for NoopLlmProvider {
             usage: Usage {
                 prompt_tokens: 1,
                 completion_tokens: 1,
+                reasoning_tokens: None,
                 total_tokens: 2,
                 cache_creation_input_tokens: None,
                 cache_read_input_tokens: None,
@@ -660,6 +661,7 @@ impl LlmProvider for NoopLlmProvider {
                 usage: Some(Usage {
                     prompt_tokens: 1,
                     completion_tokens: 1,
+                    reasoning_tokens: None,
                     total_tokens: 2,
                     cache_creation_input_tokens: None,
                     cache_read_input_tokens: None,
@@ -697,6 +699,7 @@ impl LlmProvider for ExecLoopProvider {
                     prompt_tokens: 60,
                     completion_tokens: 10,
                     total_tokens: 70,
+                    reasoning_tokens: Some(3),
                     ..Usage::default()
                 },
                 finish_reason: Some("tool_calls".to_string()),
@@ -742,6 +745,7 @@ impl LlmProvider for ExecLoopProvider {
                         prompt_tokens: 90,
                         completion_tokens: 20,
                         total_tokens: 110,
+                        reasoning_tokens: Some(5),
                         ..Usage::default()
                     },
                     finish_reason: Some("stop".to_string()),
@@ -776,6 +780,7 @@ impl LlmProvider for LengthFinishProvider {
             usage: Usage {
                 prompt_tokens: 1,
                 completion_tokens: 4,
+                reasoning_tokens: None,
                 total_tokens: 5,
                 cache_creation_input_tokens: None,
                 cache_read_input_tokens: None,
@@ -1084,6 +1089,7 @@ impl LlmProvider for SummaryProvider {
             usage: Usage {
                 prompt_tokens: 13,
                 completion_tokens: 7,
+                reasoning_tokens: None,
                 total_tokens: 20,
                 cache_creation_input_tokens: Some(3),
                 cache_read_input_tokens: Some(11),

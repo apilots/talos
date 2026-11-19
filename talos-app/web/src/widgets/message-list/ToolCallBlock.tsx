@@ -7,7 +7,7 @@ import type { ChatToolStatus } from "@/shared/types/ui";
 import { ToolCallCard } from "@/widgets/tool-call-card/ToolCallCard";
 import { formatDuration } from "@/shared/lib/formatDuration";
 import { timelineToolTitle } from "./timelineToolPresentation";
-import { buildToolDisplayTitle, toolCommand } from "./toolDisplay";
+import { buildToolDisplayTitle, toolCommand, toolSearchQuery } from "./toolDisplay";
 import { ToolResultPreview, ToolResultRenderer } from "./ToolResultRenderer";
 
 function resolveTone(status: ChatToolStatus) {
@@ -59,9 +59,11 @@ export function ToolCallBlock({
   const [open, setOpen] = useState(status === "waiting_dynamic_input");
   const compact = variant !== "default";
   const collapsedActivity = variant === "activity" && !open;
-  const title = variant === "activity"
-    ? timelineToolTitle(toolName, argumentsValue, t)
-    : buildToolDisplayTitle(toolName, argumentsValue);
+  const isToolSearch = toolName === "ToolSearch";
+  const query = isToolSearch ? toolSearchQuery(argumentsValue) : undefined;
+  const title = isToolSearch ? toolName
+    : variant === "activity" ? timelineToolTitle(toolName, argumentsValue, t)
+      : buildToolDisplayTitle(toolName, argumentsValue);
   const command = open && compact && toolName === "Bash" ? toolCommand(argumentsValue) : undefined;
   const resultDurationMs = contentItems
     ?.filter((item) => item.type === "bash_output")
@@ -87,6 +89,7 @@ export function ToolCallBlock({
     <ToolCallCard.Root compact={compact}>
       <ToolCallCard.Header
         compact={compact}
+        description={query ? `· ("${query}")` : undefined}
         onToggle={() => setOpen((value) => !value)}
         open={open}
         duration={collapsedActivity ? undefined : duration}

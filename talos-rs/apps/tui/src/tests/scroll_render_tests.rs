@@ -70,6 +70,7 @@ async fn test_turn_completed_updates_session_usage_without_inferring_context_usa
         state.session_usage = TokenUsage {
             input_tokens: 1_100,
             output_tokens: 45,
+            reasoning_tokens: None,
             total_tokens: 1_145,
             cache_creation_input_tokens: Some(7),
             cache_read_input_tokens: Some(13),
@@ -84,6 +85,7 @@ async fn test_turn_completed_updates_session_usage_without_inferring_context_usa
             usage: TokenUsage {
                 input_tokens: 964,
                 output_tokens: 16,
+                reasoning_tokens: None,
                 total_tokens: 980,
                 cache_creation_input_tokens: Some(7),
                 cache_read_input_tokens: Some(13),
@@ -130,6 +132,7 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
     app.session_usage = TokenUsage {
         input_tokens: 80,
         output_tokens: 20,
+        reasoning_tokens: None,
         total_tokens: 100,
         cache_creation_input_tokens: Some(3),
         cache_read_input_tokens: Some(5),
@@ -138,6 +141,7 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
     let turn_usage = TokenUsage {
         input_tokens: 30,
         output_tokens: 10,
+        reasoning_tokens: None,
         total_tokens: 40,
         cache_creation_input_tokens: Some(2),
         cache_read_input_tokens: Some(4),

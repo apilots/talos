@@ -15,6 +15,28 @@ use super::*;
 use crate::AgentRunSettlement;
 
 #[test]
+fn reasoning_token_breakdown_survives_agent_metrics_protobuf() {
+    for reasoning_tokens in [None, Some(0), Some(4)] {
+        let metrics = AgentRunMetrics {
+            usage: talos_types::TokenUsage {
+                input_tokens: 12,
+                output_tokens: 8,
+                total_tokens: 20,
+                reasoning_tokens,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let wire = encode_metrics(metrics.clone());
+        assert_eq!(
+            wire.usage.as_ref().unwrap().reasoning_tokens,
+            reasoning_tokens
+        );
+        assert_eq!(decode_metrics(Some(wire)).unwrap(), metrics);
+    }
+}
+
+#[test]
 fn bash_log_and_file_byte_cursor_survive_protobuf() {
     use talos_types::talos::{BashOutputCaptureStatus as S, BashOutputLog};
     for capture_status in [

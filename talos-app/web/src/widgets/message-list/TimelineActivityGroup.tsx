@@ -6,13 +6,17 @@ import { Button } from "@/shared/ui/Button";
 import { TimelineRailRow } from "./TimelineRailRow";
 import { TimelineStep } from "./TimelineStep";
 import { TIMELINE_PAGE_SIZE, type TimelineActivity } from "./timelineDisplay";
-import { timelineToolIcon, timelineToolTitle } from "./timelineToolPresentation";
 import { toolActivity } from "./toolDisplay";
 
 export function TimelineActivityGroup({ group, timelineId }: { group: TimelineActivity; timelineId: string }) {
   const { t, i18n } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(TIMELINE_PAGE_SIZE);
+  const first = group.items[0];
+  if (group.items.length === 1 && first?.kind === "tool_call") {
+    return <TimelineStep grouped item={first} itemKey={`${timelineId}:${first.itemId}`} />;
+  }
+
   const start = Math.max(0, group.items.length - visibleCount);
   const tools = group.items.filter((item) => item.kind === "tool_call");
   const activities = new Set(tools.map((tool) => toolActivity(tool.toolName)));
@@ -20,15 +24,12 @@ export function TimelineActivityGroup({ group, timelineId }: { group: TimelineAc
   if (labels.length > 0 && activities.has(undefined)) {
     labels.push(t("timelineActivity.other"));
   }
-  const singleTool = group.items.length === 1 ? tools[0] : undefined;
-  const title = singleTool
-    ? timelineToolTitle(singleTool.toolName, singleTool.arguments, t)
-    : labels.length
+  const title = labels.length
     ? new Intl.ListFormat(i18n.resolvedLanguage).format(labels)
     : t(tools.length ? "timelineToolDetails" : "timelineThinkingDetails");
 
   return (
-    <TimelineRailRow icon={singleTool ? timelineToolIcon(singleTool.toolName) : tools.length ? Wrench : Brain}>
+    <TimelineRailRow icon={tools.length ? Wrench : Brain}>
       <details
         className="group/activity"
         data-timeline-activity="true"

@@ -173,8 +173,11 @@ impl OpenAIProvider {
     ) -> TalosResult<responses_protocol::ResponsesRequest> {
         let contract = self.responses_contract();
         let official = contract == responses_protocol::ResponsesContract::Official;
-        let reasoning = Self::effective_reasoning_effort(&request, official)
-            .map(|effort| responses_protocol::ResponsesReasoning { effort });
+        let reasoning = Self::effective_reasoning_effort(&request, official).map(|effort| {
+            let summary = (official && effort != "none")
+                .then_some(responses_protocol::ResponsesReasoningSummary::Auto);
+            responses_protocol::ResponsesReasoning { effort, summary }
+        });
         let include = (official || reasoning.is_some())
             .then(|| vec!["reasoning.encrypted_content".to_string()]);
         let mut encoded = responses_protocol::request_with_contract(

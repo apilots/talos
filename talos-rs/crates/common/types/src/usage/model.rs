@@ -45,6 +45,11 @@ pub struct TokenUsage {
     pub output_tokens: u32,
     /// Provider-reported total token count.
     pub total_tokens: u32,
+    /// Reasoning tokens included in output tokens, when the Provider reports the breakdown.
+    #[serde(default)]
+    #[ts(optional)]
+    #[ts(type = "number | null")]
+    pub reasoning_tokens: Option<u32>,
     /// Tokens written into a Provider prompt cache when reported.
     #[serde(default)]
     #[ts(optional)]
@@ -63,15 +68,17 @@ impl TokenUsage {
         self.total_tokens > 0
             || self.input_tokens > 0
             || self.output_tokens > 0
+            || self.reasoning_tokens.unwrap_or_default() > 0
             || self.cache_creation_input_tokens.unwrap_or_default() > 0
             || self.cache_read_input_tokens.unwrap_or_default() > 0
     }
 
-    /// Saturating-adds another usage sample while preserving optional cache semantics.
+    /// Saturating-adds another usage sample while preserving optional counters.
     pub fn accumulate(&mut self, other: &Self) {
         self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
         self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
         self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+        self.reasoning_tokens = sum_optional_tokens(self.reasoning_tokens, other.reasoning_tokens);
         self.cache_creation_input_tokens = sum_optional_tokens(
             self.cache_creation_input_tokens,
             other.cache_creation_input_tokens,
@@ -81,7 +88,7 @@ impl TokenUsage {
     }
 }
 
-/// Adds optional cache counters without converting two missing values into a measured zero.
+/// Adds optional counters without converting two missing values into a measured zero.
 fn sum_optional_tokens(left: Option<u32>, right: Option<u32>) -> Option<u32> {
     match (left, right) {
         (Some(left), Some(right)) => Some(left.saturating_add(right)),

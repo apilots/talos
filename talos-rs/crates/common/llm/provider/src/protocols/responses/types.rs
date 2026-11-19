@@ -56,6 +56,15 @@ pub enum ResponsesToolChoice {
 #[derive(Debug, Clone, Serialize)]
 pub struct ResponsesReasoning {
     pub effort: String,
+    /// Opts in to a displayable summary on endpoints that support it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ResponsesReasoningSummary>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponsesReasoningSummary {
+    Auto,
 }
 
 /// Provider-owned options applied by the shared Responses protocol encoder.
@@ -110,6 +119,13 @@ pub struct ResponsesUsage {
     pub total_tokens: u32,
     #[serde(default)]
     pub input_tokens_details: Option<ResponsesInputTokensDetails>,
+    #[serde(default)]
+    pub output_tokens_details: Option<ResponsesOutputTokensDetails>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResponsesOutputTokensDetails {
+    pub reasoning_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

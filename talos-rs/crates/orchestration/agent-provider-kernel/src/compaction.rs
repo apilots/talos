@@ -93,6 +93,7 @@ async fn compact_mapped(
         input_tokens: report.input_tokens,
         output_tokens: report.output_tokens,
         total_tokens: report.total_tokens,
+        reasoning_tokens: report.reasoning_tokens,
         cache_creation_input_tokens: report.cache_creation_input_tokens,
         cache_read_input_tokens: report.cache_read_input_tokens,
     };

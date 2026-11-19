@@ -42,6 +42,7 @@ impl LlmProvider for TestProvider {
             usage: Usage {
                 prompt_tokens: 11,
                 completion_tokens: 3,
+                reasoning_tokens: None,
                 total_tokens: 14,
                 cache_creation_input_tokens: Some(2),
                 cache_read_input_tokens: Some(4),
@@ -160,6 +161,7 @@ async fn client_routes_reloads_and_propagates_failures() {
             talos_types::TokenUsage {
                 input_tokens: 11,
                 output_tokens: 3,
+                reasoning_tokens: None,
                 total_tokens: 14,
                 cache_creation_input_tokens: Some(2),
                 cache_read_input_tokens: Some(4),

@@ -170,6 +170,7 @@ impl ProtocolProvider {
                     responses::ResponsesRequestOptions {
                         reasoning: send_effort.then(|| responses::ResponsesReasoning {
                             effort: wire_effort(effort, LlmProtocol::Responses),
+                            summary: None,
                         }),
                         include: (send_effort && effort.is_some())
                             .then(|| vec!["reasoning.encrypted_content".to_owned()]),

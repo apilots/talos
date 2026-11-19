@@ -12972,6 +12972,7 @@
               "cache_read_input_tokens": null,
               "input_tokens": 0,
               "output_tokens": 0,
+              "reasoning_tokens": null,
               "total_tokens": 0
             }
           }
@@ -13069,6 +13070,7 @@
               "cache_read_input_tokens": null,
               "input_tokens": 0,
               "output_tokens": 0,
+              "reasoning_tokens": null,
               "total_tokens": 0
             }
           }
@@ -15541,6 +15543,16 @@
           "format": "uint32",
           "minimum": 0.0,
           "type": "integer"
+        },
+        "reasoning_tokens": {
+          "default": null,
+          "description": "Reasoning tokens included in output tokens, when the Provider reports the breakdown.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "total_tokens": {
           "description": "Provider-reported total token count.",

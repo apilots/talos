@@ -388,6 +388,9 @@ pub struct Usage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    /// Provider-reported subset of completion tokens spent on reasoning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_tokens: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -400,6 +403,7 @@ impl From<&Usage> for talos_types::TokenUsage {
             input_tokens: usage.prompt_tokens,
             output_tokens: usage.completion_tokens,
             total_tokens: usage.total_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
             cache_creation_input_tokens: usage.cache_creation_input_tokens,
             cache_read_input_tokens: usage.cache_read_input_tokens,
         }
@@ -531,6 +535,12 @@ pub enum ModelBlockStreamEvent {
     BlockDelta {
         model_item_id: String,
         delta: ModelBlockDelta,
+    },
+    /// Resolves an assistant block that started without a provider-reported phase.
+    /// This metadata can arrive after the block's text is complete.
+    AssistantTextPhase {
+        model_item_id: String,
+        phase: ModelOutputPhase,
     },
     BlockCompleted(ModelBlockCompleted),
     ReasoningCompleted {

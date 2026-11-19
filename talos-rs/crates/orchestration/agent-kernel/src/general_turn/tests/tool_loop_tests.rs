@@ -547,13 +547,23 @@ async fn test_run_general_turn_bash_completes_directly() {
     assert_eq!(result.metrics().tool_calls, 1);
     assert_eq!(result.metrics().tool_successes, 1);
     assert_eq!(result.metrics().tool_errors, 0);
-    assert_eq!(result.usage().total_tokens, 180);
+    assert_eq!(
+        result.usage(),
+        &TokenUsage {
+            input_tokens: 150,
+            output_tokens: 30,
+            total_tokens: 180,
+            reasoning_tokens: Some(8),
+            ..TokenUsage::default()
+        }
+    );
     assert_eq!(
         result.last_model_usage,
         TokenUsage {
             input_tokens: 90,
             output_tokens: 20,
             total_tokens: 110,
+            reasoning_tokens: Some(5),
             ..TokenUsage::default()
         }
     );

@@ -30,6 +30,7 @@ fn usage_with_cache(
     TokenUsage {
         input_tokens,
         output_tokens,
+        reasoning_tokens: None,
         total_tokens: input_tokens + output_tokens,
         cache_creation_input_tokens: Some(cache_creation_input_tokens),
         cache_read_input_tokens: Some(cache_read_input_tokens),

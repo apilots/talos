@@ -70,13 +70,7 @@ impl InnerModelClient {
                     .build(),
             )
             .await?;
-        let usage = TokenUsage {
-            input_tokens: response.usage.prompt_tokens,
-            output_tokens: response.usage.completion_tokens,
-            total_tokens: response.usage.total_tokens,
-            cache_creation_input_tokens: response.usage.cache_creation_input_tokens,
-            cache_read_input_tokens: response.usage.cache_read_input_tokens,
-        };
+        let usage = TokenUsage::from(&response.usage);
         let completed_at = Utc::now();
         let timezone = talos_config::parse_timezone(&self.profile_timezone)?;
         let completed_at_ms = completed_at.timestamp_millis();

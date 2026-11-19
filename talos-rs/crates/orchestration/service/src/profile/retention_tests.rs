@@ -22,6 +22,7 @@ fn update(id: &str, completed_at_ms: i64) -> TurnUsageUpdate {
         usage: TokenUsage {
             input_tokens: 1,
             output_tokens: 1,
+            reasoning_tokens: None,
             total_tokens: 2,
             cache_creation_input_tokens: None,
             cache_read_input_tokens: None,

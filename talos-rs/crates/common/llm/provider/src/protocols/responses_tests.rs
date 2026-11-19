@@ -1,5 +1,6 @@
 use super::*;
 use crate::{Attachment, AttachmentKind, FunctionCall};
+use crate::{ModelBlockDelta, ModelBlockKind, ModelBlockStreamEvent, ModelOutputPhase};
 use bytes::Bytes;
 
 #[test]
@@ -97,6 +98,7 @@ fn responses_request_serializes_tools_reasoning_and_function_output() {
         ResponsesRequestOptions {
             reasoning: Some(ResponsesReasoning {
                 effort: "high".to_string(),
+                summary: None,
             }),
             include: Some(vec!["reasoning.encrypted_content".to_string()]),
         },
@@ -147,6 +149,7 @@ fn responses_chat_response_reads_output_items() {
         "usage": {
             "input_tokens": 10,
             "output_tokens": 2,
+            "output_tokens_details": {"reasoning_tokens": 1},
             "total_tokens": 12,
             "input_tokens_details": {"cached_tokens": 1, "cache_write_tokens": 6}
         }
@@ -162,6 +165,8 @@ fn responses_chat_response_reads_output_items() {
         Some(ReasoningContinuation::Blocks(blocks)) if blocks.len() == 1
     ));
     assert_eq!(mapped.usage.total_tokens, 12);
+    assert_eq!(mapped.usage.completion_tokens, 2);
+    assert_eq!(mapped.usage.reasoning_tokens, Some(1));
     assert_eq!(mapped.usage.cache_creation_input_tokens, Some(6));
     assert_eq!(mapped.usage.cache_read_input_tokens, Some(1));
     let calls = mapped.tool_calls.expect("tool calls should exist");
@@ -475,7 +480,7 @@ fn compatible_responses_keep_existing_json_status_and_ignore_unknown_terminal_me
 async fn compatible_responses_keep_streamed_tool_arguments_and_done_sentinel() {
     let sse = concat!(
         "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"echo\"}}\n\n",
-        "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\"{\\\"n\\\":42}\"}\n\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"item_id\":\"fc_1\",\"delta\":\"{\\\"n\\\":42}\"}\n\n",
         "data: {\"type\":\"response.function_call_arguments.done\",\"output_index\":0,\"arguments\":\"{ \\\"n\\\": 42 }\"}\n\n",
         "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"arguments\":\"{ \\\"n\\\": 42 }\"}}\n\n",
         "data: [DONE]\n\n",
@@ -485,9 +490,13 @@ async fn compatible_responses_keep_streamed_tool_arguments_and_done_sentinel() {
         ResponsesModelBlocks::openrouter(),
     );
     let mut arguments = String::new();
+    let mut call_id = None;
     let mut finished = false;
     while let Some(event) = blocks.next().await {
         match event.unwrap() {
+            ModelBlockStreamEvent::BlockStarted(block) => {
+                call_id = block.tool_call.and_then(|tool| tool.call_id);
+            }
             ModelBlockStreamEvent::BlockDelta {
                 delta: ModelBlockDelta::ToolArguments { delta },
                 ..
@@ -499,6 +508,7 @@ async fn compatible_responses_keep_streamed_tool_arguments_and_done_sentinel() {
         }
     }
     assert_eq!(arguments, r#"{"n":42}"#);
+    assert_eq!(call_id.as_deref(), Some("call_1"));
     assert!(finished);
 
     let mut text = stream(
@@ -509,4 +519,252 @@ async fn compatible_responses_keep_streamed_tool_arguments_and_done_sentinel() {
     );
     assert_eq!(text.next().await.unwrap().unwrap().delta, "Partial");
     assert!(text.next().await.is_none());
+}
+
+#[tokio::test]
+async fn responses_reconcile_parts_items_and_terminal_output_without_duplicates() {
+    let events = [
+        serde_json::json!({"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":0,"delta":"Th"}),
+        serde_json::json!({"type":"response.reasoning_summary_part.done","item_id":"rs_1","summary_index":0,"part":{"type":"summary_text","text":"Think"}}),
+        serde_json::json!({"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Think"},{"type":"summary_text","text":" before acting"}],"encrypted_content":"opaque"}}),
+        serde_json::json!({"type":"response.output_item.added","output_index":1,"item":{"id":"msg_1","type":"message","phase":"commentary"}}),
+        serde_json::json!({"type":"response.output_text.delta","item_id":"msg_1","content_index":0,"delta":"Work"}),
+        serde_json::json!({"type":"response.output_text.done","item_id":"msg_1","content_index":0,"text":"Working"}),
+        serde_json::json!({"type":"response.output_item.done","output_index":1,"item":{"id":"msg_1","type":"message","phase":"commentary","content":[{"type":"output_text","text":"Working"}],"summary":[{"type":"summary_text","text":"Unrelated message metadata"}]}}),
+        serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[
+            {"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Think"},{"type":"summary_text","text":" before acting"}],"encrypted_content":"opaque"},
+            {"id":"msg_1","type":"message","phase":"commentary","content":[{"type":"output_text","text":"Working"}]},
+            {"id":"msg_2","type":"message","phase":"final_answer","content":[{"type":"output_text","text":"Done."},{"type":"refusal","refusal":"I skipped one part."}]}
+        ],"usage":{"input_tokens":9,"output_tokens":7,"total_tokens":16,"input_tokens_details":{"cached_tokens":3},"output_tokens_details":{"reasoning_tokens":4}}}}),
+    ];
+    let sse = events
+        .iter()
+        .map(|event| format!("data: {event}\n\n"))
+        .collect::<String>();
+    for contract in [ResponsesContract::Official, ResponsesContract::Compatible] {
+        let response = reqwest::Response::from(http::Response::new(sse.clone()));
+        let mut blocks =
+            model_blocks_with_contract(response, ResponsesModelBlocks::openai(), contract);
+        let mut reasoning = String::new();
+        let mut text = String::new();
+        let mut phases = Vec::new();
+        let mut completions = 0;
+        let mut finished_reasoning = None;
+        let mut finish_usage = None;
+        while let Some(event) = blocks.next().await {
+            match event.unwrap() {
+                ModelBlockStreamEvent::BlockStarted(block)
+                    if block.kind == ModelBlockKind::AssistantText =>
+                {
+                    phases.push(block.output_phase)
+                }
+                ModelBlockStreamEvent::BlockDelta {
+                    delta: ModelBlockDelta::AssistantText { delta },
+                    ..
+                } => text.push_str(&delta),
+                ModelBlockStreamEvent::BlockDelta {
+                    delta: ModelBlockDelta::ReasoningText { delta },
+                    ..
+                } => reasoning.push_str(&delta),
+                ModelBlockStreamEvent::BlockCompleted(_) => completions += 1,
+                ModelBlockStreamEvent::ReasoningCompleted { output } => {
+                    finished_reasoning = Some(output)
+                }
+                ModelBlockStreamEvent::Done { usage, .. } => finish_usage = usage,
+                _ => {}
+            }
+        }
+        assert_eq!(reasoning, "Think before acting");
+        let output = finished_reasoning.unwrap();
+        assert_eq!(output.display_text(), reasoning);
+        let Some(ReasoningContinuation::Blocks(continuation)) = output.continuation else {
+            panic!("expected structured reasoning continuation");
+        };
+        assert_eq!(continuation.len(), 3);
+        assert_eq!(text, "WorkingDone.I skipped one part.");
+        assert_eq!(
+            phases,
+            [ModelOutputPhase::Commentary, ModelOutputPhase::FinalAnswer]
+        );
+        assert_eq!(completions, 3);
+        let usage = finish_usage.unwrap();
+        assert_eq!(usage.total_tokens, 16);
+        assert_eq!(usage.completion_tokens, 7);
+        assert_eq!(usage.reasoning_tokens, Some(4));
+        assert_eq!(usage.cache_read_input_tokens, Some(3));
+
+        let response = reqwest::Response::from(http::Response::new(sse.clone()));
+        let mut text_stream = stream_with_contract(response, "fixture", contract);
+        let mut full_text = String::new();
+        while let Some(chunk) = text_stream.next().await {
+            full_text.push_str(&chunk.unwrap().delta);
+        }
+        assert_eq!(full_text, text);
+    }
+}
+
+#[tokio::test]
+async fn responses_preserve_id_only_calls_and_wait_for_late_tool_metadata() {
+    let events = [
+        serde_json::json!({"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"n\":"}),
+        serde_json::json!({"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"first","arguments":"{\"n\":1}"}}),
+        serde_json::json!({"type":"response.function_call_arguments.done","item_id":"fc_2","arguments":"{\"n\":2}"}),
+        serde_json::json!({"type":"response.completed","response":{"output":[
+            {"id":"fc_1","type":"function_call","call_id":"call_1","name":"first","arguments":"{\"n\":1}"},
+            {"id":"fc_2","type":"function_call","call_id":"call_2","name":"second","arguments":{"n":2}}
+        ]}}),
+    ];
+    let sse = events
+        .iter()
+        .map(|event| format!("data: {event}\n\n"))
+        .collect::<String>();
+    let response = reqwest::Response::from(http::Response::new(sse));
+    let mut stream = model_blocks(response, ResponsesModelBlocks::openrouter());
+    let mut calls = Vec::new();
+    let mut arguments = String::new();
+    let mut completed_arguments = Vec::new();
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            ModelBlockStreamEvent::BlockStarted(block) => {
+                let tool = block.tool_call.unwrap();
+                calls.push((tool.index, tool.call_id.unwrap(), tool.tool_name.unwrap()));
+            }
+            ModelBlockStreamEvent::BlockDelta {
+                delta: ModelBlockDelta::ToolArguments { delta },
+                ..
+            } => arguments.push_str(&delta),
+            ModelBlockStreamEvent::BlockCompleted(_) => {
+                completed_arguments.push(std::mem::take(&mut arguments))
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        calls,
+        [
+            (0, "call_1".into(), "first".into()),
+            (1, "call_2".into(), "second".into())
+        ]
+    );
+    assert_eq!(completed_arguments, [r#"{"n":1}"#, r#"{"n":2}"#]);
+}
+
+#[tokio::test]
+async fn compatible_responses_preserve_typed_provider_errors_and_cancellation() {
+    use talos_error::ErrorCode;
+
+    for (sse, expected) in [
+        (
+            "event: error\ndata: {\"code\":\"rate_limit_exceeded\",\"message\":\"private\"}\n\n",
+            ErrorCode::UsageLimitExceeded,
+        ),
+        (
+            "data: {\"type\":\"response.cancelled\"}\n\n",
+            ErrorCode::Cancelled,
+        ),
+    ] {
+        let response = reqwest::Response::from(http::Response::new(sse));
+        let mut blocks = model_blocks(response, ResponsesModelBlocks::openrouter());
+        let error = blocks.next().await.unwrap().unwrap_err().to_api_error();
+        assert_eq!(error.code, expected);
+        assert!(!error.message.contains("private"));
+        assert!(blocks.next().await.is_none());
+    }
+}
+
+#[tokio::test]
+async fn responses_keep_late_reasoning_in_continuation_after_explicit_final_answer() {
+    let events = [
+        serde_json::json!({"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"msg_1","phase":"final_answer"}}),
+        serde_json::json!({"type":"response.output_text.delta","output_index":1,"delta":"Answer"}),
+        serde_json::json!({"type":"response.completed","response":{"output":[
+            {"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Checked"}],"encrypted_content":"opaque"},
+            {"type":"message","id":"msg_1","phase":"final_answer","content":[{"type":"output_text","text":"Answer"}]}
+        ]}}),
+    ];
+    let sse = events
+        .iter()
+        .map(|event| format!("data: {event}\n\n"))
+        .collect::<String>();
+    let response = reqwest::Response::from(http::Response::new(sse));
+    let mut stream = model_blocks_with_contract(
+        response,
+        ResponsesModelBlocks::openai(),
+        ResponsesContract::Official,
+    );
+    let mut output = None;
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            ModelBlockStreamEvent::BlockStarted(block) => {
+                assert_eq!(block.kind, ModelBlockKind::AssistantText)
+            }
+            ModelBlockStreamEvent::ReasoningCompleted { output: reasoning } => {
+                output = Some(reasoning)
+            }
+            _ => {}
+        }
+    }
+    let output = output.unwrap();
+    assert_eq!(output.display_text(), "");
+    assert!(
+        matches!(output.continuation, Some(ReasoningContinuation::Blocks(blocks)) if blocks.len() == 2)
+    );
+}
+
+#[tokio::test]
+async fn responses_commits_phase_from_item_done_or_terminal_snapshot() {
+    for phase_on_item_done in [false, true] {
+        let added = serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","phase":null}});
+        let delta = serde_json::json!({"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","delta":"Working"});
+        let mut completed_item = serde_json::json!({"id":"msg_1","type":"message","content":[{"type":"output_text","text":"Working"}]});
+        if phase_on_item_done {
+            completed_item["phase"] = serde_json::json!("commentary");
+        }
+        let item_done = serde_json::json!({"type":"response.output_item.done","output_index":0,"item":completed_item});
+        completed_item["phase"] = serde_json::json!("commentary");
+        let terminal =
+            serde_json::json!({"type":"response.completed","response":{"output":[completed_item]}});
+        let body = [added, delta, item_done, terminal]
+            .iter()
+            .map(|event| format!("data: {event}\n\n"))
+            .collect::<String>();
+        for contract in [ResponsesContract::Official, ResponsesContract::Compatible] {
+            let response = reqwest::Response::from(http::Response::new(body.clone()));
+            let mut stream =
+                model_blocks_with_contract(response, ResponsesModelBlocks::openai(), contract);
+            let Some(Ok(ModelBlockStreamEvent::BlockStarted(started))) = stream.next().await else {
+                panic!("assistant block should start pending");
+            };
+            assert_eq!(started.output_phase, ModelOutputPhase::Unknown);
+            assert!(matches!(
+                stream.next().await.unwrap().unwrap(),
+                ModelBlockStreamEvent::BlockDelta { .. }
+            ));
+            let mut observed = Vec::new();
+            while let Some(event) = stream.next().await {
+                match event.unwrap() {
+                    ModelBlockStreamEvent::AssistantTextPhase {
+                        model_item_id,
+                        phase,
+                    } => {
+                        assert_eq!(model_item_id, started.model_item_id);
+                        assert_eq!(phase, ModelOutputPhase::Commentary);
+                        observed.push("phase");
+                    }
+                    ModelBlockStreamEvent::BlockCompleted(completed) => {
+                        assert_eq!(completed.model_item_id, started.model_item_id);
+                        observed.push("complete");
+                    }
+                    ModelBlockStreamEvent::Done { .. } => observed.push("done"),
+                    other => panic!("unexpected event: {other:?}"),
+                }
+            }
+            let expected = if phase_on_item_done {
+                ["phase", "complete", "done"]
+            } else {
+                ["complete", "phase", "done"]
+            };
+            assert_eq!(observed, expected);
+        }
+    }
 }

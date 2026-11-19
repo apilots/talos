@@ -206,6 +206,7 @@ pub(super) fn token_usage_from_session_history_compaction(
         input_tokens: compaction.compaction_input_tokens,
         output_tokens: compaction.compaction_output_tokens,
         total_tokens: compaction.compaction_total_tokens,
+        reasoning_tokens: compaction.compaction_reasoning_tokens,
         cache_creation_input_tokens: compaction.compaction_cache_creation_input_tokens,
         cache_read_input_tokens: compaction.compaction_cache_read_input_tokens,
     }

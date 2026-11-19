@@ -73,13 +73,13 @@ it("pages interleaved history while keeping the latest commentary and active com
       ...history,
     ],
   }} copiedLabel="Copied" copyLabel="Copy" helpfulLabel="Helpful" notHelpfulLabel="Not helpful" />);
-  expect(container.querySelectorAll("[data-timeline-activity]")).toHaveLength(64);
+  expect(container.querySelectorAll("[data-timeline-activity], [data-timeline-role='tool']")).toHaveLength(65);
   expect(screen.getByText("The batch is being checked.")).toBeTruthy();
   expect(screen.getByText("No command output yet")).toBeTruthy();
   expect(screen.queryByText("Bash · echo ordered-0")).toBeNull();
   expect(screen.getByText("Bash · echo ordered-79")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Show earlier steps" }));
-  expect(container.querySelectorAll("[data-timeline-activity]")).toHaveLength(128);
+  expect(container.querySelectorAll("[data-timeline-activity], [data-timeline-role='tool']")).toHaveLength(129);
   fireEvent.click(screen.getByRole("button", { name: "Show earlier steps" }));
   expect(screen.getByText("Bash · echo ordered-0")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Show earlier steps" })).toBeNull();

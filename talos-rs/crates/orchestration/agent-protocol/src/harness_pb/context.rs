@@ -108,6 +108,7 @@ pub fn encode_metrics(value: AgentRunMetrics) -> pb::RunMetrics {
             total_tokens: value.usage.total_tokens,
             cache_creation_input_tokens: value.usage.cache_creation_input_tokens,
             cache_read_input_tokens: value.usage.cache_read_input_tokens,
+            reasoning_tokens: value.usage.reasoning_tokens,
         }),
         context: value.context.map(|value| pb::ContextUsage {
             used_tokens: value.used_tokens,
@@ -133,6 +134,7 @@ pub fn decode_metrics(value: Option<pb::RunMetrics>) -> TalosResult<AgentRunMetr
             total_tokens: usage.total_tokens,
             cache_creation_input_tokens: usage.cache_creation_input_tokens,
             cache_read_input_tokens: usage.cache_read_input_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
         },
         context: value.context.map(|value| ContextUsage {
             used_tokens: value.used_tokens,

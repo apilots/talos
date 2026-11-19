@@ -30,6 +30,7 @@ pub struct MemoryFormationReport {
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub total_tokens: u32,
+    pub reasoning_tokens: Option<u32>,
     pub covers_from_seq: Option<u64>,
     pub covers_until_seq: Option<u64>,
     pub trimmed_context_unit_count: u32,
@@ -44,6 +45,7 @@ impl MemoryFormationReport {
         self.input_tokens = self.input_tokens.saturating_add(usage.prompt_tokens);
         self.output_tokens = self.output_tokens.saturating_add(usage.completion_tokens);
         self.total_tokens = self.total_tokens.saturating_add(usage.total_tokens);
+        self.reasoning_tokens = sum_optional_tokens(self.reasoning_tokens, usage.reasoning_tokens);
         self.cache_creation_input_tokens = sum_optional_tokens(
             self.cache_creation_input_tokens,
             usage.cache_creation_input_tokens,

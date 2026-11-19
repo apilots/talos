@@ -14,6 +14,7 @@ pub(super) fn usage_from_row(row: &sqlx::sqlite::SqliteRow) -> TalosResult<Token
                 .map_err(storage_error("read output tokens"))?,
             "output_tokens",
         )?,
+        reasoning_tokens: None,
         total_tokens: token_value(
             row.try_get("total_tokens")
                 .map_err(storage_error("read total tokens"))?,
@@ -46,6 +47,7 @@ pub(super) fn usage_from_aggregate_row(row: &sqlx::sqlite::SqliteRow) -> TalosRe
                 .unwrap_or_default(),
             "output_tokens",
         )?,
+        reasoning_tokens: None,
         total_tokens: token_value(
             row.try_get::<Option<i64>, _>("total_tokens")
                 .map_err(storage_error("read aggregate total tokens"))?

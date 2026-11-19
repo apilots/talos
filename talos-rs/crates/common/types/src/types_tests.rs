@@ -333,6 +333,7 @@ fn test_session_usage_serializes_tokens_and_nullable_camel_case_context() {
             input_tokens: 12,
             output_tokens: 3,
             total_tokens: 15,
+            reasoning_tokens: Some(2),
             ..talos::TokenUsage::default()
         },
         context: ContextUsage::new(8, 100, 80, 42),
@@ -345,6 +346,7 @@ fn test_session_usage_serializes_tokens_and_nullable_camel_case_context() {
                 "input_tokens": 12,
                 "output_tokens": 3,
                 "total_tokens": 15,
+                "reasoning_tokens": 2,
                 "cache_creation_input_tokens": null,
                 "cache_read_input_tokens": null
             },

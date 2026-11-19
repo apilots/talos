@@ -300,6 +300,7 @@ async fn compact_session_history_if_needed(
                     compaction_total_tokens: 0,
                     compaction_cache_creation_input_tokens: None,
                     compaction_cache_read_input_tokens: None,
+                    compaction_reasoning_tokens: None,
                 },
             )));
         }
@@ -365,6 +366,7 @@ async fn compact_session_history_if_needed(
             compaction_total_tokens: compaction_usage.total_tokens,
             compaction_cache_creation_input_tokens: compaction_usage.cache_creation_input_tokens,
             compaction_cache_read_input_tokens: compaction_usage.cache_read_input_tokens,
+            compaction_reasoning_tokens: compaction_usage.reasoning_tokens,
         },
     )))
 }

@@ -227,6 +227,19 @@ Select reasoning replay per model using its configured wire contract. A private
 Chat endpoint requiring `reasoning_content` must opt in; do not change replay
 fields globally for unrelated providers.
 
+Native OpenAI, OpenRouter, and custom Responses connections share output
+decoding for assistant text and refusals, reasoning, and function calls. The
+stream uses output indices and item IDs to match deltas with completed parts,
+items, and the terminal snapshot. An explicit assistant phase on a completed
+item resolves the same pending Agent text block, even after its text is
+complete. Function calls need a name before dispatch, and encrypted reasoning
+stays in the continuation. When reasoning is enabled, the native official
+OpenAI adapter requests `reasoning.summary: auto` for display. The Agent tracks
+reported `reasoning_tokens` as a breakdown of output tokens. The provider's
+output and total counts already include that breakdown.
+Provider-hosted tools, artifacts, and annotations require dedicated Talos
+mappings.
+
 The shipped profiles select Responses for new official OpenAI connections.
 Configuration upgrades preserve saved protocols and model catalogs. The four
 default models are GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra, and GPT-6 Luna.

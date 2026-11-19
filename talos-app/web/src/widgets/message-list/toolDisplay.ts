@@ -36,6 +36,11 @@ export function toolCommand(input: unknown) {
     .find((value): value is string => typeof value === "string" && !!value.trim());
 }
 
+export function toolSearchQuery(input: unknown) {
+  const query = normalizedString(resolveArguments(input)?.query);
+  return query ? truncatePreview(query) : undefined;
+}
+
 export function toolActivity(toolName: string) {
   switch (toolName) {
     case "Bash": return "commands";

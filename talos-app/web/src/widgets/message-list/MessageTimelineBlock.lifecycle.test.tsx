@@ -51,7 +51,7 @@ describe("MessageTimelineBlock lifecycle", () => {
     expect(screen.getByRole("status")).not.toBe(previous);
   });
 
-  it("keeps commentary in sequence and honors an explicit collapse during live updates", async () => {
+  it("keeps commentary in sequence and honors an explicit collapse during live updates", () => {
     const view = (
       <MessageList
         blocks={[{
@@ -69,23 +69,20 @@ describe("MessageTimelineBlock lifecycle", () => {
       />
     );
     const { container, rerender } = render(view);
-    const groups = container.querySelectorAll<HTMLDetailsElement>("details");
+    const firstCommand = screen.getByRole("button", { name: "Bash · sleep 30" });
     const progress = screen.getByText("The first check passed.");
-    expect(groups[0].compareDocumentPosition(progress) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(progress.compareDocumentPosition(groups[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(groups[0]).getByText("Bash · sleep 30")).toBeTruthy();
-    expect(within(groups[0]).queryByRole("button")).toBeNull();
-    const groupSummary = groups[0].querySelector("summary")!;
-    fireEvent.click(groupSummary);
-    expect(await within(groups[0]).findByRole("button", { name: /Bash · sleep 30/ })).toBeTruthy();
-    fireEvent.click(groupSummary);
-    expect(groups[0].open).toBe(false);
+    const secondCommand = screen.getByRole("button", { name: "Bash · printf ready" });
+    expect(firstCommand.compareDocumentPosition(progress) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(progress.compareDocumentPosition(secondCommand) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(firstCommand);
+    expect(firstCommand.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(firstCommand);
 
     rerender(<MessageList {...view.props} blocks={[{
       ...view.props.blocks[0],
       items: [...view.props.blocks[0].items, { ...command, itemId: "tool-3", arguments: { command: "sleep 20" } }],
     }]} />);
-    expect(groups[0].open).toBe(false);
+    expect(firstCommand.getAttribute("aria-expanded")).toBe("false");
     expect(screen.getByText("The first check passed.").closest("details")).toBeNull();
     expect(screen.getByText(/sleep 20/).closest("details")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^Working/ }));
@@ -169,8 +166,10 @@ describe("MessageTimelineBlock lifecycle", () => {
     );
     const groups = container.querySelectorAll<HTMLDetailsElement>("[data-timeline-activity]");
     expect(Array.from(groups, (group) => group.querySelector("summary > span")?.textContent)).toEqual([
-      "Thinking", "Ran commands and Read files", "Thinking", "Bash · printf checked",
+      "Thinking", "Ran commands and Read files", "Thinking",
     ]);
+    const lastTool = screen.getByRole("button", { name: "Bash · printf checked" });
+    expect(groups[2].compareDocumentPosition(lastTool) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const tools = within(groups[1]);
     expect(tools.queryByText(/sleep 30|result\.txt|command output/)).toBeNull();
     fireEvent.click(tools.getByText("Ran commands and Read files"));
@@ -183,6 +182,29 @@ describe("MessageTimelineBlock lifecycle", () => {
     expect(tools.getByText("command output")).toBeTruthy();
     fireEvent.click(within(groups[2]).getByText("Thinking"));
     expect(await within(groups[2]).findByText("Verify the read result.")).toBeTruthy();
+  });
+
+  it("expands a single completed tool using one title and keeps its details accessible", async () => {
+    render(
+      <MessageList blocks={[{ id: "single-tool", kind: "timeline", live: false, items: [
+        { ...command, toolName: "ToolSearch", arguments: { query: "WebSearch WebFetch" }, progress: [],
+          output: '{"activated_tools":[]}', status: "completed", completedAtMs: 1_100 },
+      ] }]} emptyDetail="" emptyTitle="" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+    const disclosure = screen.getByRole("button", { name: 'ToolSearch · ("WebSearch WebFetch")' });
+    expect(within(disclosure).getByText("ToolSearch", { exact: true })).toBeTruthy();
+    expect(within(disclosure).getByText('· ("WebSearch WebFetch")', { exact: true })).toBeTruthy();
+    fireEvent.click(disclosure);
+    const details = await screen.findByText("Details", { exact: true });
+    expect(screen.getAllByText("ToolSearch", { exact: true })).toHaveLength(1);
+    expect(screen.getByText(/"activated_tools"/)).toBeTruthy();
+    fireEvent.click(details);
+    expect(details.closest("details")?.open).toBe(true);
+    expect(screen.getByText(command.callId)).toBeTruthy();
+    expect(screen.getByText(/"query": "WebSearch WebFetch"/)).toBeTruthy();
+    fireEvent.click(disclosure);
+    expect(screen.queryByText("Details", { exact: true })).toBeNull();
   });
 
   it("nests Thinking only within verified Bash execution", async () => {

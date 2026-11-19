@@ -60,6 +60,7 @@ export const ToolCallCard = {
   },
   Header({
     compact = false,
+    description,
     duration,
     open,
     onToggle,
@@ -69,6 +70,7 @@ export const ToolCallCard = {
     tone,
   }: {
     compact?: boolean;
+    description?: string;
     duration?: ReactNode;
     open: boolean;
     onToggle: () => void;
@@ -95,10 +97,14 @@ export const ToolCallCard = {
               <Wrench size={13} />
             </span>
           ) : null}
-          <div className="min-w-0 flex-1">
-            <div className={cn("truncate text-[13.5px]", statusLabel ? "font-medium text-ink" : "text-muted")} title={title}>
+          <div
+            className="min-w-0 flex-1 truncate text-[13.5px] text-muted"
+            title={description ? `${title} ${description}` : title}
+          >
+            <span className={statusLabel || description ? "font-medium text-ink" : undefined}>
               {title}
-            </div>
+            </span>
+            {description ? <>{" "}<span>{description}</span></> : null}
           </div>
         </div>
         <div className={cn("flex shrink-0 items-center", compact ? "gap-2.5" : "gap-2")}>
