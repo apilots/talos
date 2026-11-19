@@ -58,6 +58,12 @@ $TALOS_HOME/logs/talos.log
 Provider secret 保存在 `.env` 中，配置引用对应的 `TALOS_LLM_*_API_KEY` 环境变量。
 仓库默认配置位于 `conf/`，由 Runtime 复制或升级，不直接编辑用户 home 中的文件。
 
+会话标题、工作区记忆提炼和 Dream Memory 共用 `agent.inner_model`。模板默认选用
+DeepSeek Flash。仅配置 OpenAI 的安装可在 YAML 中将此项的 `provider` 设为 `openai`、
+`id` 设为 `gpt-6-luna`，然后重启 Talos。模型页面用于管理 Provider 连接和目录。
+会话上下文压缩默认使用会话模型，`agent.kernel.compaction.model` 可指定同一 Provider
+下的另一个模型。
+
 CI 的 Rust、Node 和 pnpm 版本统一来自 `.github/release-toolchain.env`。
 `pr-e2e.yml` 负责 PR/main 调度，命名复用工作流分别展示 WebUI、Desktop、TUI、
 Server 内部模块和轻量安装契约。`talos-webui.yml` 与 `talos-desktop.yml` 共享
@@ -109,22 +115,20 @@ fixture/资源、配置及 CI 定义；全仓格式/错误/仓库检查使用更
 ## OpenAI 官方连接
 
 随附配置模板为 OpenAI 官方连接预设 Responses，升级保留已保存的协议和模型目录。
-模板主推 GPT-6.2 Astra、GPT-6.2 Sol、GPT-6.1 Terra 和 GPT-6 Luna，费用使用标准
+默认目录包含 GPT-6.2 Astra、GPT-6.2 Sol、GPT-6.1 Terra 和 GPT-6 Luna 四个模型，费用使用标准
 短上下文与 30 分钟缓存写入费率。
 
-GPT-6.2 Astra、GPT-6.2 Sol、GPT-6 Astra、GPT-6.1 Sol 和 GPT-6.1 Terra 的工具调用需要
-Responses。GPT-6 Luna、GPT-5.5 和 GPT-5.4 mini 在 Chat Completions 中使用函数工具时
+GPT-6.2 Astra、GPT-6.2 Sol 和 GPT-6.1 Terra 的工具调用需要 Responses。
+GPT-6 Luna 和 GPT-5.5 在 Chat Completions 中使用函数工具时
 需要显式发送 `reasoning_effort: none`。如果升级后的安装仍通过 Chat Completions
 连接 `https://api.openai.com/v1`，请在模型设置中为 OpenAI 选择 Responses。
 使用配置文件时，在 `$TALOS_HOME/conf/talos.yaml` 中将 `llm.openai.protocol`
 设为 `responses` 并重启 Talos。要更新已有模型目录，可将当前模板中需要的条目加入
 `llm.openai.models`。第三方连接应使用各自支持的协议。
 
-关闭推理时，OpenAI 官方连接为 `gpt-6-luna`、`gpt-6.1-terra` 和旧版
-`gpt-6-sol` 显式发送 `none`。GPT-6.2 Astra、GPT-6.2 Sol、GPT-6.1 Sol 和 GPT-6 Astra
-要求推理。关闭这些模型的推理设置时，Talos 省略推理强度，由 OpenAI 使用模型默认值。
-参见 [OpenAI GPT-6.2 指南](https://developers.openai.com/api/docs/guides/latest-model)和
-[GPT-6.1 Sol 文档](https://developers.openai.com/api/docs/models/gpt-6.1-sol)。
+关闭推理时，OpenAI 官方连接为 `gpt-6-luna` 和 `gpt-6.1-terra` 显式发送 `none`。
+GPT-6.2 Astra 和 Sol 要求推理。关闭这两个模型的推理设置时，Talos 省略推理强度，
+由 OpenAI 使用模型默认值。参见 [OpenAI GPT-6.2 指南](https://developers.openai.com/api/docs/guides/latest-model)。
 
 内置 OpenAI Provider 连接 `https://api.openai.com` 时，Chat 使用
 `max_completion_tokens` 设置输出上限。Responses 默认发送 `store: false`，
