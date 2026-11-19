@@ -305,6 +305,9 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             continue
         elif path.startswith(('conf/', 'talos-rs/.cargo/')) or path in ('justfile', '.github/release-toolchain.env', '.github/ci-toolchain.env', '.github/sandbox-base.env'):
             result.full(rust, frontend, frontend_checks=path == '.github/release-toolchain.env')
+        elif path == '.github/scripts/preview-office.lock':
+            for category, cases in client_group_targets('21_resource_preview', root).items():
+                result.targets[category].update(cases)
         elif path.startswith(('.github/scripts/ci_', '.github/scripts/pr_change_scope',
                               '.github/actions/ci-', '.github/workflows/ci-',
                               '.github/workflows/talos-', '.github/workflows/pr-e2e')):
