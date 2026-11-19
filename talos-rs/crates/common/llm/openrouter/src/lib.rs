@@ -109,8 +109,12 @@ impl OpenRouterProvider {
         request: ChatRequest,
         stream: Option<bool>,
     ) -> TalosResult<responses_protocol::ResponsesRequest> {
-        let reasoning = Self::reasoning_effort(request.reasoning_effort)
-            .map(|effort| responses_protocol::ResponsesReasoning { effort });
+        let reasoning = Self::reasoning_effort(request.reasoning_effort).map(|effort| {
+            responses_protocol::ResponsesReasoning {
+                effort,
+                summary: None,
+            }
+        });
         let include = reasoning
             .as_ref()
             .map(|_| vec!["reasoning.encrypted_content".to_string()]);

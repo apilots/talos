@@ -123,7 +123,9 @@ GPT-6.2 Astra 和 Sol 要求推理。关闭这两个模型的推理设置时，T
 保留已声明的可选参数。Responses JSON 和 SSE 保留拒绝文本，纯文本达到
 输出上限时报告 `length`，上游失败以错误返回。
 Responses 将上游报告的缓存读取与写入映射到逐调用和回合用量字段。
-输出 token 包含 OpenAI 的推理 token，Talos 暂无单独的推理 token 计数。
+Agent 会单独记录上游报告的 `reasoning_tokens`，上游的输出和总量已经包含这部分用量。
+内置 OpenAI 发送已启用的推理档位时，会请求 `reasoning.summary: auto`。
+上游明确给出的助手阶段会更新同一个 Agent 文本块，文本完成后到达的阶段也会生效。
 
 官方 Responses 要求流式响应包含终止事件，并校验工具参数的最终值。
 

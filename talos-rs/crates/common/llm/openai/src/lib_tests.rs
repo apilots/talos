@@ -417,6 +417,32 @@ fn official_responses_requests_stateless_reasoning_and_preserves_optional_tool_f
 }
 
 #[test]
+fn official_responses_requests_summary_only_with_enabled_reasoning() {
+    let provider = OpenAIProvider::new(
+        OpenAIConfig::new("").with_base_url("https://openai-gateway.example/v1"),
+    );
+    let request = ChatRequest::builder()
+        .model("gpt-6-luna")
+        .messages(vec![ChatMessage::user("hello")])
+        .reasoning_effort(Some(ReasoningEffort::Medium))
+        .build();
+
+    for stream in [Some(true), None] {
+        let body =
+            serde_json::to_value(provider.responses_request(request.clone(), stream).unwrap())
+                .unwrap();
+        assert_eq!(
+            body["reasoning"],
+            serde_json::json!({"effort": "medium", "summary": "auto"})
+        );
+    }
+
+    let off = ChatRequest::new_user("hello", "gpt-6-luna");
+    let body = serde_json::to_value(provider.responses_request(off, Some(true)).unwrap()).unwrap();
+    assert_eq!(body["reasoning"], serde_json::json!({"effort": "none"}));
+}
+
+#[test]
 fn official_reasoning_off_distinguishes_gpt6_sol_from_gpt61_sol() {
     let provider = OpenAIProvider::new(OpenAIConfig::new(""));
     for (model, expected) in [

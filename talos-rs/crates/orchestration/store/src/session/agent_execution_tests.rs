@@ -614,6 +614,7 @@ async fn terminal_settlement_and_compaction_usage_update_disjoint_session_state(
         usage: TokenUsage {
             input_tokens: 3,
             output_tokens: 2,
+            reasoning_tokens: None,
             total_tokens: 5,
             cache_creation_input_tokens: None,
             cache_read_input_tokens: None,
@@ -638,6 +639,7 @@ async fn terminal_settlement_and_compaction_usage_update_disjoint_session_state(
     let compaction_usage = TokenUsage {
         input_tokens: 1,
         output_tokens: 1,
+        reasoning_tokens: None,
         total_tokens: 2,
         cache_creation_input_tokens: None,
         cache_read_input_tokens: None,
@@ -670,6 +672,7 @@ async fn terminal_settlement_and_compaction_usage_update_disjoint_session_state(
             TokenUsage {
                 input_tokens: 4,
                 output_tokens: 3,
+                reasoning_tokens: None,
                 total_tokens: 7,
                 cache_creation_input_tokens: None,
                 cache_read_input_tokens: None,
@@ -717,6 +720,7 @@ async fn session_clear_atomically_removes_canonical_history_and_resets_summary()
         usage: TokenUsage {
             input_tokens: 3,
             output_tokens: 2,
+            reasoning_tokens: None,
             total_tokens: 5,
             cache_creation_input_tokens: None,
             cache_read_input_tokens: None,

@@ -4,6 +4,8 @@ use talos_llm_provider::{
     ModelBlockStreamEvent, ModelOutputPhase,
 };
 
+#[path = "stream_phase_tests.rs"]
+mod phase_tests;
 #[path = "stream_recovery_tests.rs"]
 mod recovery_tests;
 

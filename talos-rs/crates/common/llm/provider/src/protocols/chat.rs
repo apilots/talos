@@ -48,7 +48,6 @@ struct ModelToolAcc {
 /// Normalize leading plain instructions for compatible Chat templates without changing history boundaries.
 pub fn merge_initial_system_messages(encoded: &mut ChatCompletionRequest) {
     // Compatible Chat templates commonly accept only one initial system message.
-    // Merge only leading plain instructions; preserve every history boundary.
     let count = encoded
         .messages
         .iter()
@@ -192,6 +191,7 @@ pub fn usage(usage: ChatCompletionUsage) -> TalosResult<Usage> {
     Ok(Usage {
         prompt_tokens: usage.prompt_tokens,
         completion_tokens: usage.completion_tokens,
+        reasoning_tokens: None,
         total_tokens: usage.total_tokens,
         cache_creation_input_tokens: prompt_details.and_then(|details| details.cache_write_tokens),
         cache_read_input_tokens: prompt_details.and_then(|details| details.cached_tokens),

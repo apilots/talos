@@ -185,9 +185,9 @@ def profile(browser, origin, steps):
     try:
         began = time.monotonic()
         page.goto(origin + '/sessions/' + LONG)
-        activities = page.locator('[data-timeline-activity]')
-        last_command = page.get_by_text(f'Bash · echo step-{steps - 1}', exact=True)
-        group = activities.filter(has=last_command)
+        activities = page.locator('[data-timeline-activity], [data-timeline-role="tool"]')
+        last_tool = page.locator(f'[data-timeline-item-key$=":call-{steps - 1}"]')
+        last_command = last_tool.get_by_text(f'Bash · echo step-{steps - 1}', exact=True)
         thinking = page.locator('[data-timeline-activity] > summary').get_by_text('Thinking', exact=True).last
         commentary = page.get_by_text('The checks are running.', exact=True)
         active_tool = page.locator('[data-timeline-item-key$=":quiet-call"]')
@@ -206,9 +206,10 @@ def profile(browser, origin, steps):
         overview.click()
         expect(commentary).to_be_visible()
         expect(last_command).to_be_visible()
-        assert group.evaluate('''node => {
-            const groups = Array.from(document.querySelectorAll('[data-timeline-activity]'));
-            return groups[groups.indexOf(node) - 1]?.querySelector('summary')?.textContent.trim() === 'Thinking';
+        assert last_tool.evaluate('''node => {
+            const row = node.closest('[data-process-surface] > div');
+            return row?.previousElementSibling?.querySelector('[data-timeline-activity] > summary')
+                ?.textContent.trim() === 'Thinking';
         }'''), 'Thinking should be a separate row before its command'
         expect(active_tool.get_by_text('No command output yet')).to_be_visible()
         expect(tail).to_have_count(0)
@@ -221,9 +222,9 @@ def profile(browser, origin, steps):
             page.screenshot(path=str(REPORT / 'running-quiet.png'))
         mounted = activities.count()
         assert mounted <= 64, mounted
-        group.locator('summary').click()
-        expect(group.locator('[data-timeline-role="tool"]')).to_be_visible()
-        expect(group.get_by_text('Thinking', exact=True)).to_have_count(0)
+        last_command.click()
+        expect(last_tool.get_by_text(f'echo step-{steps - 1}', exact=True)).to_be_visible()
+        expect(last_tool.get_by_text('Thinking', exact=True)).to_have_count(0)
         page.wait_for_timeout(100)
         assert fixture.requests and not fixture.stale, fixture.requests
         initial_requests = list(fixture.requests)

@@ -43,6 +43,7 @@ pub fn encode_reply(response: ChatResponse) -> pb::DreamMemoryModelReply {
             total_tokens: response.usage.total_tokens,
             cache_creation_input_tokens: response.usage.cache_creation_input_tokens,
             cache_read_input_tokens: response.usage.cache_read_input_tokens,
+            reasoning_tokens: response.usage.reasoning_tokens,
         }),
     }
 }
@@ -63,6 +64,7 @@ pub fn decode_reply(response: pb::DreamMemoryModelReply) -> TalosResult<ChatResp
             total_tokens: usage.total_tokens,
             cache_creation_input_tokens: usage.cache_creation_input_tokens,
             cache_read_input_tokens: usage.cache_read_input_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
         },
     })
 }

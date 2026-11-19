@@ -118,8 +118,11 @@ impl OpenAIProvider {
         request: ChatRequest,
         stream: Option<bool>,
     ) -> TalosResult<responses_protocol::ResponsesRequest> {
-        let reasoning = Self::effective_reasoning_effort(&request)
-            .map(|effort| responses_protocol::ResponsesReasoning { effort });
+        let reasoning = Self::effective_reasoning_effort(&request).map(|effort| {
+            let summary =
+                (effort != "none").then_some(responses_protocol::ResponsesReasoningSummary::Auto);
+            responses_protocol::ResponsesReasoning { effort, summary }
+        });
         let mut encoded = responses_protocol::request_with_contract(
             request,
             stream,

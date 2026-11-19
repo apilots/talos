@@ -34,6 +34,7 @@ fn session_info() -> SessionInfo {
             tokens: TokenUsage {
                 input_tokens: 120_000,
                 output_tokens: 40_000,
+                reasoning_tokens: None,
                 total_tokens: 160_000,
                 cache_creation_input_tokens: Some(3_000),
                 cache_read_input_tokens: Some(21_000),

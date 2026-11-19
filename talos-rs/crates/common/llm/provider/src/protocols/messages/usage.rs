@@ -51,6 +51,7 @@ pub(super) fn usage_from_messages(usage: &MessagesUsage, output_tokens: u32) -> 
         completion_tokens: output_tokens,
         total_tokens,
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        reasoning_tokens: None,
         cache_read_input_tokens: usage.cache_read_input_tokens,
     })
 }

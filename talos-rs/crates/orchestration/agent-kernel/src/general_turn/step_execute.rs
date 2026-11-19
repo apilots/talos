@@ -18,13 +18,14 @@ struct PendingToolCall {
 #[derive(Debug, Clone)]
 enum ActiveModelBlock {
     Reasoning,
-    AssistantText {
-        item_key: KernelStreamItemKey,
-        phase: AssistantTextPhase,
-    },
-    ToolCall {
-        index: usize,
-    },
+    AssistantText { index: usize },
+    ToolCall { index: usize },
+}
+
+struct StreamedAssistantText {
+    item_key: KernelStreamItemKey,
+    phase: AssistantTextPhase,
+    text: String,
 }
 
 #[derive(Debug, Default)]
@@ -84,17 +85,11 @@ fn normalized_tool_call_id(round: u32, index: usize, id: Option<String>) -> Stri
         .unwrap_or_else(|| format!("tool-{}-{}", round, index))
 }
 
-fn resolve_assistant_text_phase(
-    call_mode: KernelModelCallMode,
-    output_phase: ModelOutputPhase,
-) -> AssistantTextPhase {
-    match call_mode {
-        KernelModelCallMode::Finalization => AssistantTextPhase::FinalAnswer,
-        KernelModelCallMode::WorkingLoop => match output_phase {
-            ModelOutputPhase::Unknown => AssistantTextPhase::Unknown,
-            ModelOutputPhase::Commentary => AssistantTextPhase::Commentary,
-            ModelOutputPhase::FinalAnswer => AssistantTextPhase::FinalAnswer,
-        },
+fn resolve_assistant_text_phase(output_phase: ModelOutputPhase) -> AssistantTextPhase {
+    match output_phase {
+        ModelOutputPhase::Unknown => AssistantTextPhase::Unknown,
+        ModelOutputPhase::Commentary => AssistantTextPhase::Commentary,
+        ModelOutputPhase::FinalAnswer => AssistantTextPhase::FinalAnswer,
     }
 }
 
@@ -112,35 +107,40 @@ fn ensure_not_after_final(final_answer_started: bool, event: &str) -> TalosResul
     Ok(())
 }
 
-async fn close_active_non_final_blocks_before_final(
+async fn prepare_final_answer(
+    model_item_id: &str,
+    final_answer_started: bool,
+    has_tool_calls: bool,
     active_blocks: &mut BTreeMap<String, ActiveModelBlock>,
     completed_blocks: &mut BTreeSet<String>,
+    assistant_items: &[StreamedAssistantText],
     stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
 ) -> TalosResult<()> {
-    let active_tool = active_blocks.iter().find_map(|(id, block)| {
-        matches!(block, ActiveModelBlock::ToolCall { .. }).then_some(id.clone())
-    });
-    if let Some(model_item_id) = active_tool {
-        return Err(provider_protocol_violation(format!(
-            "final answer started with active tool call block {model_item_id}"
-        )));
+    if final_answer_started {
+        return Err(provider_protocol_violation(
+            "multiple final answer blocks in one stream",
+        ));
     }
-
-    let active_ids: Vec<String> = active_blocks.keys().cloned().collect();
+    if has_tool_calls {
+        return Err(provider_protocol_violation(
+            "final answer started after tool call was emitted in same round",
+        ));
+    }
+    let active_ids: Vec<String> = active_blocks
+        .keys()
+        .filter(|id| id.as_str() != model_item_id)
+        .cloned()
+        .collect();
     for model_item_id in active_ids {
         let Some(block) = active_blocks.remove(&model_item_id) else {
             continue;
         };
         completed_blocks.insert(model_item_id);
-        if let ActiveModelBlock::AssistantText {
-            item_key,
-            phase: AssistantTextPhase::Commentary | AssistantTextPhase::Unknown,
-        } = block
-        {
+        if let ActiveModelBlock::AssistantText { index } = block {
             emit_stream_event(
                 stream_tx,
                 AgentKernelEventPayload::AssistantTextCompleted(AssistantTextCompletedStreamData {
-                    item_key,
+                    item_key: assistant_items[index].item_key.clone(),
                 }),
             )
             .await;
@@ -161,7 +161,6 @@ pub(crate) async fn stream_round(
     observation: Option<Arc<dyn crate::trajectory::KernelModelObservation>>,
 ) -> TalosResult<StreamRound> {
     let mut stream = llm_provider.stream_model_blocks(request).await?;
-    let mut content = String::new();
     let mut streamed_reasoning = String::new();
     let mut completed_reasoning: Option<ReasoningOutput> = None;
     let mut finish_reason = None;
@@ -171,11 +170,9 @@ pub(crate) async fn stream_round(
     let mut completed_blocks = BTreeSet::<String>::new();
     let mut streamed_tool_outputs = Vec::new();
     let mut usage = TokenUsage::default();
-    let mut assistant_text_streamed = false;
-    let mut final_answer_streamed = false;
     let execution_summary_streamed = false;
     let mut final_answer_started = false;
-    let mut unknown_assistant_text_items = Vec::<KernelStreamItemKey>::new();
+    let mut assistant_items = Vec::<StreamedAssistantText>::new();
     let mut scheduler = streaming_tool_execution.map(|config| {
         crate::tool_execution::StreamingToolScheduler::new(
             config.execution_mode,
@@ -246,7 +243,7 @@ pub(crate) async fn stream_round(
                     active_blocks.insert(started.model_item_id, ActiveModelBlock::Reasoning);
                 }
                 ModelBlockKind::AssistantText => {
-                    let phase = resolve_assistant_text_phase(call_mode, started.output_phase);
+                    let phase = resolve_assistant_text_phase(started.output_phase);
                     let model_item_id = started.model_item_id;
                     if active_blocks.contains_key(&model_item_id) {
                         return Err(provider_protocol_violation(format!(
@@ -264,41 +261,30 @@ pub(crate) async fn stream_round(
                     };
 
                     if matches!(phase, AssistantTextPhase::FinalAnswer) {
-                        if final_answer_started {
-                            return Err(provider_protocol_violation(
-                                "multiple final answer blocks in one stream",
-                            ));
-                        }
-                        if !pending_calls.is_empty() {
-                            return Err(provider_protocol_violation(
-                                "final answer started after tool call was emitted in same round",
-                            ));
-                        }
-                        close_active_non_final_blocks_before_final(
+                        prepare_final_answer(
+                            &model_item_id,
+                            final_answer_started,
+                            !pending_calls.is_empty(),
                             &mut active_blocks,
                             &mut completed_blocks,
+                            &assistant_items,
                             stream_tx,
                         )
                         .await?;
                         final_answer_started = true;
-                        final_answer_streamed = true;
                     } else if matches!(phase, AssistantTextPhase::Commentary) {
                         ensure_not_after_final(final_answer_started, "commentary assistant text")?;
                     } else {
                         ensure_not_after_final(final_answer_started, "unknown assistant text")?;
                     }
 
-                    assistant_text_streamed = true;
-                    if matches!(phase, AssistantTextPhase::Unknown) {
-                        unknown_assistant_text_items.push(item_key.clone());
-                    }
-                    active_blocks.insert(
-                        model_item_id,
-                        ActiveModelBlock::AssistantText {
-                            item_key: item_key.clone(),
-                            phase,
-                        },
-                    );
+                    let index = assistant_items.len();
+                    assistant_items.push(StreamedAssistantText {
+                        item_key: item_key.clone(),
+                        phase,
+                        text: String::new(),
+                    });
+                    active_blocks.insert(model_item_id, ActiveModelBlock::AssistantText { index });
                     emit_stream_event(
                         stream_tx,
                         AgentKernelEventPayload::AssistantTextStarted(
@@ -353,18 +339,19 @@ pub(crate) async fn stream_round(
                 delta,
             } => match delta {
                 ModelBlockDelta::AssistantText { delta } => {
-                    let Some(ActiveModelBlock::AssistantText { item_key, .. }) =
+                    let Some(ActiveModelBlock::AssistantText { index }) =
                         active_blocks.get(&model_item_id)
                     else {
                         return Err(provider_protocol_violation(format!(
                             "assistant text delta received without active assistant block {model_item_id}"
                         )));
                     };
-                    content.push_str(&delta);
+                    let item = &mut assistant_items[*index];
+                    item.text.push_str(&delta);
                     emit_stream_event(
                         stream_tx,
                         AgentKernelEventPayload::AssistantTextDelta(AssistantTextDeltaStreamData {
-                            item_key: item_key.clone(),
+                            item_key: item.item_key.clone(),
                             delta,
                         }),
                     )
@@ -442,6 +429,50 @@ pub(crate) async fn stream_round(
                     .await;
                 }
             },
+            ModelBlockStreamEvent::AssistantTextPhase {
+                model_item_id,
+                phase,
+            } => {
+                let phase = resolve_assistant_text_phase(phase);
+                let index = assistant_items
+                    .iter()
+                    .position(|item| item.item_key.local_id == model_item_id)
+                    .ok_or_else(|| {
+                        provider_protocol_violation("phase received for an unknown assistant block")
+                    })?;
+                if phase == AssistantTextPhase::Unknown
+                    || assistant_items[index].phase != AssistantTextPhase::Unknown
+                {
+                    return Err(provider_protocol_violation(
+                        "phase update must resolve a pending assistant block",
+                    ));
+                }
+                if phase == AssistantTextPhase::FinalAnswer {
+                    prepare_final_answer(
+                        &model_item_id,
+                        final_answer_started,
+                        !pending_calls.is_empty(),
+                        &mut active_blocks,
+                        &mut completed_blocks,
+                        &assistant_items,
+                        stream_tx,
+                    )
+                    .await?;
+                    final_answer_started = true;
+                }
+                let item = &mut assistant_items[index];
+                item.phase = phase;
+                emit_stream_event(
+                    stream_tx,
+                    AgentKernelEventPayload::AssistantTextCommitted(
+                        AssistantTextCommittedStreamData {
+                            item_key: item.item_key.clone(),
+                            phase,
+                        },
+                    ),
+                )
+                .await;
+            }
             ModelBlockStreamEvent::BlockCompleted(completed) => {
                 let Some(active_block) = active_blocks.remove(&completed.model_item_id) else {
                     if completed_blocks.contains(&completed.model_item_id) {
@@ -455,11 +486,13 @@ pub(crate) async fn stream_round(
                 completed_blocks.insert(completed.model_item_id);
                 match active_block {
                     ActiveModelBlock::Reasoning => {}
-                    ActiveModelBlock::AssistantText { item_key, .. } => {
+                    ActiveModelBlock::AssistantText { index } => {
                         emit_stream_event(
                             stream_tx,
                             AgentKernelEventPayload::AssistantTextCompleted(
-                                AssistantTextCompletedStreamData { item_key },
+                                AssistantTextCompletedStreamData {
+                                    item_key: assistant_items[index].item_key.clone(),
+                                },
                             ),
                         )
                         .await;
@@ -583,46 +616,35 @@ pub(crate) async fn stream_round(
             ));
         }
     };
-    if !unknown_assistant_text_items.is_empty() {
-        let phase = if tool_calls.is_empty() {
+    let fallback_phase =
+        if tool_calls.is_empty() || matches!(call_mode, KernelModelCallMode::Finalization) {
             AssistantTextPhase::FinalAnswer
         } else {
             AssistantTextPhase::Commentary
         };
-        for item_key in unknown_assistant_text_items {
-            emit_stream_event(
-                stream_tx,
-                AgentKernelEventPayload::AssistantTextCommitted(AssistantTextCommittedStreamData {
-                    item_key,
-                    phase,
-                }),
-            )
-            .await;
-        }
-        if matches!(phase, AssistantTextPhase::FinalAnswer) {
-            final_answer_streamed = true;
-        }
-    }
-    if !assistant_text_streamed && !content.trim().is_empty() {
-        let phase = if tool_calls.is_empty() {
-            AssistantTextPhase::FinalAnswer
-        } else {
-            AssistantTextPhase::Commentary
-        };
-        assistant_text_streamed = emit_assistant_text_stream_item(
+    for item in assistant_items
+        .iter_mut()
+        .filter(|item| item.phase == AssistantTextPhase::Unknown)
+    {
+        item.phase = fallback_phase;
+        emit_stream_event(
             stream_tx,
-            KernelStreamItemKey {
-                round: Some(round),
-                local_id: "round_terminal_output".to_string(),
-            },
-            phase,
-            Some(round),
-            &content,
+            AgentKernelEventPayload::AssistantTextCommitted(AssistantTextCommittedStreamData {
+                item_key: item.item_key.clone(),
+                phase: fallback_phase,
+            }),
         )
         .await;
-        final_answer_streamed =
-            assistant_text_streamed && matches!(phase, AssistantTextPhase::FinalAnswer);
     }
+    let assistant_text_streamed = !assistant_items.is_empty();
+    let final_answer_streamed = assistant_items
+        .iter()
+        .any(|item| item.phase == AssistantTextPhase::FinalAnswer);
+    let content = assistant_items
+        .into_iter()
+        .filter(|item| !tool_calls.is_empty() || item.phase == AssistantTextPhase::FinalAnswer)
+        .map(|item| item.text)
+        .collect::<String>();
 
     Ok(StreamRound {
         content,

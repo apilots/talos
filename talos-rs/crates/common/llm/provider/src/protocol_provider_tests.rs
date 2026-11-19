@@ -1,4 +1,5 @@
 use super::*;
+use crate::ModelBlockDelta;
 use crate::{
     apply_thinking_selection, ChatMessage, FunctionCall, ModelBlockStreamEvent, ReasoningBlock,
     ReasoningContinuation, ReasoningEncryptedBlock, ReasoningTextBlock,
@@ -266,7 +267,10 @@ async fn three_protocols_use_real_http_nonstream_stream_tools_and_protocol_auth(
             LlmProtocol::Chat=>(json!({"model":"same-model","choices":[{"message":{"content":"","reasoning":"thought","tool_calls":[{"id":"call-1","type":"function","function":{"name":"echo","arguments":"{\"text\":\"hello\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}),
             "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".to_owned(),"chat/completions"),
             LlmProtocol::Responses=>(json!({"model":"same-model","output":[{"type":"reasoning","id":"rs-1","encrypted_content":"opaque","summary":[{"type":"summary_text","text":"thought"}]},{"type":"function_call","id":"fc-1","call_id":"call-1","name":"echo","arguments":"{\"text\":\"hello\"}"}],"status":"completed"}),
-            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg-1\",\"delta\":\"OK\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_owned(),"responses"),
+            concat!(
+                "event: response.output_text.delta\ndata: {\"item_id\":\"msg-1\",\"delta\":\"O\"}\n\n",
+                "event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"output\":[{\"id\":\"msg-1\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}]}}\n\n",
+            ).to_owned(),"responses"),
             LlmProtocol::Messages=>(json!({"model":"same-model","content":[{"type":"thinking","thinking":"thought","signature":"signed"},{"type":"tool_use","id":"call-1","name":"echo","input":{"text":"hello"}}],"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":2}}),
             "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_stop\"}\n\n".to_owned(),"messages"),
         };
@@ -308,12 +312,19 @@ async fn three_protocols_use_real_http_nonstream_stream_tools_and_protocol_auth(
             .await
             .unwrap();
         let mut done = false;
+        let mut block_text = String::new();
         while let Some(event) = blocks.next().await {
-            if matches!(event.unwrap(), ModelBlockStreamEvent::Done { .. }) {
-                done = true;
+            match event.unwrap() {
+                ModelBlockStreamEvent::Done { .. } => done = true,
+                ModelBlockStreamEvent::BlockDelta {
+                    delta: ModelBlockDelta::AssistantText { delta },
+                    ..
+                } => block_text.push_str(&delta),
+                _ => {}
             }
         }
         assert!(done);
+        assert_eq!(block_text, "OK");
         let mut stream = provider.stream(followup).await.unwrap();
         let mut text = String::new();
         while let Some(chunk) = stream.next().await {

@@ -530,6 +530,7 @@ fn validate_monotonic_metrics(
         || next_usage.input_tokens < previous_usage.input_tokens
         || next_usage.output_tokens < previous_usage.output_tokens
         || next_usage.total_tokens < previous_usage.total_tokens
+        || optional_counter_decreased(previous_usage.reasoning_tokens, next_usage.reasoning_tokens)
         || optional_counter_decreased(
             previous_usage.cache_creation_input_tokens,
             next_usage.cache_creation_input_tokens,

@@ -1501,6 +1501,10 @@ output_tokens: number,
  */
 total_tokens: number,
 /**
+ * Reasoning tokens included in output tokens, when the Provider reports the breakdown.
+ */
+reasoning_tokens?: number | null,
+/**
  * Tokens written into a Provider prompt cache when reported.
  */
 cache_creation_input_tokens?: number | null,

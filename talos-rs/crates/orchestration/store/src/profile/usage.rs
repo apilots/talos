@@ -19,6 +19,11 @@ pub(super) fn usage_from_row(row: &sqlx::sqlite::SqliteRow) -> TalosResult<Token
                 .map_err(storage_error("read total tokens"))?,
             "total_tokens",
         )?,
+        reasoning_tokens: optional_token_value(
+            row.try_get("reasoning_tokens")
+                .map_err(storage_error("read reasoning tokens"))?,
+            "reasoning_tokens",
+        )?,
         cache_creation_input_tokens: optional_token_value(
             row.try_get("cache_creation_input_tokens")
                 .map_err(storage_error("read cache creation tokens"))?,
@@ -51,6 +56,11 @@ pub(super) fn usage_from_aggregate_row(row: &sqlx::sqlite::SqliteRow) -> TalosRe
                 .map_err(storage_error("read aggregate total tokens"))?
                 .unwrap_or_default(),
             "total_tokens",
+        )?,
+        reasoning_tokens: optional_token_value(
+            row.try_get("reasoning_tokens")
+                .map_err(storage_error("read aggregate reasoning tokens"))?,
+            "reasoning_tokens",
         )?,
         cache_creation_input_tokens: optional_token_value(
             row.try_get("cache_creation_input_tokens")

@@ -255,6 +255,7 @@ message TokenUsage {
   uint32 input_tokens = 1; uint32 output_tokens = 2; uint32 total_tokens = 3;
   optional uint32 cache_creation_input_tokens = 4;
   optional uint32 cache_read_input_tokens = 5;
+  optional uint32 reasoning_tokens = 6;
 }
 message ContextUsage {
   uint32 used_tokens = 1; uint32 context_window_tokens = 2;

@@ -247,7 +247,8 @@ impl KernelModelObservation for ModelCapture {
                     t.execution_duration_ms = t.started_at_ms.map(|start| now - start);
                 }
             }
-            ModelBlockStreamEvent::ReasoningCompleted { .. } => {}
+            ModelBlockStreamEvent::ReasoningCompleted { .. }
+            | ModelBlockStreamEvent::AssistantTextPhase { .. } => {}
         }
     }
     fn response(&self, response: &ChatResponse) {

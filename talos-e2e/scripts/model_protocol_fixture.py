@@ -3,7 +3,6 @@
 The Agent owns the streaming tool loop. Non-streaming transport/tool coverage belongs
 in ProtocolProvider's Rust tests; this fixture never invents a completion API.
 """
-import copy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -165,27 +164,38 @@ def chat_chunks(call, mode, done, *, command=None):
 
 def response_events(call, mode, done):
     events = []
-    index = 0
+    output = []
     if not done and mode == "on":
         item = {"type": "reasoning", "id": f"rs_{call}", "summary": [{"type": "summary_text", "text": f"private:{call}"}], "encrypted_content": f"encrypted:{call}"}
-        events.extend([{"type": "response.output_item.added", "output_index": index, "item": item},
-            {"type": "response.reasoning_summary_text.delta", "output_index": index, "delta": f"private:{call}"},
-            {"type": "response.output_item.done", "output_index": index, "item": item}])
-        index += 1
+        start = {"type": "reasoning", "id": item["id"], "summary": []}
+        events.extend([{"type": "response.output_item.added", "output_index": 0, "item": start},
+            {"type": "response.reasoning_summary_text.delta", "output_index": 0, "delta": f"private:{call}"},
+            {"type": "response.output_item.done", "output_index": 0, "item": item}])
+        output.append(item)
     if done:
-        item = {"type": "message", "id": "msg_fixture", "role": "assistant", "content": [{"type": "output_text", "text": f"PROTOCOL_OK:{call}"}]}
-        delta = {"type": "response.output_text.delta", "output_index": index, "delta": f"PROTOCOL_OK:{call}"}
+        progress = {"type": "message", "id": "msg_progress", "role": "assistant",
+                    "content": [{"type": "output_text", "text": f"PROTOCOL_PROGRESS:{call}"}]}
+        events.extend([{"type": "response.output_item.added", "output_index": 0, "item": dict(progress, content=[])},
+            {"type": "response.output_text.delta", "output_index": 0, "delta": f"PROTOCOL_PROGRESS:{call}"},
+            {"type": "response.output_item.done", "output_index": 0, "item": progress}])
+        output.append(dict(progress, phase="commentary"))
+        item = {"type": "message", "id": "msg_fixture", "role": "assistant", "phase": "final_answer",
+                "content": [{"type": "output_text", "text": f"PROTOCOL_OK:{call}"}]}
+        start = dict(item, content=[], phase=None)
+        delta = {"type": "response.output_text.delta", "output_index": len(output), "delta": f"PROTOCOL_OK:{call}"}
     else:
         item = {"type": "function_call", "id": f"fc_{call}", "call_id": call, "name": "Bash", "arguments": json.dumps({"command": f"printf 'TOOL_{call[5:]}'"})}
-        delta = {"type": "response.function_call_arguments.delta", "output_index": index, "delta": item["arguments"]}
-    start = copy.deepcopy(item)
-    if not done:
-        start["arguments"] = ""
+        start = dict(item, arguments="")
+        delta = {"type": "response.function_call_arguments.delta", "output_index": len(output), "delta": item["arguments"]}
+    index = len(output)
+    output.append(item)
+    usage = {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110,
+             "input_tokens_details": {"cached_tokens": 80 if done else 0, "cache_write_tokens": 0 if done else 40}}
+    if mode == "on":
+        usage["output_tokens_details"] = {"reasoning_tokens": 3 if done else 4}
     events.extend([{"type": "response.output_item.added", "output_index": index, "item": start}, delta,
         {"type": "response.output_item.done", "output_index": index, "item": item},
-        {"type": "response.completed", "response": {"id": "resp_fixture", "status": "completed", "output": [item],
-            "usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110,
-                "input_tokens_details": {"cached_tokens": 80 if done else 0, "cache_write_tokens": 0 if done else 40}}}}])
+        {"type": "response.completed", "response": {"id": "resp_fixture", "status": "completed", "output": output, "usage": usage}}])
     return events
 
 
@@ -316,6 +326,9 @@ def verify(base, directory):
                 usage = result["metrics"]["usage"]
                 assert usage["cache_read_input_tokens"] == 80, usage
                 assert usage["cache_creation_input_tokens"] == 40, usage
+            if protocol == "responses":
+                assert usage["output_tokens"] == 20 and usage["total_tokens"] == 220, usage
+                assert usage["reasoning_tokens"] == (7 if mode == "on" else None), usage
             if mode != "off":
                 assert result["reasoning"], "omit policy must preserve canonical reasoning display/history"
             print(f"CASE protocol_agent_tool_loop PASS protocol={protocol} replay={replay} thinking={mode} upstream_requests=2")
@@ -324,6 +337,21 @@ def verify(base, directory):
         stored = http(base, f"/v1/sessions/{result['session_id']}/history?limit=100")
         (directory / f"{provider}-history.json").write_text(json.dumps(stored, indent=2))
         assert f"private:call_{provider}_{modes(provider)[0]}" in json.dumps(stored), "reasoning replay policy changed canonical stored history"
+        if protocol == "responses":
+            for mode in modes(provider):
+                call = f"call_{provider}_{mode}"
+                contents = [
+                    block["content"]["data"]
+                    for turn in stored["data"] if turn["result"]["status"] == "completed"
+                    for message in turn["result"]["result"]["messages"]
+                    for block in message["blocks"]
+                    if block["content"]["type"] == "assistantText"
+                    and call in block["content"]["data"]["text"]
+                ]
+                assert contents == [
+                    {"phase": "commentary", "text": f"PROTOCOL_PROGRESS:{call}"},
+                    {"phase": "finalAnswer", "text": f"PROTOCOL_OK:{call}"},
+                ], contents
         if provider == "chat-protocol-default":
             from trajectory_fixture import verify as verify_trajectory
             verify_trajectory(base, directory, stored)

@@ -201,3 +201,51 @@ async fn chat_stream_reasoning_details_replay_after_tool_call() {
     );
     assert_eq!(actual["messages"][0]["reasoning_details"][0]["index"], 0);
 }
+
+#[tokio::test]
+async fn responses_stream_maps_terminal_snapshot_through_the_openrouter_adapter() {
+    let snapshot = serde_json::json!({
+        "type": "response.completed",
+        "response": {
+            "status": "completed",
+            "output": [
+                {"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Checking"}],"encrypted_content":"opaque"},
+                {"type":"message","id":"msg_1","phase":"commentary","content":[{"type":"output_text","text":"Working"}]},
+                {"type":"function_call","id":"fc_1","call_id":"call_1","name":"echo","arguments":{"n":1}},
+                {"type":"web_search_call","id":"hosted_1","status":"completed"}
+            ],
+            "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5}
+        }
+    });
+    let base_url = spawn_sse_server(format!("data: {snapshot}\n\n")).await;
+    let provider = OpenRouterProvider::new(
+        OpenRouterConfig::new("test-key")
+            .with_base_url(base_url)
+            .with_protocol(OpenRouterProtocol::Responses),
+    );
+    let stream = provider
+        .stream_model_blocks(reasoning_request(ReasoningEffort::High))
+        .await
+        .unwrap();
+    let events = collect_events(stream).await;
+    let calls = events
+        .iter()
+        .filter_map(|event| match event {
+            ModelBlockStreamEvent::BlockStarted(block) => block.tool_call.as_ref(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].call_id.as_deref(), Some("call_1"));
+    assert_eq!(calls[0].tool_name.as_deref(), Some("echo"));
+    assert!(events.iter().any(|event| matches!(event,
+        ModelBlockStreamEvent::BlockDelta { delta: talos_llm_provider::ModelBlockDelta::ToolArguments { delta }, .. }
+        if delta == r#"{"n":1}"#
+    )));
+    assert!(events.iter().any(|event| matches!(event,
+        ModelBlockStreamEvent::ReasoningCompleted { output } if output.display_text() == "Checking" && output.continuation.is_some()
+    )));
+    assert!(events.iter().any(|event| matches!(event,
+        ModelBlockStreamEvent::Done { usage: Some(usage), .. } if usage.total_tokens == 5
+    )));
+}

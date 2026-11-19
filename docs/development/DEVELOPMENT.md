@@ -248,14 +248,23 @@ uses the model's default. See the [OpenAI GPT-6.2 guide](https://developers.open
 
 The built-in OpenAI connection sends
 `store: false` and requests encrypted reasoning for manual history replay.
+It requests `reasoning.summary: auto` when it sends an enabled reasoning effort.
 Responses function tools set `strict: false` so optional tool arguments keep
 their declared semantics. Responses JSON and SSE retain refusal text, report
 text-only output limits as `length`, and propagate failed responses as errors.
 Official Responses requires a terminal event and checks finalized tool arguments.
-OpenAI Responses maps reported cache reads and writes to the existing
-usage counters in per-call and turn metrics. Output tokens include reasoning
-tokens reported by OpenAI. Talos does not expose a separate reasoning token
-counter.
+
+Native OpenAI, OpenRouter, and custom Responses connections share output decoding.
+Output indices and item IDs match deltas with completed parts, items, and the
+terminal snapshot. An explicit assistant phase resolves the same Agent text
+block, including when it arrives after that block's text is complete.
+Function calls need a name before dispatch, and encrypted reasoning stays in the
+continuation. Provider-hosted tools, artifacts, and annotations require dedicated
+Talos mappings.
+
+Responses maps reported cache reads and writes to per-call and turn metrics.
+The Agent records reported `reasoning_tokens` as a breakdown already included in
+the provider's output and total token counts.
 
 The native Bailian Chat adapter maps the explicit-cache fields documented in
 [Bailian Context Cache](https://help.aliyun.com/zh/model-studio/context-cache).

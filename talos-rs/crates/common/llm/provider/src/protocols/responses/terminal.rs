@@ -45,22 +45,23 @@ pub(super) fn stream_terminal(
         "response.completed" => "completed",
         "response.failed" | "error" => "failed",
         "response.incomplete" => "incomplete",
-        "response.cancelled" if contract == ResponsesContract::Official => "cancelled",
+        "response.cancelled" => "cancelled",
         _ => return None,
     };
     let response = &event["response"];
-    let nested_error = event["error"]["code"]
+    let error_code = event["code"]
         .as_str()
+        .or_else(|| event["error"]["code"].as_str())
         .or_else(|| response["error"]["code"].as_str());
     let incomplete_reason = response["incomplete_details"]["reason"].as_str();
 
-    if contract == ResponsesContract::Compatible {
+    if contract == ResponsesContract::Compatible && status != "cancelled" {
         return Some(if status == "completed" {
             Ok(compatible_finish_reason(response["status"].as_str())
                 .unwrap_or_else(|| "stop".to_owned()))
         } else {
             Err(crate::error::stream_response_error(
-                nested_error.or(incomplete_reason),
+                error_code.or(incomplete_reason),
             ))
         });
     }
@@ -70,13 +71,8 @@ pub(super) fn stream_terminal(
             .as_array()
             .is_some_and(|items| items.iter().any(|item| item_type(item) == "function_call"));
     Some(
-        official_finish_reason(
-            Some(status),
-            event["code"].as_str().or(nested_error),
-            incomplete_reason,
-            has_tool_calls,
-        )
-        .map(|reason| reason.expect("terminal Responses status has a finish reason")),
+        official_finish_reason(Some(status), error_code, incomplete_reason, has_tool_calls)
+            .map(|reason| reason.expect("terminal Responses status has a finish reason")),
     )
 }
 
