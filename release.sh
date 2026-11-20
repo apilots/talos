@@ -30,17 +30,17 @@ run() {
 
 normalize_version() {
   local input="$1"
-  if [[ "${input}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "${input}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[1-9][0-9]*)?$ ]]; then
     VERSION="${input#v}"
     TAG="${input}"
     return
   fi
-  if [[ "${input}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "${input}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[1-9][0-9]*)?$ ]]; then
     VERSION="${input}"
     TAG="v${input}"
     return
   fi
-  die "version must look like 0.1.3 or v0.1.3"
+  die "expected a formal version such as 0.1.17 or 0.1.17-1 (optional v prefix)"
 }
 
 require_command() {
@@ -60,7 +60,7 @@ require_clean_worktree() {
 require_release_branch() {
   local branch
   branch="$(git branch --show-current)"
-  EXPECTED_BRANCH="release-${VERSION}"
+  EXPECTED_BRANCH="release-${VERSION%-*}"
   [[ "${branch}" == "${EXPECTED_BRANCH}" ]] \
     || die "release must run from ${EXPECTED_BRANCH}, current branch is ${branch}"
 }
@@ -128,6 +128,7 @@ require_validated_candidate() {
     --name "${artifact_name}" --dir "${CANDIDATE_DIR}"
   python3 .github/scripts/release_candidate.py verify \
     --repository "${REPOSITORY}" --sha "${HEAD_SHA}" \
+    --version "${VERSION}" \
     --run-id "${CANDIDATE_RUN}" --directory "${CANDIDATE_DIR}"
   if [[ -z "${NOTES_FILE}" ]]; then
     mkdir -p output/release-notes

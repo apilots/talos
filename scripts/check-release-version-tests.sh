@@ -71,6 +71,18 @@ git reset --soft HEAD~2
 git -c core.hooksPath=/dev/null commit -q -m "chore(release): prepare v1.2.3"
 expect_rejection "version preparation commit must contain only"
 
+# A maintenance version uses the same files and preparation commit on the base branch.
+git reset --hard -q
+git ls-files | while IFS= read -r file; do
+  sed 's/1\.2\.3/1.2.3-1/g' "${file}" > version-file
+  cat version-file > "${file}"
+done
+rm version-file
+git add -u
+git -c core.hooksPath=/dev/null commit -q -m "chore(release): prepare v1.2.3-1"
+bash "${validator}" 1.2.3-1
+bash "${validator}" --metadata
+
 # Main closeout validates consistent snapshot metadata without release-only history.
 git reset --hard -q
 python3 - <<'PY_METADATA'
@@ -78,7 +90,7 @@ from pathlib import Path
 for root in [Path("talos-app"), Path("talos-rs")]:
     for path in root.rglob("*"):
         if path.is_file():
-            path.write_text(path.read_text().replace("1.2.3", "1.2.4-SNAPSHOT"))
+            path.write_text(path.read_text().replace("1.2.3-1", "1.2.4-SNAPSHOT"))
 PY_METADATA
 bash "${validator}" --metadata
 printf '{"version":"1.2.5-SNAPSHOT"}\n' > talos-app/package.json

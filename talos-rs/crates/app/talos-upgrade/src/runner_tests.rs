@@ -220,6 +220,44 @@ async fn tasks_run_when_their_target_version_is_reached() {
 }
 
 #[tokio::test]
+async fn numeric_maintenance_releases_upgrade_from_the_stable_base() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = test_config(temp.path());
+    run_at_version(&config, "0.1.17", &[], fresh_install)
+        .await
+        .unwrap();
+
+    let tasks = [task(
+        FIRST_TASK_ID,
+        Version::new(0, 1, 17),
+        100,
+        write_first,
+    )];
+    let first = run_at_version(&config, "0.1.17-1", &tasks, legacy_install)
+        .await
+        .unwrap();
+    assert_eq!(first.applied, [FIRST_TASK_ID]);
+
+    for version in ["0.1.17-2", "0.1.17-10"] {
+        let report = run_at_version(&config, version, &tasks, legacy_install)
+            .await
+            .unwrap();
+        assert_eq!(report.skipped, [FIRST_TASK_ID]);
+    }
+
+    for version in ["0.1.17", "0.1.17-2"] {
+        let error = run_at_version(&config, version, &tasks, legacy_install)
+            .await
+            .unwrap_err();
+        assert!(error.is_code(ErrorCode::InvalidRequest));
+    }
+    let next = run_at_version(&config, "0.1.18-SNAPSHOT", &tasks, legacy_install)
+        .await
+        .unwrap();
+    assert_eq!(next.previous_version, "0.1.17-10");
+}
+
+#[tokio::test]
 async fn failed_task_keeps_previous_version_and_can_retry() {
     let temp = tempfile::tempdir().expect("temp home");
     let config = test_config(temp.path());

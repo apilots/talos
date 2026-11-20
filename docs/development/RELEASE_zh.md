@@ -25,6 +25,14 @@ Release。`apilots/talos-releases` 中已经发布的版本和下载制品继续
 chore(release): prepare v<version>
 ```
 
+## 已发布版本的小版本修复
+
+常规版本继续使用 `X.Y.Z`，按原流程发布。已发布版本发现 bug 时，从对应 release 分支
+发布小版本 `X.Y.Z-N`。编号从 `1` 开始，在同一版本内每发一次加一。修复提交同步到 `main`。
+
+例如，`0.1.17` 发布后发现 Desktop 升级失败，修复版用 `0.1.17-1`，下一次修复用
+`0.1.17-2`。
+
 ## 创建 release 分支时切正式版本
 
 从最新远端 `main` 的精确提交创建 `release-<version>`。创建后立即将所有版本位置
@@ -46,8 +54,7 @@ chore(release): prepare v<version>
 提交进入下一版本 `-SNAPSHOT` 开发，不必等待 release 发布。Docker 默认值继续指向
 已发布的最新正式镜像，直到新版本发布成功。
 
-通用发布规范与自动化调整提交到 main，供后续版本生效；不作为产品 bug 修复
-回补到已有 release 分支。
+通用发布规范与自动化调整提交到 main。仅在修复版发版必需时回补发布工具。
 
 ## 稳定阶段只修 bug
 
@@ -123,8 +130,8 @@ macOS Intel 构建与原生安装 CI 已停用。
 `shasum -a 256 -c checksums.txt`。验证 Release Notes 与 annotated tag 一致、manifest
 源码 SHA 对应不可变 tag、镜像包含 `linux/amd64` 与 `linux/arm64`，最新版本还要验证 latest 引用。
 
-发布成功后将精确 tag Notes 原样归档到 `docs/releases/<tag>.md`，再将 release 分支合回 main。发生版本冲突时保留 main 已进入的下一开发
+发布成功后将精确 tag Notes 原样归档到 `docs/releases/<tag>.md`。常规发布将 release 分支合回 main，修复发布只回合修复和 Notes，版本提交留在 release 分支。发生版本冲突时保留 main 已进入的下一开发
 版本，不能将 main 降回正式版本，也不能用 release 整棵文件树覆盖正在进行的开发。
-Docker 默认值更新为新发布镜像。如果 main 尚未切下一版本，再用独立提交进入开发周期。
+新版本成为 latest 时，更新 Docker 默认镜像。如果 main 尚未切下一版本，再用独立提交进入开发周期。
 已发布 tag 始终不变。协议和数据升级还需执行
 [部署文档](../../deploy/README_zh.md#数据升级与回滚)中的流程。
