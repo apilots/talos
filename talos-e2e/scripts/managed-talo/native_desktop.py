@@ -30,6 +30,19 @@ def electron():
     return Path(os.environ.get('TALOS_E2E_ELECTRON', native)).resolve(strict=True)
 
 
+def wait_for_pixels(page):
+    page.wait_for_function('''() => [...document.querySelectorAll('canvas')].some(canvas => {
+        if (canvas.width < 20 || canvas.height < 20) return false;
+        const context = canvas.getContext('2d');
+        if (!context) return false;
+        const colors = new Set();
+        for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+            colors.add(String(context.getImageData(Math.floor(canvas.width*x/8), Math.floor(canvas.height*y/8), 1, 1).data));
+        }
+        return colors.size > 3;
+    })''', polling=100, timeout=24000)
+
+
 def capture(playwright, process, endpoint, base, node_id, report, stage):
     deadline = time.monotonic() + 15
     while True:
@@ -42,6 +55,38 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
             time.sleep(.2)
     context = browser.contexts[0]
     page = context.pages[0] if context.pages else context.wait_for_event('page', timeout=15000)
+    if stage == 'initialize':
+        page.wait_for_function("location.protocol === 'file:' && typeof window.talos?.invoke === 'function'")
+        try:
+            chooser = page.get_by_role('tab', name='Talo', exact=True)
+            chooser.or_(page.get_by_role('link', name='Talo', exact=True)).first.click()
+            page.get_by_role('button', name='Initialize Talo', exact=True).click()
+            page.get_by_role('button', name='Connect desktop', exact=True).click(timeout=120000)
+            wait_for_pixels(page)
+            page.screenshot(path=report / 'electron-native-talo.png')
+            page.get_by_role('button', name='Take control', exact=True).click()
+            release = page.get_by_role('button', name='Return to agent', exact=True)
+            release.wait_for()
+            wait_for_pixels(page)
+            sys.path[:0] = [str(ROOT / 'talos-e2e/scripts/browser-worker'), str(ROOT / 'talos-e2e/scripts')]
+            from managed_talo import ASSISTANT, data, http, managed_resource, wait
+            from media import shift_pressed
+            instance = data(http(base + ASSISTANT))['instance']['instanceId']
+            worker, = managed_resource('container', instance)
+            page.locator('canvas:visible').first.click()
+            page.keyboard.down('Shift')
+            try:
+                wait(lambda: shift_pressed(worker), 'Electron keyboard input applied on the Talo Worker')
+            finally:
+                page.keyboard.up('Shift')
+            release.click()
+            page.get_by_role('button', name='Take control', exact=True).wait_for()
+            print('PASS native Electron initialization, framebuffer, Worker keyboard input and control release', flush=True)
+        except Exception:
+            page.screenshot(path=report / 'electron-native-failure.png')
+            print(page.locator('body').inner_text()[:1200], flush=True)
+            raise
+        return
     page.wait_for_url(lambda url: url.startswith(base + '/'), timeout=15000)
     streams, nodes = [], []
 
@@ -64,16 +109,7 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
         if stage == 'before-reset':
             page.screenshot(path=report / 'electron-talo-chooser.png')
         connect.click()
-        page.wait_for_function('''() => [...document.querySelectorAll('canvas')].some(canvas => {
-            if (canvas.width < 20 || canvas.height < 20) return false;
-            const context = canvas.getContext('2d');
-            if (!context) return false;
-            const colors = new Set();
-            for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
-                colors.add(String(context.getImageData(Math.floor(canvas.width*x/8), Math.floor(canvas.height*y/8), 1, 1).data));
-            }
-            return colors.size > 3;
-        })''', polling=100, timeout=24000)
+        wait_for_pixels(page)
         media = [stream for stream in streams if stream.path == '/v1/desktop/stream']
         assert node_id in nodes and media and all(stream.netloc == urlsplit(base).netloc for stream in media)
         page.screenshot(path=report / f'electron-talo-{stage}.png')
@@ -94,9 +130,15 @@ def main():
     report = Path(report)
     debug_port = port()
     with tempfile.TemporaryDirectory(prefix='talos-electron-') as home, (report / f'electron-{stage}.log').open('wb') as log:
+        env = dict(os.environ, HOME=home, LANG='en_US.UTF-8')
+        if stage == 'initialize':
+            env.pop('TALOS_DESKTOP_SERVER_URL', None)
+            env.pop('TALOS_DESKTOP_RENDERER_URL', None)
+        else:
+            env['TALOS_DESKTOP_SERVER_URL'] = base
         process = subprocess.Popen([
-            str(electron()), str(DESKTOP), f'--remote-debugging-port={debug_port}', f'--user-data-dir={home}',
-        ], env={**os.environ, 'HOME': home, 'TALOS_DESKTOP_SERVER_URL': base, 'LANG': 'en_US.UTF-8'},
+            str(electron()), str(DESKTOP), '--lang=en-US', f'--remote-debugging-port={debug_port}', f'--user-data-dir={home}',
+        ], env=env,
             stdout=log, stderr=log, start_new_session=True)
         try:
             with sync_playwright() as playwright:

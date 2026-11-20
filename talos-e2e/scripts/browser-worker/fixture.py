@@ -586,3 +586,43 @@ print(json.dumps({'lockSha256':metadata['lockSha256'],'browserUseVersion':versio
 
 if __name__ == '__main__':
     run(plugin_packages_only=sys.argv[1:] == ['--plugin-packages-only'])
+
+
+def start_ingress(stack, directory, ingress, web, rpc_port, cert, key):
+    caddy_config = directory / 'Caddyfile'
+    caddy_config.write_text(f'''{{
+    admin off
+    auto_https off
+}}
+{ingress} {{
+    bind 127.0.0.1
+    tls {cert} {key}
+    @grpc path /talos.agent.v1.*
+    handle @grpc {{
+        reverse_proxy https://127.0.0.1:{rpc_port} {{
+            transport http {{
+                tls_trusted_ca_certs {cert}
+            }}
+        }}
+    }}
+    handle {{
+        reverse_proxy {web}
+    }}
+}}
+''')
+    log = stack.enter_context((REPORT / 'ingress.log').open('wb'))
+    caddy = subprocess.Popen([os.environ.get('TALOS_E2E_CADDY_BIN', 'caddy'), 'run',
+                             '--config', str(caddy_config)], stdout=log, stderr=subprocess.STDOUT,
+                             env=dict(os.environ, XDG_CONFIG_HOME=str(directory / 'caddy-config'),
+                                      XDG_DATA_HOME=str(directory / 'caddy-data')))
+    stack.callback(stop, caddy)
+
+
+def stop(process):
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)

@@ -1,5 +1,5 @@
 //! Route management requests owned by the configured control plane.
-use std::time::Duration;
+use std::{sync::Mutex, time::Duration};
 
 use reqwest::{Client, Method, Url};
 use serde_json::{json, Value};
@@ -7,10 +7,14 @@ use talos_app_protocol::requests::ClientRequestParams;
 use talos_config::CloudConfig;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::Actor;
-use talos_types::{ApiResponse, ManagedWorkerActionRequest, UserCurrentResponse};
+use talos_types::{
+    ApiResponse, DesktopViewGrant, ManagedWorkerActionRequest, ManagedWorkerResponse,
+    UserCurrentResponse,
+};
 
 use super::application_sync::ApplicationSyncHost;
 
+pub(super) const SERVER_TICKET: &str = "server:";
 const TALO_PATH: &str = "/v1/computers/managed-worker";
 
 pub(super) struct CloudCall {
@@ -31,18 +35,57 @@ impl CloudCall {
         let computer = match request {
             ClientRequestParams::BuiltinJobList(request) => Some(request.computer_id.as_str()),
             ClientRequestParams::BuiltinJobControl(request) => Some(request.computer_id.as_str()),
-            _ => None,
+            _ => Self::personal_target(request),
         };
         if let Some(computer) = computer {
             if computer == "embedded" || computer == host.local_computer_id().await? {
                 return Ok(None);
             }
         }
+        if matches!(request, ClientRequestParams::Browser(_)) && computer.is_none() {
+            return Ok(None);
+        }
         Self::from_request(request)
+    }
+
+    pub fn personal_target(request: &ClientRequestParams) -> Option<&str> {
+        match request {
+            ClientRequestParams::ComputerRead(params) => Some(&params.node_id),
+            ClientRequestParams::DesktopOpen(params) => Some(&params.node_id),
+            ClientRequestParams::Browser(params)
+                if !matches!(params.operation, talos_types::BrowserOperation::OpenLocal) =>
+            {
+                params.node_id.as_deref()
+            }
+            _ => None,
+        }
+    }
+
+    fn managed_read() -> Self {
+        Self {
+            method: Method::GET,
+            path: TALO_PATH.to_owned(),
+            body: None,
+        }
     }
 
     fn from_request(request: &ClientRequestParams) -> TalosResult<Option<Self>> {
         let call = match request {
+            ClientRequestParams::ComputerRead(params) => Self {
+                method: Method::GET,
+                path: format!("/v1/computers/{}", params.node_id),
+                body: None,
+            },
+            ClientRequestParams::Browser(request) => Self {
+                method: Method::POST,
+                path: "/v1/browser".into(),
+                body: Some(value(request)?),
+            },
+            ClientRequestParams::DesktopOpen(request) => Self {
+                method: Method::POST,
+                path: "/v1/desktop/open".into(),
+                body: Some(value(request)?),
+            },
             ClientRequestParams::BuiltinJobList(request) => Self {
                 method: Method::POST,
                 path: "/v1/builtin-job/list".to_owned(),
@@ -53,11 +96,7 @@ impl CloudCall {
                 path: "/v1/builtin-job/control".to_owned(),
                 body: Some(value(request)?),
             },
-            ClientRequestParams::ComputerReadManagedWorker(_) => Self {
-                method: Method::GET,
-                path: TALO_PATH.to_owned(),
-                body: None,
-            },
+            ClientRequestParams::ComputerReadManagedWorker(_) => Self::managed_read(),
             ClientRequestParams::ComputerCreateManagedWorker(_) => Self {
                 method: Method::POST,
                 path: TALO_PATH.to_owned(),
@@ -103,6 +142,8 @@ impl CloudCall {
 pub(super) struct DesktopCloud {
     client: Client,
     origin: Url,
+    // A routing hint from a Server response. Every operation still authenticates with that Server.
+    personal_node: Mutex<Option<(String, String)>>,
 }
 
 impl DesktopCloud {
@@ -138,10 +179,71 @@ impl DesktopCloud {
         Ok(Self {
             client: client.build().map_err(request_error)?,
             origin,
+            personal_node: Mutex::default(),
         })
     }
 
-    pub async fn send(&self, actor: &Actor, call: CloudCall) -> TalosResult<Value> {
+    pub fn knows_personal_node(&self, actor: &Actor, node: &str) -> bool {
+        self.personal_node
+            .lock()
+            .expect("personal Talo routing lock")
+            .as_ref()
+            .is_some_and(|(owner, id)| owner == &actor.user_id && id == node)
+    }
+
+    pub async fn discover_personal_node(&self, actor: &Actor, node: &str) -> bool {
+        match self
+            .read_personal_status(actor, CloudCall::managed_read())
+            .await
+        {
+            Ok(status) => status
+                .instance
+                .is_some_and(|instance| instance.node_id == node),
+            Err(error) => {
+                talos_logging::report_error(&error);
+                false
+            }
+        }
+    }
+
+    async fn read_personal_status(
+        &self,
+        actor: &Actor,
+        call: CloudCall,
+    ) -> TalosResult<ManagedWorkerResponse> {
+        let status: ManagedWorkerResponse = self.send(actor, call).await?;
+        *self
+            .personal_node
+            .lock()
+            .expect("personal Talo routing lock") = status
+            .instance
+            .as_ref()
+            .map(|instance| (actor.user_id.clone(), instance.node_id.clone()));
+        Ok(status)
+    }
+
+    pub async fn dispatch(
+        &self,
+        actor: &Actor,
+        call: CloudCall,
+        request: &ClientRequestParams,
+    ) -> TalosResult<Value> {
+        if matches!(request, ClientRequestParams::ComputerReadManagedWorker(_)) {
+            return value(&self.read_personal_status(actor, call).await?);
+        }
+        if matches!(request, ClientRequestParams::DesktopOpen(_)) {
+            let mut grant: DesktopViewGrant = self.send(actor, call).await?;
+            grant.ticket = format!("{SERVER_TICKET}{}", grant.ticket);
+            return value(&grant);
+        }
+        self.send(actor, call).await
+    }
+
+    pub async fn send<T: serde::de::DeserializeOwned>(
+        &self,
+        actor: &Actor,
+        call: CloudCall,
+    ) -> TalosResult<T> {
         let token = actor.access_token.as_deref().ok_or_else(|| {
             TalosError::new(
                 ErrorCode::Unauthenticated,
@@ -201,6 +303,9 @@ impl DesktopCloud {
         }
     }
 }
+
+#[path = "desktop_cloud_stream.rs"]
+mod stream;
 
 fn value(request: &impl serde::Serialize) -> TalosResult<Value> {
     serde_json::to_value(request).map_err(|error| {

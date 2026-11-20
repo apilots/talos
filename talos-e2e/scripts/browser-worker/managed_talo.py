@@ -1,5 +1,6 @@
 """Secretless Talo acceptance against a disposable Server, registry and Worker."""
 import argparse
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ import uuid
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fixture import MODEL_PROVIDER, ACCOUNTS, REPORT, ROOT, TOKEN, configure, data, free_port, http, wait
+from fixture import MODEL_PROVIDER, ACCOUNTS, REPORT, ROOT, TOKEN, config, configure, data, free_port, http, start_ingress, wait
 from lifecycle import container_args
 from media import media
 from managed_talo_access import configure_accounts, exercise_access
@@ -185,7 +186,7 @@ def phase(base, expected):
     return snapshot if snapshot and snapshot["phase"] == expected else None
 
 
-def exercise(base, instances, worker_model, faults, observed, before_delete=None):
+def exercise(base, instances, worker_model, faults, observed, before_delete=None, initialize=None):
     for token, user in ACCOUNTS.items():
         current = data(http(base + "/v1/user", token=token))["user"]
         assert (current["user_id"], current["role"], current["type"]) == (
@@ -195,9 +196,17 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
     exercise_access(base)
     assert data(http(base + ASSISTANT)) == {"enabled": True, "instance": None}
     assert http(base + ASSISTANT, {}, token="no-such-fixture-user")["status"] != "success"
+    if initialize:
+        try:
+            initialize()
+        finally:
+            instance = data(http(base + ASSISTANT))["instance"]
+            if instance:
+                instances.append(instance["instanceId"])
     created = data(http(base + ASSISTANT, {}))["instance"]
     instance = created["instanceId"]
-    instances.append(instance)
+    if instance not in instances:
+        instances.append(instance)
     assert data(http(base + ASSISTANT, {}))["instance"]["instanceId"] == instance
     node = created["nodeId"]
     assert data(http(base + ASSISTANT, token=bob))["instance"] is None
@@ -459,7 +468,31 @@ def server_healthy(container, base):
     return http(base + "/health")
 
 
-def run(files, parity=False):
+def initialize_native(files, base, rpc_port, issuer_port):
+    with ExitStack() as stack:
+        home = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="talo-desktop-")))
+        ingress = f"https://127.0.0.1:{free_port()}"
+        cert = files / "server.crt"
+        start_ingress(stack, home, ingress, base, rpc_port, cert, files / "server.key")
+        profile = config(home, 8080, issuer_port)
+        profile["cloud"].update(agent_base_url=ingress, agent_trusted_ca_file=str(cert))
+        (home / "conf").mkdir()
+        cfg = home / "conf/talos.yaml"
+        cfg.write_text(yaml.safe_dump(profile))
+        auth = home / "auth"
+        auth.mkdir(mode=0o700)
+        session = auth / "cloud-session.json"
+        session.write_text(json.dumps({"schema_version": 2, "cloud_api_base_url": profile["cloud"]["api_base_url"],
+            "access_token": TOKEN, "token_type": "Bearer", "expires_at_ms": int(time.time() * 1000)+3600000,
+            "last_used_at_ms": int(time.time() * 1000), "user": ACCOUNTS[TOKEN]}))
+        session.chmod(0o600)
+        subprocess.run([sys.executable, str(ROOT / "talos-e2e/scripts/managed-talo/native_desktop.py"),
+                        base, "", str(REPORT), "initialize"], check=True, timeout=200,
+                       env=dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(cfg),
+                                TALOS_APP_SERVER_BIN=os.environ["TALOS_E2E_APP_SERVER_BIN"]))
+
+
+def run(files, parity=False, native=False):
     files.chmod(0o755)
     run_id = uuid.uuid4().hex[:10]
     registry, server = f"talo-e2e-registry-{run_id}", f"talo-e2e-server-{run_id}"
@@ -468,6 +501,11 @@ def run(files, parity=False):
     try:
         docker("run", "-d", *container_args(registry), "--publish", "127.0.0.1::5000", REGISTRY_IMAGE)
         registry_address = docker("port", registry, "5000/tcp")
+        def registry_ready():
+            with urllib.request.urlopen(f"http://{registry_address}/v2/", timeout=2) as response:
+                return response.status == 200
+
+        wait(registry_ready, "disposable registry")
         # The Engine trusts loopback registries. The API requires an actual immutable manifest digest.
         tag = f"{registry_address}/talo-e2e-worker:fixture"
         docker("tag", WORKER_IMAGE, tag)
@@ -480,6 +518,9 @@ def run(files, parity=False):
         fault_port = free_port()
         recovery_args = ["--publish", f"127.0.0.1:{fault_port}:18080",
                          "--env", "TALOS_E2E_TALO_RECOVERY=1"] if RECOVERY else []
+        if native:
+            recovery_args += ["--publish", f"127.0.0.1:{rpc_port}:9443",
+                              "--publish", f"127.0.0.1:{fault_port}:18080"]
         ingress_port = 9444 if RECOVERY else 9443
         worker_model = server_files(files, gateway, rpc_port, model_port, pinned_worker)
         socket_mount = f"type=bind,src={SOCKET},dst=/var/run/docker.sock"
@@ -520,7 +561,9 @@ def run(files, parity=False):
                 docker("restart", server)
                 wait(lambda: server_healthy(server, base), "Server restart")
 
-        exercise(base, instances, worker_model, f"http://127.0.0.1:{fault_port}", DockerObservations(), restart)
+        exercise(base, instances, worker_model, f"http://127.0.0.1:{fault_port}", DockerObservations(), restart,
+                 initialize=(lambda: initialize_native(files, base, rpc_port, fault_port)) if native else None)
+
     finally:
         (REPORT / "managed-talo-server.log").write_text(docker("logs", server, check=False))
         docker("rm", "-fv", server, check=False)
@@ -538,8 +581,9 @@ def run(files, parity=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parity", action="store_true", help="Include personal registration and Server restart")
+    parser.add_argument("--native", action="store_true", help="Initialize and view Talo in native Electron")
     args = parser.parse_args()
     tmp_root = Path(os.environ["TALOS_E2E_TMP_ROOT"])
     tmp_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="talo-e2e-", dir=tmp_root) as directory:
-        run(Path(directory), args.parity)
+        run(Path(directory), args.parity, args.native)

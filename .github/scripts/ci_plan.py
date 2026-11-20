@@ -39,7 +39,7 @@ def scenario_task(category: str, target: str, root: Path = ROOT) -> dict:
     return dict(name=target.splitlines()[0].split(':', 1)[1].replace('/', ' · '),
                 kind='e2e', category=category, targets=target, cases=sorted(set(cases)),
                 binaries=sorted(binaries), binary_pattern='ci-binary-' + ('{' + ','.join(sorted(binaries)) + '}' if len(binaries) > 1 else next(iter(binaries), 'none')), node=node, chrome='chrome' in requirements['checks'], office='soffice' in requirements['commands'],
-                docker=bool(images), images=images, caddy='caddy' in requirements['checks'],
+                docker=bool(images), images=images, display='display' in requirements['checks'], caddy='caddy' in requirements['checks'],
                 rust_tests='cargo-nextest' in requirements['commands'],
                 rust=['talos-tools'] if 'cargo-nextest' in requirements['commands'] else [], frontend=[])
 

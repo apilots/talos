@@ -1,4 +1,5 @@
 //! Desktop identity and enrollment over the existing management runtime.
+use super::desktop_cloud::{CloudCall, DesktopCloud};
 use async_trait::async_trait;
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
@@ -26,7 +27,7 @@ pub(crate) struct DesktopApplication {
     pub(crate) device_name: String,
     pub(crate) worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     local: Arc<dyn AppServerApplication>,
-    cloud: tokio::sync::OnceCell<super::desktop_cloud::DesktopCloud>,
+    cloud: tokio::sync::OnceCell<DesktopCloud>,
     pub(crate) sync_host: Arc<crate::application_sync::ApplicationSyncHost>,
 }
 
@@ -56,6 +57,12 @@ impl DesktopApplication {
         }
     }
 
+    async fn cloud(&self) -> TalosResult<&DesktopCloud> {
+        self.cloud
+            .get_or_try_init(|| async { DesktopCloud::new(&self.config.cloud) })
+            .await
+    }
+
     pub(crate) async fn stop_registration(&self) -> TalosResult<()> {
         if let Some(worker) = self.worker.lock().await.take() {
             worker.shutdown().await?;
@@ -72,7 +79,13 @@ impl DesktopApplication {
             ClientRequestParams::DesktopStreamOpen(params) => {
                 let viewer = self.media.reserve(actor, params.stream_id)?;
                 self.media
-                    .open(&self.service, actor, params.ticket, viewer)
+                    .open(
+                        &self.service,
+                        self.cloud.get(),
+                        actor,
+                        params.ticket,
+                        viewer,
+                    )
                     .await?;
                 value(())
             }
@@ -119,7 +132,13 @@ impl AppServerApplication for DesktopApplication {
                     .map_err(project_error);
                 Box::pin(async move {
                     self.media
-                        .open(&self.service, &actor, params.ticket, viewer?)
+                        .open(
+                            &self.service,
+                            self.cloud.get(),
+                            &actor,
+                            params.ticket,
+                            viewer?,
+                        )
                         .await
                         .map_err(project_error)?;
                     Ok(ApplicationResponse {
@@ -153,20 +172,37 @@ impl AppServerApplication for DesktopApplication {
         actor: &Actor,
         request: ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
-        if let Some(call) =
-            super::desktop_cloud::CloudCall::for_request(actor, &request.params, &self.sync_host)
-                .await
-                .map_err(project_error)?
+        if let Some(call) = CloudCall::for_request(actor, &request.params, &self.sync_host)
+            .await
+            .map_err(project_error)?
         {
-            let cloud = self
-                .cloud
-                .get_or_try_init(|| async {
-                    super::desktop_cloud::DesktopCloud::new(&self.config.cloud)
-                })
-                .await
-                .map_err(project_error)?;
+            if let Some(node) = CloudCall::personal_target(&request.params).filter(|node| {
+                !self
+                    .cloud
+                    .get()
+                    .is_some_and(|cloud| cloud.knows_personal_node(actor, node))
+            }) {
+                let result = self.local.dispatch(actor, request.clone()).await;
+                // On cold startup, the ordinary Worker route remains authoritative unless the
+                // Server confirms this is the account's personal Talo.
+                if !matches!(&result, Err(error) if matches!(error.code, ErrorCode::PermissionDenied | ErrorCode::ResourceNotFound))
+                    || !actor.role.can_use_managed_worker(actor.user_type)
+                {
+                    return result;
+                }
+                match self.cloud().await {
+                    Ok(cloud) if cloud.discover_personal_node(actor, node).await => (),
+                    _ => return result,
+                }
+            }
             return Ok(ApplicationResponse {
-                body: cloud.send(actor, call).await.map_err(project_error)?,
+                body: self
+                    .cloud()
+                    .await
+                    .map_err(project_error)?
+                    .dispatch(actor, call, &request.params)
+                    .await
+                    .map_err(project_error)?,
                 started_turn: None,
             });
         }

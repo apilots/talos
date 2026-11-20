@@ -104,6 +104,13 @@ class ChangeScopeTests(unittest.TestCase):
                          client_group_targets('23_browser_container')['desktop'])
         self.assertFalse(helper.rust or helper.frontend)
 
+    def test_native_talo_journey_follows_renderer_and_media_changes(self):
+        target = 'case:23_browser_container/03_managed_talo'
+        for path in ('talos-app/desktop/src/ipc-guard.ts', 'talos-app/desktop/src/desktop-server-requests.ts',
+                     'talos-app/web/src/pages/home/TaloPage.tsx', 'talos-rs/crates/app/talos-base/src/desktop_cloud.rs'):
+            self.assertIn(target, impact([path]).targets['server'], path)
+        self.assertEqual(impact(['talos-e2e/scripts/managed-talo/native_desktop.py']).targets['server'], {target})
+
     def test_managed_talo_full_topology_stays_local(self):
         result = plan([
             'talos-e2e/scenarios/25_managed_talo/05_kubernetes_recovery_desktop.sh',

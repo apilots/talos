@@ -202,6 +202,16 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             result.targets['server'].add(OWNER_CONTROLS_TARGET)
             result.harness = True
             continue
+        if path == 'talos-e2e/scripts/managed-talo/native_desktop.py':
+            result.targets['server'].add('case:23_browser_container/03_managed_talo')
+            result.harness = True
+            continue
+        if (any(path.startswith('talos-app/desktop/src/' + name) for name in (*MEDIA_OWNERS, 'main.ts', 'renderer-entry'))
+                or path.startswith(('talos-app/web/src/shared/api/desktop-client', 'talos-app/ts-sdk/packages/core/src/app-server',
+                                    'talos-app/web/src/features/computers/', 'talos-app/web/src/pages/home/TaloPage',
+                                    'talos-app/ts-sdk/packages/app-server/', 'talos-rs/crates/app/talos-base/src/desktop_',
+                                    'talos-rs/crates/gateway/http/src/server/desktop'))):
+            result.targets['server'].add('case:23_browser_container/03_managed_talo')
         if path.startswith(OWNER_CONTROLS_INPUTS):
             result.targets['server'].add(OWNER_CONTROLS_TARGET)
         if path.startswith('talos-rs/'):

@@ -105,7 +105,7 @@ async fn cloud_calls_use_the_server_origin_and_preserve_authorization_errors() {
     .unwrap()
     .unwrap();
     assert!(cloud
-        .send(&actor, call)
+        .send::<Value>(&actor, call)
         .await
         .unwrap_err()
         .is_code(ErrorCode::PermissionDenied));
@@ -118,7 +118,7 @@ async fn cloud_calls_use_the_server_origin_and_preserve_authorization_errors() {
         }),
     ] {
         let call = CloudCall::from_request(&params).unwrap().unwrap();
-        let data = cloud.send(&actor, call).await.unwrap();
+        let data = cloud.dispatch(&actor, call, &params).await.unwrap();
         let status: ManagedWorkerResponse = serde_json::from_value(data).unwrap();
         assert!(status.enabled && status.instance.is_none());
     }

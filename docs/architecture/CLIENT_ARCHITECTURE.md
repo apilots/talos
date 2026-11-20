@@ -261,7 +261,7 @@ viewing and control. Browser capabilities determine whether desktop media is
 available. Built-in job requests target the selected Computer and its execution
 instance. The verified execution-host owner controls its existing application
 jobs, including maintenance of historical data. Desktop delegates cloud Computer job operations and managed Talo
-lifecycle to the configured Server used by Web.
+lifecycle to the configured Server used by Web. Personal Talo browser controls and media use that same authenticated Server and viewer ticket. The native renderer receives frames through its existing IPC bridge.
 When opening a registered remote Computer, Desktop verifies its directory
 identity at the Gateway. After the owner connection is admitted, Desktop can
 record the public Computer metadata locally so the execution route also works

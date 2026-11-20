@@ -101,6 +101,7 @@ impl DesktopMedia {
     pub(crate) async fn open(
         &self,
         service: &talos_service::TalosService,
+        cloud: Option<&crate::desktop_cloud::DesktopCloud>,
         actor: &Actor,
         ticket: String,
         viewer: Viewer,
@@ -108,7 +109,12 @@ impl DesktopMedia {
         let transport = tokio::select! {
             biased;
             _ = viewer.stop.cancelled() => return Err(denied()),
-            result = service.consume_desktop_ticket(actor, ticket, Some(&viewer.stream_id)) => result?,
+            result = async {
+                if let Some(ticket) = ticket.strip_prefix(crate::desktop_cloud::SERVER_TICKET) {
+                    return cloud.ok_or_else(denied)?.connect_viewer(actor, ticket, &viewer.stream_id).await;
+                }
+                service.consume_desktop_ticket(actor, ticket, Some(&viewer.stream_id)).await
+            } => result?,
         };
         self.start_stream(viewer, transport)
     }
