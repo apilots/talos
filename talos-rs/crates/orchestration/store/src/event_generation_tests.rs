@@ -97,14 +97,6 @@ async fn event_generation_keeps_existing_cursor_and_allows_reuse_of_a_retired_tu
     assert_eq!(events.len(), 1);
     assert_eq!(events.pop().unwrap().event_seq, 31);
     assert_eq!(reopened.active_turn.last_event_seq, 31);
-    let retained: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT event_seq, history_generation FROM agent_events WHERE session_id='s' ORDER BY event_seq",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    assert_eq!(retained, [(15, 7), (31, 8)]);
-
     sqlx::query("INSERT INTO session_event_retention(session_id,through_generation,deleted) VALUES ('s',8,1)")
         .execute(pool)
         .await
@@ -113,6 +105,14 @@ async fn event_generation_keeps_existing_cursor_and_allows_reuse_of_a_retired_tu
         .execute(pool)
         .await
         .unwrap();
+    let retained: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT event_seq, history_generation FROM agent_events WHERE session_id='s' ORDER BY event_seq",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(retained, [(15, 7), (31, 8)]);
+
     sqlx::query(
         "INSERT INTO sessions(session_key,user_id,agent_id,workspace_id,source_type,source_provider,environment_json,conf_json,usage_json,created_at,last_activity)
          VALUES ('s','u','agent','workspace','http','http','null','{}','{}',3,3)",
