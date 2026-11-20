@@ -5,7 +5,6 @@ use chrono::{DateTime, Utc};
 use talos_config::ProfileUsageRetentionConfig;
 use talos_storage::SqliteStorage;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore, TurnUsageUpdate};
-use talos_store::session::MaintenanceDataScope;
 use talos_types::{ModelRef, StopReason, TokenUsage};
 
 use super::ProfileUsageRetention;
@@ -58,13 +57,7 @@ async fn retention_stops_after_configured_batch_limit() {
     );
 
     let now = DateTime::<Utc>::from_timestamp(2 * 24 * 60 * 60, 0).unwrap();
-    assert_eq!(
-        retention
-            .run_at(now, MaintenanceDataScope::Application)
-            .await
-            .unwrap(),
-        2
-    );
+    assert_eq!(retention.run_at(now).await.unwrap(), 2);
 
     let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM profile_turn_usage")
         .fetch_one(&pool)

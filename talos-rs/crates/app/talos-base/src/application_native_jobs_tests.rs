@@ -9,7 +9,7 @@ use talos_config::{Config, TalosPaths};
 use talos_service::automation::native_jobs::NativeJobService;
 use talos_storage::SqliteStorage;
 use talos_store::{
-    automation::native_jobs::{DatabaseNativeJobControlStore, NativeJobControlStore},
+    automation::native_jobs::DatabaseNativeJobControlStore,
     session::{DatabaseSessionStore, SessionRecord, SessionStore, SessionTreeIdentity},
 };
 use talos_types::{
@@ -43,21 +43,12 @@ async fn storage() -> Arc<SqliteStorage> {
 }
 
 async fn insert_session(storage: Arc<SqliteStorage>, owner: &str) {
-    insert_computer_session(storage, &format!("session-{owner}"), owner, "embedded").await;
-}
-
-async fn insert_computer_session(
-    storage: Arc<SqliteStorage>,
-    session: &str,
-    owner: &str,
-    computer: &str,
-) {
     let store = DatabaseSessionStore::new(storage).await.unwrap();
     store
         .insert_session_record(&SessionRecord {
-            id: session.into(),
+            id: format!("session-{owner}"),
             agent_id: "talos".into(),
-            execution_node_id: computer.into(),
+            execution_node_id: "embedded".into(),
             tree_identity: SessionTreeIdentity::Primary,
             workspace_id: "default".into(),
             title: "Native maintenance scope".into(),
@@ -97,61 +88,16 @@ async fn insert_usage(storage: &dyn Storage, owner: &str, kind: &str, finalized:
 }
 
 #[tokio::test]
-async fn data_scope_checks_sessions_and_all_orphan_usage_owners() {
-    let storage = storage().await;
-    let actor = Actor::regular(OWNER);
-    insert_session(storage.clone(), OWNER).await;
-    insert_usage(storage.as_ref(), OWNER, "turn", "1").await;
-    verify_maintained_data_owner(storage.as_ref(), &actor)
-        .await
-        .unwrap();
-
-    insert_session(storage.clone(), FOREIGN).await;
-    assert_code(
-        verify_maintained_data_owner(storage.as_ref(), &actor).await,
-        ErrorCode::PermissionDenied,
-    );
-    storage
-        .execute("DELETE FROM sessions WHERE user_id = ?", &[FOREIGN])
-        .await
-        .unwrap();
-
-    for (kind, finalized) in [("turn", "0"), ("turn", "1"), ("memory", "1")] {
-        insert_usage(storage.as_ref(), FOREIGN, kind, finalized).await;
-        assert_code(
-            verify_maintained_data_owner(storage.as_ref(), &actor).await,
-            ErrorCode::PermissionDenied,
-        );
-        storage
-            .execute(
-                "DELETE FROM profile_turn_usage WHERE user_id = ?",
-                &[FOREIGN],
-            )
-            .await
-            .unwrap();
-    }
-    verify_maintained_data_owner(storage.as_ref(), &actor)
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
 async fn only_open_mode_accepts_local_anonymous_aliases() {
     let storage = storage().await;
     insert_session(storage.clone(), "anonymous").await;
     insert_usage(storage.as_ref(), "embedded", "turn", "1").await;
-    for actor in [Actor::regular(OWNER), Actor::regular("anonymous")] {
-        assert_code(
-            verify_maintained_data_owner(storage.as_ref(), &actor).await,
-            ErrorCode::PermissionDenied,
-        );
-    }
-    verify_maintained_data_owner(storage.as_ref(), &Actor::auth_disabled())
+    verify_anonymous_data(storage.as_ref(), &Actor::auth_disabled())
         .await
         .unwrap();
     insert_usage(storage.as_ref(), FOREIGN, "memory", "1").await;
     assert_code(
-        verify_maintained_data_owner(storage.as_ref(), &Actor::auth_disabled()).await,
+        verify_anonymous_data(storage.as_ref(), &Actor::auth_disabled()).await,
         ErrorCode::PermissionDenied,
     );
 }
@@ -183,50 +129,41 @@ struct HostFixture {
     _home: tempfile::TempDir,
 }
 
-fn fixture_config(home: &Path) -> Config {
-    let paths = TalosPaths::from_home(home.into());
-    paths.ensure_base_dirs().unwrap();
-    let mut config = Config::default().with_runtime_paths(paths);
-    config.apply_derived_paths();
-    config.gateway.auth = true;
-    config.sync.enabled = Some(false);
-    config.agent.kernel.tools.enable_mcp_tools = false;
-    config.automation.dream_memory_maintenance.cron = CRON.into();
-    config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
-        id: config.llm.model.clone(),
-        name: "Native control fixture".into(),
-        context_window: 32768,
-        reasoning: false,
-        reasoning_efforts: None,
-        reasoning_effort: Default::default(),
-        reasoning_replay: Default::default(),
-        request_parameters: Default::default(),
-        speed: Default::default(),
-        input: Vec::new(),
-        cost: Default::default(),
-    }];
-    config
-}
-
-fn persist_config(config: &Config) {
-    let mut persisted = serde_json::to_value(config).unwrap();
-    persisted["logging"].as_object_mut().unwrap().remove("file");
-    persisted["storage"]
-        .as_object_mut()
-        .unwrap()
-        .remove("connection_string");
-    std::fs::write(
-        config.source_path(),
-        serde_json::to_vec(&persisted).unwrap(),
-    )
-    .unwrap();
-}
-
 impl HostFixture {
-    async fn start(personal_desktop: bool) -> Self {
+    async fn start() -> Self {
         let home = tempfile::tempdir().unwrap();
-        let config = fixture_config(home.path());
-        persist_config(&config);
+        let paths = TalosPaths::from_home(home.path().into());
+        paths.ensure_base_dirs().unwrap();
+        let mut config = Config::default().with_runtime_paths(paths);
+        config.apply_derived_paths();
+        config.gateway.auth = true;
+        config.sync.enabled = Some(false);
+        config.agent.kernel.tools.enable_mcp_tools = false;
+        config.automation.dream_memory_maintenance.cron = CRON.into();
+        config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+            id: config.llm.model.clone(),
+            name: "Native control fixture".into(),
+            context_window: 32768,
+            reasoning: false,
+            reasoning_efforts: None,
+            reasoning_effort: Default::default(),
+            reasoning_replay: Default::default(),
+            request_parameters: Default::default(),
+            speed: Default::default(),
+            input: Vec::new(),
+            cost: Default::default(),
+        }];
+        let mut persisted = serde_json::to_value(&config).unwrap();
+        persisted["logging"].as_object_mut().unwrap().remove("file");
+        persisted["storage"]
+            .as_object_mut()
+            .unwrap()
+            .remove("connection_string");
+        std::fs::write(
+            config.source_path(),
+            serde_json::to_vec(&persisted).unwrap(),
+        )
+        .unwrap();
         let runtime = crate::build_application_runtime_with_migration_dir(config, &migrations())
             .await
             .unwrap();
@@ -248,8 +185,6 @@ impl HostFixture {
             storage: storage.clone(),
             automation,
             execution_instance_id: runtime.sync_peer_id().into(),
-            personal_desktop,
-            computer_maintenance: None,
         });
         Self {
             runtime,
@@ -269,7 +204,7 @@ impl HostFixture {
 
 #[tokio::test]
 async fn real_host_requires_local_owner_and_exact_computer_without_admin_override() {
-    let fixture = HostFixture::start(/* personal_desktop */ false).await;
+    let fixture = HostFixture::start().await;
     insert_session(fixture.storage.clone(), OWNER).await;
     let scope = fixture
         .host
@@ -300,8 +235,6 @@ async fn real_host_requires_local_owner_and_exact_computer_without_admin_overrid
         storage: fixture.storage.clone(),
         automation: fixture.host.automation.clone(),
         execution_instance_id: fixture.runtime.sync_peer_id().into(),
-        personal_desktop: false,
-        computer_maintenance: None,
     };
     assert_code(
         unavailable
@@ -313,66 +246,8 @@ async fn real_host_requires_local_owner_and_exact_computer_without_admin_overrid
 }
 
 #[tokio::test]
-async fn foreign_data_added_after_listing_blocks_next_control_without_side_effects() {
-    let fixture = HostFixture::start(/* personal_desktop */ false).await;
-    let controls = Arc::new(DatabaseNativeJobControlStore::new(
-        fixture.storage.pool().clone(),
-    ));
-    let host: Arc<dyn NativeJobHost> = fixture.host.clone();
-    let service = NativeJobService::new(controls.clone(), Arc::downgrade(&host));
-    let actor = Actor::regular(OWNER);
-    let before = service
-        .list(
-            &actor,
-            BuiltinJobListRequest {
-                computer_id: "embedded".into(),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(before.data.len(), 2);
-    assert!(before.data.iter().all(|job| job.paused));
-    insert_usage(fixture.storage.as_ref(), FOREIGN, "memory", "1").await;
-    for action in [
-        BuiltinJobAction::Resume,
-        BuiltinJobAction::Pause,
-        BuiltinJobAction::RunOnce,
-    ] {
-        assert_code(
-            service
-                .control(
-                    &actor,
-                    BuiltinJobControlRequest {
-                        computer_id: "embedded".into(),
-                        execution_instance_id: fixture.runtime.sync_peer_id().into(),
-                        job_id: BuiltinJobId::ProfileUsageRetention,
-                        action,
-                    },
-                )
-                .await,
-            ErrorCode::PermissionDenied,
-        );
-    }
-    assert!(controls
-        .load_paused(fixture.runtime.sync_peer_id())
-        .await
-        .unwrap()
-        .is_empty());
-    assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
-    assert!(fixture
-        .host
-        .automation
-        .jobs()
-        .await
-        .unwrap()
-        .iter()
-        .all(|job| job.paused && !job.running));
-    fixture.close().await;
-}
-
-#[tokio::test]
-async fn personal_desktop_owner_can_manage_jobs_with_historical_data() {
-    let fixture = HostFixture::start(/* personal_desktop */ true).await;
+async fn execution_host_owner_can_manage_existing_jobs_with_historical_data() {
+    let fixture = HostFixture::start().await;
     insert_session(fixture.storage.clone(), "anonymous").await;
     insert_usage(fixture.storage.as_ref(), FOREIGN, "memory", "1").await;
     let controls = Arc::new(DatabaseNativeJobControlStore::new(
@@ -445,320 +320,6 @@ async fn personal_desktop_owner_can_manage_jobs_with_historical_data() {
 }
 
 #[tokio::test]
-async fn server_worker_owners_share_controls_without_sharing_maintenance_data() {
-    const LOCAL: &str = "registered-embedded";
-    const REMOTE: &str = "standalone-docker";
-    let home = tempfile::tempdir().unwrap();
-    let mut config = fixture_config(home.path());
-    config.agent_node.control_plane = Some(talos_config::AgentNodeControlConfig {
-        bind_address: "127.0.0.1:9443".into(),
-        tls_certificate_file: home.path().join("test-cert.pem"),
-        tls_private_key_file: home.path().join("test-key.pem"),
-        trusted_node_ca_file: None,
-    });
-    persist_config(&config);
-    let runtime =
-        crate::build_application_runtime_with_migration_dir(config.clone(), &migrations())
-            .await
-            .unwrap();
-    config.agent_node.runner = Some(talos_config::AgentNodeRunnerConfig {
-        transport: Some(talos_config::AgentNodeTransport::Direct),
-        node_id: LOCAL.into(),
-        control_plane_endpoint: config.cloud.agent_base_url.clone(),
-        credential_file: home.path().join("runner.credential"),
-        trusted_ca_file: None,
-    });
-    persist_config(&config);
-    let storage = crate::application_storage::connect_application_storage(&runtime.config)
-        .await
-        .unwrap();
-    for id in [LOCAL, REMOTE] {
-        storage.execute(
-            "INSERT INTO agent_nodes (node_id, owner_user_id, display_name, mode, credential_hash,
-             credential_expires_at, created_at, updated_at)
-             VALUES (?, ?, ?, 'remote', zeroblob(32), 9999999999, 1, 1)",
-            &[id, OWNER, id],
-        ).await.unwrap();
-    }
-    let owner = Actor::regular(OWNER);
-    let list = |computer: &str| BuiltinJobListRequest {
-        computer_id: computer.into(),
-    };
-    let service = &runtime.service;
-    let local = service
-        .list_builtin_jobs(&owner, list(LOCAL))
-        .await
-        .unwrap()
-        .data;
-    let remote = service
-        .list_builtin_jobs(&owner, list(REMOTE))
-        .await
-        .unwrap()
-        .data;
-    assert_eq!(local.len(), 2);
-    assert_eq!(remote.len(), 2);
-    let local_alias = service
-        .list_builtin_jobs(&owner, list("embedded"))
-        .await
-        .unwrap()
-        .data;
-    assert_eq!(local_alias.len(), 2);
-    assert!(local_alias.iter().all(|job| job.computer_id == LOCAL));
-    verify_web_owner_access(&runtime, LOCAL, REMOTE).await;
-    let action = |jobs: &[BuiltinJobInfo], action| {
-        let job = jobs
-            .iter()
-            .find(|job| job.id == BuiltinJobId::ProfileUsageRetention)
-            .unwrap();
-        BuiltinJobControlRequest {
-            computer_id: job.computer_id.clone(),
-            execution_instance_id: job.execution_instance_id.clone(),
-            job_id: job.id,
-            action,
-        }
-    };
-    assert_ne!(
-        local[0].execution_instance_id,
-        remote[0].execution_instance_id
-    );
-    let foreign_admin = Actor::regular(FOREIGN).with_role(talos_auth::UserRole::Admin);
-    assert_code(
-        service.list_builtin_jobs(&foreign_admin, list(LOCAL)).await,
-        ErrorCode::PermissionDenied,
-    );
-    assert_code(
-        service
-            .control_builtin_job(&foreign_admin, action(&remote, BuiltinJobAction::Pause))
-            .await,
-        ErrorCode::PermissionDenied,
-    );
-    let mut mismatched = action(&local, BuiltinJobAction::Pause);
-    mismatched.computer_id = REMOTE.into();
-    assert_code(
-        service.control_builtin_job(&owner, mismatched).await,
-        ErrorCode::Conflict,
-    );
-
-    for jobs in [&local, &remote] {
-        assert!(
-            service
-                .control_builtin_job(&owner, action(jobs, BuiltinJobAction::Pause))
-                .await
-                .unwrap()
-                .paused
-        );
-        wait_for_retention(&runtime, &owner, &jobs[0].computer_id).await;
-    }
-    for (session, account, node) in [
-        ("local-legacy", OWNER, "embedded"),
-        ("local-registered", OWNER, LOCAL),
-        ("remote", OWNER, REMOTE),
-        ("foreign", FOREIGN, "embedded"),
-    ] {
-        insert_computer_session(storage.clone(), session, account, node).await;
-        storage
-            .execute(
-                "INSERT INTO profile_turn_usage (user_id, usage_kind, session_id, turn_id,
-             last_request_id, model_provider, model_id, input_tokens, output_tokens,
-             total_tokens, usage_available, finalized, timezone, completed_at_ms)
-             VALUES (?, 'turn', ?, ?, ?, 'fixture', 'fixture', 1, 1, 2, 1, 1, 'UTC', 1)",
-                &[account, session, session, session],
-            )
-            .await
-            .unwrap();
-    }
-    insert_usage(storage.as_ref(), OWNER, "memory", "1").await;
-    assert!(
-        service
-            .control_builtin_job(&owner, action(&local, BuiltinJobAction::RunOnce))
-            .await
-            .unwrap()
-            .paused
-    );
-    wait_for_retention(&runtime, &owner, LOCAL).await;
-    let remaining = || async { sqlx_count_remaining(storage.as_ref()).await };
-    assert_eq!(remaining().await, ["deleted-session", "foreign", "remote"]);
-    use talos_store::profile::{DatabaseProfileStore, ProfileStore};
-    use talos_store::session::{MaintenanceDataScope, UnassignedComputerData};
-    let unassigned = UnassignedComputerData {
-        embedded_owner_id: Some(OWNER.into()),
-    };
-    let deleted = DatabaseProfileStore::new(&storage)
-        .delete_finalized_before(2, 20, MaintenanceDataScope::Unassigned(&unassigned))
-        .await
-        .unwrap();
-    assert_eq!(deleted, 2);
-    assert_eq!(remaining().await, ["remote"]);
-    assert!(
-        service
-            .control_builtin_job(&owner, action(&remote, BuiltinJobAction::RunOnce))
-            .await
-            .unwrap()
-            .paused
-    );
-    wait_for_retention(&runtime, &owner, REMOTE).await;
-    assert!(remaining().await.is_empty());
-
-    assert!(
-        !service
-            .control_builtin_job(&owner, action(&local, BuiltinJobAction::Resume))
-            .await
-            .unwrap()
-            .paused
-    );
-    assert!(
-        service
-            .list_builtin_jobs(&owner, list(REMOTE))
-            .await
-            .unwrap()
-            .data
-            .iter()
-            .find(|job| job.id == BuiltinJobId::ProfileUsageRetention)
-            .unwrap()
-            .paused
-    );
-    runtime.shutdown_sync().await.unwrap();
-    runtime.shutdown().await.unwrap();
-}
-
-struct WorkerWebAuth;
-
-#[async_trait::async_trait]
-impl talos_auth::AuthService for WorkerWebAuth {
-    async fn logout(&self, _: &talos_auth::RequestIdentity) -> TalosResult<()> {
-        Ok(())
-    }
-
-    fn local_identity(&self, token: &str) -> TalosResult<talos_auth::RequestIdentity> {
-        let role = match token {
-            OWNER => talos_auth::UserRole::User,
-            FOREIGN => talos_auth::UserRole::Admin,
-            _ => {
-                return Err(TalosError::new(
-                    ErrorCode::Unauthenticated,
-                    "Unknown test identity.",
-                ))
-            }
-        };
-        Ok(talos_auth::RequestIdentity {
-            user_id: token.into(),
-            username: None,
-            role,
-            user_type: Default::default(),
-            auth_disabled: false,
-            access_token: Some(token.into()),
-        })
-    }
-
-    async fn verify_access_token(&self, token: &str) -> TalosResult<talos_auth::RequestIdentity> {
-        self.local_identity(token)
-    }
-}
-
-async fn verify_web_owner_access(
-    runtime: &crate::TalosApplicationRuntime,
-    local: &str,
-    remote: &str,
-) {
-    use talos_types::{ApiResponse, BuiltinJobListResponse};
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    drop(listener);
-    let http = talos_gateway_http::HttpServer::new(
-        runtime.service.clone(),
-        runtime.event_service.clone(),
-        Arc::new(WorkerWebAuth),
-        runtime.config.clone(),
-        "127.0.0.1",
-        address.port(),
-    );
-    let stop = tokio_util::sync::CancellationToken::new();
-    let shutdown = stop.clone();
-    let server = tokio::spawn(async move { http.run_with_shutdown(shutdown).await.unwrap() });
-    tokio::time::timeout(Duration::from_secs(3), async {
-        while tokio::net::TcpStream::connect(address).await.is_err() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    let client = reqwest::Client::new();
-    let list = |token: &str, computer: &str| {
-        client
-            .post(format!("http://{address}/v1/builtin-job/list"))
-            .bearer_auth(token)
-            .json(&BuiltinJobListRequest {
-                computer_id: computer.into(),
-            })
-    };
-    for id in [local, remote] {
-        let response = list(OWNER, id).send().await.unwrap();
-        assert_eq!(response.status(), reqwest::StatusCode::OK);
-        match response
-            .json::<ApiResponse<BuiltinJobListResponse>>()
-            .await
-            .unwrap()
-        {
-            ApiResponse::Success { data } => {
-                assert_eq!(data.data.len(), 2);
-                assert!(data.data.iter().all(|job| job.computer_id == id));
-            }
-            response => panic!("unexpected Computer job response: {response:?}"),
-        }
-        assert_eq!(
-            list(FOREIGN, id).send().await.unwrap().status(),
-            reqwest::StatusCode::FORBIDDEN
-        );
-    }
-    stop.cancel();
-    server.await.unwrap();
-}
-
-async fn wait_for_retention(
-    runtime: &crate::TalosApplicationRuntime,
-    actor: &Actor,
-    computer_id: &str,
-) {
-    tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            let jobs = runtime
-                .service
-                .list_builtin_jobs(
-                    actor,
-                    BuiltinJobListRequest {
-                        computer_id: computer_id.to_owned(),
-                    },
-                )
-                .await
-                .unwrap()
-                .data;
-            if jobs
-                .iter()
-                .any(|job| job.id == BuiltinJobId::ProfileUsageRetention && !job.running)
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-}
-
-async fn sqlx_count_remaining(storage: &dyn Storage) -> Vec<String> {
-    storage
-        .query(
-            "SELECT session_id FROM profile_turn_usage ORDER BY session_id",
-            &[],
-        )
-        .await
-        .unwrap()
-        .iter()
-        .map(|row| row.get_string("session_id").unwrap())
-        .collect()
-}
-
-#[tokio::test]
 async fn runtime_projection_tracks_actual_claims_outcomes_and_hides_internal_scan() {
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
@@ -809,7 +370,6 @@ async fn runtime_projection_tracks_actual_claims_outcomes_and_hides_internal_sca
         automation: automation.clone(),
         computer_id: "actual-computer".into(),
         execution_instance_id: "actual-instance".into(),
-        job_prefix: String::new(),
     };
     let initial = runtime.list().await.unwrap();
     assert_eq!(initial.len(), 2);

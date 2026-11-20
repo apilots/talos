@@ -1,4 +1,4 @@
-//! Real host and Computer authorization for maintenance callbacks.
+//! Real host/instance authorization for the original database-wide callbacks.
 use std::sync::{Arc, Weak};
 
 use talos_automation::{Automation, AutomationPauseUpdate};
@@ -10,7 +10,6 @@ use talos_service::{
 use talos_storage::Storage;
 use talos_types::{BuiltinJobAction, BuiltinJobId, BuiltinJobInfo, BuiltinJobOutcome};
 
-use super::application_computer_maintenance::ComputerMaintenance;
 use crate::application_sync::ApplicationSyncHost;
 
 pub(crate) struct ApplicationNativeJobHost {
@@ -18,8 +17,6 @@ pub(crate) struct ApplicationNativeJobHost {
     pub storage: Arc<dyn Storage>,
     pub automation: Automation,
     pub execution_instance_id: String,
-    pub personal_desktop: bool,
-    pub computer_maintenance: Option<Arc<ComputerMaintenance>>,
 }
 
 impl NativeJobHost for ApplicationNativeJobHost {
@@ -35,35 +32,6 @@ impl NativeJobHost for ApplicationNativeJobHost {
                     "Native job host is unavailable",
                 )
             })?;
-            if let Some(computers) = &self.computer_maintenance {
-                if actor.auth_disabled {
-                    return Err(scope_denied());
-                }
-                let computer_id = if requested_computer == "embedded" {
-                    host.local_computer_id().await?
-                } else {
-                    requested_computer.to_owned()
-                };
-                let target = computers
-                    .owned_target(&computer_id, &actor.user_id)
-                    .await?
-                    .ok_or_else(scope_denied)?;
-                host.service
-                    .nodes
-                    .read_computer(
-                        actor,
-                        talos_types::GetNodeRequest {
-                            node_id: computer_id.clone(),
-                        },
-                    )
-                    .await?;
-                computers.ensure(&target).await?;
-                return Ok(self.resolve_runtime(
-                    computer_id,
-                    target.execution_instance_id.clone(),
-                    target.job_prefix(),
-                ));
-            }
             if !actor.auth_disabled && !host.owns_local_computer(actor).await? {
                 return Err(scope_denied());
             }
@@ -74,50 +42,28 @@ impl NativeJobHost for ApplicationNativeJobHost {
             if computer_id != requested_computer || actor.user_id.is_empty() {
                 return Err(scope_denied());
             }
-            // The verified owner of a personal Desktop controls its local data,
-            // including historical sessions under other identities.
-            if !self.personal_desktop || actor.auth_disabled {
-                verify_maintained_data_owner(self.storage.as_ref(), actor).await?;
+            // The verified owner manages the execution host's existing jobs.
+            // Anonymous local access retains its original data boundary.
+            if actor.auth_disabled {
+                verify_anonymous_data(self.storage.as_ref(), actor).await?;
             }
-            Ok(self.resolve_runtime(
+            let runtime = Arc::new(ApplicationNativeJobRuntime {
+                automation: self.automation.clone(),
+                computer_id: computer_id.clone(),
+                execution_instance_id: self.execution_instance_id.clone(),
+            });
+            Ok(ResolvedNativeJobs {
                 computer_id,
-                self.execution_instance_id.clone(),
-                String::new(),
-            ))
+                execution_instance_id: self.execution_instance_id.clone(),
+                runtime,
+            })
         })
     }
 }
 
-impl ApplicationNativeJobHost {
-    fn resolve_runtime(
-        &self,
-        computer_id: String,
-        execution_instance_id: String,
-        job_prefix: String,
-    ) -> ResolvedNativeJobs {
-        let runtime = Arc::new(ApplicationNativeJobRuntime {
-            automation: self.automation.clone(),
-            computer_id: computer_id.clone(),
-            execution_instance_id: execution_instance_id.clone(),
-            job_prefix,
-        });
-        ResolvedNativeJobs {
-            computer_id,
-            execution_instance_id,
-            runtime,
-        }
-    }
-}
-
-/// Node ownership is insufficient for callbacks that scan a whole database.
-/// Inspect both actual owner columns, including usage without a surviving Session.
-/// This is a current-data authorization check, not a permanent tenant lease.
-async fn verify_maintained_data_owner(storage: &dyn Storage, actor: &Actor) -> TalosResult<()> {
-    let predicate = if actor.auth_disabled {
-        "user_id NOT IN (?, 'anonymous', 'embedded')"
-    } else {
-        "user_id <> ?"
-    };
+/// Preserve the existing anonymous host boundary when no verified owner is present.
+async fn verify_anonymous_data(storage: &dyn Storage, actor: &Actor) -> TalosResult<()> {
+    let predicate = "user_id NOT IN (?, 'anonymous', 'embedded')";
     let query = format!(
         "SELECT 1 AS foreign_owner FROM sessions WHERE user_id IS NULL OR {predicate} \
          UNION ALL SELECT 1 FROM profile_turn_usage WHERE user_id IS NULL OR {predicate} LIMIT 1"
@@ -133,14 +79,16 @@ async fn verify_maintained_data_owner(storage: &dyn Storage, actor: &Actor) -> T
 }
 
 fn scope_denied() -> TalosError {
-    TalosError::new(ErrorCode::PermissionDenied, "Native job controls require ownership of the actual execution instance and its maintained data")
+    TalosError::new(
+        ErrorCode::PermissionDenied,
+        "Native job controls require ownership of the execution Computer",
+    )
 }
 
 struct ApplicationNativeJobRuntime {
     automation: Automation,
     computer_id: String,
     execution_instance_id: String,
-    job_prefix: String,
 }
 
 impl NativeJobRuntime for ApplicationNativeJobRuntime {
@@ -150,12 +98,8 @@ impl NativeJobRuntime for ApplicationNativeJobRuntime {
                 .jobs()
                 .await?
                 .into_iter()
-                .filter_map(|job| {
-                    let name = job.name.strip_prefix(&self.job_prefix)?.to_owned();
-                    Some((name, job))
-                })
-                .map(|(name, job)| {
-                    let id = match name.as_str() {
+                .map(|job| {
+                    let id = match job.name.as_str() {
                         "profile-usage-retention" => BuiltinJobId::ProfileUsageRetention,
                         "dream-memory-maintenance" => BuiltinJobId::DreamMemoryMaintenance,
                         _ => {
@@ -178,7 +122,7 @@ impl NativeJobRuntime for ApplicationNativeJobRuntime {
                     });
                     Ok(BuiltinJobInfo {
                         id,
-                        name,
+                        name: job.name,
                         computer_id: self.computer_id.clone(),
                         execution_instance_id: self.execution_instance_id.clone(),
                         schedule: job.schedule,
@@ -196,22 +140,14 @@ impl NativeJobRuntime for ApplicationNativeJobRuntime {
     }
 
     fn set_paused(&self, update: NativeJobPauseUpdate) -> NativeJobFuture<'_, ()> {
-        Box::pin(async move {
-            let name = format!("{}{}", self.job_prefix, update.job_id.as_str());
-            self.automation
-                .set_paused(AutomationPauseUpdate {
-                    name: &name,
-                    paused: update.paused,
-                })
-                .await
-        })
+        Box::pin(self.automation.set_paused(AutomationPauseUpdate {
+            name: update.job_id.as_str(),
+            paused: update.paused,
+        }))
     }
 
     fn run_once(&self, job_id: BuiltinJobId) -> NativeJobFuture<'_, ()> {
-        Box::pin(async move {
-            let name = format!("{}{}", self.job_prefix, job_id.as_str());
-            self.automation.run_once(&name).await
-        })
+        Box::pin(self.automation.run_once(job_id.as_str()))
     }
 }
 

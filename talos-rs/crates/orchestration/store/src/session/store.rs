@@ -11,7 +11,6 @@ use super::{
     SessionRecord, SessionSummary, SessionTreeIdentity, SessionTreeScope,
 };
 
-mod query;
 mod record;
 mod sync_binding;
 
@@ -143,6 +142,23 @@ impl DatabaseSessionStore {
                 Some(trimmed.to_string())
             }
         })
+    }
+
+    fn append_tree_scope(
+        scope: &SessionTreeScope,
+        clauses: &mut Vec<&'static str>,
+        params: &mut Vec<String>,
+    ) {
+        match scope {
+            SessionTreeScope::Primary => clauses.push("NULLIF(parent_session_id, '') IS NULL"),
+            SessionTreeScope::SubagentTree {
+                tree_root_session_id,
+            } => {
+                clauses.push("tree_root_session_id = ?");
+                params.push(tree_root_session_id.clone());
+            }
+            SessionTreeScope::All => {}
+        }
     }
 }
 
@@ -379,7 +395,14 @@ impl SessionStore for DatabaseSessionStore {
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);
-        Self::append_computer_scope(query, &mut clauses, &mut params);
+        if let Some(node_id) = query.execution_node_id.as_deref() {
+            clauses.push("execution_node_id = ?");
+            params.push(node_id.to_string());
+        }
+        if let Some(user_id) = query.user_id.as_deref() {
+            clauses.push("user_id = ?");
+            params.push(user_id.to_string());
+        }
         if let Some(channel_id) = query.channel_id.as_deref() {
             clauses.push("channel_id = ?");
             params.push(channel_id.to_string());
@@ -451,7 +474,14 @@ impl SessionStore for DatabaseSessionStore {
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);
-        Self::append_computer_scope(query, &mut clauses, &mut params);
+        if let Some(node_id) = query.execution_node_id.as_deref() {
+            clauses.push("execution_node_id = ?");
+            params.push(node_id.to_string());
+        }
+        if let Some(user_id) = query.user_id.as_deref() {
+            clauses.push("user_id = ?");
+            params.push(user_id.to_string());
+        }
         if let Some(channel_id) = query.channel_id.as_deref() {
             clauses.push("channel_id = ?");
             params.push(channel_id.to_string());

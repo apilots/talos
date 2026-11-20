@@ -259,7 +259,8 @@ uses the same UUID/credential contract for embedded and standalone Workers;
 The embedded and registered Docker Workers use the same owner-authorized desktop
 viewing and control. Browser capabilities determine whether desktop media is
 available. Built-in job requests target the selected Computer and its execution
-instance. Desktop delegates cloud Computer job operations and managed Talo
+instance. The verified execution-host owner controls its existing application
+jobs, including maintenance of historical data. Desktop delegates cloud Computer job operations and managed Talo
 lifecycle to the configured Server used by Web.
 When opening a registered remote Computer, Desktop verifies its directory
 identity at the Gateway. After the owner connection is admitted, Desktop can

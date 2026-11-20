@@ -278,9 +278,7 @@ pub(super) async fn delete_finalized_before(
     storage: &SqliteStorage,
     completed_before_ms: i64,
     limit: usize,
-    scope: crate::session::MaintenanceDataScope<'_>,
 ) -> TalosResult<u64> {
-    use crate::session::{MaintenanceDataScope, REGISTERED_SESSION_COMPUTER};
     let _writer = storage.lock_writer().await;
     if limit == 0 {
         return Err(TalosError::new(
@@ -294,40 +292,23 @@ pub(super) async fn delete_finalized_before(
             "profile usage retention batch size is too large".to_string(),
         )
     })?;
-    let predicate = match scope {
-        MaintenanceDataScope::Application => String::new(),
-        MaintenanceDataScope::Computer(_) => "AND usage.user_id = ?
-            AND EXISTS (SELECT 1 FROM sessions
-                WHERE sessions.session_key = usage.session_id AND sessions.user_id = usage.user_id
-                  AND sessions.execution_node_id IN (?, ?))"
-            .to_owned(),
-        MaintenanceDataScope::Unassigned(_) => format!(
-            "AND NOT EXISTS (SELECT 1 FROM sessions
-                WHERE sessions.session_key = usage.session_id AND sessions.user_id = usage.user_id
-                  AND {REGISTERED_SESSION_COMPUTER})"
-        ),
-    };
-    let sql = format!(
-        "DELETE FROM profile_turn_usage WHERE id IN (
-            SELECT id FROM profile_turn_usage AS usage
-            WHERE usage.finalized = 1 AND usage.completed_at_ms < ? {predicate}
-            ORDER BY usage.completed_at_ms ASC, usage.id ASC LIMIT ?
-        )"
-    );
-    let query = sqlx::query(&sql).bind(completed_before_ms);
-    let query = match scope {
-        MaintenanceDataScope::Application => query,
-        MaintenanceDataScope::Computer(computer) => query
-            .bind(&computer.owner_user_id)
-            .bind(&computer.computer_id)
-            .bind(computer.include_embedded_execution.then_some("embedded")),
-        MaintenanceDataScope::Unassigned(data) => query.bind(data.embedded_owner_id.as_deref()),
-    };
-    let result = query
-        .bind(limit)
-        .execute(storage.pool())
-        .await
-        .map_err(storage_error("delete expired profile usage"))?;
+    let result = sqlx::query(
+        r#"
+        DELETE FROM profile_turn_usage
+        WHERE id IN (
+            SELECT id
+            FROM profile_turn_usage
+            WHERE finalized = 1 AND completed_at_ms < ?
+            ORDER BY completed_at_ms ASC, id ASC
+            LIMIT ?
+        )
+        "#,
+    )
+    .bind(completed_before_ms)
+    .bind(limit)
+    .execute(storage.pool())
+    .await
+    .map_err(storage_error("delete expired profile usage"))?;
     Ok(result.rows_affected())
 }
 

@@ -36,7 +36,6 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         config,
         migration_dir,
         crate::SessionOwnershipPolicy::default(),
-        /* desktop_host */ false,
     )
     .await
 }
@@ -45,7 +44,6 @@ pub(crate) async fn build_application_runtime_with_policy(
     config: Config,
     migration_dir: &Path,
     session_ownership: crate::SessionOwnershipPolicy,
-    desktop_host: bool,
 ) -> TalosResult<TalosApplicationRuntime> {
     let storage_connection = application_storage::connect_application_storage(&config).await?;
     let upgrade_report = talos_upgrade::run_startup_upgrades(talos_upgrade::StartupUpgradeParams {
@@ -341,39 +339,17 @@ pub(crate) async fn build_application_runtime_with_policy(
             storage_connection.pool().clone(),
         ),
     );
-    let maintenance = application_automation::MaintenanceJobs::new(
+    let initial_paused = native_job_controls.load_paused(sync.peer_id()).await?;
+    let automation = application_automation::start_maintenance(
         profile_store,
         config.automation.profile_usage_retention.clone(),
         dream_memory_maintenance,
         config.automation.dream_memory_maintenance.clone(),
         talos_config::parse_timezone(&config.timezone)?,
-    );
-    let computer_maintenance = (config.gateway.auth && config.agent_node.control_plane.is_some())
-        .then(|| {
-            Arc::new(
-                super::application_computer_maintenance::ComputerMaintenance::new(
-                    sync_stores.nodes.clone(),
-                    config.source_path(),
-                    sync.peer_id().to_owned(),
-                    native_job_controls.clone(),
-                    maintenance.clone(),
-                ),
-            )
-        });
-    let initial_paused = native_job_controls.load_paused(sync.peer_id()).await?;
-    let automation = application_automation::start_maintenance(
-        &maintenance,
         initial_paused,
-        computer_maintenance.as_ref(),
         loop_scan_enabled.then(|| Arc::downgrade(&service)),
     )
     .await?;
-    if let Some(computers) = &computer_maintenance {
-        if let Err(error) = computers.attach(automation.clone()).await {
-            automation.shutdown().await?;
-            return Err(error);
-        }
-    }
 
     // No external MCP starts until every fallible assembly step has completed.
     worker.activate_mcp()?;
@@ -454,9 +430,6 @@ pub(crate) async fn build_application_runtime_with_policy(
             storage: storage.clone(),
             automation: automation.clone(),
             execution_instance_id: sync.peer_id().to_owned(),
-            personal_desktop: desktop_host
-                && config.storage.database_type == talos_config::DatabaseType::Sqlite,
-            computer_maintenance,
         });
     service.install_native_job_control(Arc::new(
         talos_service::automation::native_jobs::NativeJobService::new(

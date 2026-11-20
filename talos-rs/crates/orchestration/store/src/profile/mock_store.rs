@@ -52,7 +52,6 @@ impl ProfileStore for MockProfileStore {
         &self,
         _completed_before_ms: i64,
         _limit: usize,
-        _computer: crate::session::MaintenanceDataScope<'_>,
     ) -> TalosResult<u64> {
         Ok(0)
     }

@@ -3,9 +3,7 @@ use std::sync::Arc;
 use talos_config::{DreamMemoryMaintenanceConfig, TalosPaths, WorkspaceConfig};
 use talos_error::TalosResult;
 use talos_service::{InnerModelClient, TalosService};
-use talos_store::session::{
-    ComputerDataScope, SessionPageCursor, SessionQuery, SessionStore, UnassignedComputerData,
-};
+use talos_store::session::{SessionPageCursor, SessionQuery, SessionStore};
 use talos_types::ModelUsageKind;
 
 /// Result of one bounded global Dream Memory maintenance run.
@@ -48,43 +46,19 @@ impl DreamMemoryMaintenance {
     }
 
     pub(super) async fn run(&self) -> TalosResult<DreamMemoryMaintenanceReport> {
-        self.run_matching(SessionQuery::default()).await
-    }
-
-    pub(super) async fn run_for_computer(
-        &self,
-        computer: &ComputerDataScope,
-    ) -> TalosResult<DreamMemoryMaintenanceReport> {
-        self.run_matching(SessionQuery {
-            execution_node_id: Some(computer.computer_id.clone()),
-            include_embedded_execution: computer.include_embedded_execution,
-            user_id: Some(computer.owner_user_id.clone()),
-            ..SessionQuery::default()
-        })
-        .await
-    }
-
-    pub(super) async fn run_unassigned(
-        &self,
-        unassigned: UnassignedComputerData,
-    ) -> TalosResult<DreamMemoryMaintenanceReport> {
-        self.run_matching(SessionQuery {
-            unassigned_computer: Some(unassigned),
-            ..SessionQuery::default()
-        })
-        .await
-    }
-
-    async fn run_matching(
-        &self,
-        mut query: SessionQuery,
-    ) -> TalosResult<DreamMemoryMaintenanceReport> {
         let mut report = DreamMemoryMaintenanceReport::default();
-        query.limit = Some(self.config.batch_size);
+        let mut after = None;
         for _ in 0..self.config.max_batches {
-            let records = self.session_store.list_session_records(&query).await?;
+            let records = self
+                .session_store
+                .list_session_records(&SessionQuery {
+                    limit: Some(self.config.batch_size),
+                    after: after.clone(),
+                    ..SessionQuery::default()
+                })
+                .await?;
             let record_count = records.len();
-            query.after = records.last().map(|record| SessionPageCursor {
+            after = records.last().map(|record| SessionPageCursor {
                 last_activity: record.last_activity,
                 session_id: record.id.clone(),
             });

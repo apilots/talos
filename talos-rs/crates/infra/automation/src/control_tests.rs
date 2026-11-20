@@ -24,9 +24,7 @@ async fn persisted_pause_suppresses_startup_and_scheduled_admission() {
         .await
         .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert!(automation
-        .managed_job("native")
-        .unwrap()
+    assert!(automation.jobs[0]
         .claim(Trigger::Scheduled)
         .unwrap()
         .is_none());
@@ -74,9 +72,7 @@ async fn paused_manual_run_is_single_claim_and_drains_without_resuming() {
         .await
         .unwrap_err()
         .is_code(ErrorCode::Conflict));
-    assert!(automation
-        .managed_job("native")
-        .unwrap()
+    assert!(automation.jobs[0]
         .claim(Trigger::Scheduled)
         .unwrap()
         .is_none());
@@ -88,13 +84,11 @@ async fn paused_manual_run_is_single_claim_and_drains_without_resuming() {
     assert!(!closing.is_finished());
     release.notify_one();
     closing.await.unwrap().unwrap();
-    assert!(automation
-        .managed_job("native")
-        .unwrap()
+    assert!(automation.jobs[0]
         .claim(Trigger::Scheduled)
         .unwrap()
         .is_none());
-    let info = automation.managed_job("native").unwrap().snapshot();
+    let info = automation.jobs[0].snapshot();
     assert!(info.paused && !info.running && info.last_finished_at.is_some());
     assert_eq!(info.last_error, None);
     assert!(automation
@@ -109,12 +103,7 @@ async fn pause_does_not_cancel_running_and_resume_schedules_future_only() {
     let automation = Automation::start(vec![controlled_job(true, Arc::new(AtomicUsize::new(0)))])
         .await
         .unwrap();
-    let running = automation
-        .managed_job("native")
-        .unwrap()
-        .claim(Trigger::Manual)
-        .unwrap()
-        .unwrap();
+    let running = automation.jobs[0].claim(Trigger::Manual).unwrap().unwrap();
     automation
         .set_paused(AutomationPauseUpdate {
             name: "native",

@@ -60,12 +60,6 @@ pub enum SessionTreeScope {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionQuery {
     pub execution_node_id: Option<String>,
-    /// Include the application's local execution alias alongside a verified Computer ID.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub include_embedded_execution: bool,
-    /// Select legacy Sessions without an owning registered Computer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unassigned_computer: Option<UnassignedComputerData>,
     pub tree_scope: SessionTreeScope,
     pub user_id: Option<String>,
     pub channel_id: Option<String>,
@@ -75,28 +69,6 @@ pub struct SessionQuery {
     pub offset: Option<usize>,
     pub memory_pending_only: bool,
     pub after: Option<SessionPageCursor>,
-}
-
-/// Owned Computer whose execution data an application maintenance job may process.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ComputerDataScope {
-    pub computer_id: String,
-    pub owner_user_id: String,
-    pub include_embedded_execution: bool,
-}
-
-/// Legacy maintenance remains scheduled for data outside registered Computer scopes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UnassignedComputerData {
-    pub embedded_owner_id: Option<String>,
-}
-
-/// Data affected by one maintenance run.
-#[derive(Clone, Copy)]
-pub enum MaintenanceDataScope<'a> {
-    Application,
-    Computer(&'a ComputerDataScope),
-    Unassigned(&'a UnassignedComputerData),
 }
 
 /// Stable keyset cursor for the session list order.

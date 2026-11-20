@@ -373,9 +373,9 @@ def main():
 
         qa_computer = wait(standard_computer, 'Standard user registered their own Worker')
         qa_binding = controls(qa_computer,
-            lambda: data(http(web + '/v1/builtin-job/list', {'computerId': qa_computer}, QA_TOKEN)),
-            lambda request: data(http(web + '/v1/builtin-job/control', request, QA_TOKEN)))
-        denied(http(web + '/v1/builtin-job/control', dict(qa_binding, action='pause')), {'permissionDenied'})
+            lambda: qa.call('builtinJob/list', {'computerId': qa_computer}),
+            lambda request: qa.call('builtinJob/control', request))
+        denied(admin.exchange('builtinJob/control', dict(qa_binding, action='pause')), {'permissionDenied'})
         print('CASE authenticated_owner_isolation_and_regular_worker_parity PASS', flush=True)
 
 
