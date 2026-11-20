@@ -4,6 +4,7 @@ Apply rules to the changed behavior. Check directory instructions when entering 
 
 ## Core constraints
 
+- Reuse suitable open-source libraries or existing project code to keep changes maintainable and avoid duplication and bloat.
 - Reuse the existing capability owner, Services, Stores, configuration, and event paths. Add an abstraction only for a current caller or stable boundary; avoid parallel managers, registries, protocols, and speculative extension points.
 - Keep lifecycle, state, execution, transport, and presentation separate. Upper layers compose policy; lower layers consume stable inputs without depending on upper-layer services. Core crates own only stable shared capabilities; evaluate a more appropriate crate before expanding them.
 - Keep one typed domain model across transports and clients. Use enums for business variants and structured persistence schemas. Store records and transport envelopes must not leak into public domain APIs; SDKs hide transport differences.
@@ -40,9 +41,11 @@ For unfamiliar ownership, consult the relevant entry in [Rust modules](docs/refe
 
 ## Validation and completion
 
-- At self-review handoff, save a concise, self-contained visual HTML report under the repository-root ignored `output/` directory. Combine short text with diagrams or screenshots to explain findings, fixes, verification, and remaining limits; link the report and its evidence in the handoff. Do not commit generated review reports.
+- Before opening a PR, have an independent subagent review the diff with no conversation history (`fork_turns="none"`). The primary agent verifies its findings and decides which changes to make.
+- Keep one self-review HTML report per task under the repository-root ignored `output/` directory. Revise or rewrite the same file at the same path on every iteration. At handoff, link the report and its evidence. Use concise text and relevant diagrams or screenshots to explain findings, fixes, verification, and remaining limits.
 - Keep actual self-test, review and acceptance records in the repository-root ignored `output/` directory, including result tables, verification-only Markdown, logs, screenshots and issue observations. Use `.tmp/` for disposable scratch files. Do not commit these records under specs or deployment documentation, including concise copies of the same results.
-- Tracked specs and documentation own designs, contracts, reusable verification procedures and deployment/acceptance checklists. Summarize actual commands, results, limitations and blockers in PR evidence; link to PRs rather than ignored local reports when a durable reference is needed. Keep task plans and progress in the ignored task-owned `IMPLEMENTATION_PLAN.md` as required by the development guide.
+- Tracked specs and documentation own designs, contracts, reusable verification procedures and deployment/acceptance checklists. Summarize actual commands, results, limitations and blockers in PR evidence; link to PRs rather than ignored local reports when a durable reference is needed.
+- For complex work, divide the task-owned `IMPLEMENTATION_PLAN.md` into stages with a goal, acceptance criteria and checks for each. Update status, actual results and the next action at stage or scope changes. Mark a stage complete once its criteria and checks pass. After an interruption, read the plan and current diff, then resume at the first unfinished stage.
 - Use [scoped validation commands](docs/development/DEVELOPMENT.md#scoped-validation) from the repository root. Rust tests run through `just test -p <package>` (cargo-nextest), not bare `cargo test`. The repository check is `pnpm --dir talos-app check:repo`.
 - Choose checks for the affected behavior. Fix failures caused by the change and continue through authorized implementation and verification; a first implementation or successful compile alone is not completion. Broaden or repeat checks only for changed behavior, failures, or unresolved risk.
 - Review the requested diff for missing behavior and unnecessary code, fixtures, conversions, or workarounds. Remove obsolete paths introduced or replaced by the change; leave no TODO without an associated issue or plan. Preserve unrelated user work.
