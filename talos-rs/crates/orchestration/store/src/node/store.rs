@@ -102,6 +102,64 @@ impl DatabaseAgentNodeStore {
         self.sync.install(adapter)
     }
 
+    /// Maintain a local projection after the Gateway has admitted an owner
+    /// connection. This write does not register a Worker or publish to Sync.
+    pub async fn remember_remote_computer(&self, node: &talos_types::NodeInfo) -> TalosResult<()> {
+        let system_info = node
+            .system_info
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| {
+                TalosError::internal_with_source("Encode Worker system report.", error)
+            })?;
+        let mut transaction = self.storage.write_transaction().await?;
+        let binding: Option<(Option<String>, String)> =
+            sqlx::query_as("SELECT owner_user_id, mode FROM agent_nodes WHERE node_id = ?")
+                .bind(&node.node_id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(|error| database_error("read remote Computer binding", error))?;
+        if binding.is_some_and(|(owner, mode)| owner != node.owner_user_id || mode != "remote") {
+            return Err(TalosError::authorization_denied());
+        }
+        let removed: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM computer_deletions WHERE node_id = ?)",
+        )
+        .bind(&node.node_id)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|error| database_error("read remote Computer deletion", error))?;
+        if removed {
+            return Err(TalosError::new(
+                ErrorCode::ResourceExpired,
+                "Computer registration has been removed.",
+            ));
+        }
+        sqlx::query(
+            "INSERT INTO agent_nodes(node_id, owner_user_id, display_name, mode, endpoint, status, created_at, updated_at, system_info)
+             VALUES (?, ?, ?, 'remote', ?, ?, ?, ?, ?)
+             ON CONFLICT(node_id) DO UPDATE SET display_name = excluded.display_name,
+                 endpoint = excluded.endpoint, status = excluded.status,
+                 updated_at = excluded.updated_at, system_info = excluded.system_info
+             WHERE agent_nodes.credential_hash IS NULL AND agent_nodes.lease_token_hash IS NULL
+                 AND agent_nodes.updated_at <= excluded.updated_at
+                 AND NOT EXISTS (SELECT 1 FROM managed_workers WHERE node_id = excluded.node_id)",
+        )
+        .bind(&node.node_id)
+        .bind(&node.owner_user_id)
+        .bind(&node.display_name)
+        .bind(&node.endpoint)
+        .bind(status_text(node.status))
+        .bind(node.created_at)
+        .bind(node.updated_at)
+        .bind(system_info)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| database_error("remember remote Computer", error))?;
+        transaction.commit().await
+    }
+
     pub(super) async fn begin_write(
         &self,
         node_id: &str,

@@ -315,8 +315,8 @@ impl ApplicationSyncHost {
         Ok(handle)
     }
 
-    /// Publish an owned remote Computer using G's authenticated SDK. Its local
-    /// directory row came from H; it is never re-registered or given a fake lease.
+    /// Publish an owned remote Computer using G's authenticated SDK, including
+    /// when the local directory has not received the Computer through Sync.
     pub async fn connect_computer(
         &self,
         actor: &RequestIdentity,
@@ -365,26 +365,19 @@ impl ApplicationSyncHost {
                 None => self.account_credential(actor)?,
             }
         };
-        let trust = self
-            .config
-            .cloud
-            .agent_trusted_ca_file
-            .as_ref()
-            .map(std::fs::read)
-            .transpose()
-            .map_err(|error| {
-                TalosError::internal_with_source(
-                    "Read Agent trust certificate; technical details were withheld.",
-                    error,
-                )
-            })?
-            .map_or(
-                agent_client::AgentTlsTrust::SystemRoots,
-                agent_client::AgentTlsTrust::Certificate,
-            );
-        let gateway =
-            agent_client::AgentNodeClient::connect(&self.config.cloud.agent_base_url, trust)
-                .await?;
+        let gateway = self.gateway_client().await?;
+        let remote = if local {
+            None
+        } else {
+            let node = gateway.get_node(token, computer_id).await?;
+            if node.node_id != computer_id
+                || node.mode != talos_types::NodeMode::Remote
+                || node.owner_user_id.as_deref() != Some(verified.user_id.as_str())
+            {
+                return Err(TalosError::authorization_denied());
+            }
+            Some(node)
+        };
         let deployments = gateway.get_deployments(token, computer_id).await?;
         let (connection, auth) = gateway
             .connect_coordinator_with_resources(
@@ -432,7 +425,11 @@ impl ApplicationSyncHost {
         {
             return Ok(());
         }
-        if !local {
+        if let Some(node) = remote {
+            self.sync_stores
+                .nodes
+                .remember_remote_computer(&node)
+                .await?;
             self.coordinator
                 .replace_remote_node(
                     computer_id.into(),

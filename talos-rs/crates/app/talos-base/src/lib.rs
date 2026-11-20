@@ -50,6 +50,7 @@ mod application_sync_observer;
 #[path = "application_sync_tests.rs"]
 mod application_sync_tests;
 mod desktop_application;
+mod desktop_cloud;
 mod desktop_media;
 mod desktop_worker;
 mod dream_memory_maintenance;
@@ -296,13 +297,7 @@ pub async fn run_embedded_app_server(
         let config_source = resolve_config_source_path(&config);
         log_config_source(config_source);
         let startup_report = startup::finish_startup(&config)?;
-        build_application_runtime_after_startup(
-            config,
-            &startup_report,
-            options,
-            /* desktop_host */ false,
-        )
-        .await
+        build_application_runtime_after_startup(config, &startup_report, options).await
     }
     .await
     .inspect_err(talos_logging::report_error)?;
@@ -604,13 +599,9 @@ async fn start_server_after_startup(
 ) -> TalosResult<TalosServerRuntime> {
     let config = apply_runtime_options(config, options.as_ref());
     config.validate_runtime()?;
-    let runtime = build_application_runtime_after_startup(
-        config.clone(),
-        startup_report,
-        options.as_ref(),
-        /* desktop_host */ false,
-    )
-    .await?;
+    let runtime =
+        build_application_runtime_after_startup(config.clone(), startup_report, options.as_ref())
+            .await?;
 
     let managed_worker = application_managed_worker::configure(
         &config,
@@ -737,7 +728,6 @@ async fn run_json_rpc_stdio_after_startup(
         runtime_config,
         startup_report,
         desktop_session_options().as_ref(),
-        desktop_host_name.is_some(),
     )
     .await?;
     let desktop_host_bridge = if desktop_host_name.is_some() {
@@ -813,7 +803,6 @@ async fn build_application_runtime_after_startup(
     config: Config,
     startup_report: &startup::FinishStartupReport,
     options: Option<&TalosServerOptions>,
-    desktop_host: bool,
 ) -> TalosResult<TalosApplicationRuntime> {
     application_runtime::build_application_runtime_with_policy(
         config,
@@ -821,7 +810,6 @@ async fn build_application_runtime_after_startup(
         options
             .and_then(|options| options.session_ownership)
             .unwrap_or_default(),
-        desktop_host,
     )
     .await
 }

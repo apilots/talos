@@ -39,6 +39,12 @@
       ],
       "binaries": []
     },
+    "04_authenticated_worker_owner.sh": {
+      "commands": ["docker", "openssl", "node", "pnpm", "python3"],
+      "python_modules": ["yaml", "websockets", "playwright"],
+      "checks": ["docker", "server_image", "chrome", "caddy"],
+      "binaries": ["app_server"]
+    },
     "03_managed_talo.sh": {
       "commands": [
         "docker",

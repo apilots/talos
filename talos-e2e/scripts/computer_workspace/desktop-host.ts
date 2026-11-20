@@ -7,6 +7,13 @@ const controller = new DesktopAppServerController({
   env: process.env,
   desktopHost: true,
   clientKind: "desktop",
+  onServerRequest: (request) => {
+    if (process.env.TALOS_E2E_DESKTOP_MEDIA !== "1" || request.method !== "client/desktop/frame") {
+      throw new Error("Unexpected Desktop server request");
+    }
+    process.stdout.write(`${JSON.stringify({ frame: request.params })}\n`);
+    return { kind: "done" };
+  },
   onRuntimeState: (state) => {
     if (state.kind === "error") {
       process.stderr.write(`Desktop runtime error: ${state.error?.code ?? "internalError"}\n`);

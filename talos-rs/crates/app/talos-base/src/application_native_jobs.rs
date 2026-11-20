@@ -17,7 +17,6 @@ pub(crate) struct ApplicationNativeJobHost {
     pub storage: Arc<dyn Storage>,
     pub automation: Automation,
     pub execution_instance_id: String,
-    pub personal_desktop: bool,
 }
 
 impl NativeJobHost for ApplicationNativeJobHost {
@@ -43,10 +42,10 @@ impl NativeJobHost for ApplicationNativeJobHost {
             if computer_id != requested_computer || actor.user_id.is_empty() {
                 return Err(scope_denied());
             }
-            // The verified owner of a personal Desktop controls its local data,
-            // including historical sessions under other identities.
-            if !self.personal_desktop || actor.auth_disabled {
-                verify_maintained_data_owner(self.storage.as_ref(), actor).await?;
+            // The verified owner manages the execution host's existing jobs.
+            // Anonymous local access retains its original data boundary.
+            if actor.auth_disabled {
+                verify_anonymous_data(self.storage.as_ref(), actor).await?;
             }
             let runtime = Arc::new(ApplicationNativeJobRuntime {
                 automation: self.automation.clone(),
@@ -62,15 +61,9 @@ impl NativeJobHost for ApplicationNativeJobHost {
     }
 }
 
-/// Node ownership is insufficient for callbacks that scan a whole database.
-/// Inspect both actual owner columns, including usage without a surviving Session.
-/// This is a current-data authorization check, not a permanent tenant lease.
-async fn verify_maintained_data_owner(storage: &dyn Storage, actor: &Actor) -> TalosResult<()> {
-    let predicate = if actor.auth_disabled {
-        "user_id NOT IN (?, 'anonymous', 'embedded')"
-    } else {
-        "user_id <> ?"
-    };
+/// Preserve the existing anonymous host boundary when no verified owner is present.
+async fn verify_anonymous_data(storage: &dyn Storage, actor: &Actor) -> TalosResult<()> {
+    let predicate = "user_id NOT IN (?, 'anonymous', 'embedded')";
     let query = format!(
         "SELECT 1 AS foreign_owner FROM sessions WHERE user_id IS NULL OR {predicate} \
          UNION ALL SELECT 1 FROM profile_turn_usage WHERE user_id IS NULL OR {predicate} LIMIT 1"
@@ -86,7 +79,10 @@ async fn verify_maintained_data_owner(storage: &dyn Storage, actor: &Actor) -> T
 }
 
 fn scope_denied() -> TalosError {
-    TalosError::new(ErrorCode::PermissionDenied, "Native job controls require ownership of the actual execution instance and its maintained data")
+    TalosError::new(
+        ErrorCode::PermissionDenied,
+        "Native job controls require ownership of the execution Computer",
+    )
 }
 
 struct ApplicationNativeJobRuntime {

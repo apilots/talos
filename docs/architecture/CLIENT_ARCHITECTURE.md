@@ -256,6 +256,17 @@ uses the same UUID/credential contract for embedded and standalone Workers;
 `direct`/`outbound` selects transport independently of ownership. See
 [deployment and authorization](../../deploy/README.md#computer-identity-transport-and-configuration-access).
 
+The embedded and registered Docker Workers use the same owner-authorized desktop
+viewing and control. Browser capabilities determine whether desktop media is
+available. Built-in job requests target the selected Computer and its execution
+instance. The verified execution-host owner controls its existing application
+jobs, including maintenance of historical data. Desktop delegates cloud Computer job operations and managed Talo
+lifecycle to the configured Server used by Web.
+When opening a registered remote Computer, Desktop verifies its directory
+identity at the Gateway. After the owner connection is admitted, Desktop can
+record the public Computer metadata locally so the execution route also works
+before Sync imports that Computer.
+
 - SDKs own the complete product API, typed domain objects, structured errors,
   stream contracts, and transport-neutral lifecycle semantics.
 - Transport adapters own serialization, authentication transport, connection

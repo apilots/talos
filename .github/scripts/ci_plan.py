@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ci_impact import CATEGORIES, ROOT, SERVER_TARGETS, frontend_graph, impact, rust_graph, scenario_runner
+from ci_impact import CATEGORIES, OWNER_CONTROLS_CASE, ROOT, SERVER_TARGETS, frontend_graph, impact, rust_graph, scenario_runner
 
 BINARIES = {
     'server': ('talos-server', 'talos-server', 'TALOS_E2E_SERVER_BIN'),
@@ -39,7 +39,8 @@ def scenario_task(category: str, target: str, root: Path = ROOT) -> dict:
     return dict(name=target.splitlines()[0].split(':', 1)[1].replace('/', ' · '),
                 kind='e2e', category=category, targets=target, cases=sorted(set(cases)),
                 binaries=sorted(binaries), binary_pattern='ci-binary-' + ('{' + ','.join(sorted(binaries)) + '}' if len(binaries) > 1 else next(iter(binaries), 'none')), node=node, chrome='chrome' in requirements['checks'], office='soffice' in requirements['commands'],
-                docker=bool(images), images=images, rust_tests='cargo-nextest' in requirements['commands'],
+                docker=bool(images), images=images, caddy='caddy' in requirements['checks'],
+                rust_tests='cargo-nextest' in requirements['commands'],
                 rust=['talos-tools'] if 'cargo-nextest' in requirements['commands'] else [], frontend=[])
 
 
@@ -123,6 +124,8 @@ def task_roots(task: dict, root: Path = ROOT) -> set[str]:
         roots.update({'talos-e2e/run_e2e.sh', 'talos-e2e/scripts', 'talos-e2e/fixtures', 'talos-e2e/docker'})
         roots.update('talos-e2e/scenarios/' + case for case in task['cases'])
         roots.update('talos-e2e/scenarios/' + str(Path(case).parent / 'requirements.json') for case in task['cases'])
+        if OWNER_CONTROLS_CASE.removeprefix('talos-e2e/scenarios/') in task['cases']:
+            roots.add('deploy/docker/talos-worker/chromium-seccomp.json')
     if task['kind'] == 'mcp':
         roots.update({'talos-rs', '.cargo', 'rust-toolchain.toml', 'rust-toolchain',
                       'talos-e2e', 'deploy/install'})

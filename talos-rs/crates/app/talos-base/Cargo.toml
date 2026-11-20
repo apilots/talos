@@ -21,6 +21,7 @@ subtle = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+reqwest = { workspace = true }
 talos-app-protocol = { workspace = true }
 futures-util = { workspace = true }
 async-trait = { workspace = true }
@@ -66,7 +67,6 @@ axum = "0.7"
 talos-plugin = { workspace = true }
 bytes = { workspace = true }
 rcgen = "0.14"
-reqwest = { workspace = true }
 talos-mcp = { workspace = true }
 tempfile = "3"
 

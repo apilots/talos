@@ -9,7 +9,7 @@ use talos_config::{Config, TalosPaths};
 use talos_service::automation::native_jobs::NativeJobService;
 use talos_storage::SqliteStorage;
 use talos_store::{
-    automation::native_jobs::{DatabaseNativeJobControlStore, NativeJobControlStore},
+    automation::native_jobs::DatabaseNativeJobControlStore,
     session::{DatabaseSessionStore, SessionRecord, SessionStore, SessionTreeIdentity},
 };
 use talos_types::{
@@ -88,61 +88,16 @@ async fn insert_usage(storage: &dyn Storage, owner: &str, kind: &str, finalized:
 }
 
 #[tokio::test]
-async fn data_scope_checks_sessions_and_all_orphan_usage_owners() {
-    let storage = storage().await;
-    let actor = Actor::regular(OWNER);
-    insert_session(storage.clone(), OWNER).await;
-    insert_usage(storage.as_ref(), OWNER, "turn", "1").await;
-    verify_maintained_data_owner(storage.as_ref(), &actor)
-        .await
-        .unwrap();
-
-    insert_session(storage.clone(), FOREIGN).await;
-    assert_code(
-        verify_maintained_data_owner(storage.as_ref(), &actor).await,
-        ErrorCode::PermissionDenied,
-    );
-    storage
-        .execute("DELETE FROM sessions WHERE user_id = ?", &[FOREIGN])
-        .await
-        .unwrap();
-
-    for (kind, finalized) in [("turn", "0"), ("turn", "1"), ("memory", "1")] {
-        insert_usage(storage.as_ref(), FOREIGN, kind, finalized).await;
-        assert_code(
-            verify_maintained_data_owner(storage.as_ref(), &actor).await,
-            ErrorCode::PermissionDenied,
-        );
-        storage
-            .execute(
-                "DELETE FROM profile_turn_usage WHERE user_id = ?",
-                &[FOREIGN],
-            )
-            .await
-            .unwrap();
-    }
-    verify_maintained_data_owner(storage.as_ref(), &actor)
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
 async fn only_open_mode_accepts_local_anonymous_aliases() {
     let storage = storage().await;
     insert_session(storage.clone(), "anonymous").await;
     insert_usage(storage.as_ref(), "embedded", "turn", "1").await;
-    for actor in [Actor::regular(OWNER), Actor::regular("anonymous")] {
-        assert_code(
-            verify_maintained_data_owner(storage.as_ref(), &actor).await,
-            ErrorCode::PermissionDenied,
-        );
-    }
-    verify_maintained_data_owner(storage.as_ref(), &Actor::auth_disabled())
+    verify_anonymous_data(storage.as_ref(), &Actor::auth_disabled())
         .await
         .unwrap();
     insert_usage(storage.as_ref(), FOREIGN, "memory", "1").await;
     assert_code(
-        verify_maintained_data_owner(storage.as_ref(), &Actor::auth_disabled()).await,
+        verify_anonymous_data(storage.as_ref(), &Actor::auth_disabled()).await,
         ErrorCode::PermissionDenied,
     );
 }
@@ -175,7 +130,7 @@ struct HostFixture {
 }
 
 impl HostFixture {
-    async fn start(personal_desktop: bool) -> Self {
+    async fn start() -> Self {
         let home = tempfile::tempdir().unwrap();
         let paths = TalosPaths::from_home(home.path().into());
         paths.ensure_base_dirs().unwrap();
@@ -230,7 +185,6 @@ impl HostFixture {
             storage: storage.clone(),
             automation,
             execution_instance_id: runtime.sync_peer_id().into(),
-            personal_desktop,
         });
         Self {
             runtime,
@@ -250,7 +204,7 @@ impl HostFixture {
 
 #[tokio::test]
 async fn real_host_requires_local_owner_and_exact_computer_without_admin_override() {
-    let fixture = HostFixture::start(/* personal_desktop */ false).await;
+    let fixture = HostFixture::start().await;
     insert_session(fixture.storage.clone(), OWNER).await;
     let scope = fixture
         .host
@@ -281,7 +235,6 @@ async fn real_host_requires_local_owner_and_exact_computer_without_admin_overrid
         storage: fixture.storage.clone(),
         automation: fixture.host.automation.clone(),
         execution_instance_id: fixture.runtime.sync_peer_id().into(),
-        personal_desktop: false,
     };
     assert_code(
         unavailable
@@ -293,66 +246,8 @@ async fn real_host_requires_local_owner_and_exact_computer_without_admin_overrid
 }
 
 #[tokio::test]
-async fn foreign_data_added_after_listing_blocks_next_control_without_side_effects() {
-    let fixture = HostFixture::start(/* personal_desktop */ false).await;
-    let controls = Arc::new(DatabaseNativeJobControlStore::new(
-        fixture.storage.pool().clone(),
-    ));
-    let host: Arc<dyn NativeJobHost> = fixture.host.clone();
-    let service = NativeJobService::new(controls.clone(), Arc::downgrade(&host));
-    let actor = Actor::regular(OWNER);
-    let before = service
-        .list(
-            &actor,
-            BuiltinJobListRequest {
-                computer_id: "embedded".into(),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(before.data.len(), 2);
-    assert!(before.data.iter().all(|job| job.paused));
-    insert_usage(fixture.storage.as_ref(), FOREIGN, "memory", "1").await;
-    for action in [
-        BuiltinJobAction::Resume,
-        BuiltinJobAction::Pause,
-        BuiltinJobAction::RunOnce,
-    ] {
-        assert_code(
-            service
-                .control(
-                    &actor,
-                    BuiltinJobControlRequest {
-                        computer_id: "embedded".into(),
-                        execution_instance_id: fixture.runtime.sync_peer_id().into(),
-                        job_id: BuiltinJobId::ProfileUsageRetention,
-                        action,
-                    },
-                )
-                .await,
-            ErrorCode::PermissionDenied,
-        );
-    }
-    assert!(controls
-        .load_paused(fixture.runtime.sync_peer_id())
-        .await
-        .unwrap()
-        .is_empty());
-    assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
-    assert!(fixture
-        .host
-        .automation
-        .jobs()
-        .await
-        .unwrap()
-        .iter()
-        .all(|job| job.paused && !job.running));
-    fixture.close().await;
-}
-
-#[tokio::test]
-async fn personal_desktop_owner_can_manage_jobs_with_historical_data() {
-    let fixture = HostFixture::start(/* personal_desktop */ true).await;
+async fn execution_host_owner_can_manage_existing_jobs_with_historical_data() {
+    let fixture = HostFixture::start().await;
     insert_session(fixture.storage.clone(), "anonymous").await;
     insert_usage(fixture.storage.as_ref(), FOREIGN, "memory", "1").await;
     let controls = Arc::new(DatabaseNativeJobControlStore::new(

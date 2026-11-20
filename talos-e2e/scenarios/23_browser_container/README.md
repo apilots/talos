@@ -7,6 +7,7 @@ separate from lightweight workspace tabs (22) and native Browser/MCP (20).
 just e2e-group 23_browser_container
 just e2e-case 23_browser_container/01_docker_worker
 just e2e-case 23_browser_container/03_managed_talo
+just e2e-case 23_browser_container/04_authenticated_worker_owner
 ```
 
 | Case | Product journey | Assertions |
@@ -14,8 +15,21 @@ just e2e-case 23_browser_container/03_managed_talo
 | `01_docker_worker` | Outbound Docker Worker → ordinary task/tools → private live desktop → restart/profile recovery | First non-navigation tool opens a task tab while preserving the private HTTP homepage; navigation/DOM/files and forged attachment rejection; default homepage, background after closing all browser windows and working Browser/Terminal/Files launchers; authenticated media, three consecutive rejected Worker admissions release their candidate reservations while preserving the live controller, input/control fencing, held-key release, backpressure, expiry and viewer teardown; replacement Worker reuses its owned profile. |
 | `02_docker_server` | Packaged anonymous Server → shared CLI/PTY TUI → model edit/add → restart → desktop viewing/control → embedded Browser MCP | Real RFB pixels and X11 key state prove anonymous viewing and input; release clears held input and permits an Agent task; disconnect suspends automation, clears input, and explicit resume permits another task. Each task performs seven real Browser actions and a File API screenshot. Model edits persist across a Server process restart; the TUI exercises DEL and Ctrl-H. Docker networking is disabled and model/page fixtures remain local. |
 | `03_managed_talo` | Authenticated Server with a local Docker socket → managed Talo Worker → lifecycle | Uses a disposable local registry for the Worker image digest. Verifies Worker registration over TLS, account-scoped ownership, initialization retry, manual stop and start, stale generation rejection, Home retention across Reset, idle sleep, explicit Wake, a first Turn with Worker-local model configuration, the same live Desktop media and control case as the personal Worker, and cleanup after confirmed Delete. |
+| `04_authenticated_worker_owner` | Two device sign-ins → registered embedded Worker → Web and cold native Desktop App Server | The administrator lists, pauses, runs and resumes Built-in jobs through both clients. Web renders live pixels and native Desktop receives RFB frames after connecting with an empty Computer directory and Sync disabled. A standard user is denied the administrator's Worker, can run their Desktop host's existing jobs locally, and retains exclusive control of those jobs. |
 
-Run the same case with `TALOS_E2E_TALO_RECOVERY=1` to exercise a disposable TLS
+Case 04 runs in the hosted Server matrix for PR and main-branch changes to
+Worker registration and routing, authentication, Built-in jobs, browser/media,
+their Web and Desktop entry points and SDKs, packaged Server inputs, and its
+fixtures. Shared infrastructure changes use the existing full selection.
+Documentation, unrelated UI, and unrelated TUI changes leave the case unselected.
+Mixed changes select one Server job. The runner requires a current packaged
+Server image, the App Server binary, Chrome, Caddy, and the declared Python
+and Node dependencies. The hosted job prepares those inputs before preflight.
+The disposable issuer supplies device approvals for two fixed test identities.
+The product clients complete the normal login flow and Server authorization.
+This case exercises the Desktop Controller and App Server media bridge.
+
+Run case 03 with `TALOS_E2E_TALO_RECOVERY=1` to exercise a disposable TLS
 relay fault. The recovery path covers command replay without Wake, a queued
 Turn that survives delayed registration, both real Wake deadlines, and offline
 Reset retention. For local native Electron
