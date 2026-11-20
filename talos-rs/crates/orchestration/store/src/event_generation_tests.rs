@@ -27,6 +27,18 @@ async fn event_generation_keeps_existing_cursor_and_allows_reuse_of_a_retired_tu
         ..sqlx::migrate::Migrator::DEFAULT
     };
     previous.run(pool).await.unwrap();
+    // A previously repaired installation has already retired the legacy table.
+    sqlx::raw_sql(
+        "DROP TRIGGER sessions_cleanup_after_delete;
+         DROP TABLE legacy_timeline_events;
+         CREATE TRIGGER sessions_cleanup_after_delete AFTER DELETE ON sessions
+         BEGIN
+             DELETE FROM agent_events WHERE session_id = OLD.session_key;
+         END;",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
     sqlx::query(
         "INSERT INTO sessions(session_key,user_id,agent_id,workspace_id,source_type,source_provider,environment_json,conf_json,usage_json,created_at,last_activity,history_generation)
          VALUES ('s','u','agent','workspace','http','http','null','{}','{}',1,1,7)",
@@ -42,6 +54,16 @@ async fn event_generation_keeps_existing_cursor_and_allows_reuse_of_a_retired_tu
         .execute(pool)
         .await
         .unwrap();
+    let blocked = migrations.run(pool).await.unwrap_err();
+    assert!(blocked
+        .to_string()
+        .contains("no such table: main.legacy_timeline_events"));
+    let last_applied: i64 = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(last_applied, 202611180004);
+    run_migrations(pool, &test_migrations_dir()).await.unwrap();
     run_migrations(pool, &test_migrations_dir()).await.unwrap();
 
     let effects = DatabaseSessionStore::new(storage.clone()).await.unwrap();
