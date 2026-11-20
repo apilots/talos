@@ -31,8 +31,7 @@ chore(release): prepare v<version>
 Regular releases keep the `X.Y.Z` format and existing workflow. For a bug
 found after release, publish an `X.Y.Z-N` fix from the corresponding release
 branch. Start at `1` and increment for each fix release on that version. Carry
-the fix commits back to `main`. Keep the version preparation commit on the
-release branch.
+the fix commits back to `main` and retain its development version.
 
 For example, the Desktop upgrade bug found after `0.1.17` would be
 fixed in `0.1.17-1`. The next fix on that line would be `0.1.17-2`.
@@ -207,11 +206,9 @@ the manifest source SHA matches the immutable tag, and both `linux/amd64` and
 `linux/arm64` image platforms are present. Verify latest references for the newest release.
 
 After successful publication, archive the exact tag Notes in
-`docs/releases/<tag>.md` without rewriting them. Merge a regular release branch
-into `main`; for a maintenance release, carry over only the fixes and Notes.
-Preserve main's
-next development version when resolving version conflicts; never reset main to the
-released version or copy the entire release tree over ongoing development. Update
-Docker defaults when the new release becomes latest. If main has not advanced yet, start
-the next development version in a separate commit. Keep the released tag immutable.
+`docs/releases/<tag>.md` without rewriting them and merge the release branch into
+`main` to preserve tag ancestry. Keep main's development version when resolving
+version conflicts. Update Docker defaults when the new release becomes latest.
+If main has not advanced yet, start the next development version in a separate
+commit. Keep the released tag immutable.
 Protocol/data upgrades also follow [Deployment](../../deploy/README.md#data-upgrades-and-rollback).

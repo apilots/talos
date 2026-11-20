@@ -130,8 +130,8 @@ macOS Intel 构建与原生安装 CI 已停用。
 `shasum -a 256 -c checksums.txt`。验证 Release Notes 与 annotated tag 一致、manifest
 源码 SHA 对应不可变 tag、镜像包含 `linux/amd64` 与 `linux/arm64`，最新版本还要验证 latest 引用。
 
-发布成功后将精确 tag Notes 原样归档到 `docs/releases/<tag>.md`。常规发布将 release 分支合回 main，修复发布只回合修复和 Notes，版本提交留在 release 分支。发生版本冲突时保留 main 已进入的下一开发
-版本，不能将 main 降回正式版本，也不能用 release 整棵文件树覆盖正在进行的开发。
+发布成功后将精确 tag Notes 原样归档到 `docs/releases/<tag>.md`，再将 release 分支合回 main，
+保留 tag 的提交历史。发生版本冲突时保留 main 的开发版本。
 新版本成为 latest 时，更新 Docker 默认镜像。如果 main 尚未切下一版本，再用独立提交进入开发周期。
 已发布 tag 始终不变。协议和数据升级还需执行
 [部署文档](../../deploy/README_zh.md#数据升级与回滚)中的流程。
