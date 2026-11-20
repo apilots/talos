@@ -26,6 +26,7 @@ pub(crate) struct DesktopApplication {
     pub(crate) device_name: String,
     pub(crate) worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     local: Arc<dyn AppServerApplication>,
+    cloud: tokio::sync::OnceCell<super::desktop_cloud::DesktopCloud>,
     pub(crate) sync_host: Arc<crate::application_sync::ApplicationSyncHost>,
 }
 
@@ -51,6 +52,7 @@ impl DesktopApplication {
             device_name,
             worker_failures: runtime.worker_failures.clone(),
             local,
+            cloud: Default::default(),
         }
     }
 
@@ -151,6 +153,23 @@ impl AppServerApplication for DesktopApplication {
         actor: &Actor,
         request: ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
+        if let Some(call) =
+            super::desktop_cloud::CloudCall::for_request(actor, &request.params, &self.sync_host)
+                .await
+                .map_err(project_error)?
+        {
+            let cloud = self
+                .cloud
+                .get_or_try_init(|| async {
+                    super::desktop_cloud::DesktopCloud::new(&self.config.cloud)
+                })
+                .await
+                .map_err(project_error)?;
+            return Ok(ApplicationResponse {
+                body: cloud.send(actor, call).await.map_err(project_error)?,
+                started_turn: None,
+            });
+        }
         if let ClientRequestParams::Browser(params) = &request.params {
             if matches!(params.operation, talos_types::BrowserOperation::OpenLocal) {
                 let identity = self.worker_identity().await.map_err(project_error)?;

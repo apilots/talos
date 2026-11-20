@@ -400,8 +400,20 @@ async fn deletion_keeps_recent_and_unfinished_usage() {
     unfinished.completed_at_ms = 50;
     store.record_turn_usage(unfinished).await.unwrap();
 
-    assert_eq!(store.delete_finalized_before(200, 1).await.unwrap(), 1);
-    assert_eq!(store.delete_finalized_before(200, 10).await.unwrap(), 1);
+    assert_eq!(
+        store
+            .delete_finalized_before(200, 1, crate::session::MaintenanceDataScope::Application)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        store
+            .delete_finalized_before(200, 10, crate::session::MaintenanceDataScope::Application)
+            .await
+            .unwrap(),
+        1
+    );
 
     let finalized: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM profile_turn_usage WHERE finalized = 1")

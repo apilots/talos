@@ -11,6 +11,7 @@ use talos_store::profile::ProfileStore;
 use tokio::signal;
 use tracing::{error, info, warn};
 
+use super::application_computer_maintenance::{ComputerJobTarget, ComputerMaintenance};
 use super::dream_memory_maintenance::DreamMemoryMaintenance;
 use super::TalosApplicationRuntime;
 
@@ -67,50 +68,163 @@ impl TalosApplicationRuntime {
     }
 }
 
-/// Starts application-owned maintenance jobs from validated configuration.
-pub(super) async fn start_maintenance(
-    profiles: Arc<dyn ProfileStore>,
+#[derive(Clone)]
+pub(super) enum MaintenanceTarget {
+    Application,
+    Computer(ComputerJobTarget),
+    Unassigned(std::sync::Weak<ComputerMaintenance>),
+}
+
+impl MaintenanceTarget {
+    fn job_name(&self, id: talos_types::BuiltinJobId) -> String {
+        match self {
+            Self::Application => id.as_str().to_owned(),
+            Self::Computer(target) => target.job_name(id),
+            Self::Unassigned(_) => format!("unassigned/{}", id.as_str()),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct MaintenanceJobs {
+    retention: ProfileUsageRetention,
     profile_config: ProfileUsageRetentionConfig,
     memory: DreamMemoryMaintenance,
     memory_config: DreamMemoryMaintenanceConfig,
-    timezone: TalosTimezone,
-    initial_paused: Vec<talos_types::BuiltinJobId>,
-    loop_service: Option<std::sync::Weak<talos_service::TalosService>>,
-) -> TalosResult<Automation> {
-    let retention = ProfileUsageRetention::new(profiles, profile_config.clone());
-    let mut jobs = vec![
-        AutomationJob::cron_on_start(
-            "profile-usage-retention",
-            profile_config.cron,
+    pub timezone: TalosTimezone,
+}
+
+impl MaintenanceJobs {
+    pub(super) fn new(
+        profiles: Arc<dyn ProfileStore>,
+        profile_config: ProfileUsageRetentionConfig,
+        memory: DreamMemoryMaintenance,
+        memory_config: DreamMemoryMaintenanceConfig,
+        timezone: TalosTimezone,
+    ) -> Self {
+        Self {
+            retention: ProfileUsageRetention::new(profiles, profile_config.clone()),
+            profile_config,
+            memory,
+            memory_config,
             timezone,
+        }
+    }
+
+    pub(super) fn definitions(
+        &self,
+        initial_paused: &[talos_types::BuiltinJobId],
+        target: MaintenanceTarget,
+    ) -> Vec<AutomationJob> {
+        use talos_types::BuiltinJobId;
+        let retention_name = target.job_name(BuiltinJobId::ProfileUsageRetention);
+        let memory_name = target.job_name(BuiltinJobId::DreamMemoryMaintenance);
+        let retention_target = target.clone();
+        let memory_target = target.clone();
+        let retention = self.retention.clone();
+        let memory = self.memory.clone();
+        let retention = AutomationJob::cron_on_start(
+            retention_name,
+            self.profile_config.cron.clone(),
+            self.timezone,
             move || {
                 let retention = retention.clone();
-                async move { retention.run().await.map(|_| ()) }
+                let target = retention_target.clone();
+                async move {
+                    match target {
+                        MaintenanceTarget::Computer(target) => {
+                            if let Some(scope) = target.current_scope().await? {
+                                retention.run_for_computer(&scope).await?;
+                            }
+                        }
+                        MaintenanceTarget::Application => {
+                            retention.run().await?;
+                        }
+                        MaintenanceTarget::Unassigned(owner) => {
+                            if let Some(owner) = owner.upgrade() {
+                                retention
+                                    .run_unassigned(&owner.unassigned_data().await?)
+                                    .await?;
+                            }
+                        }
+                    }
+                    Ok(())
+                }
             },
-        )
-        .with_control(AutomationJobControl {
-            paused: initial_paused.contains(&talos_types::BuiltinJobId::ProfileUsageRetention),
-            run_once: true,
-        }),
-        AutomationJob::cron(
-            "dream-memory-maintenance",
-            memory_config.cron,
-            timezone,
+        );
+        let memory = AutomationJob::cron(
+            memory_name,
+            self.memory_config.cron.clone(),
+            self.timezone,
             move || {
                 let memory = memory.clone();
-                async move { memory.run().await.map(|_| ()) }
+                let target = memory_target.clone();
+                async move {
+                    match target {
+                        MaintenanceTarget::Computer(target) => {
+                            if let Some(scope) = target.current_scope().await? {
+                                memory.run_for_computer(&scope).await?;
+                            }
+                        }
+                        MaintenanceTarget::Application => {
+                            memory.run().await?;
+                        }
+                        MaintenanceTarget::Unassigned(owner) => {
+                            if let Some(owner) = owner.upgrade() {
+                                memory
+                                    .run_unassigned(owner.unassigned_data().await?)
+                                    .await?;
+                            }
+                        }
+                    }
+                    Ok(())
+                }
             },
-        )
-        .with_control(AutomationJobControl {
-            paused: initial_paused.contains(&talos_types::BuiltinJobId::DreamMemoryMaintenance),
-            run_once: true,
-        }),
-    ];
+        );
+        [
+            (BuiltinJobId::ProfileUsageRetention, retention),
+            (BuiltinJobId::DreamMemoryMaintenance, memory),
+        ]
+        .into_iter()
+        .filter_map(|(id, job)| {
+            let paused = initial_paused.contains(&id);
+            if matches!(target, MaintenanceTarget::Unassigned(_)) {
+                // Honor existing application-level pause state for these legacy records.
+                (!paused).then_some(job)
+            } else {
+                Some(job.with_control(AutomationJobControl {
+                    paused,
+                    run_once: true,
+                }))
+            }
+        })
+        .collect()
+    }
+}
+
+/// Starts maintenance and the existing session scan on one scheduler.
+pub(super) async fn start_maintenance(
+    jobs: &MaintenanceJobs,
+    initial_paused: Vec<talos_types::BuiltinJobId>,
+    computers: Option<&Arc<ComputerMaintenance>>,
+    loop_service: Option<std::sync::Weak<talos_service::TalosService>>,
+) -> TalosResult<Automation> {
+    let mut definitions = match computers {
+        Some(computers) => {
+            let mut definitions = jobs.definitions(
+                &initial_paused,
+                MaintenanceTarget::Unassigned(Arc::downgrade(computers)),
+            );
+            definitions.push(computers.refresh_job(jobs.timezone));
+            definitions
+        }
+        None => jobs.definitions(&initial_paused, MaintenanceTarget::Application),
+    };
     if let Some(service) = loop_service {
-        jobs.push(AutomationJob::cron(
+        definitions.push(AutomationJob::cron(
             "session-loop-scan",
             "*/1 * * * * *",
-            timezone,
+            jobs.timezone,
             move || {
                 let service = service.clone();
                 async move {
@@ -124,7 +238,7 @@ pub(super) async fn start_maintenance(
             },
         ));
     }
-    Automation::start(jobs).await
+    Automation::start(definitions).await
 }
 
 pub(super) async fn finish(

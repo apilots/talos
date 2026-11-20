@@ -46,6 +46,48 @@ WORKSPACE_CASES = client_group_targets('22_workspace_resources')
 PREVIEW_CASES = client_group_targets('21_resource_preview')
 NATIVE_BROWSER_CASES = client_group_targets('20_browser_workspace')['desktop']
 CONTAINER_CASES = client_group_targets('23_browser_container')
+OWNER_CONTROLS_TARGET = 'case:23_browser_container/04_authenticated_worker_owner'
+SERVER_CONTAINER_CASES = CONTAINER_CASES['server'] - {OWNER_CONTROLS_TARGET}
+OWNER_CONTROLS_CASE = 'talos-e2e/scenarios/23_browser_container/04_authenticated_worker_owner.sh'
+OWNER_CONTROLS_FIXTURE = 'talos-e2e/scripts/browser-worker/owner_controls'
+OWNER_CONTROLS_INPUTS = (
+    'talos-rs/bin/talos-server/', 'talos-rs/bin/app-server/',
+    'talos-rs/crates/app/talos-base/src/application_',
+    'talos-rs/crates/app/talos-base/src/desktop_', 'talos-rs/crates/app/talos-base/src/agent_',
+    'talos-rs/crates/app/talos-base/src/lib.rs', 'talos-rs/crates/app/talos-base/Cargo.toml',
+    'talos-rs/crates/app/talos-base/src/dream_memory_maintenance.rs',
+    'talos-rs/crates/app/talos-worker/', 'talos-rs/crates/infra/auth/',
+    'talos-rs/crates/infra/automation/', 'talos-rs/crates/infra/config/src/domains/cloud',
+    'talos-rs/crates/infra/config/src/domains/managed_worker',
+    'talos-rs/crates/gateway/core/', 'talos-rs/crates/gateway/http/',
+    'talos-rs/crates/gateway/app-server/', 'talos-rs/crates/gateway/app-protocol/',
+    'talos-rs/crates/common/types/src/builtin_job', 'talos-rs/crates/common/types/src/browser',
+    'talos-rs/crates/common/types/src/node', 'talos-rs/crates/common/types/src/auth',
+    'talos-rs/crates/orchestration/agent-client/', 'talos-rs/crates/orchestration/agent-protocol/',
+    'talos-rs/crates/orchestration/agent-pb/', 'talos-rs/crates/orchestration/coordinator/',
+    'talos-rs/crates/orchestration/service/src/agent_node/',
+    'talos-rs/crates/orchestration/service/src/lib.rs',
+    'talos-rs/crates/orchestration/service/src/access/', 'talos-rs/crates/orchestration/service/src/profile/',
+    'talos-rs/crates/orchestration/service/src/service/desktop',
+    'talos-rs/crates/orchestration/service/src/service/sync_management',
+    'talos-rs/crates/orchestration/store/src/node/', 'talos-rs/crates/orchestration/store/src/profile/',
+    'talos-rs/crates/orchestration/store/src/session/', 'talos-rs/crates/action/browser/',
+    'talos-app/web/src/app/', 'talos-app/web/src/shared/api/',
+    'talos-app/web/src/shared/i18n/automationResources', 'talos-app/web/src/shared/i18n/desktopResources',
+    'talos-app/web/src/pages/automation/', 'talos-app/web/src/pages/auth/', 'talos-app/web/src/pages/computers/',
+    'talos-app/web/src/features/automation/', 'talos-app/web/src/features/auth/',
+    'talos-app/web/src/features/computers/', 'talos-app/ts-sdk/packages/',
+    'talos-app/pnpm-lock.yaml',
+    'talos-app/desktop/src/app-server-controller', 'talos-app/desktop/src/desktop-media',
+    'talos-app/desktop/src/desktop-ipc', 'talos-app/desktop/src/desktop-server-requests',
+    'talos-app/desktop/src/ipc-guard', 'talos-app/desktop/src/preload',
+    'talos-e2e/scripts/browser-worker/fixture.py', 'talos-e2e/scripts/browser-worker/media.py',
+    'talos-e2e/scripts/computer_workspace/desktop-host.ts',
+    'talos-e2e/scripts/computer_workspace/vite.config.ts',
+    'talos-e2e/scenarios/23_browser_container/requirements.json',
+    'build/server/', 'build/container/', 'build/worker/browser/',
+    'deploy/docker/talos-worker/chromium-seccomp.json',
+)
 BROWSER_CASES = (WORKSPACE_CASES['webui'] | WORKSPACE_CASES['desktop']
                  | NATIVE_BROWSER_CASES | CONTAINER_CASES['desktop'])
 RUNNING_TURN_TARGET = 'case:09_app_server/running_turn'
@@ -156,6 +198,12 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
     for path in paths:
         if is_document(path):
             continue
+        if path == OWNER_CONTROLS_CASE or path.startswith(OWNER_CONTROLS_FIXTURE):
+            result.targets['server'].add(OWNER_CONTROLS_TARGET)
+            result.harness = True
+            continue
+        if path.startswith(OWNER_CONTROLS_INPUTS):
+            result.targets['server'].add(OWNER_CONTROLS_TARGET)
         if path.startswith('talos-rs/'):
             owner = rust.owner(path)
             if owner:
@@ -174,7 +222,7 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                             'talos-rs/apps/tui/src/cli/trajectory.rs', 'talos-rs/apps/tui/src/main.rs', 'talos-rs/apps/tui/src/model_selection.rs'):
                     result.targets['tui'].add(EXEC_TARGET)
                 if path == 'talos-rs/apps/tui/src/input.rs':
-                    result.targets['server'].update(CONTAINER_CASES['server'])
+                    result.targets['server'].update(SERVER_CONTAINER_CASES)
 
             else:
                 result.full(rust, frontend, frontend_checks=False)
@@ -203,7 +251,7 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 if path.startswith('talos-app/shared/app-icons/'):
                     result.targets['webui'].update(PREVIEW_CASES['webui'])
                     result.targets['desktop'].update(PREVIEW_CASES['desktop'])
-                    result.targets['server'].update(CONTAINER_CASES['server'])
+                    result.targets['server'].update(SERVER_CONTAINER_CASES)
             else:
                 # Frontend lockfiles, workspace config, generators and unknown inputs
                 # expand within their ecosystem, never to unrelated Rust test suites.
@@ -218,13 +266,13 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
         elif path.startswith('build/worker/'):
             result.targets['desktop'].update(CONTAINER_CASES['desktop'])
             if path.startswith('build/worker/browser/'):
-                result.targets['server'].update(CONTAINER_CASES['server'])
+                result.targets['server'].update(SERVER_CONTAINER_CASES)
         elif path.startswith('build/server/'):
             result.targets['server'].update(SERVER_TARGETS.values())
-            result.targets['server'].update(CONTAINER_CASES['server'])
+            result.targets['server'].update(SERVER_CONTAINER_CASES)
         elif path.startswith('build/container/'):
             result.targets['desktop'].update(CONTAINER_CASES['desktop'])
-            result.targets['server'].update(CONTAINER_CASES['server'])
+            result.targets['server'].update(SERVER_CONTAINER_CASES)
         elif path.startswith('build/'):
             result.full(rust, frontend)
         elif path.startswith('talos-e2e/'):
@@ -244,7 +292,7 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 result.targets['desktop'].update(NATIVE_BROWSER_CASES)
             elif path.startswith('talos-e2e/scenarios/23_browser_container/'):
                 for category, cases in CONTAINER_CASES.items():
-                    result.targets[category].update(cases)
+                    result.targets[category].update(cases - {OWNER_CONTROLS_TARGET})
             elif path in ('talos-e2e/scripts/exec_unattended.py',
                           'talos-e2e/scenarios/05_cli/exec_unattended.sh'):
                 result.targets['tui'].add(EXEC_TARGET)
@@ -286,7 +334,7 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 result.targets['webui'].add(SERVER_TARGETS['registration'])
             elif path.startswith('talos-e2e/scripts/browser-worker/'):
                 result.targets['desktop'].update(NATIVE_BROWSER_CASES | CONTAINER_CASES['desktop'])
-                result.targets['server'].update(CONTAINER_CASES['server'])
+                result.targets['server'].update(SERVER_CONTAINER_CASES)
             elif path.startswith('talos-e2e/scenarios/') and any(
                     path.startswith('talos-e2e/scenarios/' + prefix) for prefix in
                     ('01_models/', '09_app_server/', '12_files/', '14_sandbox/', '06_tools/')):
@@ -376,14 +424,14 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             if owner in {'talos-skills', 'talos-plugin'}:
                 result.targets['server'].add(SERVER_TARGETS['models'])
             if owner in {'talos-plugin', 'talos-mcp', 'talos-browser'}:
-                result.targets['server'].update(CONTAINER_CASES['server'])
+                result.targets['server'].update(SERVER_CONTAINER_CASES)
             if owner == 'talos-mcp':
                 result.targets['desktop'].update(NATIVE_BROWSER_CASES)
             if owner == 'talos-browser':
                 result.targets['desktop'].update(BROWSER_CASES - WORKSPACE_CASES['webui'])
         elif consumers & {'talos-server', 'talos-worker-bin'}:
             result.targets['server'].update(SERVER_TARGETS.values())
-            result.targets['server'].update(CONTAINER_CASES['server'])
+            result.targets['server'].update(SERVER_CONTAINER_CASES)
             result.targets['webui'].update(WORKSPACE_CASES['webui'])
             result.targets['desktop'].update(BROWSER_CASES - WORKSPACE_CASES['webui'])
         elif consumers & {'app-server', 'talos-app-server-test-client'}:

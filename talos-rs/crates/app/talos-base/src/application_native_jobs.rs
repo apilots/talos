@@ -1,4 +1,4 @@
-//! Real host/instance authorization for the original database-wide callbacks.
+//! Real host and Computer authorization for maintenance callbacks.
 use std::sync::{Arc, Weak};
 
 use talos_automation::{Automation, AutomationPauseUpdate};
@@ -10,6 +10,7 @@ use talos_service::{
 use talos_storage::Storage;
 use talos_types::{BuiltinJobAction, BuiltinJobId, BuiltinJobInfo, BuiltinJobOutcome};
 
+use super::application_computer_maintenance::ComputerMaintenance;
 use crate::application_sync::ApplicationSyncHost;
 
 pub(crate) struct ApplicationNativeJobHost {
@@ -18,6 +19,7 @@ pub(crate) struct ApplicationNativeJobHost {
     pub automation: Automation,
     pub execution_instance_id: String,
     pub personal_desktop: bool,
+    pub computer_maintenance: Option<Arc<ComputerMaintenance>>,
 }
 
 impl NativeJobHost for ApplicationNativeJobHost {
@@ -33,6 +35,35 @@ impl NativeJobHost for ApplicationNativeJobHost {
                     "Native job host is unavailable",
                 )
             })?;
+            if let Some(computers) = &self.computer_maintenance {
+                if actor.auth_disabled {
+                    return Err(scope_denied());
+                }
+                let computer_id = if requested_computer == "embedded" {
+                    host.local_computer_id().await?
+                } else {
+                    requested_computer.to_owned()
+                };
+                let target = computers
+                    .owned_target(&computer_id, &actor.user_id)
+                    .await?
+                    .ok_or_else(scope_denied)?;
+                host.service
+                    .nodes
+                    .read_computer(
+                        actor,
+                        talos_types::GetNodeRequest {
+                            node_id: computer_id.clone(),
+                        },
+                    )
+                    .await?;
+                computers.ensure(&target).await?;
+                return Ok(self.resolve_runtime(
+                    computer_id,
+                    target.execution_instance_id.clone(),
+                    target.job_prefix(),
+                ));
+            }
             if !actor.auth_disabled && !host.owns_local_computer(actor).await? {
                 return Err(scope_denied());
             }
@@ -48,17 +79,33 @@ impl NativeJobHost for ApplicationNativeJobHost {
             if !self.personal_desktop || actor.auth_disabled {
                 verify_maintained_data_owner(self.storage.as_ref(), actor).await?;
             }
-            let runtime = Arc::new(ApplicationNativeJobRuntime {
-                automation: self.automation.clone(),
-                computer_id: computer_id.clone(),
-                execution_instance_id: self.execution_instance_id.clone(),
-            });
-            Ok(ResolvedNativeJobs {
+            Ok(self.resolve_runtime(
                 computer_id,
-                execution_instance_id: self.execution_instance_id.clone(),
-                runtime,
-            })
+                self.execution_instance_id.clone(),
+                String::new(),
+            ))
         })
+    }
+}
+
+impl ApplicationNativeJobHost {
+    fn resolve_runtime(
+        &self,
+        computer_id: String,
+        execution_instance_id: String,
+        job_prefix: String,
+    ) -> ResolvedNativeJobs {
+        let runtime = Arc::new(ApplicationNativeJobRuntime {
+            automation: self.automation.clone(),
+            computer_id: computer_id.clone(),
+            execution_instance_id: execution_instance_id.clone(),
+            job_prefix,
+        });
+        ResolvedNativeJobs {
+            computer_id,
+            execution_instance_id,
+            runtime,
+        }
     }
 }
 
@@ -93,6 +140,7 @@ struct ApplicationNativeJobRuntime {
     automation: Automation,
     computer_id: String,
     execution_instance_id: String,
+    job_prefix: String,
 }
 
 impl NativeJobRuntime for ApplicationNativeJobRuntime {
@@ -102,8 +150,12 @@ impl NativeJobRuntime for ApplicationNativeJobRuntime {
                 .jobs()
                 .await?
                 .into_iter()
-                .map(|job| {
-                    let id = match job.name.as_str() {
+                .filter_map(|job| {
+                    let name = job.name.strip_prefix(&self.job_prefix)?.to_owned();
+                    Some((name, job))
+                })
+                .map(|(name, job)| {
+                    let id = match name.as_str() {
                         "profile-usage-retention" => BuiltinJobId::ProfileUsageRetention,
                         "dream-memory-maintenance" => BuiltinJobId::DreamMemoryMaintenance,
                         _ => {
@@ -126,7 +178,7 @@ impl NativeJobRuntime for ApplicationNativeJobRuntime {
                     });
                     Ok(BuiltinJobInfo {
                         id,
-                        name: job.name,
+                        name,
                         computer_id: self.computer_id.clone(),
                         execution_instance_id: self.execution_instance_id.clone(),
                         schedule: job.schedule,
@@ -144,14 +196,22 @@ impl NativeJobRuntime for ApplicationNativeJobRuntime {
     }
 
     fn set_paused(&self, update: NativeJobPauseUpdate) -> NativeJobFuture<'_, ()> {
-        Box::pin(self.automation.set_paused(AutomationPauseUpdate {
-            name: update.job_id.as_str(),
-            paused: update.paused,
-        }))
+        Box::pin(async move {
+            let name = format!("{}{}", self.job_prefix, update.job_id.as_str());
+            self.automation
+                .set_paused(AutomationPauseUpdate {
+                    name: &name,
+                    paused: update.paused,
+                })
+                .await
+        })
     }
 
     fn run_once(&self, job_id: BuiltinJobId) -> NativeJobFuture<'_, ()> {
-        Box::pin(self.automation.run_once(job_id.as_str()))
+        Box::pin(async move {
+            let name = format!("{}{}", self.job_prefix, job_id.as_str());
+            self.automation.run_once(&name).await
+        })
     }
 }
 

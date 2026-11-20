@@ -7,7 +7,7 @@ import tomllib
 import unittest
 
 from pr_change_scope import ROOT, SCOPES, VERSION_PATTERNS, is_document, should_run, version_change_only, version_files
-from ci_impact import impact, rust_graph, frontend_graph, client_group_targets, SERVER_TARGETS, CONTAINER_CASES, TUI_TARGET, AUTOMATION_TARGET, AUTOMATION_WEB_TARGET, AUTOMATION_TUI_TARGET
+from ci_impact import impact, rust_graph, frontend_graph, client_group_targets, SERVER_TARGETS, CONTAINER_CASES, SERVER_CONTAINER_CASES, OWNER_CONTROLS_TARGET, TUI_TARGET, AUTOMATION_TARGET, AUTOMATION_WEB_TARGET, AUTOMATION_TUI_TARGET
 from ci_plan import plan, task_roots
 
 
@@ -98,7 +98,7 @@ class ChangeScopeTests(unittest.TestCase):
         self.assertEqual(result['categories']['desktop']['scenarios']['include'][0]['cases'],
                          ['23_browser_container/01_docker_worker.sh'])
         helper = impact(['talos-e2e/scripts/browser-worker/server.py'])
-        self.assertEqual(helper.targets['server'], CONTAINER_CASES['server'])
+        self.assertEqual(helper.targets['server'], SERVER_CONTAINER_CASES)
         self.assertEqual(helper.targets['desktop'],
                          client_group_targets('20_browser_workspace')['desktop'] |
                          client_group_targets('23_browser_container')['desktop'])
@@ -113,6 +113,47 @@ class ChangeScopeTests(unittest.TestCase):
                   for task in category['scenarios']['include'] for case in task['cases']}
         self.assertIn('23_browser_container/03_managed_talo.sh', hosted)
         self.assertFalse(any(case.startswith('25_managed_talo/') for case in hosted))
+
+    def test_authenticated_worker_owner_case_follows_cross_client_inputs_once(self):
+        paths = [
+            'talos-rs/crates/app/talos-base/src/application_native_jobs.rs',
+            'talos-rs/crates/app/talos-base/src/application_sync.rs',
+            'talos-rs/crates/infra/auth/src/cloud.rs',
+            'talos-rs/crates/infra/automation/src/lib.rs',
+            'talos-rs/crates/common/types/src/builtin_job.rs',
+            'talos-rs/crates/orchestration/store/src/node/store.rs',
+            'talos-app/web/src/pages/automation/AutomationPage.tsx',
+            'talos-app/web/src/pages/computers/ComputersPage.tsx',
+            'talos-app/web/src/features/computers/ComputerDesktop.tsx',
+            'talos-app/desktop/src/app-server-controller.ts',
+            'talos-app/ts-sdk/packages/browser/src/client.ts',
+            'talos-e2e/scripts/browser-worker/owner_controls_issuer.py',
+            'talos-e2e/scripts/computer_workspace/desktop-host.ts',
+            'deploy/docker/talos-worker/chromium-seccomp.json',
+        ]
+        for path in paths:
+            self.assertIn(OWNER_CONTROLS_TARGET, impact([path]).targets['server'], path)
+        result = plan(paths)
+        matching = [(category, task) for category, value in result['categories'].items()
+                    for task in value['scenarios']['include'] if task['targets'] == OWNER_CONTROLS_TARGET]
+        self.assertEqual(len(matching), 1)
+        category, task = matching[0]
+        self.assertEqual(category, 'server')
+        self.assertEqual(task['images'], ['server'])
+        self.assertEqual(set(task['binaries']), {'server', 'cli', 'worker', 'sandbox', 'app_server'})
+        self.assertTrue(task['chrome'] and task['caddy'] and task['node'] and task['docker'])
+        self.assertIn('deploy/docker/talos-worker/chromium-seccomp.json', task_roots(task))
+
+    def test_authenticated_worker_owner_case_ignores_unrelated_changes(self):
+        for path in [
+            'docs/architecture/CLIENT_ARCHITECTURE.md',
+            'talos-rs/apps/tui/src/input.rs',
+            'talos-app/web/src/features/settings/Appearance.tsx',
+            'talos-e2e/scenarios/23_browser_container/02_docker_server.sh',
+        ]:
+            self.assertNotIn(OWNER_CONTROLS_TARGET, impact([path]).targets['server'], path)
+        standalone = impact(['talos-e2e/scenarios/23_browser_container/04_authenticated_worker_owner.sh'])
+        self.assertEqual(standalone.targets['server'], {OWNER_CONTROLS_TARGET})
 
     def test_running_turn_snapshot_and_render_owners_select_the_json_browser_case(self):
         for path in ['talos-app/web/src/features/chat/hooks/useSessionTimelineEvents.ts',
@@ -179,7 +220,7 @@ class ChangeScopeTests(unittest.TestCase):
                      'talos-rs/crates/action/plugin/src/manager/mcp.rs',
                      'talos-rs/crates/app/talos-worker/src/browser_host.rs',
                      'talos-rs/apps/tui/src/input.rs']:
-            self.assertTrue(CONTAINER_CASES['server'] <= impact([path]).targets['server'], path)
+            self.assertTrue(SERVER_CONTAINER_CASES <= impact([path]).targets['server'], path)
 
     def test_plugin_cli_selects_its_secretless_lifecycle_and_current_binaries(self):
         result = plan(['talos-rs/apps/tui/src/cli/plugin.rs'])

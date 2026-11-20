@@ -237,6 +237,13 @@ async fn desktop_rpc_relay_carries_both_directions_and_rechecks_the_remote_lease
         input_epoch: None,
     };
     let node = fixture.credential.node_id.clone();
+    assert!(media
+        .client
+        .reserve_desktop("admin", node.clone(), binding.clone())
+        .await
+        .err()
+        .unwrap()
+        .is_code(ErrorCode::PermissionDenied));
     let reservation = media
         .client
         .reserve_desktop("user-1", node.clone(), binding.clone())

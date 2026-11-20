@@ -1,3 +1,4 @@
+use crate::session::MaintenanceDataScope;
 use async_trait::async_trait;
 use talos_error::TalosResult;
 
@@ -24,11 +25,12 @@ pub trait ProfileStore: Send + Sync {
     /// Removes unfinished usage when a logical Turn fails before finalization.
     async fn discard_turn_usage(&self, session_id: &str, turn_id: &str) -> TalosResult<()>;
 
-    /// Deletes up to `limit` finalized usage rows completed before `completed_before_ms`.
+    /// Deletes expired finalized usage, optionally restricted to one owned Computer.
     async fn delete_finalized_before(
         &self,
         completed_before_ms: i64,
         limit: usize,
+        computer: MaintenanceDataScope<'_>,
     ) -> TalosResult<u64>;
 
     async fn usage_summary(&self, user_id: &str) -> TalosResult<ProfileUsageSummary>;
@@ -75,8 +77,10 @@ impl ProfileStore for DatabaseProfileStore {
         &self,
         completed_before_ms: i64,
         limit: usize,
+        computer: MaintenanceDataScope<'_>,
     ) -> TalosResult<u64> {
-        super::write::delete_finalized_before(&self.storage, completed_before_ms, limit).await
+        super::write::delete_finalized_before(&self.storage, completed_before_ms, limit, computer)
+            .await
     }
 
     async fn usage_summary(&self, user_id: &str) -> TalosResult<ProfileUsageSummary> {

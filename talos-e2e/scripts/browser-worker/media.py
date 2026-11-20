@@ -21,6 +21,8 @@ class Viewer:
         self.socket=connect(url.replace('http','ws',1)+'/v1/desktop/stream',origin=url,proxy=None,open_timeout=5,max_size=65536,max_queue=max_queue)
         self.socket.send(json.dumps({'ticket':grant['ticket'],'accessToken':token}))
         self.grant=grant
+        self.initialize()
+    def initialize(self):
         assert self.read(12)==b'RFB 003.008\n'
         self.socket.send(b'RFB 003.008\n')
         count=self.read(1)[0]

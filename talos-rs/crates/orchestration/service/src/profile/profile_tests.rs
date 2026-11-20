@@ -30,6 +30,7 @@ impl ProfileStore for TestProfileStore {
         &self,
         _completed_before_ms: i64,
         _limit: usize,
+        _computer: talos_store::session::MaintenanceDataScope<'_>,
     ) -> TalosResult<u64> {
         Ok(0)
     }

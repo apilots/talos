@@ -33,6 +33,7 @@ pub use agent_node_rpc::{
     NodeResourceServices, NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc,
 };
 mod application_automation;
+mod application_computer_maintenance;
 mod application_desktop;
 mod application_managed_worker;
 mod application_runtime;
@@ -50,6 +51,7 @@ mod application_sync_observer;
 #[path = "application_sync_tests.rs"]
 mod application_sync_tests;
 mod desktop_application;
+mod desktop_cloud;
 mod desktop_media;
 mod desktop_worker;
 mod dream_memory_maintenance;

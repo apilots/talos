@@ -45,9 +45,37 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
     }
     async fn get_node(
         &self,
-        _: Request<pb::GetNodeRequest>,
+        request: Request<pb::GetNodeRequest>,
     ) -> Result<Response<pb::GetNodeResponse>, Status> {
-        Err(Status::unimplemented("unused fixture RPC"))
+        let node_id = request.into_inner().node_id;
+        let owner = if node_id == "foreign" {
+            "other"
+        } else {
+            "account"
+        };
+        let now = chrono::Utc::now().timestamp();
+        let node = talos_types::NodeInfo {
+            display_name: node_id.clone(),
+            node_id,
+            mode: talos_types::NodeMode::Remote,
+            endpoint: None,
+            status: talos_types::NodeStatus::Enabled,
+            health: talos_types::NodeHealth::Healthy,
+            lease_expires_at: Some(now + 60),
+            last_heartbeat_at: Some(now),
+            created_at: now,
+            updated_at: now,
+            owner_user_id: Some(owner.into()),
+            available: true,
+            credential_expires_at: None,
+            managed_worker_phase: None,
+            system_info: None,
+        };
+        Ok(Response::new(pb::GetNodeResponse {
+            result: Some(pb::get_node_response::Result::Node(
+                agent_protocol::node_pb::encode_info(node),
+            )),
+        }))
     }
     async fn verify_saved_registration(
         &self,
@@ -213,9 +241,8 @@ impl Fixture {
         )
         .await
         .unwrap();
-        // These owned rows model the directory projection already imported from H;
-        // this fixture exercises dialing/publication, not Worker enrollment.
-        for node_id in ["slow", "fast", "resumed"] {
+        // Leave "fast" absent to exercise access before Sync imports the directory.
+        for node_id in ["slow", "resumed"] {
             runtime
                 .sync_host
                 .sync_stores
@@ -260,6 +287,34 @@ impl Fixture {
         self.gateway.abort();
         self.auth.abort();
     }
+}
+
+#[tokio::test]
+async fn connection_admission_does_not_cache_foreign_or_removed_computers() {
+    let mut fixture = Fixture::start().await;
+    let nodes = &fixture.runtime.sync_host.sync_stores.nodes;
+    let error = fixture
+        .runtime
+        .connect_computer(&fixture.identity, "foreign")
+        .await
+        .unwrap_err();
+    assert!(error.is_code(talos_error::ErrorCode::PermissionDenied));
+    assert!(nodes.get("foreign").await.unwrap().is_none());
+    assert!(fixture.entered.try_recv().is_err());
+
+    nodes
+        .reconcile_deleted_registration("deleted", "account")
+        .await
+        .unwrap();
+    let error = fixture
+        .runtime
+        .connect_computer(&fixture.identity, "deleted")
+        .await
+        .unwrap_err();
+    assert!(error.is_code(talos_error::ErrorCode::ResourceExpired));
+    assert!(nodes.get("deleted").await.unwrap().is_none());
+    assert_eq!(fixture.closed.recv().await.unwrap(), "deleted");
+    fixture.finish().await;
 }
 
 #[tokio::test]

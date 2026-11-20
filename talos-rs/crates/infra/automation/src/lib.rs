@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex as StateMutex};
+use std::sync::{Arc, Mutex as StateMutex, RwLock};
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
@@ -192,41 +193,46 @@ impl Drop for RunningJob {
 pub struct Automation {
     shutdown: CancellationToken,
     tasks: Arc<Mutex<Option<Vec<JoinHandle<()>>>>>,
-    jobs: Arc<Vec<Arc<RegisteredJob>>>,
+    jobs: Arc<RwLock<Vec<Arc<RegisteredJob>>>>,
+}
+
+fn register_jobs(jobs: Vec<AutomationJob>) -> TalosResult<Vec<Arc<RegisteredJob>>> {
+    let mut registered: Vec<Arc<RegisteredJob>> = Vec::with_capacity(jobs.len());
+    for job in jobs {
+        if registered
+            .iter()
+            .any(|existing| existing.job.name == job.name)
+        {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Native job identifiers must be unique.",
+            ));
+        }
+        let schedule = parse_schedule(&job.name, &job.expression)?;
+        let paused = job.control.is_some_and(|control| control.paused);
+        let next_due_at = if paused {
+            None
+        } else {
+            Some(next_occurrence(&schedule, job.timezone, Utc::now())?)
+        };
+        registered.push(Arc::new(RegisteredJob {
+            job,
+            schedule,
+            state: StateMutex::new(JobState {
+                paused,
+                next_due_at,
+                ..JobState::default()
+            }),
+            changed: watch::channel(()).0,
+        }));
+    }
+    Ok(registered)
 }
 
 impl Automation {
     /// Validate all jobs before spawning; paused controls suppress startup and cron.
     pub async fn start(jobs: Vec<AutomationJob>) -> TalosResult<Self> {
-        let mut registered: Vec<Arc<RegisteredJob>> = Vec::with_capacity(jobs.len());
-        for job in jobs {
-            if registered
-                .iter()
-                .any(|existing| existing.job.name == job.name)
-            {
-                return Err(TalosError::new(
-                    ErrorCode::InvalidRequest,
-                    "Native job identifiers must be unique.",
-                ));
-            }
-            let schedule = parse_schedule(&job.name, &job.expression)?;
-            let paused = job.control.is_some_and(|control| control.paused);
-            let next_due_at = if paused {
-                None
-            } else {
-                Some(next_occurrence(&schedule, job.timezone, Utc::now())?)
-            };
-            registered.push(Arc::new(RegisteredJob {
-                job,
-                schedule,
-                state: StateMutex::new(JobState {
-                    paused,
-                    next_due_at,
-                    ..JobState::default()
-                }),
-                changed: watch::channel(()).0,
-            }));
-        }
+        let registered = register_jobs(jobs)?;
         let shutdown = CancellationToken::new();
         let tasks = registered
             .iter()
@@ -235,27 +241,92 @@ impl Automation {
         let automation = Self {
             shutdown,
             tasks: Arc::new(Mutex::new(Some(tasks))),
-            jobs: Arc::new(registered),
+            jobs: Arc::new(RwLock::new(registered.clone())),
         };
-        for job in automation.jobs.iter().filter(|job| job.job.run_on_start) {
+        for job in registered.iter().filter(|job| job.job.run_on_start) {
             if let Some(running) = job.claim(Trigger::Scheduled)? {
                 running.run().await;
             }
         }
-        tracing::info!(job_count = automation.jobs.len(), "automation started");
+        tracing::info!(job_count = registered.len(), "automation started");
         Ok(automation)
     }
 
-    fn managed_job(&self, name: &str) -> TalosResult<&Arc<RegisteredJob>> {
+    /// Activate a complete group of jobs once, using the same scheduler and drain.
+    /// Each group must use a distinct name for every job.
+    pub async fn ensure_jobs(&self, jobs: Vec<AutomationJob>) -> TalosResult<()> {
+        let mut tasks = self.tasks.lock().await;
+        self.ensure_running()?;
+        let mut current = self.jobs.write().expect("automation jobs");
+        if jobs
+            .iter()
+            .all(|job| current.iter().any(|entry| entry.job.name == job.name))
+        {
+            return Ok(());
+        }
+        if jobs
+            .iter()
+            .any(|job| current.iter().any(|entry| entry.job.name == job.name))
+        {
+            return Err(TalosError::new(
+                ErrorCode::Conflict,
+                "Native job group overlaps another group.",
+            ));
+        }
+        let pending = register_jobs(jobs)?;
+        for job in &pending {
+            let job = job.clone();
+            let shutdown = self.shutdown.child_token();
+            tasks
+                .as_mut()
+                .expect("running scheduler task collection")
+                .push(tokio::spawn(async move {
+                    if job.job.run_on_start && !shutdown.is_cancelled() {
+                        if let Ok(Some(running)) = job.claim(Trigger::Scheduled) {
+                            running.run().await;
+                        }
+                    }
+                    run_scheduled_job(job, shutdown).await;
+                }));
+        }
+        current.extend(pending);
+        Ok(())
+    }
+
+    fn managed_job(&self, name: &str) -> TalosResult<Arc<RegisteredJob>> {
         self.jobs
+            .read()
+            .expect("automation jobs")
             .iter()
             .find(|job| job.job.name == name && job.job.control.is_some())
+            .cloned()
             .ok_or_else(|| {
                 TalosError::new(
                     ErrorCode::ResourceNotFound,
                     "The native job is not available for management.",
                 )
             })
+    }
+
+    pub fn has_managed_job(&self, name: &str) -> bool {
+        self.managed_job(name).is_ok()
+    }
+
+    /// Retire schedules for removed owners while keeping running callbacks in the drain.
+    pub async fn retire_jobs(&self, names: &HashSet<String>) -> TalosResult<()> {
+        let mut tasks = self.tasks.lock().await;
+        self.ensure_running()?;
+        reap_finished(tasks.as_mut().expect("running scheduler task collection")).await;
+        self.jobs.write().expect("automation jobs").retain(|job| {
+            if names.contains(&job.job.name) {
+                job.state.lock().expect("automation job state").stopped = true;
+                job.changed.send_replace(());
+                false
+            } else {
+                true
+            }
+        });
+        Ok(())
     }
 
     fn ensure_running(&self) -> TalosResult<()> {
@@ -274,6 +345,8 @@ impl Automation {
         self.ensure_running()?;
         Ok(self
             .jobs
+            .read()
+            .expect("automation jobs")
             .iter()
             .filter(|job| job.job.control.is_some())
             .map(|job| job.snapshot())
@@ -333,7 +406,7 @@ impl Automation {
         let Some(tasks) = owned.take() else {
             return Ok(());
         };
-        for job in self.jobs.iter() {
+        for job in self.jobs.read().expect("automation jobs").iter() {
             job.state.lock().expect("automation job state").stopped = true;
         }
         self.shutdown.cancel();
@@ -372,6 +445,9 @@ async fn run_scheduled_job(job: Arc<RegisteredJob>, shutdown: CancellationToken)
         }
         let next = {
             let mut state = job.state.lock().expect("automation job state");
+            if state.stopped {
+                return;
+            }
             if state.paused {
                 state.next_due_at = None;
                 None
