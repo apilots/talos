@@ -94,9 +94,11 @@ PY
     docker_tag="$(sed -n 's/^TALOS_SERVER_VERSION=//p' deploy/docker/talos-server/.env.example)"
     [[ "${docker_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[1-9][0-9]*)?$ ]] || die "Docker default must be a formal version"
   fi
-  assert_file_contains "deploy/docker/talos-server/.env.example" "TALOS_SERVER_VERSION=${docker_tag}"
-  assert_file_contains "deploy/docker/talos-server/docker-compose.yml" "TALOS_SERVER_VERSION:-${docker_tag}"
-  assert_file_contains "deploy/docker/talos-worker/.env.example" "TALOS_WORKER_VERSION=${docker_tag}"
+  grep -Fxq "TALOS_SERVER_VERSION=${docker_tag}" deploy/docker/talos-server/.env.example \
+    || die "Server Docker default must use ${docker_tag}"
+  assert_file_contains "deploy/docker/talos-server/docker-compose.yml" "TALOS_SERVER_VERSION:-${docker_tag}}"
+  grep -Fxq "TALOS_WORKER_VERSION=${docker_tag}" deploy/docker/talos-worker/.env.example \
+    || die "Worker Docker default must use ${docker_tag}"
 }
 
 require_version_commit() {
