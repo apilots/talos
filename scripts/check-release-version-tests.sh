@@ -67,6 +67,9 @@ sed 's/version = "1.2.3"/version = "1.2.4"/' talos-rs/Cargo.lock > bad-lock
 mv bad-lock talos-rs/Cargo.lock
 expect_rejection "Cargo.lock talos-test version is '1.2.4', expected '1.2.3'"
 git restore talos-rs/Cargo.lock
+printf 'TALOS_WORKER_VERSION=v1.2.3-1\n' > deploy/docker/talos-worker/.env.example
+expect_rejection "Worker Docker default must use v1.2.3"
+git restore deploy/docker/talos-worker/.env.example
 git reset --soft HEAD~2
 git -c core.hooksPath=/dev/null commit -q -m "chore(release): prepare v1.2.3"
 expect_rejection "version preparation commit must contain only"
