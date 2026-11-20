@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCOPES = ("rust", "frontend", "pr-e2e", "tui-install", "ci")
 from ci_impact import impact, is_document
 
-VERSION = r"[0-9]+\.[0-9]+\.[0-9]+(?:-SNAPSHOT)?"
+VERSION = r"[0-9]+\.[0-9]+\.[0-9]+(?:-SNAPSHOT|-[1-9][0-9]*)?"
 VERSION_PATTERNS = {
     "talos-rs/Cargo.toml": rf'(?m)(^\[workspace\.package\]\n(?:(?!\[)[^\n]*\n)*?version = ")({VERSION})(")',
     "talos-rs/apps/tui/src/utils.rs": rf'(APP_VERSION: &str = "v)({VERSION})(")',

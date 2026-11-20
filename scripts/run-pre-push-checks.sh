@@ -14,7 +14,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     if [[ "${remote_ref}" == refs/tags/* ]]; then
         source_sha="$(git rev-parse "${local_sha}^{commit}")"
         tag="${remote_ref#refs/tags/}"
-        if [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        if [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[1-9][0-9]*)?$ ]]; then
             [[ "$(git cat-file -t "${local_sha}")" == tag ]] || {
                 echo "Release tags must be annotated." >&2; exit 1;
             }

@@ -10,6 +10,19 @@ import re
 import subprocess
 from pathlib import Path
 
+FORMAL_VERSION = re.compile(r"(?P<base>[0-9]+\.[0-9]+\.[0-9]+)(?:-(?P<fix>[1-9][0-9]*))?")
+
+
+def maintenance_predecessor(version: str) -> str | None:
+    match = FORMAL_VERSION.fullmatch(version)
+    if not match:
+        raise ValueError("Expected a formal candidate version")
+    if not match["fix"]:
+        return None
+    previous = int(match["fix"]) - 1
+    base_tag = f"v{match['base']}"
+    return f"{base_tag}-{previous}" if previous else base_tag
+
 
 def gh_api(path: str) -> dict:
     return json.loads(subprocess.check_output(["gh", "api", path], text=True))
@@ -50,16 +63,21 @@ def candidate_artifact(repository: str, run: dict) -> dict:
     return matches[0]
 
 
-def validate_evidence(evidence: dict, run: dict, directory: Path) -> None:
+def validate_evidence(evidence: dict, run: dict, directory: Path, version: str) -> None:
+    predecessor = maintenance_predecessor(version)
+    if run["head_branch"] != f"release-{version.split('-', 1)[0]}":
+        raise ValueError("Candidate branch must match the base release version")
     previous_tag = evidence["previous_tag"]
-    if not re.fullmatch(r"v\d+\.\d+\.\d+", previous_tag):
+    if not previous_tag.startswith("v") or not FORMAL_VERSION.fullmatch(previous_tag[1:]):
         raise ValueError("Candidate must identify its preceding published tag")
+    if predecessor and previous_tag != predecessor:
+        raise ValueError(f"Maintenance candidate must follow {predecessor}")
     expected = {
         "repository": run["repository"]["full_name"],
         "source_sha": run["head_sha"],
         "run_id": run["id"],
         "run_attempt": run["run_attempt"],
-        "version": run["head_branch"].removeprefix("release-"),
+        "version": version,
         "lock_sha256": digest(directory / "Cargo.lock"),
         "toolchain_sha256": digest(Path(".github/release-toolchain.env")),
         "previous_tag": previous_tag,
@@ -78,9 +96,9 @@ def validate_evidence(evidence: dict, run: dict, directory: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("record", "find", "verify"))
+    parser.add_argument("operation", choices=("previous-tag", "record", "find", "verify"))
     parser.add_argument("--repository", required=True)
-    parser.add_argument("--sha", required=True)
+    parser.add_argument("--sha")
     parser.add_argument("--run-id", type=int)
     parser.add_argument("--run-attempt", type=int)
     parser.add_argument("--version")
@@ -90,7 +108,17 @@ def main() -> None:
     args = parser.parse_args()
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", args.repository):
         parser.error("Invalid repository")
-    if not re.fullmatch(r"[0-9a-f]{40}", args.sha):
+    if args.operation == "previous-tag":
+        if not args.version:
+            parser.error("previous-tag requires version")
+        predecessor = maintenance_predecessor(args.version)
+        endpoint = f"tags/{predecessor}" if predecessor else "latest"
+        release = gh_api(f"repos/{args.repository}/releases/{endpoint}")
+        if predecessor and (release["draft"] or release["prerelease"]):
+            raise ValueError(f"{predecessor} must be a published formal release")
+        print(release["tag_name"])
+        return
+    if not re.fullmatch(r"[0-9a-f]{40}", args.sha or ""):
         parser.error("Expected exact source SHA")
 
     if args.operation == "record":
@@ -125,15 +153,15 @@ def main() -> None:
                 stream.write(f"run_id={run['id']}\nartifact_id={artifact['id']}\n"
                              f"artifact_name={artifact['name']}\n")
     else:
-        if not args.directory or not args.run_id:
-            parser.error("verify requires directory and run-id")
+        if not args.directory or not args.run_id or not args.version:
+            parser.error("verify requires directory, run-id and version")
         run = gh_api(f"repos/{args.repository}/actions/runs/{args.run_id}")
         validate_run(run, args.repository, args.sha)
         candidate_artifact(args.repository, run)
         if subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() != args.sha:
             raise ValueError("Source checkout does not match candidate")
         validate_evidence(json.loads((args.directory / "candidate.json").read_text()),
-                          run, args.directory)
+                          run, args.directory, args.version)
         if args.outputs:
             with args.outputs.open("a") as stream:
                 stream.write(f"lock_sha256={digest(args.directory / 'Cargo.lock')}\n")

@@ -82,7 +82,8 @@ jobs:
         run: |
           set -euo pipefail
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("talos-rs/Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
-          previous_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')"
+          previous_tag="$(python3 .github/scripts/release_candidate.py previous-tag \
+            --repository "$GITHUB_REPOSITORY" --version "$version")"
           mkdir -p release-candidate
           scripts/generate-release-notes.sh "$version" --from "$previous_tag" \
             --to "$SOURCE_SHA" --output release-candidate/release-body.md

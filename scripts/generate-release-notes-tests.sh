@@ -79,3 +79,14 @@ grep -Fqx -- "- **ci:** maintain legacy CI" "${notes}"
 ! grep -Fq "prepare v0.1.7" "${notes}"
 ! grep -Fq "start v0.1.8 development" "${notes}"
 grep -Fqx '[v0.1.6...v0.1.7](https://github.com/apilots/talos/compare/v0.1.6...v0.1.7)' "${notes}"
+
+git -C "${temp_dir}" tag v0.1.7
+commit_subject "fix(store): repair startup"
+commit_subject "chore(release): prepare v0.1.7-1"
+(
+  cd "${temp_dir}"
+  "${generator}" 0.1.7-1 --from v0.1.7 --output "${notes}"
+)
+grep -Fqx '# Talos v0.1.7-1' "${notes}"
+grep -Fqx -- '- **store:** repair startup' "${notes}"
+! grep -Fq 'prepare v0.1.7-1' "${notes}"
