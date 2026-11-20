@@ -11,13 +11,5 @@ UPDATE agent_command_idempotency SET committed_event_seq = (
 ) WHERE committed_event_seq IS NULL AND outcome IN ('accepted', 'failed');
 DROP TABLE history_repair_cursor_0_1_8;
 
-DROP TRIGGER sessions_cleanup_after_delete;
+-- The Store migration owns the current trigger, including generation retention.
 DROP TABLE legacy_timeline_events;
-CREATE TRIGGER sessions_cleanup_after_delete
-AFTER DELETE ON sessions
-BEGIN
-    DELETE FROM agent_events WHERE session_id = OLD.session_key;
-    DELETE FROM agent_active_turns WHERE session_id = OLD.session_key;
-    DELETE FROM agent_continuation_bindings WHERE session_id = OLD.session_key;
-    DELETE FROM agent_command_idempotency WHERE session_id = OLD.session_key;
-END;
