@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use sqlx::SqlitePool;
+use sqlx::migrate::MigrateError;
+use sqlx::{Executor, SqlitePool};
 use talos_error::{TalosError, TalosResult};
 
 /// Applies the complete immutable Store schema after Storage connects.
@@ -21,12 +22,45 @@ pub async fn run_migrations(pool: &SqlitePool, migration_dir: &Path) -> TalosRes
             )
             .context(diagnostic)
         })?;
-    migrator.run(pool).await.map_err(|error| {
-        TalosError::internal_with_source(
-            "apply store migrations; technical details were withheld.",
-            error,
+    let mut result = migrator.run(pool).await;
+    let blocked_by_legacy_trigger = matches!(
+        &result,
+        Err(MigrateError::Execute(sqlx::Error::Database(error)))
+            if error.message() == "error in trigger sessions_cleanup_after_delete: no such table: main.legacy_timeline_events"
+    );
+    let repair = migrator
+        .iter()
+        .find(|migration| migration.version == 202611190002);
+    if let (true, Some(repair)) = (blocked_by_legacy_trigger, repair) {
+        // The previously applied history upgrade removed the legacy table.
+        // Apply the idempotent trigger repair before retrying the blocked rename.
+        // The retry records the same repair normally in the SQLx ledger.
+        let rename_pending: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version = 202611180004 AND success)
+                AND NOT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version >= 202611180005)",
         )
-    })
+        .fetch_one(pool)
+        .await
+        .map_err(apply_migration_error)?;
+        if rename_pending {
+            let mut transaction = pool.begin().await.map_err(apply_migration_error)?;
+            let repair_sql: &str = &repair.sql;
+            (&mut *transaction)
+                .execute(repair_sql)
+                .await
+                .map_err(apply_migration_error)?;
+            transaction.commit().await.map_err(apply_migration_error)?;
+            result = migrator.run(pool).await;
+        }
+    }
+    result.map_err(apply_migration_error)
+}
+
+fn apply_migration_error(error: impl std::error::Error + Send + Sync + 'static) -> TalosError {
+    TalosError::internal_with_source(
+        "apply store migrations; technical details were withheld.",
+        error,
+    )
 }
 
 #[cfg(test)]
