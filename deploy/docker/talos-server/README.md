@@ -26,35 +26,26 @@ and read-only TLS files for authenticated Computer registration and RPC relay.
 It requires the reviewed runtime configuration and certificates before startup.
 `talos.yaml.example` lists shared runtime settings and the central TLS listener.
 Both Server and Worker images package the shared `conf/talos-prod.yaml` as
-their default `conf/talos.yaml`;
-the production example additionally enables the central listener and TLS.
+their default `conf/talos.yaml`. The single-host production example enables the
+central TLS listener and DockerEngine for personal Talo.
 Preserve any saved Worker identity when applying settings to an existing home.
-Use the [Talos Server production guide](../../TALOS_SERVER.md) for preparation,
+Use the [Talos Server production guide](../../TALOS_CLOUD_DEPLOY.md) for preparation,
 proxy routing and acceptance.
 
 Set `TALOS_SERVER_DATA_VOLUME` and `TALOS_SERVER_TLS_DIR` in `.env` to the existing
-deployment resources. Select this profile explicitly when working in this example
-directory:
-
-~~~bash
-docker compose -f compose.production.yml config --quiet
-docker compose -f compose.production.yml up -d
-~~~
-
-For the maintained installation at `/opt/talos-server`, install this production
-file as `/opt/talos-server/docker-compose.yml`, not the basic profile.
+deployment resources. Pair the production file with the managed Worker overlay
+when using the runtime in the sample below. A TLS-only deployment can use
+`compose.production.yml` alone with `talos.worker.runtime` omitted.
 
 ## Talo on a single Docker host
 
-Talo is an opt-in managed AI assistant. Run Talos Server and its Talo Workers on
-one Linux host with the same Docker Engine. Enable authentication and the
-existing TLS Agent node control plane in the Server configuration. Use
-`talos.worker.runtime` from [the sample configuration](talos.yaml.example).
-Choose a published Worker image pinned by digest. Set
-`control_plane_endpoint` to the HTTPS Agent ingress reachable from the Worker
-network. The loopback-only ports published by this Compose file are available to
-the host ingress, so the Worker uses the ingress hostname. For a private CA,
-mount its certificate into Server and set `trusted_ca_file`.
+On the maintained single-host deployment, signed-in administrators and Max users
+can each initialize their own Talo. The [production configuration](talos.yaml.example)
+selects DockerEngine and pins the compatible Worker image by its multi-platform
+digest. Its Workers use system CA roots to register at `https://agent.talos.love`
+through the existing HTTPS/gRPC ingress. For another site, set the Worker-reachable
+HTTPS origin and, for private PKI, set `trusted_ca_file` to its CA bundle mounted
+read-only in Server. Keep the gateway authenticated and the TLS Agent listener enabled.
 
 Add the managed Worker overlay to the production profile. On the Linux host,
 set `TALOS_DOCKER_GID` in `.env` to the result of
@@ -67,6 +58,11 @@ the Server image's non-root user to access it.
 docker compose -f compose.production.yml -f compose.managed-worker.yml config --quiet
 docker compose -f compose.production.yml -f compose.managed-worker.yml up -d --no-build
 ~~~
+
+At `/opt/talos-server`, install `compose.production.yml` as `docker-compose.yml` and
+`compose.managed-worker.yml` as `docker-compose.override.yml`. Plain `docker compose`
+loads both. For an existing home, follow the [configuration-only rollout](../../TALOS_CLOUD_DEPLOY.md#configuration-only-redeployment)
+to apply the runtime to the persisted configuration.
 
 To open this Server's Talo in native Electron, launch Talos Desktop with
 `TALOS_DESKTOP_SERVER_URL=https://your-talos-server.example`. Sign in with the

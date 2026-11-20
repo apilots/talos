@@ -31,7 +31,9 @@ chmod 644 "$fixture/tls/server.key"
 docker run --rm --network none --user 0 --entrypoint sh \
   --mount "type=bind,source=$fixture/home,target=/fixture" "$image" \
   -c 'chown -R 10001:10001 /fixture'
-docker run -d --name "$server" \
+socket_mount="type=bind,source=${TALOS_DOCKER_SOCKET:-/var/run/docker.sock},target=/var/run/docker.sock"
+docker_gid="$(docker run --rm --network none --mount "$socket_mount" "$image" stat -Lc '%g' /var/run/docker.sock)"
+docker run -d --name "$server" --group-add "$docker_gid" --mount "$socket_mount" \
   --mount "type=bind,source=$fixture/home,target=/home/talos/.talos" \
   --mount "type=bind,source=$fixture/tls,target=/run/talos-tls,readonly" \
   -e TALOS_LLM_DEEPSEEK_API_KEY=unused-startup-probe \

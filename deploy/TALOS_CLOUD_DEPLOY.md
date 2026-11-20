@@ -268,24 +268,39 @@ Install `deploy/docker/talos-worker/chromium-seccomp.json` at
 `TALOS_CHROMIUM_SECCOMP_PROFILE=/opt/talos-server/chromium-seccomp.json`
 in that deployment `.env`. The shared profile and 1 GiB shared memory support
 the Server image's embedded Browser without disabling Chromium's sandbox.
-For managed Talo, also install `compose.managed-worker.yml` beside it, set
-the Docker socket GID in `.env`, and configure `DockerEngine` in the
-persistent Server YAML. Use the same Compose files for validation, rollout,
-and status checks:
+For the maintained single-host deployment, install `compose.managed-worker.yml`
+as `/opt/talos-server/docker-compose.override.yml`. Set `TALOS_DOCKER_GID` in
+the existing deployment `.env` to the numeric group returned by
+`stat -Lc '%g' /var/run/docker.sock` on the Engine host (use the actual path
+if `TALOS_DOCKER_SOCKET` is set). Plain Compose commands in this directory
+discover both files; an explicit `-f docker-compose.yml` selects only the base.
+
+Before stopping the Server, verify its authenticated HTTPS/gRPC ingress. Pre-pull
+the full Worker image reference from the reviewed runtime with `docker pull` on
+the same Engine so the first initialization can register within its startup deadline.
+During the authorized window, stop the Server before editing its writable
+`$TALOS_HOME/conf/talos.yaml` in the existing external volume. For a home
+with missing or null `talos.worker.runtime`, copy just that mapping from
+the [production configuration](docker/talos-server/talos.yaml.example).
+Preserve its existing `agent_node.runner`, credentials, provider settings,
+and other keys, including `talos.server.runtime`. If a runtime already
+owns managed resources, keep its target and follow the existing runtime
+migration rules. Keep the YAML writable by UID 10001.
+On a Worker version change, resolve the compatible published tag with
+`docker buildx imagetools inspect` and use its OCI index digest in that mapping.
 
 ```bash
 cd /opt/talos-server
-compose=(docker compose -f docker-compose.yml)
-# Add the overlay for a Server configured to manage Talo with Docker Engine.
-# compose+=(-f compose.managed-worker.yml)
-"${compose[@]}" config --quiet
-"${compose[@]}" pull talos-server
-"${compose[@]}" up -d --no-deps --no-build --pull never talos-server
-"${compose[@]}" ps
+docker compose config --quiet
+docker compose pull talos-server
+docker compose up -d --no-deps --no-build --pull never talos-server
+docker compose ps
 ```
 
 Check the configured image/version, unchanged volume/TLS mounts, preserved
-provider settings and healthy authenticated startup. Verify only affected
+provider settings and healthy authenticated startup. With authorized test accounts,
+verify that an administrator and an ordinary Max user can each initialize a private
+Talo, reach Ready through the TLS Agent ingress, and see only their own instance. Verify only affected
 HTTPS/gRPC paths. Run the full acceptance checklist for a first production
 rollout or relevant product changes, rather than repeating unrelated business
 flows for deployment-file naming changes.
