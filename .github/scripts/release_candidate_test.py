@@ -7,7 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from release_candidate import candidate_artifact, select_run, validate_evidence, validate_run
+from release_candidate import (
+    candidate_artifact, maintenance_predecessor, select_run, validate_evidence, validate_run,
+)
 
 
 class ReleaseCandidateTests(unittest.TestCase):
@@ -21,6 +23,14 @@ class ReleaseCandidateTests(unittest.TestCase):
     def test_select_exact_successful_release_branch(self):
         tagged = dict(self.run, head_branch="v0.2.0")
         self.assertEqual(select_run([tagged, self.run], "apilots/talos", self.sha), self.run)
+
+    def test_maintenance_predecessor_stays_on_release_line(self):
+        self.assertIsNone(maintenance_predecessor("0.1.17"))
+        self.assertEqual(maintenance_predecessor("0.1.17-1"), "v0.1.17")
+        self.assertEqual(maintenance_predecessor("0.1.17-10"), "v0.1.17-9")
+        for invalid in ("0.1.17-0", "0.1.17-01", "0.1.17-SNAPSHOT"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                maintenance_predecessor(invalid)
 
     def test_requires_candidate_source_and_trusted_workflow(self):
         for key, value in [("head_sha", "b" * 40), ("head_branch", "main"),
@@ -107,12 +117,16 @@ class ReleaseCandidateTests(unittest.TestCase):
             def command(args, **kwargs):
                 return "b" * 40 + "\n" if args[0] == "git" else b"# Talos v0.2.0\n"
             with patch("release_candidate.subprocess.check_output", side_effect=command):
-                validate_evidence(evidence, self.run, directory)
+                validate_evidence(evidence, self.run, directory, "0.2.0")
+                maintenance = dict(evidence, version="0.2.0-1", previous_tag="v0.2.0")
+                validate_evidence(maintenance, self.run, directory, "0.2.0-1")
+                with self.assertRaisesRegex(ValueError, "Maintenance candidate must follow"):
+                    validate_evidence(evidence, self.run, directory, "0.2.0-1")
                 for key, value in [("source_sha", "c" * 40), ("lock_sha256", "wrong"),
                                    ("toolchain_sha256", "wrong"), ("run_attempt", 2)]:
                     with self.subTest(key=key), self.assertRaises(ValueError):
-                        validate_evidence(dict(evidence, **{key: value}), self.run, directory)
+                        validate_evidence(dict(evidence, **{key: value}), self.run, directory, "0.2.0")
                 (directory / "release-body.md").write_bytes(b"handwritten Notes")
                 evidence["notes_sha256"] = digest(b"handwritten Notes")
                 with self.assertRaises(ValueError):
-                    validate_evidence(evidence, self.run, directory)
+                    validate_evidence(evidence, self.run, directory, "0.2.0")

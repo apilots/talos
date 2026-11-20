@@ -22,12 +22,12 @@ die() {
 
 normalize_version() {
   local input="$1"
-  if [[ "${input}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "${input}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[1-9][0-9]*)?$ ]]; then
     TAG="${input}"
-  elif [[ "${input}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  elif [[ "${input}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[1-9][0-9]*)?$ ]]; then
     TAG="v${input}"
   else
-    die "version must look like 0.1.8 or v0.1.8"
+    die "expected a formal version such as 0.1.17 or 0.1.17-1 (optional v prefix)"
   fi
 }
 
@@ -128,10 +128,10 @@ entry_count=0
 
 while IFS= read -r subject || [[ -n "${subject}" ]]; do
   [[ -n "${subject}" ]] || continue
-  if [[ "${subject}" =~ ^Release[[:space:]]+(Talos[[:space:]]+)?v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "${subject}" =~ ^Release[[:space:]]+(Talos[[:space:]]+)?v?[0-9]+\.[0-9]+\.[0-9]+(-[1-9][0-9]*)?$ ]]; then
     continue
   fi
-  if [[ "${subject}" =~ ^chore\(release\):[[:space:]]+(prepare[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+|start[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+[[:space:]]+development)$ ]]; then
+  if [[ "${subject}" =~ ^chore\(release\):[[:space:]]+(prepare[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+(-[1-9][0-9]*)?|start[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+[[:space:]]+development)$ ]]; then
     continue
   fi
 

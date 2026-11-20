@@ -26,6 +26,17 @@ the commit hook detects them directly. Release version commits use exactly:
 chore(release): prepare v<version>
 ```
 
+## Fix an already released version
+
+Regular releases keep the `X.Y.Z` format and existing workflow. For a bug
+found after release, publish an `X.Y.Z-N` fix from the corresponding release
+branch. Start at `1` and increment for each fix release on that version. Carry
+the fix commits back to `main`. Keep the version preparation commit on the
+release branch.
+
+For example, the Desktop upgrade bug found after `0.1.17` would be
+fixed in `0.1.17-1`. The next fix on that line would be `0.1.17-2`.
+
 ## Open the release branch
 
 Fetch remote `main` and create `release-<version>` from its exact commit. Immediately
@@ -52,8 +63,8 @@ in a separate `chore(release): start v<next-version> development` commit. Keep
 Docker defaults on the latest published formal image until the new release ships.
 Development does not wait for the release branch to finish.
 
-General release policy and automation changes land on `main` for future versions;
-do not backport them to an existing release branch as product bug fixes.
+General release policy and automation changes land on `main` for future versions.
+Backport release tooling only when the maintenance release needs it.
 
 ## Stabilize
 
@@ -196,10 +207,11 @@ the manifest source SHA matches the immutable tag, and both `linux/amd64` and
 `linux/arm64` image platforms are present. Verify latest references for the newest release.
 
 After successful publication, archive the exact tag Notes in
-`docs/releases/<tag>.md` without rewriting them, then merge the release branch
-into `main`. Preserve main's
+`docs/releases/<tag>.md` without rewriting them. Merge a regular release branch
+into `main`; for a maintenance release, carry over only the fixes and Notes.
+Preserve main's
 next development version when resolving version conflicts; never reset main to the
 released version or copy the entire release tree over ongoing development. Update
-Docker defaults to the newly published image. If main has not advanced yet, start
+Docker defaults when the new release becomes latest. If main has not advanced yet, start
 the next development version in a separate commit. Keep the released tag immutable.
 Protocol/data upgrades also follow [Deployment](../../deploy/README.md#data-upgrades-and-rollback).

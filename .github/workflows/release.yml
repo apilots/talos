@@ -60,24 +60,12 @@ jobs:
             exit 1
           fi
 
-          if [[ "${TAG}" != v* ]]; then
-            echo "Release tags must use the v* format." >&2
+          formal_tag='^v[0-9]+\.[0-9]+\.[0-9]+(-[1-9][0-9]*)?$'
+          if [[ ! "${TAG}" =~ ${formal_tag} ]]; then
+            echo "Expected a formal tag such as v0.1.17 or v0.1.17-1." >&2
             exit 1
           fi
-
           VERSION="${TAG#v}"
-          if [[ -z "${VERSION}" ]]; then
-            echo "Release version must not be empty." >&2
-            exit 1
-          fi
-          if [[ "${VERSION}" != "${TAG#v}" ]]; then
-            echo "Release version ${VERSION} does not match tag ${TAG}." >&2
-            exit 1
-          fi
-          if [[ "${VERSION}" == *[!A-Za-z0-9._-]* ]]; then
-            echo "Release version contains unsupported characters: ${VERSION}" >&2
-            exit 1
-          fi
           if [[ "${PUBLISH_LATEST}" != "true" && "${PUBLISH_LATEST}" != "false" ]]; then
             echo "publish_latest must be true or false." >&2
             exit 1
@@ -86,7 +74,7 @@ jobs:
           if [[ "${PUBLISH_LATEST}" == "true" ]]; then
             query_error="$(mktemp)"
             if latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' 2>"${query_error}")"; then
-              [[ "${latest_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+              [[ "${latest_tag}" =~ ${formal_tag} ]] || {
                 echo "Cannot compare latest release version: ${latest_tag}" >&2
                 exit 1
               }
@@ -222,9 +210,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ needs.validate-source.outputs.source_sha }}
           CANDIDATE_RUN: ${{ steps.candidate.outputs.run_id }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: >-
           python3 .github/scripts/release_candidate.py verify
           --repository "$GITHUB_REPOSITORY" --sha "$SOURCE_SHA"
+          --version "$VERSION"
           --run-id "$CANDIDATE_RUN" --directory release-candidate
           --outputs "$GITHUB_OUTPUT"
       - name: Download tag Notes

@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::future::Future;
@@ -234,7 +235,7 @@ async fn run_with_paths(
     if fresh_install {
         for task in &ordered_tasks {
             let definition = task.definition();
-            if definition.target_version <= task_target_ceiling {
+            if !compare_product_versions(&definition.target_version, &task_target_ceiling).is_gt() {
                 state.tasks.insert(
                     definition.id.to_string(),
                     UpgradeTaskState {
@@ -253,7 +254,7 @@ async fn run_with_paths(
         write_state(&state_path, &state)?;
     }
     let installed_version = state.product_version.clone();
-    if &installed_version > current_version {
+    if compare_product_versions(&installed_version, current_version).is_gt() {
         return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             format!(
@@ -286,7 +287,7 @@ async fn run_with_paths(
         let definition = task.definition();
         let target_version = &definition.target_version;
         let task_started_at = Instant::now();
-        if target_version > &task_target_ceiling {
+        if compare_product_versions(target_version, &task_target_ceiling).is_gt() {
             tracing::info!(
                 upgrade_id = definition.id,
                 revision = definition.revision,
@@ -408,6 +409,20 @@ async fn run_with_paths(
     Ok(report)
 }
 
+/// Numeric maintenance releases follow the stable version of the same release line.
+fn compare_product_versions(left: &Version, right: &Version) -> Ordering {
+    let release_line = |version: &Version| {
+        let maintenance = match version.pre.as_str().as_bytes() {
+            [b'1'..=b'9', rest @ ..] => rest.iter().all(u8::is_ascii_digit),
+            _ => false,
+        };
+        (version.major, version.minor, version.patch, maintenance)
+    };
+    release_line(left)
+        .cmp(&release_line(right))
+        .then_with(|| left.cmp(right))
+}
+
 /// Allows a development SNAPSHOT to exercise Tasks owned by its pending stable release.
 fn task_target_ceiling(current_version: &Version) -> Version {
     if current_version.pre.as_str() == "SNAPSHOT" {
@@ -439,11 +454,11 @@ fn validate_and_order_tasks(tasks: &[Box<dyn UpgradeTask>]) -> TalosResult<Vec<&
     }
     let mut ordered = tasks.iter().map(Box::as_ref).collect::<Vec<_>>();
     ordered.sort_by(|left, right| {
-        left.definition()
-            .target_version
-            .cmp(&right.definition().target_version)
-            .then_with(|| left.definition().priority.cmp(&right.definition().priority))
-            .then_with(|| left.definition().id.cmp(right.definition().id))
+        let left = left.definition();
+        let right = right.definition();
+        compare_product_versions(&left.target_version, &right.target_version)
+            .then_with(|| left.priority.cmp(&right.priority))
+            .then_with(|| left.id.cmp(right.id))
     });
     Ok(ordered)
 }
