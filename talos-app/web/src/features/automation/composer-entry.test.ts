@@ -38,20 +38,20 @@ describe("explicit composer automation entry", () => {
     expect(mocks.resolveCommand).toHaveBeenCalledTimes(1);
     expect(mocks.resolveCommand).toHaveBeenCalledWith({ text: "/loop " + prompt });
   });
-  it.each(["goal", "loop"] as const)("preserves a sleeping Talo’s /%s command for Server admission", async (mode) => {
+  it.each(["goal", "loop"] as const)("keeps Talo's /%s command and explicit mode together for Server queue admission", async (mode) => {
     const mocks = client();
     const prompt = "Check  the deployment";
     const text = `/${mode} ${prompt}`;
     mocks.resolveCommand.mockResolvedValue({ command: { type: "activate", mode, prompt } });
     expect(await prepareAutomationMessage(text, undefined, "talo", true)).toEqual({
-      kind: "message", prompt: text, skillSelection: undefined,
+      kind: "message", prompt: text, skillSelection: { name: mode, path: "" },
     });
     expect(mocks.list).not.toHaveBeenCalled();
   });
   it.each([
     ["goal", "pause the deployment until CI is green"],
     ["loop", "5m Check CI"],
-  ] as const)("submits menu-selected %s on sleeping Talo without a Skill read", async (mode, prompt) => {
+  ] as const)("submits menu-selected %s on Talo without a Skill read", async (mode, prompt) => {
     const mocks = client();
     expect(await prepareAutomationMessage(prompt, mode, "talo", true)).toEqual({
       kind: "message", prompt, skillSelection: { name: mode, path: "" },

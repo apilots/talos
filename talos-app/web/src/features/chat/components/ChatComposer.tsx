@@ -24,10 +24,9 @@ import { useChatComposerAttachmentDraft } from "./useChatComposerAttachmentDraft
 import { WaitingMessages } from "./WaitingMessages";
 import { ComposerCommandResponse } from "./command-response";
 
-// ─── main component ──────────────────────────────────────────────────────────
-
 export function ChatComposer({
   draft,
+  nodeId,
   initialAutomationMode,
   onRestoredAutomationModeConsumed,
   automationCommands,
@@ -39,7 +38,7 @@ export function ChatComposer({
   onDismissCommandResponse,
   onCancel,
   inputHistory,
-  disabled,
+  disabled, attachmentsDisabled = disabled,
   permissionMode = "fullAccess",
   permissionModeDisabled = false,
   onPermissionModeChange,
@@ -82,6 +81,7 @@ export function ChatComposer({
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const attachmentDraft = useChatComposerAttachmentDraft({
+    nodeId,
     activeProjectId,
     supportedKinds: supportedAttachmentKinds,
     initialAttachments,
@@ -133,14 +133,13 @@ export function ChatComposer({
   });
 
   const handleSend = async () => {
-    if (submitting || !attachmentDraft.canSubmit(draft)) return;
+    if (disabled || submitting || !attachmentDraft.canSubmit(draft)) return;
     inputHistoryNavigation.reset();
     composerSuggestions.cancelCurrentTrigger();
     setSubmitting(true); setSendError(undefined);
-    const selected = pendingMode;
     try {
-      await attachmentDraft.submit(draft, (attachments) => onSend(attachments, selected));
-      setPendingMode((current) => current === selected ? undefined : current);
+      await attachmentDraft.submit(draft, (attachments) => onSend(attachments, pendingMode));
+      setPendingMode((current) => current === pendingMode ? undefined : current);
     } catch (failure) {
       setSendError(userVisibleError(failure, "The message could not be sent."));
     } finally { setSubmitting(false); }
@@ -164,7 +163,7 @@ export function ChatComposer({
         {showProjectSelector && compact ? <ComposerCompactContext {...{ disabled, isBusy, modelTriggerRef, models, onModelChange, setModelPickerOpen, onReasoningLevelChange, reasoningLevel, selectedModel, onProjectChange, activeProjectId, projects }} /> : null}
 
         <ComposerAttachmentTray
-          disabled={Boolean(disabled)}
+          disabled={Boolean(attachmentsDisabled)}
           error={
             attachmentDraft.hasInvalidAttachments
               ? t("chat:invalidAttachments")
@@ -223,9 +222,9 @@ export function ChatComposer({
 
         <div className="flex flex-wrap items-center gap-1 px-3 pb-3 pt-1.5">
           <ComposerAttachments
-            onAutomationMode={(automationCommands ?? automation?.commands)?.length ? (mode) => { setPendingMode(mode); editorRef.current?.focus(); } : undefined}
+            onAutomationMode={!disabled && (automationCommands ?? automation?.commands)?.length ? (mode) => { setPendingMode(mode); editorRef.current?.focus(); } : undefined}
             availableFiles={attachmentDraft.availableFiles}
-            disabled={Boolean(disabled || submitting)}
+            disabled={Boolean(attachmentsDisabled || submitting)}
             hasMoreAvailable={attachmentDraft.hasMoreAvailable}
             isLoading={attachmentDraft.isLoading}
             isLoadingMore={attachmentDraft.isLoadingMore}

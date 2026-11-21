@@ -5,10 +5,11 @@ import { TalosApiError } from "@talos/sdk-browser";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { TextMessageBlock } from "./TextMessageBlock";
 
 const files = vi.hoisted(() => ({ read: vi.fn(), content: vi.fn() }));
-vi.mock("@/shared/api/client", () => ({ getTalosClient: () => ({ files }) }));
+vi.mock("@/shared/api/client", () => ({ getTalosClient: (owner?: { sessionId?: string }) => ({ files: owner?.sessionId === "talo-chat" ? files : {} }) }));
 
 it("replays mixed attachments, previews the selected image, and releases loaded image URLs", async () => {
   // jsdom lacks native dialog methods; focus and Escape are verified in the browser.
@@ -28,7 +29,7 @@ it("replays mixed attachments, previews the selected image, and releases loaded 
   });
   files.content.mockResolvedValue({ file: { mimeType: "image/png" }, data: new Uint8Array([1, 2, 3]) });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = render(<QueryClientProvider client={queryClient}><TextMessageBlock fileIds={["first", "second", "notes", "missing"]} kind="user" text="Identify the images" /></QueryClientProvider>);
+  const view = render(<QueryClientProvider client={queryClient}><AttachmentSessionContext.Provider value="talo-chat"><TextMessageBlock fileIds={["first", "second", "notes", "missing"]} kind="user" text="Identify the images" /></AttachmentSessionContext.Provider></QueryClientProvider>);
   try {
     await screen.findByRole("button", { name: "Preview first.png" });
     fireEvent.click(await screen.findByRole("button", { name: "Preview second.png" }));
@@ -39,7 +40,10 @@ it("replays mixed attachments, previews the selected image, and releases loaded 
     expect(screen.getAllByRole("img")).toHaveLength(2);
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent("Attachment could not be loaded");
-    expect(files.content.mock.calls.map(([request]) => request.fileId)).toEqual(["first", "second"]);
+    expect(files.read).toHaveBeenCalledWith({ fileId: "notes" });
+    expect(files.content.mock.calls.map(([request]) => request)).toEqual([
+      { fileId: "first" }, { fileId: "second" },
+    ]);
     fireEvent.error(within(screen.getByRole("button", { name: "Preview first.png" })).getByRole("img"));
     expect(screen.queryByRole("button", { name: "Preview first.png" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toEqual(["Attachment could not be loaded", "Attachment could not be loaded"]);

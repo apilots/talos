@@ -13,38 +13,16 @@ not a substitute for parity tests.
 ## Client paths
 
 ```text
-+------------------+  +------------------+  +------------------+  +------------------+
-| Web UI           |  | Desktop          |  | TUI / Command    |  | Rust SDK client  |
-+--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
-         |                     |                     |                     |
-         v                     v                     v                     v
-+------------------+  +------------------+  +------------------+  +------------------+
-| TS TalosClient   |  | TS product SDK   |  | Rust SDK         |  | Rust SDK         |
-| shared types     |  | Client + types   |  | GatewayClient    |  | GatewayClient    |
-+--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
-         |                     |                     |                     |
-         v                     v                     v                     v
-+------------------+  +------------------+  +------------------+  +------------------+
-| Browser adapter  |  | HTTP/SSE or IPC  |  | EmbeddedServer   |  | Rust AppServer   |
-| HTTP + SSE       |  | personal Worker  |  | Client           |  | Client           |
-+--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
-         |                     |                     |                     |
-         +---------------------+-----------+---------+---------------------+
-                                           |
-                                           v
-+------------------------------------------------------------------------------------+
-| HTTP Gateway | main JSON-RPC stdio | in-process Gateway | app-server               |
-+------------------------------------------+-----------------------------------------+
-                                           |
-                                           v
-+------------------------------------------------------------------------------------+
-| TalosService: shared domain responses, ApiError and durable state                  |
-+------------------------------------------+-----------------------------------------+
-                                           |
-                                           v
-+------------------------------------------------------------------------------------+
-| Store commit -> Timeline { Agent | SystemNotice } -> subscribers / History         |
-+------------------------------------------+-----------------------------------------+
+Cloud Agent requests (personal Talo)
+  Web     ─┐
+           ├─ TalosClient (HTTP/SSE) → owning Talos Server → execution Worker
+  Desktop ─┘
+Cloud desktop media
+  Web viewer or native viewer ↔ owning Talos Server ↔ Worker framebuffer and input
+Local execution
+  Desktop       → AppServerClient (IPC/stdio) → bundled App Server → local Worker
+  TUI / Command → EmbeddedServerClient        → embedded Gateway
+  Rust SDK      → AppServerClient             → JSON-RPC App Server
 ```
 
 ## Unified capability surface
@@ -76,8 +54,9 @@ embedded SDK, and their product transports can all reach it.
 | `@talos/sdk-browser` | HTTP, multipart upload, authentication header, and SSE transport implementation |
 | `@talos/sdk-app-server` | JSON-RPC transport plus Electron main-process and typed preload IPC adapters |
 
-Web uses `TalosClient` over HTTP/SSE to its selected management service. Desktop
-uses `AppServerClient` through typed preload IPC and JSON-RPC stdio. Its bundled
+Web uses `TalosClient` over HTTP/SSE to its selected management service. For
+its local Worker, Desktop uses `AppServerClient` through typed preload IPC and
+JSON-RPC stdio. Its bundled
 app-server retains Service, Store, Coordinator and one `TalosWorker`. Verified
 login enrolls or restores this same Worker's personal UUID through the central
 Server. Registration does not replace the management runtime or its data.
@@ -87,6 +66,23 @@ Remote dispatch stays inside `agent-client`; credentials never reach the rendere
 The production UI requires sign-in. Anonymous development keeps local execution
 without registering a fictitious cloud node. Sync opt-out remains independent.
 Shared generated types and parity tests keep the browser and Desktop facades aligned.
+For a Server-owned cloud Agent, each client calls the owning Talos Server's
+authenticated product API through the same TypeScript SDK. Personal Talo uses
+this path for lifecycle, turns, history, live events, automation and files. The
+Server dispatches execution to its Worker. Web sends HTTP/SSE directly and
+Electron uses its configured Server endpoint and TLS trust. Desktop media has
+a separate connection through the Server that carries Worker frames and viewer
+input. The Server-issued conversation ID identifies the owner for later requests.
+An existing conversation link uses that owner even if another Computer is
+selected. If its owner cannot be resolved, an attempted send preserves the draft
+and surfaces the error. Only an explicit new chat takes the selected Computer as
+its target. Server-issued routing IDs may be cached in memory. The Server owns
+the Turn and any durable Goal or Loop across Desktop restarts.
+
+For an ordinary Worker, Desktop can remember the Server-confirmed Computer ID
+for the signed-in account and configured Server. This lets saved chats and Files
+use their authenticated local File Service during a Server outage. A first
+lookup for an unknown Computer still requires the Server.
 
 ## Rust SDK and embedded SDK
 
@@ -261,7 +257,7 @@ viewing and control. Browser capabilities determine whether desktop media is
 available. Built-in job requests target the selected Computer and its execution
 instance. The verified execution-host owner controls its existing application
 jobs, including maintenance of historical data. Desktop delegates cloud Computer job operations and managed Talo
-lifecycle to the configured Server used by Web.
+lifecycle to the configured Server used by Web. Personal Talo browser controls and media use that same authenticated Server and viewer ticket. The native renderer receives frames through its existing IPC bridge.
 When opening a registered remote Computer, Desktop verifies its directory
 identity at the Gateway. After the owner connection is admitted, Desktop can
 record the public Computer metadata locally so the execution route also works
@@ -274,7 +270,7 @@ before Sync imports that Computer.
 - Clients own presentation, interaction, optimistic state, and reconnect UX.
 - The server owns search, matching, parsing, permission, and durable lifecycle rules.
 
-Desktop's app-server controller owns backend restart and subscription replay.
+For local JSON-RPC subscriptions, Desktop's app-server controller owns backend restart and replay. Cloud Agent subscriptions reconnect through the shared HTTP/SSE SDK.
 Replay retains the verified account ID and last delivered cursor, never a token.
 After replacement it reads the current session from the existing auth owner and
 uses that account's current credential through normal request validation. Missing,
@@ -316,10 +312,11 @@ new capability as complete until those paths and their tests are aligned.
 - Use existing TUI styling helpers and the default foreground unless the design system requires a specific color. Avoid hardcoded white and churn between equivalent span/line constructions.
 - Use shared text-wrapping options and line utilities for wrapping, indentation, and list prefixes instead of custom string manipulation.
 
-For a sleeping Talo, the chat submits menu-selected Goal and Loop as the
-existing reserved Skill selection by name, leaving the path empty. Turn and
-queue admission wake the Worker and resolve its protected System Skill. The
-chat waiting row reads the existing Computer phase until Turn events arrive.
+For a personal Talo, including an idle-sleeping instance, chat submits the
+Goal or Loop activation to the same Server as a normal message. Menu selection
+carries the reserved Skill name. The Server wakes the Worker when needed,
+confirms RPC readiness, and resolves the protected Skill on that Worker during
+Turn or queue admission. The waiting row displays the reported Computer phase.
 
 ### Running Turn reads and stream offsets
 

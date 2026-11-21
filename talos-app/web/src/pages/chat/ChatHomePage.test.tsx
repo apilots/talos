@@ -20,7 +20,7 @@ function render(ui: ReactElement) {
 }
 
 let testProjects = createDefaultProjects();
-const computer = vi.hoisted(() => ({ sleeping: false }));
+const computer = vi.hoisted(() => ({ phase: undefined as "ready" | "sleeping" | undefined }));
 const createProjectMutateAsync = vi.fn();
 const setActiveProjectIdMock = vi.fn((projectId: string) => {
   useAppStore.setState({ activeProjectId: projectId });
@@ -121,7 +121,7 @@ describe("ChatHomePage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    computer.sleeping = false;
+    computer.phase = undefined;
     setTalosClientFactory(() => ({ automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) } }) as unknown as TalosWebClient);
 
     const storage = new Map<string, string>();
@@ -198,8 +198,8 @@ describe("ChatHomePage", () => {
     });
   });
 
-  it("loads Add commands and submits from a cold Home with a sleeping Talo", async () => {
-    computer.sleeping = true;
+  it.each(["ready", "sleeping"] as const)("submits Add commands from Home through a %s Talo", async (phase) => {
+    computer.phase = phase;
     const commandCatalog = vi.fn().mockResolvedValue({ data: [{ mode: "goal" }, { mode: "loop" }] });
     setTalosClientFactory(() => ({ automation: { commandCatalog } }) as unknown as TalosWebClient);
     render(<MemoryRouter initialEntries={[{ pathname: "/", state: { initialDraft: "5m Check CI" } }]}><Routes>
@@ -248,6 +248,6 @@ describe("ChatHomePage", () => {
 
 });
 
-vi.mock("@/features/computers", () => ({ useComputers: () => computer.sleeping
-  ? { selectedId: "talo", selected: { available: false, managedWorkerPhase: "sleeping" } }
+vi.mock("@/features/computers", () => ({ useComputers: () => computer.phase
+  ? { selectedId: "talo", selected: { available: computer.phase === "ready", managedWorkerPhase: computer.phase } }
   : { selectedId: "embedded", selected: { available: true } }, useProductScope: () => "test-scope", ComputerContext: () => null }));

@@ -54,12 +54,12 @@ describe("useUpdateSessionModelMutation", () => {
     const { queryClient, wrapper } = createQueryHarness();
     const connectionKey = useAppStore((state) => connectionScope(state.connection));
     const sessionKey = chatKeys.session(connectionKey, "session-1");
-    queryClient.setQueryData(sessionKey, {
+    queryClient.setQueryData(sessionKey, { owner: "server", session: {
       modelSelection: {
         modelRef: { provider: "deepseek", id: "deepseek-v4-flash" },
         reasoningEffort: "light",
       },
-    } as SessionInfo);
+    } as SessionInfo });
     const { result } = renderHook(() => useUpdateSessionModelMutation("session-1"), { wrapper });
     const nextSelection: ModelSelection = {
       modelRef: { provider: "anthropic", id: "claude-opus" },
@@ -69,7 +69,7 @@ describe("useUpdateSessionModelMutation", () => {
     act(() => result.current.mutate(nextSelection));
 
     await waitFor(() => {
-      expect(queryClient.getQueryData<SessionInfo>(sessionKey)?.modelSelection).toEqual(
+      expect(queryClient.getQueryData<{ session: SessionInfo }>(sessionKey)?.session.modelSelection).toEqual(
         nextSelection,
       );
     });
@@ -84,12 +84,12 @@ describe("useUpdateSessionModelMutation", () => {
     );
     const { queryClient, wrapper } = createQueryHarness();
     const sessionKey = chatKeys.session(useAppStore((state) => connectionScope(state.connection)), "session-1");
-    queryClient.setQueryData(sessionKey, {
+    queryClient.setQueryData(sessionKey, { owner: "server", session: {
       modelSelection: {
         modelRef: { provider: "deepseek", id: "deepseek-v4-flash" },
         reasoningEffort: "light",
       },
-    } as SessionInfo);
+    } as SessionInfo });
     const { result } = renderHook(() => useUpdateSessionModelMutation("session-1"), { wrapper });
     const firstSelection: ModelSelection = {
       modelRef: { provider: "anthropic", id: "claude-opus" },
@@ -111,7 +111,7 @@ describe("useUpdateSessionModelMutation", () => {
       "session-1",
       firstSelection,
     );
-    expect(queryClient.getQueryData<SessionInfo>(sessionKey)?.modelSelection).toEqual(
+    expect(queryClient.getQueryData<{ session: SessionInfo }>(sessionKey)?.session.modelSelection).toEqual(
       finalSelection,
     );
 
@@ -123,13 +123,13 @@ describe("useUpdateSessionModelMutation", () => {
       "session-1",
       finalSelection,
     );
-    expect(queryClient.getQueryData<SessionInfo>(sessionKey)?.modelSelection).toEqual(
+    expect(queryClient.getQueryData<{ session: SessionInfo }>(sessionKey)?.session.modelSelection).toEqual(
       finalSelection,
     );
 
     act(() => resolvers[1]?.());
     await waitFor(() => {
-      expect(queryClient.getQueryData<SessionInfo>(sessionKey)?.modelSelection).toEqual(
+      expect(queryClient.getQueryData<{ session: SessionInfo }>(sessionKey)?.session.modelSelection).toEqual(
         finalSelection,
       );
     });
@@ -178,12 +178,12 @@ describe("useSessionActions", () => {
     apiMocks.compactSession.mockResolvedValue(compactedSession);
     const { queryClient, wrapper } = createQueryHarness();
     const sessionKey = chatKeys.session(useAppStore((state) => connectionScope(state.connection)), "session-1");
-    queryClient.setQueryData(sessionKey, previousSession);
+    queryClient.setQueryData(sessionKey, { owner: "server", session: previousSession });
     const { result } = renderHook(() => useSessionActions("session-1"), { wrapper });
 
     await act(async () => result.current.compact.mutateAsync());
 
-    expect(queryClient.getQueryData<SessionInfo>(sessionKey)).toEqual(compactedSession);
+    expect(queryClient.getQueryData(sessionKey)).toEqual({ owner: "server", session: compactedSession });
   });
 });
 

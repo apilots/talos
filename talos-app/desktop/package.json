@@ -23,10 +23,12 @@
   },
   "dependencies": {
     "@talos/sdk-app-server": "workspace:*",
+    "@talos/sdk-browser": "workspace:*",
     "@talos/sdk-core": "workspace:*",
     "app-path": "^4.0.0",
     "open": "^11.0.4",
     "range-parser": "1.2.1",
+    "undici": "7.25.0",
     "which": "^7.0.0"
   },
   "devDependencies": {

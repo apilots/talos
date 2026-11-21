@@ -7,7 +7,7 @@ const fixture = vi.hoisted(() => ({
 vi.mock("electron", () => ({ ipcMain: { handle: (name:string, handler:(...args:unknown[])=>Promise<unknown>) => fixture.handlers.set(name,handler) }, BrowserWindow: {}, shell: {}, protocol: { handle: vi.fn() } }));
 vi.mock("./browser-host", () => ({ desktopBrowserHost: { workspace: fixture.workspace } }));
 import {desktopWindows} from "./desktop-window";
-import type {BaseWindow,WebContentsView} from "electron";
+import { protocol, type BaseWindow, type WebContentsView } from "electron";
 import { registerDesktopIpcHandlers } from "./desktop-ipc";
 import { TALOS_IPC } from "./ipc";
 const sender = { mainFrame: {},isDestroyed:()=>false };
@@ -19,7 +19,7 @@ beforeEach(() => {
   vi.spyOn(console,"error").mockImplementation(() => {});
 });
 afterEach(() => {desktopWindows.clear();vi.restoreAllMocks();});
-function setup(invoke=vi.fn(async()=>({ user: { user_id: "verified-alice" } }))) {
+function setup(invoke=vi.fn<() => Promise<unknown>>(async()=>({ user: { user_id: "verified-alice" } }))) {
   const setAppIcon = vi.fn();
   registerDesktopIpcHandlers({ invoke } as unknown as DesktopAppServerController, { setAppIcon });
   return { invoke, request: fixture.handlers.get(TALOS_IPC.browserRequest)!, setAppIcon };
@@ -54,6 +54,22 @@ it("routes shared Desktop APIs only for registered product views",async()=>{
  desktopWindows.add({window:{} as BaseWindow,view:{webContents:sender} as unknown as WebContentsView});
  expect(await handler(event,"user/current",{},{})).toMatchObject({status:"success"});expect(invoke).toHaveBeenCalledOnce();
  expect(await handler({...event,senderFrame:{}},"user/current",{},{})).toMatchObject({status:"error"});expect(invoke).toHaveBeenCalledOnce();
+});
+
+it("withdraws a tab's native preview even when the issuing Server is offline", async () => {
+  const { invoke } = setup();
+  const contents = { ...sender, once: vi.fn(), id: 1 };
+  desktopWindows.add({ window: {} as BaseWindow, view: { webContents: contents } as unknown as WebContentsView });
+  const handler = fixture.handlers.get(TALOS_IPC.invoke)!;
+  const send = (method: string, params: unknown) => handler({ ...event, sender: contents }, method, params, {});
+  const descriptor = { previewId: "server-preview", expiresAt: Date.now() / 1000 + 60 };
+  invoke.mockImplementationOnce(async () => descriptor);
+  expect(await send("file/preview/prepare", { source: { kind: "file", fileId: "document" } })).toMatchObject({ status: "success" });
+  invoke.mockRejectedValueOnce(new Error("Server is offline"));
+  expect(await send("file/preview/close", { previewId: descriptor.previewId })).toMatchObject({ status: "error" });
+  const serve = vi.mocked(protocol.handle).mock.calls.at(-1)![1];
+  const response = await serve(new Request("talos-preview://server-preview/document"));
+  expect(response.status).toBe(404);
 });
 
 it("applies only built-in icon IDs from a trusted product main frame", async () => {

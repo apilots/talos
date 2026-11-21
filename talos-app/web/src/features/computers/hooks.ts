@@ -48,7 +48,7 @@ export function useComputerList(query = "") {
 export function useComputer(nodeId: string | undefined) {
   const scope = useProductScope();
   return useQuery({ queryKey: ["talos", scope, "computer", nodeId],
-    queryFn: () => getTalosClient().computers.read({ nodeId: nodeId! }), enabled: Boolean(nodeId), refetchInterval: 5_000 });
+    queryFn: async () => (await getTalosClient({ nodeId, readOnly: true })).computers.read({ nodeId: nodeId! }), enabled: Boolean(nodeId), refetchInterval: 5_000 });
 }
 export function useComputers() {
   const scope = useProductScope();

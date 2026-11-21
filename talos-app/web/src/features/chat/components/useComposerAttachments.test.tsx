@@ -2,19 +2,21 @@
 
 import { createElement, type PropsWithChildren } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileInfo, FileUploadOptions } from "@talos/sdk-browser";
 
+import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { useComposerAttachments } from "./useComposerAttachments";
 
 const fileApi = vi.hoisted(() => ({
   upload: vi.fn(),
   list: vi.fn(),
+  selectClient: vi.fn(),
 }));
 
 vi.mock("@/shared/api/client", () => ({
-  getTalosClient: () => ({ files: fileApi }),
+  getTalosClient: (owner?: unknown) => { fileApi.selectClient(owner); return { files: fileApi }; },
 }));
 
 const PERSONAL_IMAGE: FileInfo = {
@@ -37,7 +39,7 @@ const PROJECT_FILE: FileInfo = {
   mimeType: "application/pdf",
 };
 
-function createWrapper() {
+function createWrapper(sessionId?: string) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -45,7 +47,8 @@ function createWrapper() {
     },
   });
   return function Wrapper({ children }: PropsWithChildren) {
-    return createElement(QueryClientProvider, { client: queryClient }, children);
+    return createElement(QueryClientProvider, { client: queryClient },
+      createElement(AttachmentSessionContext.Provider, { value: sessionId }, children));
   };
 }
 
@@ -75,7 +78,7 @@ describe("useComposerAttachments", () => {
           supportedKinds: ["image", "file"],
           initialAttachments: [PROJECT_FILE],
         }),
-      { wrapper: createWrapper() },
+      { wrapper: createWrapper("talo-chat") },
     );
     const image = new File(["png"], "pasted.png", { type: "image/png" });
 
@@ -94,6 +97,7 @@ describe("useComposerAttachments", () => {
         onProgress: expect.any(Function),
       },
     );
+    expect(fileApi.selectClient).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "talo-chat" }));
     expect(result.current.fileIds).toEqual(["project-file", "personal-image"]);
   });
 
@@ -126,6 +130,7 @@ describe("useComposerAttachments", () => {
       expect.objectContaining({ id: itemId, status: "uploading", progress: null }),
     ]);
 
+    await waitFor(() => expect(options?.onProgress).toBeDefined());
     act(() => options?.onProgress?.({ loadedBytes: 5, totalBytes: 10 }));
     expect(result.current.items[0]).toEqual(
       expect.objectContaining({
@@ -171,6 +176,7 @@ describe("useComposerAttachments", () => {
     act(() => {
       pending = result.current.upload([image]);
     });
+    await waitFor(() => expect(signal).toBeDefined());
     act(() => result.current.remove(result.current.items[0]!.id));
     await act(async () => pending);
 
@@ -236,10 +242,11 @@ describe("useComposerAttachments", () => {
           scope: { type: "project", projectId: "project-1" },
           supportedKinds: ["image", "file"],
         }),
-      { wrapper: createWrapper() },
+      { wrapper: createWrapper("talo-chat") },
     );
 
     await act(async () => result.current.loadAvailable());
+    expect(fileApi.list).toHaveBeenNthCalledWith(1, { limit: 100 });
     expect(result.current.hasMoreAvailable).toBe(true);
 
     await act(async () => result.current.loadMoreAvailable());

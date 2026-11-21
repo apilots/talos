@@ -5,19 +5,20 @@ import { previewApplications, openPreviewApplication } from "./preview-applicati
 import { app, protocol, type WebContents } from "electron";
 import rangeParser from "range-parser";
 import { createFilePreviewClient, AppProtocol, TalosApiError } from "@talos/sdk-core";
+import type { FilePreviewTransport } from "@talos/sdk-core";
 import type { DesktopAppServerController } from "./app-server-controller";
 
 /** Register before app readiness so Chromium resolves relative URLs natively. */
-export function registerFilePreviewScheme(): void {
-  protocol.registerSchemesAsPrivileged([{ scheme: "talos-preview", privileges: {
-    standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true,
-  } }]);
+export function registerDesktopSchemes(): void {
+  const privileges = { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true };
+  protocol.registerSchemesAsPrivileged([{ scheme: "talos-preview", privileges }, { scheme: "talos-cloud", privileges }]);
 }
 
 type NativePreview = {
   descriptor: AppProtocol.FilePreviewDescriptor;
   actorCredentials?: AppProtocol.ActorCredentials | null;
   ownerId: number;
+  cloud?: Pick<FilePreviewTransport, "read" | "close">;
   temporaryDirectories?: Set<string>;
   expiry?: NodeJS.Timeout;
 };
@@ -37,11 +38,11 @@ export class FilePreviewProtocol {
     if (this.installedSessions.has(session)) return;
     session.protocol.handle("talos-preview", request => this.respond(request)); this.installedSessions.add(session);
   }
-  remember(descriptor: AppProtocol.FilePreviewDescriptor, actorCredentials: AppProtocol.ActorCredentials | null | undefined, owner: WebContents, epoch: number): void {
+  remember(descriptor: AppProtocol.FilePreviewDescriptor, actorCredentials: AppProtocol.ActorCredentials | null | undefined, owner: WebContents, epoch: number, cloud?: NativePreview["cloud"]): void {
+    const preview: NativePreview = { descriptor, actorCredentials, ownerId: owner.id, cloud };
     if (epoch !== this.epoch || owner.isDestroyed()) {
-      void this.release(descriptor.previewId, { descriptor, actorCredentials, ownerId: owner.id }); return;
+      void this.release(descriptor.previewId, preview); return;
     }
-    const preview: NativePreview = { descriptor, actorCredentials, ownerId: owner.id };
     preview.expiry = setTimeout(() => this.forget(descriptor.previewId), Math.max(0, descriptor.expiresAt * 1000 - Date.now()));
     preview.expiry.unref();
     this.previews.set(descriptor.previewId, preview);
@@ -57,6 +58,11 @@ export class FilePreviewProtocol {
   forget(previewId: string): void {
     const preview = this.previews.get(previewId); this.previews.delete(previewId);
     if (preview) void this.cleanup(preview);
+  }
+  cloudResource(previewId: string, owner: WebContents) {
+    const preview = this.previews.get(previewId);
+    if (preview?.cloud && preview.ownerId !== owner.id) throw new Error("Preview belongs to another window.");
+    return preview?.cloud;
   }
   async clear(): Promise<void> {
     this.onClear();
@@ -96,8 +102,8 @@ export class FilePreviewProtocol {
     const descriptor = { ...preview.descriptor, entryPath: resource.resourcePath };
     const client = createFilePreviewClient({
       prepare: async () => descriptor,
-      read: part => this.runtime.invoke("file/preview/read", part, { actorCredentials: preview.actorCredentials }),
-      close: part => this.runtime.invoke("file/preview/close", part, { actorCredentials: preview.actorCredentials }),
+      read: part => this.read(preview, part.previewId, part.resourcePath, part.offset, part.limit),
+      close: part => this.close(preview, part.previewId),
     }, () => "");
     const content = await client.stream(descriptor);
     // Account/tab changes during I/O withdraw the resource before it can launch.
@@ -123,14 +129,20 @@ export class FilePreviewProtocol {
       catch (error) { console.error("Preview temporary file cleanup failed", error); }
     }
   }
+  private close(preview: NativePreview, previewId: string): Promise<AppProtocol.FilePreviewCloseResponse> {
+    return preview.cloud?.close({ previewId }) ?? this.runtime.invoke("file/preview/close", { previewId }, { actorCredentials: preview.actorCredentials });
+  }
   private async release(previewId: string, preview: NativePreview): Promise<void> {
-    try { await this.runtime.invoke("file/preview/close", { previewId }, { actorCredentials: preview.actorCredentials }); }
-    catch (error) {
+    const release = this.close(preview, previewId).catch(error => {
       if (!(error instanceof TalosApiError && error.apiError.code === AppProtocol.ErrorCode.ResourceNotFound)) console.error("Preview release failed", error);
-    } finally { await this.cleanup(preview); }
+    });
+    await this.cleanup(preview);
+    // The native grant is withdrawn. Sign-out only waits for local work.
+    if (!preview.cloud) await release;
   }
   private async read(preview: NativePreview, previewId: string, resourcePath: string, offset: number, limit: number): Promise<AppProtocol.FilePreviewContent> {
-    return this.runtime.invoke("file/preview/read", { previewId, resourcePath, offset, limit }, { actorCredentials: preview.actorCredentials });
+    const part = { previewId, resourcePath, offset, limit };
+    return preview.cloud?.read(part) ?? this.runtime.invoke("file/preview/read", part, { actorCredentials: preview.actorCredentials });
   }
   private async respond(request: Request): Promise<Response> {
     try {

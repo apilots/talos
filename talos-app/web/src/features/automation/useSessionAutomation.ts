@@ -21,10 +21,10 @@ export function useSessionAutomation(sessionId: string, enabled: boolean) {
   useEffect(() => { setUiOwner(owner); saveEditing(undefined); setError(undefined); setPending(false); setReadRequest(undefined); }, [owner]);
   const setEditing = (task: AutomationTask | undefined) => { if (ownerRef.current === owner) saveEditing(task); };
   const query = useQuery({ queryKey: ["talos", scope, "automation", sessionId],
-    queryFn: () => getTalosClient().automation.read({ sessionId }), enabled,
+    queryFn: async () => (await getTalosClient({ sessionId, readOnly: true })).automation.read({ sessionId }), enabled,
     refetchInterval: 5_000, retry: false });
   const catalog = useQuery({ queryKey: ["talos", scope, "automation-commands"],
-    queryFn: () => getTalosClient().automation.commandCatalog({}), enabled, staleTime: Infinity });
+    queryFn: async () => (await getTalosClient({ sessionId, readOnly: true })).automation.commandCatalog({}), enabled, staleTime: Infinity });
   const refresh = async () => {
     if (ownerRef.current !== owner) return;
     await client.invalidateQueries({ queryKey: ["talos", scope],
@@ -33,7 +33,7 @@ export function useSessionAutomation(sessionId: string, enabled: boolean) {
   const execute = async (action: AppProtocol.AutomationAction) => {
     setPending(true); setError(undefined);
     try {
-      const result = await getTalosClient().automation.execute({ sessionId, action });
+      const result = await (await getTalosClient({ sessionId })).automation.execute({ sessionId, action });
       if (ownerRef.current !== owner) return result;
       client.setQueryData(["talos", scope, "automation", sessionId], result.snapshot);
       await refresh();
@@ -44,7 +44,7 @@ export function useSessionAutomation(sessionId: string, enabled: boolean) {
     } finally { if (ownerRef.current === owner) setPending(false); }
   };
   const command = async (value: AppProtocol.AutomationCommand): Promise<void> => {
-    const snapshot = value.type === "activate" ? query.data : await getTalosClient().automation.read({ sessionId });
+    const snapshot = value.type === "activate" ? query.data : await (await getTalosClient({ sessionId, readOnly: true })).automation.read({ sessionId });
     if (ownerRef.current !== owner) return;
     const goal = snapshot?.goal;
     switch (value.type) {

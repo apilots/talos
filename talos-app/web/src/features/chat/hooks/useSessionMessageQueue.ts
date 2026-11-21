@@ -37,7 +37,7 @@ export function useSessionMessageQueue(sessionId: string, pollWhileIdle = false)
       onError(error);
     };
     const sync = new MessageQueueSync({
-      list: () => getTalosClient().messageQueue.list({ sessionId }),
+      list: async () => (await getTalosClient({ sessionId, readOnly: true })).messageQueue.list({ sessionId }),
       onChange: (nextQueue) => {
         setQueue(nextQueue);
         if (nextQueue) setError(undefined);
@@ -93,20 +93,20 @@ export function useSessionMessageQueue(sessionId: string, pollWhileIdle = false)
     queue,
     error: error ? apiErrorMessage(error) : undefined,
     add: (input: AgentUserInput) =>
-      applyMutation(() => getTalosClient().messageQueue.add({ sessionId, input } satisfies MessageQueueAddRequest)),
+      applyMutation(async () => (await getTalosClient({ sessionId })).messageQueue.add({ sessionId, input } satisfies MessageQueueAddRequest)),
     update: (messageId: string, input: AgentUserInput) =>
-      applyMutation(() => getTalosClient().messageQueue.update({
+      applyMutation(async () => (await getTalosClient({ sessionId })).messageQueue.update({
         sessionId,
         messageId,
         input,
       } satisfies MessageQueueUpdateRequest)),
     delete: (messageId: string) =>
-      applyMutation(() => getTalosClient().messageQueue.delete({ sessionId, messageId })),
+      applyMutation(async () => (await getTalosClient({ sessionId })).messageQueue.delete({ sessionId, messageId })),
     reorder: (messageIds: string[]) =>
-      applyMutation(() => getTalosClient().messageQueue.reorder({ sessionId, messageIds })),
+      applyMutation(async () => (await getTalosClient({ sessionId })).messageQueue.reorder({ sessionId, messageIds })),
     steer: async (messageId: string, turnId: string) => {
       try {
-        const response = await getTalosClient().turns.input({
+        const response = await (await getTalosClient({ sessionId })).turns.input({
           identity: { sessionId, turnId },
           input: { type: "queuedMessage", messageId },
           clientRequestId: null,
@@ -121,7 +121,7 @@ export function useSessionMessageQueue(sessionId: string, pollWhileIdle = false)
     },
     start: async (messageId?: string) => {
       try {
-        const response = await getTalosClient().messageQueue.start({
+        const response = await (await getTalosClient({ sessionId })).messageQueue.start({
           sessionId,
           messageId: messageId ?? null,
         });

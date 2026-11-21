@@ -22,7 +22,7 @@ export function ComputerRegistrationActions({ node, pending, onToggleAccess, onD
   const queries = useQueryClient();
   const cancel = useRef<HTMLButtonElement>(null);
   const mutation = useMutation({
-    mutationFn: () => getTalosClient().computers.delete({ nodeId: node.nodeId }),
+    mutationFn: async () => (await getTalosClient({ nodeId: node.nodeId })).computers.delete({ nodeId: node.nodeId }),
     onSuccess: () => {
       useAppStore.getState().clearComputer(scope, node.nodeId);
       queries.removeQueries({ queryKey: ["talos", scope, "computer", node.nodeId], exact: true });

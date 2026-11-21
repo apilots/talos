@@ -5,7 +5,7 @@ import type { FilePreviewPrepareRequest, FilePreviewDescriptor, FilePreviewReadR
 export interface FilePreviewTransport {
   prepare(request: FilePreviewPrepareRequest): Promise<FilePreviewDescriptor>;
   read(request: FilePreviewReadRequest): Promise<FilePreviewContent>;
-  close(request: FilePreviewCloseRequest): Promise<FilePreviewCloseResponse>;
+  close(request: FilePreviewCloseRequest, signal?: AbortSignal): Promise<FilePreviewCloseResponse>;
 }
 
 /** A single-use byte stream with current source metadata. */

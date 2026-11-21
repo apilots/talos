@@ -34,6 +34,7 @@ export interface MessageQueueController {
 }
 
 export interface ChatComposerProps {
+  nodeId?: string;
   draft: string;
   initialAutomationMode?: import("@talos/sdk-browser").AutomationMode;
   onRestoredAutomationModeConsumed?: () => void;
@@ -48,6 +49,7 @@ export interface ChatComposerProps {
   onCancel?: () => void;
   inputHistory?: SessionInputHistory;
   disabled?: boolean;
+  attachmentsDisabled?: boolean;
   permissionMode?: UserPermissionMode;
   permissionModeDisabled?: boolean;
   onPermissionModeChange?: (mode: UserPermissionMode) => void;

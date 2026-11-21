@@ -1,9 +1,12 @@
+import type { AppProtocol } from "@talos/sdk-core";
+
 /** Native presentation capabilities. File authority always comes from the
  * canonical preview grant; callers never supply native file/application paths. */
 export type PreviewOpenTargetId = "system" | "chrome" | "safari" | "firefox" | "edge" | "vscode" | "iterm" | "terminal";
 export type PreviewOpenResource = { kind: "webpage"; url: string } | { kind: "file"; previewId: string; resourcePath: string };
 export interface PreviewOpenTarget { id: PreviewOpenTargetId; label: string; icon?: string }
 export interface DesktopPreviewBridge {
+  prepareCloud(request: AppProtocol.FilePreviewPrepareRequest, actorCredentials: AppProtocol.ActorCredentials): Promise<AppProtocol.FilePreviewDescriptor>;
   browser(operation: PreviewBrowserOperation): Promise<PreviewBrowserState | null>;
   onBrowserState(handler: (state: PreviewBrowserState) => void): () => void;
   targets(resource: PreviewOpenResource): Promise<PreviewOpenTarget[]>;

@@ -1,6 +1,6 @@
 import { useAppStore } from "@/shared/store/app-store";
+import { canUseTalo } from "@/shared/types/account";
 
 export function useCanUseTalo() {
-  return useAppStore(({ connection }) =>
-    connection.authStatus === "authenticated" && (connection.authRole === "admin" || connection.accountType === "Max"));
+  return useAppStore(({ connection }) => canUseTalo(connection));
 }

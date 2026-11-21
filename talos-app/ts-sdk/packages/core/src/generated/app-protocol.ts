@@ -76,7 +76,11 @@ export type ActorCredential = { "type": "existing_session_token", token: string,
 
 export type FileUploadParams = { request: FileUploadRequest, dataBase64: string, };
 
-export type DesktopWorkerIdentityResponse = { nodeId: string | null, controlPlaneEndpoint: string | null, };
+export type DesktopWorkerIdentityResponse = { nodeId: string | null, controlPlaneEndpoint: string | null,
+/**
+ * Public PEM roots for this control plane, when custom trust is configured.
+ */
+controlPlaneTrustedCaPem?: string | null, };
 
 export type DesktopWorkerEnrollParams = {
 /**

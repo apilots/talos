@@ -114,3 +114,5 @@ export function createElectronAppServerClient(
 }
 
 export type { DesktopPreviewBridge, PreviewOpenResource, PreviewOpenTarget, PreviewOpenTargetId, PreviewBrowserBounds, PreviewBrowserOperation, PreviewBrowserState } from "./preview-shell";
+
+export const DESKTOP_CLOUD_ORIGIN = "talos-cloud://server";

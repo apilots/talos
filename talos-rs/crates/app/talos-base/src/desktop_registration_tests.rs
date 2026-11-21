@@ -252,6 +252,22 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .is_code(ErrorCode::Unauthenticated));
     fixture.login("user-1");
     let identity = host.enroll_worker(None, None).await.unwrap();
+    let trust = fixture
+        .config
+        .cloud
+        .agent_trusted_ca_file
+        .as_deref()
+        .unwrap();
+    let pem = talos_service::read_worker_trusted_ca(Some(trust))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        identity
+            .control_plane_trusted_ca_pem
+            .as_deref()
+            .map(str::as_bytes),
+        Some(pem.as_slice())
+    );
     let node_id = identity.node_id.clone().unwrap();
     use talos_app_server::AppServerApplication;
     let reply = host

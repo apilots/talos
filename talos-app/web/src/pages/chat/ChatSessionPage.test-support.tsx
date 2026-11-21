@@ -5,6 +5,7 @@ const mocks = {
   sendText: vi.fn(),
   draft: "",
   realComposer: false,
+  realSessionQuery: false,
   sendTurn: vi.fn(),
   setDraft: vi.fn(),
   refetchProjects: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = {
   compactSession: vi.fn(),
   clearSession: vi.fn(),
   session: undefined as unknown,
+  sessionError: undefined as Error | undefined,
   sessionHistoryError: undefined as Error | undefined,
   sessionHistoryIsSuccess: true,
   sessionQueryEnabled: undefined as boolean | undefined,
@@ -98,6 +100,7 @@ export async function createChatFeatureMock(
             id: "model-1",
             name: "Model 1",
             provider: "mock",
+            input: ["text", "image"],
             reasoning: true,
             reasoning_effort: "medium",
             selection_capabilities: { reasoning: "effort", reasoning_efforts: ["light", "medium", "high", "xhigh"], fast: true, default_fast: false, default_reasoning_effort: "medium" },
@@ -117,9 +120,10 @@ export async function createChatFeatureMock(
       ],
       setActiveProjectId: vi.fn(),
     }),
-    useSessionQuery: (_sessionId: string, enabled?: boolean) => {
+    useSessionQuery: (sessionId: string, enabled?: boolean, draftNodeId?: string) => {
       mocks.sessionQueryEnabled = enabled;
-      return { data: mocks.session };
+      if (mocks.realSessionQuery) return actual.useSessionQuery(sessionId, enabled, draftNodeId);
+      return { data: mocks.session, error: mocks.sessionError };
     },
     useUpdateSessionModelMutation: () => ({ mutate: mocks.mutateModel }),
     useUpdateSessionPermissionModeMutation: () => ({
@@ -150,6 +154,7 @@ export function createAppStoreMock() {
 export function resetChatSessionPageMocks() {
   mocks.session = {
     context: { session_id: "sess-1" },
+    nodeId: "embedded",
     title: "Session 1",
     projectId: null,
     config: { llm: { model: "model-1" } },
@@ -160,9 +165,11 @@ export function resetChatSessionPageMocks() {
     },
   };
   mocks.realComposer = false;
+  mocks.realSessionQuery = false;
   mocks.draft = "";
   mocks.sendTurn.mockReset();
   mocks.sendTurn.mockResolvedValue(undefined);
+  mocks.sessionError = undefined;
   mocks.sessionHistoryError = undefined;
   mocks.sessionHistoryIsSuccess = true;
   mocks.isStreaming = false;

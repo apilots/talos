@@ -47,15 +47,17 @@ export function ChatHomePage() {
   const activeProjectId = projectsView.activeProjectId;
   const setActiveProjectId = projectsView.setActiveProjectId;
   const computers = useComputers();
-  const sleepingTalo = computers.selected?.managedWorkerPhase === "sleeping";
-  const canSend = computers.selected?.available || sleepingTalo;
+  const managedPhase = computers.selected?.managedWorkerPhase;
+  const canSend = managedPhase == null
+    ? computers.selected?.available
+    : managedPhase === "ready" || managedPhase === "sleeping";
   const scope = useProductScope();
   const draftKey = JSON.stringify([scope, computers.selectedId, "home"]);
   const ownerRef = useRef<string | undefined>(draftKey);
   ownerRef.current = draftKey;
   useEffect(() => { ownerRef.current = draftKey; return () => { ownerRef.current = undefined; }; }, [draftKey]);
   const commands = useQuery({ queryKey: ["talos", scope, "automation-commands"],
-    queryFn: () => getTalosClient().automation.commandCatalog({}),
+    queryFn: async () => (await getTalosClient({ nodeId: computers.selectedId })).automation.commandCatalog({}),
     enabled: canSend, staleTime: Infinity });
   const savedDraft = useAppStore((state) => state.composerDrafts[draftKey] ?? "");
   const saveDraft = useAppStore((state) => state.saveComposerDraft);
@@ -99,7 +101,7 @@ export function ChatHomePage() {
     mode?: AutomationMode,
   ) {
     if (!canSend) return;
-    const prepared = await prepareAutomationMessage(initialPrompt ?? "", mode, computers.selectedId, sleepingTalo);
+    const prepared = await prepareAutomationMessage(initialPrompt ?? "", mode, computers.selectedId, managedPhase != null);
     if (ownerRef.current !== draftKey) return;
     if (prepared.kind === "management") throw automationRequestError("chatRequired");
     const trimmed = prepared.prompt.trim();
@@ -146,6 +148,7 @@ export function ChatHomePage() {
         </h1>
         <ChatComposer
           key={draftKey}
+          nodeId={computers.selectedId}
           automationCommands={commands.data?.data}
           activeProjectId={activeProject?.id ?? activeProjectId}
           disabled={!canSend}

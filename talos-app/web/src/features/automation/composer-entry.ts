@@ -8,10 +8,10 @@ export async function prepareAutomationMessage(
   text: string,
   mode: AutomationMode | undefined,
   nodeId?: string,
-  sleepingTalo = false,
+  managedTalo = false,
 ) {
   const command = text.trimStart().startsWith("/")
-    ? (await getTalosClient().automation.resolveCommand({ text })).command : null;
+    ? (await (await getTalosClient({ nodeId })).automation.resolveCommand({ text })).command : null;
   if (command && command.type !== "activate") {
     if (mode) throw automationRequestError("selectedModeManagementConflict");
     return { kind: "management" as const, command };
@@ -21,12 +21,12 @@ export async function prepareAutomationMessage(
   }
   const selectedMode = command?.type === "activate" ? command.mode : mode;
   if (selectedMode && !nodeId) throw automationRequestError("computerRequired");
-  // Turn admission wakes Talo and resolves the protected Skill on the Worker.
-  if (sleepingTalo && selectedMode) {
+  // Server admission resolves the protected Skill on Talo, waking it when needed.
+  if (managedTalo && selectedMode) {
     return {
       kind: "message" as const,
       prompt: text,
-      skillSelection: command?.type === "activate" ? undefined : { name: selectedMode, path: "" },
+      skillSelection: { name: selectedMode, path: "" },
     };
   }
   return { kind: "message" as const, prompt: command?.type === "activate" ? command.prompt : text,

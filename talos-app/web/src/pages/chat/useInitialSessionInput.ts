@@ -1,5 +1,5 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
-import type { AutomationMode, ModelInfo } from "@talos/sdk-browser";
+import type { ModelInfo } from "@talos/sdk-browser";
 
 import { modelSelectionForRef, type SendTextOptions } from "@/features/chat";
 import type { ProjectView } from "@/shared/types/ui";
@@ -13,7 +13,7 @@ type Navigate = (
 
 interface InitialSessionInputParams {
   onPendingSessionChange: Dispatch<SetStateAction<string | undefined>>;
-  onRestoreAutomationMode?: (mode: AutomationMode) => void;
+  onRestoreDraft?: (draft: SessionLocationState) => void;
   locationPathname: string;
   locationState: SessionLocationState | null;
   models?: ModelInfo[];
@@ -31,7 +31,7 @@ export function hasInitialSessionInput(state: SessionLocationState | null): bool
 /** Sends navigation-provided text and file references exactly once for a draft session. */
 export function useInitialSessionInput({
   onPendingSessionChange,
-  onRestoreAutomationMode,
+  onRestoreDraft,
   locationPathname,
   locationState,
   models,
@@ -88,8 +88,7 @@ export function useInitialSessionInput({
       .catch(() => {
         if (mountedRef.current && activeSessionIdRef.current === sessionId) {
           setDraft(initialPrompt);
-          const mode = locationState?.initialSkillSelection?.name;
-          if (mode === "goal" || mode === "loop") onRestoreAutomationMode?.(mode);
+          if (locationState) onRestoreDraft?.(locationState);
         }
       })
       .finally(() => {
@@ -99,7 +98,7 @@ export function useInitialSessionInput({
       });
   }, [
     onPendingSessionChange,
-    onRestoreAutomationMode,
+    onRestoreDraft,
     locationPathname,
     locationState,
     models,

@@ -1,11 +1,11 @@
 import type { AppProtocol } from "@talos/sdk-core";
 
 type ParamGuard = (params: unknown) => boolean;
-// Enrollment and credential delivery belong to the trusted host, never the renderer bridge.
+// The host owns enrollment and credential delivery. The Server SDK owns managed Worker lifecycle.
 export type DesktopRendererMethod = Exclude<
   AppProtocol.ClientMethod,
   | "initialize" | "computer/create" | "computer/rotateCredential"
-  | "computer/createManagedWorker" | "computer/startManagedWorker" | "computer/stopManagedWorker"
+  | "computer/readManagedWorker" | "computer/createManagedWorker" | "computer/startManagedWorker" | "computer/stopManagedWorker"
   | "computer/resetManagedWorker" | "computer/deleteManagedWorker"
 >;
 
@@ -148,7 +148,6 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     (params.limit == null || (typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 0)),
   "computer/delete": (params) => hasString(params, "nodeId"),
   "computer/read": (params) => hasString(params, "nodeId"),
-  "computer/readManagedWorker": (params) => isRecord(params) && Object.keys(params).length === 0,
   "computer/rename": (params) => hasString(params, "nodeId") && hasString(params, "displayName"),
   "computer/setStatus": (params) => hasString(params, "nodeId") && isRecord(params) &&
     (params.status === "enabled" || params.status === "disabled"),

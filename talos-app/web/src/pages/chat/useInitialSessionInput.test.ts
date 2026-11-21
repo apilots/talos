@@ -20,14 +20,16 @@ describe("useInitialSessionInput", () => {
     await waitFor(() => expect(sendText).toHaveBeenCalledExactlyOnceWith("5m Check raw task", expect.objectContaining({ nodeId: "actual-node", skillSelection: initialSkillSelection })));
   });
 
-  it("restores the exact selected mode and raw draft only when initial admission fails", async () => {
+  it("restores the first-turn text, selected Goal and attachments for retry", async () => {
     const setDraft = vi.fn(); const restore = vi.fn();
     const sendText = vi.fn().mockRejectedValue(new Error("admission denied"));
-    renderHook(() => useInitialSessionInput({ onPendingSessionChange: vi.fn(), onRestoreAutomationMode: restore,
-      locationPathname: "/sessions/new", locationState: { initialPrompt: "Raw task", initialSkillSelection: { name: "goal", path: "/real/goal/SKILL.md" } },
+    const draft = { initialNodeId: "worker", initialPrompt: "Raw task", initialSkillSelection: { name: "goal", path: "/real/goal/SKILL.md" },
+      initialAttachments: [{ fileId: "file-1", originalFilename: "diagram.png", mimeType: "image/png", sizeBytes: 8, tags: [], metadata: {}, scope: { type: "personal" as const }, createdAt: 1, updatedAt: 1 }] };
+    renderHook(() => useInitialSessionInput({ onPendingSessionChange: vi.fn(), onRestoreDraft: restore,
+      locationPathname: "/sessions/new", locationState: draft,
       navigate: vi.fn(), projects: [], sendText, sessionId: "new", setDraft,
     }));
-    await waitFor(() => expect(restore).toHaveBeenCalledExactlyOnceWith("goal"));
+    await waitFor(() => expect(restore).toHaveBeenCalledExactlyOnceWith(draft));
     expect(setDraft).toHaveBeenCalledExactlyOnceWith("Raw task");
   });
 

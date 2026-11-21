@@ -8,12 +8,14 @@ import {
 } from "./useComposerAttachments";
 
 interface ChatComposerAttachmentDraftOptions {
+  nodeId?: string;
   activeProjectId: string;
   initialAttachments: FileInfo[];
   supportedKinds: ComposerAttachmentKind[];
 }
 
 export function useChatComposerAttachmentDraft({
+  nodeId,
   activeProjectId,
   initialAttachments,
   supportedKinds,
@@ -26,6 +28,7 @@ export function useChatComposerAttachmentDraft({
     [activeProjectId],
   );
   const draft = useComposerAttachments({
+    nodeId,
     scope,
     supportedKinds,
     initialAttachments,

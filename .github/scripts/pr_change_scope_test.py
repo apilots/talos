@@ -43,12 +43,15 @@ class ChangeScopeTests(unittest.TestCase):
             self.assertEqual(selected.targets[category], {target})
             self.assertEqual(sum(map(len, selected.targets.values())), 1)
         selected = plan(['talos-e2e/scripts/automation_model_fixture.py'])
-        expected = {'server': '01_session_automation', 'webui': '02_web_entry', 'tui': '03_tui_entry'}
-        for category, case in expected.items():
+        expected = {'server': {'24_automation/01_session_automation.sh', '23_browser_container/03_managed_talo.sh'},
+                    'webui': {'24_automation/02_web_entry.sh'}, 'tui': {'24_automation/03_tui_entry.sh'}}
+        for category, cases in expected.items():
             tasks = selected['categories'][category]['scenarios']['include']
-            self.assertEqual([task['cases'] for task in tasks], [[f'24_automation/{case}.sh']])
+            self.assertCountEqual([case for task in tasks for case in task['cases']], cases)
         self.assertTrue(selected['categories']['webui']['scenarios']['include'][0]['chrome'])
-        self.assertFalse(selected['categories']['server']['scenarios']['include'][0]['chrome'])
+        session_task = next(task for task in selected['categories']['server']['scenarios']['include']
+                            if '24_automation/01_session_automation.sh' in task['cases'])
+        self.assertFalse(session_task['chrome'])
         self.assertIn(AUTOMATION_WEB_TARGET, impact(['talos-app/ts-sdk/packages/core/src/adapters.ts']).targets['webui'])
 
     def test_automation_cli_selects_real_process_acceptance_and_binaries(self):
@@ -92,6 +95,7 @@ class ChangeScopeTests(unittest.TestCase):
         managed = by_case[('23_browser_container/03_managed_talo.sh',)]
         self.assertEqual(task['images'], ['server'])
         self.assertEqual(managed['images'], ['server', 'worker'])
+        self.assertTrue(managed['chrome'])
         self.assertEqual(set(task['binaries']), {'server', 'cli', 'worker', 'sandbox'})
         self.assertTrue(task['docker'] and task['node'])
         self.assertIn('talos-app/web', task_roots(task))
@@ -103,6 +107,31 @@ class ChangeScopeTests(unittest.TestCase):
                          client_group_targets('20_browser_workspace')['desktop'] |
                          client_group_targets('23_browser_container')['desktop'])
         self.assertFalse(helper.rust or helper.frontend)
+
+    def test_native_talo_journey_follows_renderer_and_media_changes(self):
+        target = 'case:23_browser_container/03_managed_talo'
+        for path in ('talos-app/desktop/src/ipc-guard.ts', 'talos-app/desktop/src/desktop-server-requests.ts',
+                     'talos-app/desktop/src/desktop-ipc.ts', 'talos-app/desktop/src/control-plane.ts',
+                     'talos-app/desktop/src/file-preview-protocol.ts', 'talos-app/web/src/shared/api/product-queries.ts',
+                     'talos-app/web/src/shared/api/desktop-product-owner.ts', 'talos-app/web/src/shared/api/computer-target.ts',
+                     'talos-app/web/src/features/chat/api.ts', 'talos-app/web/src/features/automation/useSessionAutomation.ts',
+                     'talos-app/web/src/pages/home/TaloPage.tsx', 'talos-rs/crates/app/talos-base/src/desktop_cloud.rs',
+                     'talos-app/web/src/features/chat/hooks/useChatSession.ts', 'talos-app/web/src/features/chat/hooks/useSessionStreaming.ts',
+                     'talos-app/web/src/features/chat/components/useComposerAttachments.ts',
+                     'talos-app/web/src/features/files/api.ts', 'talos-app/web/src/shared/api/client.ts',
+                     'talos-app/web/src/features/files/components/FilePreview.tsx',
+                     'talos-app/web/src/features/files/hooks/useFileMetadata.ts',
+                     'talos-app/web/src/features/files/hooks/useFilesPage.ts', 'talos-app/web/src/pages/files/FilesPage.tsx',
+                     'talos-app/web/src/features/files/hooks/useFilePreview.ts', 'talos-app/web/src/shared/lib/open-resource.ts',
+                     'talos-app/web/src/pages/chat/useChatSessionComposer.ts',
+                     'talos-app/web/src/pages/chat/ChatHomePage.tsx', 'talos-app/web/src/pages/chat/useInitialSessionInput.ts',
+                     'talos-app/web/src/features/automation/composer-entry.ts',
+                     'talos-app/web/src/features/chat/components/ChatComposer.tsx',
+                     'talos-app/ts-sdk/packages/browser/src/index.ts', 'talos-app/ts-sdk/packages/core/src/file-preview.ts',
+                     'talos-app/ts-sdk/packages/core/src/client.ts',
+                     'talos-rs/crates/gateway/app-server/src/runtime/subscriptions.rs'):
+            self.assertIn(target, impact([path]).targets['server'], path)
+        self.assertEqual(impact(['talos-e2e/scripts/managed-talo/native_desktop.py']).targets['server'], {target})
 
     def test_managed_talo_full_topology_stays_local(self):
         result = plan([

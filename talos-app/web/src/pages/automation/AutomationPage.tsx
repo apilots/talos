@@ -24,18 +24,18 @@ function AutomationPageContent() {
   const fallbackFocusRef = useRef<HTMLHeadingElement>(null);
   const [tab, setTab] = useState<"unfinished" | "ended" | "jobs">("unfinished");
   const [editing, setEditing] = useState<AutomationTask>();
-  const tasks = useInfiniteQuery({ queryKey: ["talos", scope, "automation", "list", tab],
+  const tasks = useInfiniteQuery({ queryKey: ["talos", scope, "automation", "list", computers.selectedId, tab],
     initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => getTalosClient().automation.list({ sessionId: null, scope: tab === "ended" ? "ended" : "unfinished", cursor: pageParam, limit: 30 }),
+    queryFn: async ({ pageParam }) => (await getTalosClient({ nodeId: computers.selectedId })).automation.list({ sessionId: null, scope: tab === "ended" ? "ended" : "unfinished", cursor: pageParam, limit: 30 }),
     getNextPageParam: (page) => page.nextCursor ?? undefined, enabled: tab !== "jobs", refetchInterval: 5_000, retry: false });
   const jobs = useQuery({ queryKey: ["talos", scope, "builtin-jobs", computers.selectedId],
-    queryFn: () => getTalosClient().builtinJobs.list({ computerId: computers.selectedId! }),
+    queryFn: async () => (await getTalosClient({ nodeId: computers.selectedId })).builtinJobs.list({ computerId: computers.selectedId! }),
     enabled: tab === "jobs" && Boolean(computers.selectedId), refetchInterval: 5_000, retry: false });
   const mutation = useMutation({
-    mutationFn: (request: AppProtocol.AutomationRequest) => getTalosClient().automation.execute(request),
+    mutationFn: async (request: AppProtocol.AutomationRequest) => (await getTalosClient({ sessionId: request.sessionId })).automation.execute(request),
     onSuccess: () => cache.invalidateQueries({ queryKey: ["talos", scope, "automation"] }),
   });
-  const jobMutation = useMutation({ mutationFn: (request: AppProtocol.BuiltinJobControlRequest) => getTalosClient().builtinJobs.control(request),
+  const jobMutation = useMutation({ mutationFn: async (request: AppProtocol.BuiltinJobControlRequest) => (await getTalosClient({ nodeId: request.computerId })).builtinJobs.control(request),
     onSuccess: () => cache.invalidateQueries({ queryKey: ["talos", scope, "builtin-jobs"] }) });
   const entries = tasks.data?.pages.flatMap((page) => page.data) ?? [];
   const error = (tab === "jobs" ? jobs.error ?? jobMutation.error : tasks.error ?? mutation.error);

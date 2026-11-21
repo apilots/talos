@@ -27,11 +27,11 @@ export function useSessionTracing(
 ) {
   const connection = useConnectionKey();
   const scope = ["trajectory", connection, sessionId] as const;
-  const api = getTalosClient().trajectory;
+  const api = async () => (await getTalosClient({ sessionId, readOnly: true })).trajectory;
   const identity = { sessionId, turnId: turnId ?? "" };
   const capability = useQuery({
     queryKey: [...scope, "capabilities"],
-    queryFn: () => api.capabilities(),
+    queryFn: async () => (await api()).capabilities(),
     enabled: visible,
     retry: false,
     staleTime: 60000,
@@ -56,7 +56,7 @@ export function useSessionTracing(
         let cursor: string | null = null;
         do {
           signal.throwIfAborted();
-          const page = await api.readTurn({
+          const page = await (await api()).readTurn({
             identity: { sessionId, turnId: id }, cursor, limit: 32,
           }, signal);
           pages.push(page);
@@ -88,7 +88,7 @@ export function useSessionTracing(
     ],
     queryFn: async ({ signal }) => {
       try {
-        return await api.readTool(
+        return await (await api()).readTool(
           { identity, callId: selection?.kind === "tool" ? selection.callId : "" },
           signal,
         );
@@ -122,8 +122,8 @@ export function useSessionTracing(
         : undefined;
   const request = useQuery({
     queryKey: [...scope, "request", turnId, modelRequestId],
-    queryFn: ({ signal }) =>
-      api.readRequest({ identity, modelRequestId: modelRequestId! }, signal),
+    queryFn: async ({ signal }) =>
+      (await api()).readRequest({ identity, modelRequestId: modelRequestId! }, signal),
     enabled: enabled && Boolean(modelRequestId),
     retry: false,
   });
@@ -172,8 +172,8 @@ export function useSessionTracing(
   const bodies = useQueries({
     queries: uniqueRefs.map((ref) => ({
       queryKey: [...scope, "payload", turnId, ref.payloadId],
-      queryFn: ({ signal }: { signal: AbortSignal }) =>
-        api.payload(identity, ref, signal),
+      queryFn: async ({ signal }: { signal: AbortSignal }) =>
+        (await api()).payload(identity, ref, signal),
       enabled:
         enabled &&
         (bodyWanted || ref.payloadId === request.data?.parameters?.payloadId),

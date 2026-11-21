@@ -6944,6 +6944,13 @@
             "null"
           ]
         },
+        "controlPlaneTrustedCaPem": {
+          "description": "Public PEM roots for this control plane, when custom trust is configured.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "nodeId": {
           "type": [
             "string",

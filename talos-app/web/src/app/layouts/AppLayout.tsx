@@ -36,17 +36,19 @@ export function AppLayout() {
   const [viewport, setViewport] = useState(() => ({ wide: window.matchMedia("(min-width: 1024px)").matches, width: window.innerWidth }));
   const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
   const { wide } = viewport;
-  const setWorkspaceContext = useAppStore(state => state.setWorkspaceContext);
-  useLayoutEffect(() => {
-    if (location.pathname.startsWith("/settings") && useAppStore.getState().workspaceOwner?.scope === scope) return;
-    setWorkspaceContext({ scope, context: workspaceContextForPath(location.pathname) }, window.matchMedia("(min-width: 1024px)").matches);
-  }, [scope, location.pathname, setWorkspaceContext]);
   const standalonePage = location.pathname === "/computers" || location.pathname.startsWith("/settings");
   const taloPage = location.pathname === "/talo";
   const canUseTalo = useCanUseTalo();
   const talo = useManagedWorkerStatus(canUseTalo && taloPage && !computerId).status.data?.instance;
+  const taloSessionId = taloPage && taloHasConversation(talo) ? talo.conversationSessionId : undefined;
+  const setWorkspaceContext = useAppStore(state => state.setWorkspaceContext);
+  useLayoutEffect(() => {
+    if (location.pathname.startsWith("/settings") && useAppStore.getState().workspaceOwner?.scope === scope) return;
+    const context = taloSessionId ? { kind: "session" as const, sessionId: taloSessionId } : workspaceContextForPath(location.pathname);
+    setWorkspaceContext({ scope, context }, window.matchMedia("(min-width: 1024px)").matches);
+  }, [scope, location.pathname, taloSessionId, setWorkspaceContext]);
   const choosingComputer = !computerId && !standalonePage && !location.pathname.startsWith("/sessions/") &&
-    !(taloPage && taloHasConversation(talo));
+    !taloSessionId;
   const contentKey = choosingComputer ? "chooser"
     : location.pathname.startsWith("/sessions/") ? "session"
     : taloPage ? "talo" : computerId ?? "pending";

@@ -41,6 +41,13 @@ def prepare(template, destination, port):
     Path(destination).with_suffix(".json").write_text(json.dumps(config))
 
 
+def assert_selection(contents, mode, prompt):
+    assert any(item == {'type': 'text', 'text': prompt} for item in contents), contents
+    selected = [item for item in contents if item['type'] == 'skillSelection']
+    assert len(selected) == 1 and selected[0]['name'] == mode, contents
+    assert '/.system/' + mode + '/' in selected[0]['path'], selected
+
+
 def nested(value):
     yield value
     if isinstance(value, dict):
@@ -65,7 +72,7 @@ def snapshot(messages):
     raise AssertionError("real Tool result did not contain its Session snapshot")
 
 
-def serve(directory):
+def serve(directory, address=("127.0.0.1", 0), model=MODEL, key=KEY):
     directory.mkdir(parents=True, exist_ok=True)
     lock = threading.Lock()
 
@@ -80,7 +87,7 @@ def serve(directory):
 
         def chunk(self, delta, finish=None):
             value = {"id": "automation-fixture", "object": "chat.completion.chunk",
-                     "created": 1, "model": MODEL,
+                     "created": 1, "model": model,
                      "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
             self.wfile.write(f"data: {json.dumps(value)}\n\n".encode())
             self.wfile.flush()
@@ -116,10 +123,10 @@ def serve(directory):
                     self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
                     return
                 assert self.path == "/v1/chat/completions"
-                assert self.headers.get("Authorization") == f"Bearer {KEY}"
-                assert body["model"] == MODEL
+                assert self.headers.get("Authorization") == f"Bearer {key}"
+                assert body["model"] == model
                 if not body.get("stream"):
-                    raw = json.dumps({"id": "aux", "model": MODEL, "choices": [{"index": 0,
+                    raw = json.dumps({"id": "aux", "model": model, "choices": [{"index": 0,
                         "message": {"role": "assistant", "content": '{"operation":"noop"}'},
                         "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}).encode()
                     self.send_response(200); self.send_header("Content-Type", "application/json")
@@ -218,7 +225,7 @@ def serve(directory):
                 record("errors.jsonl", {"error": repr(error), "body": body})
                 raise
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = ThreadingHTTPServer(address, Handler)
     (directory / "port").write_text(str(server.server_port))
     server.serve_forever()
 
