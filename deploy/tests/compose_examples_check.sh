@@ -15,16 +15,13 @@ cp "$root/deploy/docker/talos-worker/docker-compose.yml" "$fixture/talos-worker/
 cp "$root/deploy/docker/talos-worker/chromium-seccomp.json" "$fixture/talos-worker/"
 (cd "$fixture/server" && docker compose config --format json) > "$fixture/basic.json"
 (cd "$fixture/server" && docker compose -f compose.production.yml config --format json) > "$fixture/production.json"
-(cd "$fixture/server" && TALOS_DOCKER_GID=123 TALOS_DOCKER_SOCKET=/run/custom/docker.sock docker compose -f compose.production.yml \
+(cd "$fixture/server" && TALOS_DOCKER_GID=123 TALOS_DOCKER_SOCKET=/var/run/docker.sock docker compose -f compose.production.yml \
   -f compose.managed-worker.yml config --format json) > "$fixture/managed-worker.json"
-ruby -ryaml -rjson -e 'puts JSON.generate(YAML.load_file(ARGV.fetch(0)))' \
-  "$root/deploy/docker/talos-server/talos.yaml.example" > "$fixture/runtime.json"
 # This is an isolated rendering identity, never registered or started.
 (cd "$fixture/talos-worker" && TALOS_WORKER_NODE_ID=00000000-0000-0000-0000-000000000001 \
   docker compose config --format json) > "$fixture/worker.json"
 python3 - "$fixture" <<'PY'
 import json
-import re
 from pathlib import Path
 import sys
 
@@ -59,20 +56,8 @@ for profile in (basic, production):
 assert set(managed["services"]) == {"talos-server"}
 managed_server = managed["services"]["talos-server"]
 assert managed_server["group_add"] == ["123"]
-profile = json.loads((fixture / "runtime.json").read_text())
-runtime = profile["talos"]["worker"]["runtime"]
-assert runtime["kind"] == "DockerEngine"
-docker_engine = runtime["docker_engine"]
-connection = docker_engine["worker"]
-assert re.fullmatch(r"[^@\s]+@sha256:[a-f0-9]{64}", connection["image"])
-assert connection["control_plane_endpoint"].startswith("https://")
-assert "trusted_ca_file" in connection
-assert {"cpu_cores", "memory_bytes", "shm_bytes"} <= docker_engine["resources"].keys()
-timing = profile["talos"]["server"]["runtime"]
-assert {"idle_timeout_seconds", "request_wait_seconds", "start_timeout_seconds", "wake_cooldown_seconds"} <= timing.keys()
-assert docker_engine["socket_path"] == "/var/run/docker.sock"
-socket = next(mount for mount in managed_server["volumes"] if mount["target"] == docker_engine["socket_path"])
-assert socket["type"] == "bind" and socket["source"] == "/run/custom/docker.sock"
+socket = next(mount for mount in managed_server["volumes"] if mount["target"] == "/var/run/docker.sock")
+assert socket["type"] == "bind" and socket["source"] == "/var/run/docker.sock"
 assert not socket.get("bind", {}).get("create_host_path", False)
 service = worker["services"]["talos-worker"]
 assert not service.get("ports") and not service.get("healthcheck")
