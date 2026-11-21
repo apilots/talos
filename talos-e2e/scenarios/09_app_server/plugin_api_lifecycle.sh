@@ -7,6 +7,7 @@ source "${SCRIPT_DIR}/../../scripts/common.sh"
 
 build_app_server_binaries
 prepare_talos_home
+node "${REPO_ROOT}/build/plugins/snapshot.mjs" "${REPO_ROOT}/plugins/apilots-mcps"
 
 export TALOS_APP_SERVER_BIN="${TALOS_E2E_APP_SERVER_BIN}"
 TALOS_E2E_PLUGIN_CATALOG="$(python3 "${TALOS_E2E_DIR}/scripts/plugin_fixture.py")"

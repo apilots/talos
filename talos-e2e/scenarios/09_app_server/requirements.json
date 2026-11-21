@@ -44,6 +44,8 @@
     "plugin_api_lifecycle.sh": {
       "commands": [
         "cargo",
+        "git",
+        "node",
         "protoc",
         "timeout",
         "python3"
