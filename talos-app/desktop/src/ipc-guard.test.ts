@@ -16,17 +16,9 @@ describe("desktop IPC guard", () => {
     expect(() => assertDesktopRendererInvoke("computer/create", { displayName: "Laptop", credentialExpiresAt: 2000000000 })).toThrow();
     expect(() => assertDesktopRendererInvoke("computer/rotateCredential", { nodeId: "node-1", expiresAt: 2000000000 })).toThrow();
   });
-  it("lets the signed-in owner manage Talo through the Server", () => {
-    const instance = { instanceId: "personal-talo", expectedGeneration: 1 };
-    for (const method of ["computer/readManagedWorker", "computer/createManagedWorker"]) {
-      expect(() => assertDesktopRendererInvoke(method, {})).not.toThrow();
-    }
-    for (const action of ["start", "stop", "reset"]) {
-      expect(() => assertDesktopRendererInvoke(`computer/${action}ManagedWorker`, instance)).not.toThrow();
-    }
-    expect(() => assertDesktopRendererInvoke("computer/deleteManagedWorker", {
-      ...instance, confirmDataLoss: true,
-    })).not.toThrow();
+  it("allows standalone Desktop to read Talo capability while management stays with the Server", () => {
+    expect(() => assertDesktopRendererInvoke("computer/readManagedWorker", {})).not.toThrow();
+    expect(isDesktopRendererMethod("computer/createManagedWorker")).toBe(false);
   });
   it("allows typed file methods without duplicating file business validation", () => {
     expect(() =>

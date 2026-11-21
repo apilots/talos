@@ -23,6 +23,8 @@ Loop 既支持用户指定固定间隔，也支持模型根据本轮结果决定
 
 “每 5 分钟检查 CI，直到通过”是 Loop；“持续修复 CI，直到通过”是 Goal。无需为了前者同时创建 Goal。
 
+For a personal Talo, Web and Desktop send the Goal or Loop activation to its owning Talos Server. The Server resolves the protected System Skill on the execution Worker during Turn or queue admission. This applies to ready and idle-sleeping instances. A successful Create action records the definition in the Server database. Subsequent dispatch follows the saved Goal or Loop while Desktop is disconnected. After an uncertain response, a reconnect reads the existing task and its session history from the Server. See [managed Talo conversation ownership](../feat-054-managed-talo/design.md#73-talo-专属对话).
+
 ## 2. 一期范围
 
 - Loop：固定间隔与模型决定间隔两种模式，后续间隔最小 1 分钟；显式模式的注册 Turn 只登记 / 回执；提示词驱动的普通 Turn 创建后同样交由自动首轮执行，最早在定义创建 10 秒后准入；查看、编辑 prompt / 间隔、停止、清除。
@@ -318,7 +320,7 @@ The authenticated owner of a Desktop app-server backed by local SQLite can list 
 5. 页面刷新 / 重连 / 关闭不停止工作；Server 重启不统一暂停 Goal / 停止 Loop，后续正常触发基于已保存状态走原准入。有旧 Turn 记录时先协调，不绕过人工动作；纯内存队列、短期 per-object permit 和未记录执行丢失时不补跑错过的 occurrence，也不伪造终态或模型决定。持锁扫描把 active 且 `next_due_at` 为空、没有运行中 Turn 和排队 occurrence 的 Loop 安排到下一个间隔。旧 Cancelled 仍有效，显式新建许可不冒充持久事实。没有可用下次依据时，动态显示“模型决定”，固定显示“暂无下次时间”；首轮门槛依据已有持久字段经原扫描检查，Goal 后续仍按已提交终态 / 已确认空闲事实检查，不引入启动全量补跑。不新增队列 / 逐次触发持久化。
 6. History / Timeline 使用正常用户消息与执行展示，在确切自动 Input 或本条显式选择 Skill 的 Input 底栏，按真实 origin 优先、否则本条 activationMode 默认常显小 icon / 简短来源，整条 Input 悬停 / 聚焦时展开时间、复制；普通 User 无 badge，不单独创建 Goal / Loop 大标题或卡片，不解析 prompt 猜来源。保留原错误、取消与用量，同一目标不因重连或重复结算重复累计。
 7. Web / Desktop 的待发模式位于 Full access 右侧，以淡竖线分隔并无框嵌入图标与文字，悬停 / 聚焦可清除；任务行与 WaitingMessages 共用一个展开容器，左侧仅 icon + Goal / Loop，随后摘要，不重复状态文字、抽屉或同 Loop 定义 / 排队行，不替换 Timeline。Goal 编辑仅 prompt 且保留预算；Loop 可编辑 prompt 与固定 / 动态间隔，固定至少 1 分钟，旧配置决定不覆盖新配置，不重启当前 Turn、重复对象或自动恢复。人工队列编辑 / Steer 保持原限制；历史 Goal 操作只影响目标 ID。覆盖窄屏 / 空态 / 错误态及 TUI / CLI。
-8. Skill 通过共用工具、管理 / 编辑和 CLI 通过 SDK，均进入同一 Service；普通请求由模型依照 Skill 目录描述与工具 schema 判断，不注入未选择的完整正文、不伪造 selection 或用关键词限制创建，显式模式与自动绑定仍由后端确定。Home / Add / slash / 新旧 Session 均传真实 System SkillSelection 与原 prompt，原 ACK 消费一次、失败保留；Goal 注册不冒认人工 Turn 为真实首轮，不越过人工队列；后续自动 Turn 加载对应 Skill 规则。
+8. The shared tool and SDK submit to the same Service. For ordinary prompts the model uses Skill descriptions and the tool schema to decide whether to create a task. Only an explicit selection or an existing automation binding loads the full Skill. Home, Add and slash preserve the original prompt and selected mode through admission for new and existing Sessions. On personal Talo the Server resolves the protected System Skill. Consume the acknowledgment once and retain the draft on failure. Goal registration leaves the human queue intact. Later automatic Turns load the corresponding Skill.
 9. 当前电脑 owner 能查看所属执行实例的两个现有内置 Job、暂停 / 恢复并按能力执行一次，不分管理员 / 普通用户，不因电脑归属获得其他电脑或未经归属授权的共享 Server 全局控制权。暂停覆盖启动即执行与定时执行、重启后保留，已运行回调不中断，手动执行不解除暂停且不并行；内部首轮 / Loop 扫描不可被列表操作关闭。
 
 TUI 入口须单独完成本端验收：分别直接提交 `/goal <提示词>`、`/loop <提示词>`，确认发出的结构化选择、登记和实际执行结果，并保留可供 Review 的终端截图。源码接入、mock 回归、CLI 参数调用或 Web 截图均不能替代这项 TUI 验收；不因此额外要求与 Web 相同的布局设计。受维护的 E2E 必须区分“已登记并保存首轮期限”与“已到点进入原队列”，不得在 10 秒期限前断言已排队；取消与重启场景依据真实 definition / queue / Turn 事实验收，并保持原内存丢失边界，不为测试缩短生产门槛。TUI 与 E2E 的实际验收结果只进入本地证据和任务 Plan。

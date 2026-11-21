@@ -394,11 +394,11 @@ impl TalosApplicationAdapter {
                 let FileUploadParams {
                     request,
                     data_base64,
-                    ..
                 } = params;
-                let data =
-                    decode_file_upload_data(&data_base64, self.app.files.limits().max_upload_bytes)
-                        .map_err(talos_error_to_api_error)?;
+                let data = decode_file_upload_data(
+                    &data_base64,
+                    self.app.files.limits().max_upload_bytes,
+                )?;
                 let body = Box::pin(futures_util::stream::iter([Ok(data)]));
                 to_value(
                     self.gateway
@@ -409,40 +409,25 @@ impl TalosApplicationAdapter {
             }
             ClientRequestParams::FileList(params) => to_value(
                 self.gateway
-                    .list_files(actor, params.request)
+                    .list_files(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::FileRead(params) => to_value(
                 self.gateway
-                    .read_file(
-                        actor,
-                        talos_types::FileReadRequest {
-                            file_id: params.file_id,
-                        },
-                    )
+                    .read_file(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::FileContent(params) => to_value(
                 self.gateway
-                    .read_file_content(
-                        actor,
-                        talos_types::FileReadRequest {
-                            file_id: params.file_id,
-                        },
-                    )
+                    .read_file_content(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::FilePreviewPrepare(params) => to_value(
                 self.gateway
-                    .prepare_file_preview(
-                        actor,
-                        talos_types::FilePreviewPrepareRequest {
-                            source: params.source,
-                        },
-                    )
+                    .prepare_file_preview(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
@@ -466,12 +451,7 @@ impl TalosApplicationAdapter {
             ),
             ClientRequestParams::FileDelete(params) => to_value(
                 self.gateway
-                    .delete_file(
-                        actor,
-                        talos_types::FileDeleteRequest {
-                            file_id: params.file_id,
-                        },
-                    )
+                    .delete_file(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),

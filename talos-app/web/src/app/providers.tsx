@@ -1,11 +1,12 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getDesktopBridge } from "@/shared/api/desktop-client";
 import { connectionScope } from "@/shared/store/connection-scope";
 import { useAuthBootstrap } from "@/features/auth";
+import { productQueries as queryClient } from "@/shared/api/product-queries";
 import { router } from "@/app/router";
 import { useAppStore } from "@/shared/store/app-store";
 import { i18n } from "@/shared/i18n/setup";
@@ -17,18 +18,6 @@ export function AppProviders() {
   useTranslation();
   useAuthBootstrap();
   useAppIconEffects();
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            retry: 1,
-            refetchOnWindowFocus: false,
-          },
-        },
-      }),
-  );
-
   useEffect(() => getDesktopBridge()?.onRuntimeState?.((workerRuntimeState) => {
     useAppStore.getState().setConnection({ workerRuntimeState });
   }), []);

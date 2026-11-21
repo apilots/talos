@@ -26,6 +26,18 @@ describe("useChatSession automation admission", () => {
   });
 
 
+  it("queues a Talo slash activation for Server normalization even with steering enabled", async () => {
+    mocks.activeTurn = { state: "running", identity: { sessionId: "session-1", turnId: "turn-1" } };
+    const { result } = renderHook(() => useChatSession("session-1", 1, "ready", "steer"));
+    act(() => result.current.setDraft("/goal Fix CI"));
+    await act(async () => result.current.sendTurn({ skillSelection: { name: "goal", path: "" } }));
+    expect(mocks.messageQueueAdd).toHaveBeenCalledWith({ content: [
+      { type: "skillSelection", name: "goal", path: "" },
+      { type: "text", text: "/goal Fix CI" },
+    ] });
+    expect(mocks.submitTurnInput).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])("sends the shared slash prompt through original admission/queue while preserving raw draft on failure (busy=%s)", async (busy) => {
     if (!busy) {
       const actual = await vi.importActual<typeof import("../api")>("../api");

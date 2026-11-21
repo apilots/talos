@@ -14,7 +14,7 @@ import uuid
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fixture import MODEL_PROVIDER, ACCOUNTS, REPORT, ROOT, TOKEN, config, configure, data, free_port, http, start_ingress, wait
+from fixture import MODEL_PROVIDER, ACCOUNTS, REPORT, ROOT, TOKEN, config, configure, data, free_port, http, http_response, start_ingress, wait
 from lifecycle import container_args
 from media import media
 from managed_talo_access import configure_accounts, exercise_access
@@ -28,6 +28,16 @@ SOCKET = os.environ.get("TALOS_E2E_DOCKER_SOCKET", "/var/run/docker.sock")
 REGISTRY_IMAGE = "registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
 ASSISTANT = "/v1/computers/managed-worker"
 LABEL = "io.talos.managed-worker.instance"
+AUTOMATION_MARKERS = {"goal": "goal_aa", "loop": "dynamicstop_bb"}
+
+
+def native_automation_prompt(stage):
+    prompt = f"AUTO_CASE={AUTOMATION_MARKERS[stage]} controlled automation work"
+    if stage == "loop":
+        prompt += "; check progress; model decides the next check time"
+    return prompt
+
+
 FIXTURE_PROGRAM = r"""
 from http.server import ThreadingHTTPServer
 from threading import Event, Thread
@@ -96,6 +106,11 @@ class ManagedFixture(Fixture):
         self.wfile.write(b"data: [DONE]\n\n")
         self.close_connection = True
 
+if os.environ.get("TALOS_E2E_NATIVE_AUTOMATION") == "1":
+    from pathlib import Path
+    from automation_model_fixture import serve
+    Thread(target=serve, args=(Path("/tmp/talo-e2e/automation"), ("0.0.0.0", 18081),
+                               "browser-fixture", "fixture"), daemon=True).start()
 server = ThreadingHTTPServer(("0.0.0.0", 18080), ManagedFixture)
 Thread(target=server.serve_forever, daemon=True).start()
 if os.environ.get("TALOS_E2E_TALO_RECOVERY") == "1":
@@ -332,6 +347,7 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
         workspace = data(http(base + f"/v1/workspace/info?nodeId={node}"))["userWorkspaceDir"]
         observed.execute(awake, "sh", "-ec", 'mkdir -p "$1"; echo "Report from the Talo Worker" > "$1/talo-preview.txt"', "sh", workspace)
         native_stage("chat")
+        native_stage("automation")
     exercise_access(base, ready, session)
     media(base, node, observed.compute(instance), http, data, wait, REPORT, observed.execute)
     if RECOVERY:
@@ -503,6 +519,44 @@ def run_native_stage(files, base, rpc_port, issuer_port, stage):
                                 TALOS_APP_SERVER_BIN=os.environ["TALOS_E2E_APP_SERVER_BIN"]))
 
 
+def run_native_automation(files, base, rpc_port, issuer_port, server, model_url, worker_model):
+    from automation_model_fixture import assert_selection
+
+    instance = data(http(base + ASSISTANT))["instance"]
+    node, session = instance["nodeId"], instance["conversationSessionId"]
+    data(http(base + f"/v1/fs/directory?nodeId={node}&wakeIfSleeping=true"))
+    # Keep the selected model identity while directing this Worker's calls to the controlled automation model.
+    provider = worker_model["custom_providers"][MODEL_PROVIDER]
+    provider["base_url"] = model_url
+    data(http_response(base + f"/v1/llm?nodeId={node}", worker_model, method="PUT")[1])
+    for stage, marker in AUTOMATION_MARKERS.items():
+        run_native_stage(files, base, rpc_port, issuer_port, stage)
+        snapshot = data(http(base + "/v1/automation/read", {"sessionId": session}))
+        registered = snapshot["goal"] if stage == "goal" else next(iter(snapshot["loops"]))
+        assert registered["status"] == "active", registered
+        # Release the model only after the submitting Electron process exits.
+        for gate in (("work-1",) if stage == "goal" else ("work-1", "declared")):
+            docker("exec", server, "touch", f"/tmp/talo-e2e/automation/{marker}.release-{gate}")
+        def settled():
+            entries = data(http(base + "/v1/automation/list", {"sessionId": session, "scope": "ended"}))["data"]
+            tasks = (entry["goal" if stage == "goal" else "loopTask"] for entry in entries if entry["type"] == stage)
+            return next((task for task in tasks if task["id"] == registered["id"]), None)
+
+        task = wait(settled, f"Server settled native {stage} after Electron closed")
+        assert task["latestTurnId"] and task["sessionId"] == session, task
+        if stage == "goal":
+            assert task["status"] == "complete" and task["completionEvidence"] == "Controlled Goal work finished", task
+        else:
+            assert task["status"] == "stopped" and task["stopReason"] == "modelStopped", task
+        prompt = native_automation_prompt(stage)
+        history = data(http(base + f"/v1/sessions/{session}/history"))["data"]
+        user_inputs = ([block["content"]["data"] for block in message["blocks"] if block["content"]["type"] == "userContent"]
+                       for turn in history for message in turn["result"]["result"]["messages"] if message["role"] == "user")
+        original, = [content for content in user_inputs if {"type": "text", "text": prompt} in content]
+        assert_selection(original, stage, prompt)
+        print(f"PASS native {stage} {task['id']} settled on Server after Electron closed: {task['status']}", flush=True)
+
+
 def run(files, parity=False, native=False):
     files.chmod(0o755)
     run_id = uuid.uuid4().hex[:10]
@@ -530,6 +584,8 @@ def run(files, parity=False, native=False):
         recovery_args = ["--publish", f"127.0.0.1:{fault_port}:18080",
                          "--env", "TALOS_E2E_TALO_RECOVERY=1"] if RECOVERY else []
         if native:
+            automation_port = free_port()
+            recovery_args += ["--publish", f"{gateway}:{automation_port}:18081", "--env", "TALOS_E2E_NATIVE_AUTOMATION=1"]
             recovery_args += ["--publish", f"127.0.0.1:{rpc_port}:9443",
                               "--publish", f"127.0.0.1:{fault_port}:18080"]
         ingress_port = 9444 if RECOVERY else 9443
@@ -572,8 +628,15 @@ def run(files, parity=False, native=False):
                 docker("restart", server)
                 wait(lambda: server_healthy(server, base), "Server restart")
 
+        def desktop_stage(stage):
+            if stage == "automation":
+                run_native_automation(files, base, rpc_port, fault_port, server,
+                                      f"http://{gateway}:{automation_port}/v1", worker_model)
+            else:
+                run_native_stage(files, base, rpc_port, fault_port, stage)
+
         exercise(base, instances, worker_model, f"http://127.0.0.1:{fault_port}", DockerObservations(), restart,
-                 native_stage=(lambda stage: run_native_stage(files, base, rpc_port, fault_port, stage)) if native else None)
+                 native_stage=desktop_stage if native else None)
 
     finally:
         (REPORT / "managed-talo-server.log").write_text(docker("logs", server, check=False))

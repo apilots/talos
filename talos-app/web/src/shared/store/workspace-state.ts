@@ -39,7 +39,7 @@ export function restoreWorkspaces(value: unknown): Record<string, WorkspaceSnaps
       if (!item || typeof item !== "object") continue;
       let window: WorkspaceWindow | null = null;
       if (item.kind === "computer" && typeof item.nodeId === "string" && item.nodeId) window = { kind: "computer", nodeId: item.nodeId };
-      if (item.kind === "file" && typeof item.fileId === "string" && item.fileId) window = { kind: "file", fileId: item.fileId };
+      if (item.kind === "file" && typeof item.fileId === "string" && item.fileId) window = { kind: "file", fileId: item.fileId, nodeId: typeof item.nodeId === "string" ? item.nodeId : undefined };
       if (item.kind === "sessionFile" && typeof item.sessionId === "string" && item.sessionId && typeof item.path === "string" && item.path) window = { kind: "sessionFile", sessionId: item.sessionId, path: item.path };
       if (item.kind === "webpage" && typeof item.id === "string" && item.id && typeof item.url === "string"
         && (!item.url || normalizeWorkspaceWebpageUrl(item.url))) window = { kind: "webpage", id: item.id, url: item.url, title: typeof item.title === "string" ? item.title : undefined };

@@ -18,7 +18,7 @@ import {
 } from "@/features/chat";
 import {
   useComputer,
-  useComputers,
+  useManagedWorkerStatus,
   useProductScope,
 } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
@@ -34,7 +34,8 @@ import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
 import { useChatSessionComposer } from "./useChatSessionComposer";
 
 export function ChatSessionPage() {
-  return <ChatSessionContent sessionId={useParams().sessionId ?? ""} />;
+  const sessionId = useParams().sessionId ?? "";
+  return <ChatSessionContent key={sessionId} sessionId={sessionId} />;
 }
 
 export function ChatSessionContent({ sessionId, talo }: {
@@ -54,28 +55,34 @@ export function ChatSessionContent({ sessionId, talo }: {
   const locationState = talo ? null : location.state as SessionLocationState | null;
   const [pendingInitialSessionId, setPendingInitialSessionId] =
     useState<string>();
-  const [restoredAutomationMode, setRestoredAutomationMode] = useState<{ scope: string; sessionId: string; mode: "goal" | "loop" }>();
+  const [retryDraft, setRetryDraft] = useState<SessionLocationState>();
   const sessionQuery = useSessionQuery(
     sessionId,
-    !hasInitialSessionInput(locationState) &&
+    !(locationState?.initialNodeId && hasInitialSessionInput(locationState)) &&
       pendingInitialSessionId !== sessionId,
   );
   const session = sessionQuery.data;
-  const computers = useComputers();
+  const missingSession = !session && sessionQuery.error instanceof TalosApiError &&
+    sessionQuery.error.code === AppProtocol.ErrorCode.ResourceNotFound;
+  const draftNodeId = locationState?.initialNodeId ?? retryDraft?.initialNodeId;
+  const checkReservation = Boolean(!talo && missingSession && !draftNodeId);
+  const { status } = useManagedWorkerStatus(checkReservation);
+  const instance = talo ?? status.data?.instance;
+  const reservedTalo = instance?.conversationSessionId === sessionId ? instance : undefined;
+  const firstTaloTurn = Boolean(missingSession && reservedTalo);
+  const newDraft = Boolean(!session && draftNodeId && (!sessionQuery.error || missingSession));
   const scope = useProductScope();
   const selectComputer = useAppStore((state) => state.selectComputer);
-  const nodeId =
-    talo?.nodeId ?? session?.nodeId ?? locationState?.initialNodeId ?? computers.selectedId;
-  const target = useComputer(nodeId);
-  const workerPhase = talo?.phase ?? target.data?.managedWorkerPhase;
-  const sleepingTalo = workerPhase === "sleeping";
-  const ready = talo ? workerPhase === "ready" : target.data?.available;
-  const firstTaloTurn = talo && sessionQuery.error instanceof TalosApiError &&
-    sessionQuery.error.code === AppProtocol.ErrorCode.ResourceNotFound;
+  const nodeId = session?.nodeId ?? reservedTalo?.nodeId ?? draftNodeId;
+  const { data: computer } = useComputer(nodeId);
+  const workerPhase = reservedTalo?.phase ?? computer?.managedWorkerPhase ?? (instance?.nodeId === nodeId ? instance?.phase : undefined);
+  const ready = workerPhase == null ? computer?.available : workerPhase === "ready";
+  const canSend = Boolean((ready || workerPhase === "sleeping") &&
+    ((session && !sessionQuery.error) || newDraft || firstTaloTurn));
   useEffect(() => {
-    const computer = talo?.nodeId ?? session?.nodeId;
+    const computer = session?.nodeId ?? reservedTalo?.nodeId;
     if (computer) selectComputer(scope, computer);
-  }, [talo?.nodeId, session?.nodeId, sessionId, scope, selectComputer]);
+  }, [reservedTalo?.nodeId, session?.nodeId, sessionId, scope, selectComputer]);
   const { data: modelCatalog } = useModelsQuery(nodeId);
   const models = modelCatalog?.models;
   const projectsView = useProjectsView(nodeId);
@@ -110,7 +117,7 @@ export function ChatSessionContent({ sessionId, talo }: {
   const projects = projectsView.projects;
   const sessionHistoryError = sessionHistoryQuery.error;
   const shouldShowMessageList =
-    Boolean(firstTaloTurn) || blocks.length > 0 ||
+    firstTaloTurn || blocks.length > 0 ||
     (sessionHistoryQuery.isSuccess && !sessionHistoryError);
   const autoScroll = useChatSessionAutoScroll({
     blocks,
@@ -119,24 +126,30 @@ export function ChatSessionContent({ sessionId, talo }: {
     streamError,
   });
 
+  const retrySkill = retryDraft?.initialSkillSelection?.name;
   const sessionComposer = useChatSessionComposer({
     chat,
-    locationState,
+    locationState: locationState ?? retryDraft ?? null,
     modelCatalog,
     projectsView,
     session,
     sessionId,
     nodeId,
-    sleepingTalo,
-    taloConversation: Boolean(talo),
-    restoredAutomationMode: restoredAutomationMode?.scope === scope && restoredAutomationMode.sessionId === sessionId ? restoredAutomationMode.mode : undefined,
-    onRestoredAutomationModeConsumed: () => setRestoredAutomationMode(undefined),
+    managedTalo: workerPhase != null,
+    canSend,
+    taloConversation: Boolean(reservedTalo),
+    restoredAutomationMode: retrySkill === "goal" || retrySkill === "loop" ? retrySkill : undefined,
+    onRestoredAutomationModeConsumed: () => setRetryDraft(current => current && { ...current, initialSkillSelection: undefined }),
+    onDraftAccepted: () => {
+      setRetryDraft(undefined);
+      if (locationState) navigate(location.pathname, { replace: true, state: null });
+    },
   });
   useInitialSessionInput({
     onPendingSessionChange: setPendingInitialSessionId,
-    onRestoreAutomationMode: (mode) => setRestoredAutomationMode({ scope, sessionId, mode }),
+    onRestoreDraft: setRetryDraft,
     locationPathname: location.pathname,
-    locationState,
+    locationState: newDraft && canSend ? locationState : null,
     models,
     navigate,
     projects,
@@ -152,7 +165,7 @@ export function ChatSessionContent({ sessionId, talo }: {
 
   const content = (
     <div className="flex h-full w-full flex-col overflow-hidden">
-      {sessionQuery.error && !locationState && !firstTaloTurn ? (
+      {sessionQuery.error && !newDraft && !firstTaloTurn ? (
         <p role="alert" className="px-7 py-3 text-sm text-danger">
           {userVisibleErrorMessage(
             sessionQuery.error,
@@ -250,12 +263,6 @@ export function ChatSessionContent({ sessionId, talo }: {
           <ChatComposer
             key={JSON.stringify([scope, sessionId])}
             {...sessionComposer.props}
-            disabled={
-              (!ready && !sleepingTalo) ||
-              (sessionQuery.isPending &&
-                !talo && !locationState &&
-                pendingInitialSessionId !== sessionId)
-            }
           />
         </div>
       </div>
@@ -263,6 +270,6 @@ export function ChatSessionContent({ sessionId, talo }: {
     </div>
   );
   // History can arrive before session metadata. A new ordinary draft has neither.
-  const attachmentSessionId = talo || session || blocks.length > 0 ? sessionId : undefined;
+  const attachmentSessionId = reservedTalo || session || blocks.length > 0 ? sessionId : undefined;
   return <AttachmentSessionContext.Provider value={attachmentSessionId}>{content}</AttachmentSessionContext.Provider>;
 }

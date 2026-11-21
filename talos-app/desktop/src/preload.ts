@@ -8,6 +8,8 @@ import type { AppProtocol } from "@talos/sdk-core";
 
 const bridge: TalosDesktopBridge = {
   preview: {
+    prepareCloud: (request, actorCredentials) => ipcRenderer.invoke(TALOS_IPC.previewPrepareCloud, request, actorCredentials)
+      .then(response => unwrapTalosApiResponse<AppProtocol.FilePreviewDescriptor>(response)),
     browser: operation => ipcRenderer.invoke(TALOS_IPC.previewBrowser, operation).then(response => unwrapTalosApiResponse<import("@talos/sdk-app-server/desktop").PreviewBrowserState | null>(response)),
     onBrowserState: handler => {
       const listener = (_event: IpcRendererEvent, state: import("@talos/sdk-app-server/desktop").PreviewBrowserState) => handler(state);

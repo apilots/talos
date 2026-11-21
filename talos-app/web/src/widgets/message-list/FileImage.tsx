@@ -21,7 +21,7 @@ export function FileImage({ fileId, label, size = "full" }: { fileId: string; la
     let objectUrl: string | undefined;
     setSource(undefined);
     setError(undefined);
-    void getTalosClient().files.content({ fileId, sessionId }).then(({ file, data }) => {
+    void Promise.resolve(getTalosClient({ sessionId, readOnly: true })).then(client => client.files.content({ fileId })).then(({ file, data }) => {
       if (!active) return;
       objectUrl = URL.createObjectURL(new Blob([new Uint8Array(data).buffer], { type: file.mimeType }));
       setSource(objectUrl);

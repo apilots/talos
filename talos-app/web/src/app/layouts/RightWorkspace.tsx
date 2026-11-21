@@ -32,8 +32,8 @@ function ComputerTab({ nodeId, ...props }: TabProps & { nodeId: string }) {
   const computer = useComputer(nodeId);
   return <WindowTab {...props} kind="computer" name={computer.data?.displayName || `Computer · ${nodeId.slice(0, 8)}`} />;
 }
-function FileTab({ fileId, scope, sessionId, ...props }: TabProps & { fileId: string; scope: string; sessionId?: string }) {
-  const file = useFileMetadata(scope, fileId, sessionId);
+function FileTab({ fileId, scope, sessionId, nodeId, ...props }: TabProps & { fileId: string; scope: string; sessionId?: string; nodeId?: string }) {
+  const file = useFileMetadata(scope, fileId, { sessionId, nodeId });
   return <WindowTab {...props} kind="file" name={file.data?.originalFilename || `File · ${fileId.slice(0, 8)}`} />;
 }
 function WorkspaceTab({ window, scope, sessionId, ...props }: TabProps & { window: WorkspaceWindow; scope: string; sessionId?: string }) {
@@ -41,7 +41,7 @@ function WorkspaceTab({ window, scope, sessionId, ...props }: TabProps & { windo
   switch (window.kind) {
     case "browser": return <WindowTab {...props} kind="browser" name={window.title} />;
     case "computer": return <ComputerTab {...props} nodeId={window.nodeId} />;
-    case "file": return <FileTab {...props} fileId={window.fileId} scope={scope} sessionId={sessionId} />;
+    case "file": return <FileTab {...props} fileId={window.fileId} nodeId={window.nodeId} scope={scope} sessionId={sessionId} />;
     case "sessionFile": return <WindowTab {...props} kind="sessionFile" name={window.path.split(/[\\/]/).pop() || window.path} />;
     case "webpage": return <WindowTab {...props} kind="webpage" name={window.title || (window.url ? new URL(window.url).host : t("newTab"))} />;
   }
@@ -201,7 +201,7 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
           {window.kind === "browser" ? activeWindow ? <DesktopBrowserPage tab={window} selected={selected} /> : null
             : window.kind === "webpage" ? <WebPagePreview url={window.url} onNavigate={(url, title) => navigateWebpage(context.key,key,url,title)} />
             : selected && window.kind === "computer" ? <ComputerDesktop nodeId={window.nodeId} expanded={expanded} onExitInput={() => toggleRef.current?.focus()} />
-            : window.kind === "file" ? <FilePreview source={{ kind: "file", fileId: window.fileId }} attachmentSessionId={context.sessionId} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : window.kind === "sessionFile" ? <FilePreview source={{ kind: "sessionPath", sessionId: window.sessionId, path: window.path }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : null}
+            : window.kind === "file" ? <FilePreview source={{ kind: "file", fileId: window.fileId }} owner={{ sessionId: context.sessionId, nodeId: window.nodeId }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : window.kind === "sessionFile" ? <FilePreview source={{ kind: "sessionPath", sessionId: window.sessionId, path: window.path }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : null}
         </div>;
       }))}
     </div>

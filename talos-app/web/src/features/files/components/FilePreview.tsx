@@ -16,9 +16,9 @@ import { formatFileSize } from "../hooks/useFilesPage";
 import { TextPreview } from "./TextPreview";
 const PdfPreview = lazy(() => import("./PdfPreview"));
 
-function DocumentImage({ fileId, label, scope, instanceKey, sessionId }: { fileId: string; label: string; scope: string; instanceKey: string; sessionId?: string }) {
+function DocumentImage({ fileId, label, scope, instanceKey, sessionId, nodeId }: { fileId: string; label: string; scope: string; instanceKey: string; sessionId?: string; nodeId?: string }) {
   const { t } = useTranslation("files");
-  const preview = useFilePreview({ kind: "file", fileId }, scope, `${instanceKey}:image:${fileId}`, sessionId);
+  const preview = useFilePreview({ kind: "file", fileId }, scope, `${instanceKey}:image:${fileId}`, { sessionId, nodeId });
   return preview.error ? <span role="alert">{userVisibleErrorMessage(preview.error, t("preview.loadFailed"))}</span>
     : preview.descriptor ? <img src={getTalosClient().files.preview.resourceUrl(preview.descriptor)} alt={label} /> : <span role="status">{t("preview.loading")}</span>;
 }
@@ -31,9 +31,9 @@ function DocumentScroll({ resourcePath, position, onPositionChange, children }: 
   }}>{children}</div>;
 }
 /** One resource view for every shell and source. Document transforms use the same descriptor/read/resource URL contract as source files. */
-export function FilePreview({ source, attachmentSessionId, connectionKey, instanceKey, position, onPositionChange }: { source: FilePreviewSource; attachmentSessionId?: string; connectionKey: string; instanceKey: string; position?: FilePreviewPosition; onPositionChange?: (position: FilePreviewPosition | undefined) => void }) {
+export function FilePreview({ source, owner = {}, connectionKey, instanceKey, position, onPositionChange }: { source: FilePreviewSource; owner?: { sessionId?: string; nodeId?: string }; connectionKey: string; instanceKey: string; position?: FilePreviewPosition; onPositionChange?: (position: FilePreviewPosition | undefined) => void }) {
   const { t } = useTranslation("files");
-  const preview = useFilePreview(source, connectionKey, instanceKey, attachmentSessionId);
+  const preview = useFilePreview(source, connectionKey, instanceKey, owner);
   const descriptor = preview.descriptor;
   const document = descriptor?.document;
   const resourcePath = document?.kind === "pdf" ? document.resourcePath : descriptor?.entryPath;
@@ -68,16 +68,16 @@ export function FilePreview({ source, attachmentSessionId, connectionKey, instan
   }, [descriptor, resourcePath]);
   const sessionId = source.kind === "sessionPath" ? source.sessionId : null;
   const openLink = useCallback(async (reference: string) => {
-    if (/^[a-z][a-z\d+.-]*:/i.test(reference) || reference.startsWith("//")) { await openResourceLink(reference); return; }
+    if (/^[a-z][a-z\d+.-]*:/i.test(reference) || reference.startsWith("//")) { await openResourceLink(reference, owner.nodeId); return; }
     const citation = parseFilePreviewReference(reference, { fromPath: resourcePath });
     const path = resourcePath ? citation.path : undefined;
     if (path !== undefined) {
       if (sessionId !== null) await openResource({ kind: "sessionFile", sessionId, path, ...(citation.line ? { position: { kind: "text", resourcePath: null, line: citation.line, encoding: "utf-8" } as const } : {}) });
       else throw new Error("This registered file has no adjacent file source.");
-    } else await openResourceLink(reference);
-  }, [resourcePath, sessionId]);
-  const imageSessionId = sessionId ?? attachmentSessionId;
-  const renderFileImage = useCallback((id: string, label: string) => <DocumentImage fileId={id} label={label} scope={connectionKey} instanceKey={instanceKey} sessionId={imageSessionId} />, [connectionKey, instanceKey, imageSessionId]);
+    } else await openResourceLink(reference, owner.nodeId);
+  }, [resourcePath, sessionId, owner.nodeId]);
+  const imageSessionId = sessionId ?? owner.sessionId;
+  const renderFileImage = useCallback((id: string, label: string) => <DocumentImage fileId={id} label={label} scope={connectionKey} instanceKey={instanceKey} sessionId={imageSessionId} nodeId={owner.nodeId} />, [connectionKey, instanceKey, imageSessionId, owner.nodeId]);
   const loading = <p role="status" className="px-6 py-8 text-sm text-muted">{t("preview.loading")}</p>;
   return <section aria-label={t("preview.title")} className="flex h-full min-h-0 flex-col bg-background">
     <BrowserToolbar surface={browserUrl ? surface : undefined} source={{ kind: "file", label: source.kind === "file" ? `${t("pageLabel")} / ${location}` : location, resource, preview: descriptor }} onRefresh={preview.refresh} refreshDisabled={preview.pending || content.isFetching}>

@@ -16,8 +16,11 @@ import type {
   MemorySearchResponse,
   FsDirectoryCreateResponse,
   FsDirectoryReadResponse,
+  FileDeleteRequest,
   FileDeleteResponse,
+  FileListRequest,
   FileListResponse,
+  FileReadRequest,
   FileReadResponse,
   FileUpdateRequest,
   FileUpdateResponse,
@@ -122,7 +125,7 @@ export class AppServerClient {
 
   files = {
     preview: createFilePreviewClient({
-      prepare: (request: AppProtocol.FilePreviewPrepareParams) => this.transport.request<AppProtocol.FilePreviewDescriptor>("file/preview/prepare", request),
+      prepare: (request: AppProtocol.FilePreviewPrepareRequest) => this.transport.request<AppProtocol.FilePreviewDescriptor>("file/preview/prepare", request),
       read: (request: AppProtocol.FilePreviewReadRequest) => this.transport.request<AppProtocol.FilePreviewContent>("file/preview/read", request),
       close: (request: AppProtocol.FilePreviewCloseRequest) => this.transport.request<AppProtocol.FilePreviewCloseResponse>("file/preview/close", request),
     }, (preview, path) => {
@@ -133,7 +136,7 @@ export class AppServerClient {
     upload: async (
       request: FileUploadRequest,
       data: FileUploadData,
-      options: FileUploadOptions & { sessionId?: string } = {},
+      options: FileUploadOptions = {},
     ): Promise<FileUploadResponse> => {
       throwIfUploadAborted(options.signal);
       const totalBytes = data instanceof Blob ? data.size : data.byteLength;
@@ -143,14 +146,12 @@ export class AppServerClient {
       const response = await this.transport.request<FileUploadResponse>("file/upload", {
         request,
         dataBase64: encodeBase64(bytes),
-        sessionId: options.sessionId,
       } satisfies AppProtocol.FileUploadParams);
       if (options.signal?.aborted) {
         try {
-          await this.files.delete({
+          await this.transport.request<FileDeleteResponse>("file/delete", {
             fileId: response.file.fileId,
-            sessionId: options.sessionId,
-          });
+          } satisfies FileDeleteRequest);
         } catch (cleanupError) {
           throw new Error("Cancelled file upload cleanup failed.", { cause: cleanupError });
         }
@@ -159,15 +160,15 @@ export class AppServerClient {
       options.onProgress?.({ loadedBytes: totalBytes, totalBytes });
       return response;
     },
-    list: (request: AppProtocol.FileListParams = {}): Promise<FileListResponse> =>
+    list: (request: FileListRequest = {}): Promise<FileListResponse> =>
       this.transport.request("file/list", request),
-    read: (request: AppProtocol.FileIdParams): Promise<FileReadResponse> =>
+    read: (request: FileReadRequest): Promise<FileReadResponse> =>
       this.transport.request("file/read", request),
-    content: (request: AppProtocol.FileIdParams): Promise<import("./types").FileDownloadResponse> =>
+    content: (request: FileReadRequest): Promise<import("./types").FileDownloadResponse> =>
       this.transport.request<import("./generated/app-protocol").FileContentResponse>("file/content", request).then(decodeFileContent),
     update: (request: FileUpdateRequest): Promise<FileUpdateResponse> =>
       this.transport.request("file/update", request),
-    delete: (request: AppProtocol.FileIdParams): Promise<FileDeleteResponse> =>
+    delete: (request: FileDeleteRequest): Promise<FileDeleteResponse> =>
       this.transport.request("file/delete", request),
   };
 

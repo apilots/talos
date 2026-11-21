@@ -24,6 +24,7 @@ import {
   updateSessionModel,
   updateSessionPermissionMode,
 } from "../api";
+import { sessionDetailKey, type SessionDetail } from "@/shared/api/product-queries";
 import { useAppStore } from "@/shared/store/app-store";
 import { connectionScope } from "@/shared/store/connection-scope";
 import { useSelectedComputerId, useEnvironmentKey, useProductScope } from "@/features/computers";
@@ -35,8 +36,7 @@ export const chatKeys = {
   models: (connectionKey: string) => [...chatKeys.all, connectionKey, "models"] as const,
   sessions: (connectionKey: string) => [...chatKeys.all, connectionKey, "sessions"] as const,
   projects: (connectionKey: string) => [...chatKeys.all, connectionKey, "projects"] as const,
-  session: (connectionKey: string, sessionId: string) =>
-    [...chatKeys.all, connectionKey, "session", sessionId] as const,
+  session: sessionDetailKey,
   activeTurn: (connectionKey: string, sessionId: string) =>
     [...chatKeys.all, connectionKey, "active-turn", sessionId] as const,
   sessionHistory: (connectionKey: string, sessionId: string) =>
@@ -61,10 +61,11 @@ export function useModelsQuery(nodeId?: string) {
 }
 
 export function useSessionsQuery() {
+  const nodeId = useSelectedComputerId();
   const connectionKey = useEnvironmentKey();
   const query = useQuery({
     queryKey: chatKeys.sessions(connectionKey),
-    queryFn: listSessions,
+    queryFn: () => listSessions(nodeId),
     refetchInterval: 5_000,
   });
 
@@ -106,6 +107,7 @@ export function useSessionQuery(sessionId: string, enabled = true) {
   return useQuery({
     queryKey: chatKeys.session(connectionKey, sessionId),
     queryFn: () => getSession(sessionId),
+    select: detail => detail.session,
     enabled: Boolean(sessionId) && enabled,
   });
 }
@@ -191,16 +193,16 @@ export function useUpdateSessionModelMutation(sessionId: string) {
     mutationFn: (modelSelection) => updateSessionModel(sessionId, modelSelection),
     onMutate: async (modelSelection: ModelSelection) => {
       await queryClient.cancelQueries({ queryKey: sessionKey });
-      const previousSession = queryClient.getQueryData<SessionInfo>(sessionKey);
-      queryClient.setQueryData<SessionInfo>(sessionKey, (current) =>
-        current ? { ...current, modelSelection } : current,
+      const previousSession = queryClient.getQueryData<SessionDetail>(sessionKey);
+      queryClient.setQueryData<SessionDetail>(sessionKey, (current) =>
+        current ? { ...current, session: { ...current.session, modelSelection } } : current,
       );
       return { previousSession };
     },
     onError: (_error, modelSelection, context) => {
       if (context?.previousSession) {
-        queryClient.setQueryData<SessionInfo>(sessionKey, (current) => {
-          const currentSelection = current?.modelSelection;
+        queryClient.setQueryData<SessionDetail>(sessionKey, (current) => {
+          const currentSelection = current?.session.modelSelection;
           const failedSelectionIsCurrent =
             currentSelection?.modelRef.provider === modelSelection.modelRef.provider &&
             currentSelection.modelRef.id === modelSelection.modelRef.id &&
@@ -225,9 +227,9 @@ export function useUpdateSessionPermissionModeMutation(sessionId: string) {
   return useMutation({
     mutationFn: (mode: UserPermissionMode) => updateSessionPermissionMode(sessionId, mode),
     onSuccess: (session) => {
-      queryClient.setQueryData<SessionInfo>(
+      queryClient.setQueryData<SessionDetail>(
         chatKeys.session(connectionKey, sessionId),
-        session,
+        current => current && { ...current, session },
       );
     },
   });
@@ -285,9 +287,9 @@ export function useSessionActions(sessionId: string) {
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
   const applySessionResult = async (session: SessionInfo) => {
-    queryClient.setQueryData<SessionInfo>(
+    queryClient.setQueryData<SessionDetail>(
       chatKeys.session(connectionKey, sessionId),
-      session,
+      current => current && { ...current, session },
     );
     await queryClient.invalidateQueries({ queryKey: ["talos"], predicate: (query) => query.queryKey.includes("sessions") });
     await queryClient.invalidateQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });

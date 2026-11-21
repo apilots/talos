@@ -1,5 +1,8 @@
 import { AppProtocol, TalosApiError } from "@talos/sdk-core";
-import { ipcMain, shell } from "electron";
+import { createBrowserTalosClient } from "@talos/sdk-browser";
+import { DESKTOP_CLOUD_ORIGIN } from "@talos/sdk-app-server/desktop";
+import { controlPlaneFetch } from "./control-plane";
+import { ipcMain, protocol, shell } from "electron";
 
 import { isAppIconId } from "../../shared/app-icons";
 import { PreviewBrowserHost } from "./preview-browser";
@@ -19,6 +22,33 @@ export function registerDesktopIpcHandlers(
 ): void {
   const browserPreviews = new PreviewBrowserHost(session => filePreviews.installSession(session), TALOS_IPC.previewBrowserState);
   const filePreviews = new FilePreviewProtocol(runtime, () => browserPreviews.clear());
+  const cloudFetch = controlPlaneFetch(runtime);
+  protocol.handle("talos-cloud", async request => {
+    const response = await cloudFetch(request);
+    // Fetch has already decoded the network response body.
+    const headers = new Headers(response.headers);
+    headers.delete("content-encoding");
+    headers.delete("content-length");
+    headers.set("Access-Control-Allow-Origin", "*");
+    return new Response(response.body, { status: response.status, headers });
+  });
+  ipcMain.handle(TALOS_IPC.previewPrepareCloud, (event, request: AppProtocol.FilePreviewPrepareRequest, credentials: unknown) =>
+    ipcResponse(async () => {
+      assertProductRenderer(event);
+      const { actorCredentials } = assertDesktopRendererInvoke("file/preview/prepare", request, { actorCredentials: credentials });
+      if (!actorCredentials) throw new Error("A signed-in user is required for a cloud preview.");
+      const epoch = filePreviews.epoch;
+      const actor = await runtime.invoke<AppProtocol.UserCurrentResponse>("user/current", {}, { actorCredentials });
+      const client = createBrowserTalosClient({ baseUrl: DESKTOP_CLOUD_ORIGIN, fetch: cloudFetch,
+        getToken: () => actorCredentials.credential.token, getUserId: () => actor.user.user_id });
+      const descriptor = await client.files.preview.prepare(request);
+      const native = { ...descriptor, previewId: "server-" + descriptor.previewId };
+      filePreviews.remember(native, actorCredentials, event.sender, epoch, {
+        read: part => client.files.preview.read({ ...part, previewId: descriptor.previewId }),
+        close: () => client.files.preview.close({ previewId: descriptor.previewId }),
+      });
+      return native;
+    }));
   filePreviews.install();
   ipcMain.handle(TALOS_IPC.previewBrowser, (event, operation: unknown) => ipcResponse(async () => {
     assertProductRenderer(event); return browserPreviews.operate(operation, event.sender);
@@ -65,11 +95,21 @@ export function registerDesktopIpcHandlers(
           .catch(error=>console.error("Desktop media cleanup failed",error));
       });
       if (method === "auth/logout" || method === "auth/session/clear") await filePreviews.clear();
+      if (method === "file/preview/read") {
+        const part = params as AppProtocol.FilePreviewReadRequest;
+        const cloud = filePreviews.cloudResource(part.previewId, event.sender);
+        if (cloud) return cloud.read(part);
+      }
+      if (method === "file/preview/close") {
+        const part = params as AppProtocol.FilePreviewCloseRequest;
+        const cloud = filePreviews.cloudResource(part.previewId, event.sender);
+        filePreviews.forget(part.previewId);
+        if (cloud) return cloud.close(part);
+      }
       const previewEpoch = filePreviews.epoch;
       try {
         const result = await runtime.invoke(invokeOptions.method, params, {actorCredentials:invokeOptions.actorCredentials});
         if (method === "file/preview/prepare") filePreviews.remember(result as AppProtocol.FilePreviewDescriptor, invokeOptions.actorCredentials, event.sender, previewEpoch);
-        if (method === "file/preview/close") filePreviews.forget((params as AppProtocol.FilePreviewCloseRequest).previewId);
         if (method === "user/current") await filePreviews.accountChanged((result as AppProtocol.UserCurrentResponse).user.user_id, invokeOptions.actorCredentials);
         return result;
       } catch(error) {if(method==="desktop/streamOpen"&&stream)desktopMediaHost.release(stream,event.sender);throw error;}

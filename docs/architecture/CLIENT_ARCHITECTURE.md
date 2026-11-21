@@ -76,8 +76,9 @@ embedded SDK, and their product transports can all reach it.
 | `@talos/sdk-browser` | HTTP, multipart upload, authentication header, and SSE transport implementation |
 | `@talos/sdk-app-server` | JSON-RPC transport plus Electron main-process and typed preload IPC adapters |
 
-Web uses `TalosClient` over HTTP/SSE to its selected management service. Desktop
-uses `AppServerClient` through typed preload IPC and JSON-RPC stdio. Its bundled
+Web uses `TalosClient` over HTTP/SSE to its selected management service. For
+its local Worker, Desktop uses `AppServerClient` through typed preload IPC and
+JSON-RPC stdio. Its bundled
 app-server retains Service, Store, Coordinator and one `TalosWorker`. Verified
 login enrolls or restores this same Worker's personal UUID through the central
 Server. Registration does not replace the management runtime or its data.
@@ -87,9 +88,17 @@ Remote dispatch stays inside `agent-client`; credentials never reach the rendere
 The production UI requires sign-in. Anonymous development keeps local execution
 without registering a fictitious cloud node. Sync opt-out remains independent.
 Shared generated types and parity tests keep the browser and Desktop facades aligned.
-Desktop routes personal Talo turns, history, live events, session commands and chat
-attachments to the Server that supplied the session ID. The Server owns the turn
-across Desktop restarts.
+Web and Desktop use the same Talos Server SDK for personal Talo, including
+lifecycle, turns, history, live events, automation, and files. The browser sends
+HTTP/SSE directly. Electron transports the same SDK requests to its configured
+Server with the host's TLS trust. The local App Server serves ordinary Computers
+and bridges native desktop media. The Server-issued conversation ID determines
+the destination of subsequent operations.
+An existing conversation link uses that owner even if another Computer is
+selected. If its owner cannot be resolved, an attempted send preserves the draft
+and surfaces the error. Only an explicit new chat takes the selected Computer as
+its target. Server-issued routing IDs may be cached in memory. The Server owns
+the Turn and any durable Goal or Loop across Desktop restarts.
 
 ## Rust SDK and embedded SDK
 
@@ -319,10 +328,11 @@ new capability as complete until those paths and their tests are aligned.
 - Use existing TUI styling helpers and the default foreground unless the design system requires a specific color. Avoid hardcoded white and churn between equivalent span/line constructions.
 - Use shared text-wrapping options and line utilities for wrapping, indentation, and list prefixes instead of custom string manipulation.
 
-For a sleeping Talo, the chat submits menu-selected Goal and Loop as the
-existing reserved Skill selection by name, leaving the path empty. Turn and
-queue admission wake the Worker and resolve its protected System Skill. The
-chat waiting row reads the existing Computer phase until Turn events arrive.
+For a personal Talo, including an idle-sleeping instance, chat submits the
+Goal or Loop activation to the same Server as a normal message. Menu selection
+carries the reserved Skill name. The Server wakes the Worker when needed,
+confirms RPC readiness, and resolves the protected Skill on that Worker during
+Turn or queue admission. The waiting row displays the reported Computer phase.
 
 ### Running Turn reads and stream offsets
 

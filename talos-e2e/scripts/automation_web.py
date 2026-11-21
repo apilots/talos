@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 import yaml
 from playwright.sync_api import expect, sync_playwright
 
-from automation_model_fixture import prepare
+from automation_model_fixture import assert_selection, prepare
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.environ['TALOS_SCENARIO_REPORT_DIR'])
@@ -51,13 +51,6 @@ def user_inputs(database, session):
         return [json.loads(row[0])['data'] for row in db.execute(
             "SELECT payload_json FROM agent_events WHERE session_id=? AND json_extract(payload_json,'$.type')='messageCompleted'",
             (session,)) if json.loads(row[0])['data']['role'] == 'user']
-
-
-def assert_selection(contents, mode, prompt):
-    assert any(item == {'type': 'text', 'text': prompt} for item in contents), contents
-    selected = [item for item in contents if item['type'] == 'skillSelection']
-    assert len(selected) == 1 and selected[0]['name'] == mode, contents
-    assert '/.system/' + mode + '/' in selected[0]['path'], selected
 
 
 def assert_input(contents, mode, entry, prompt):

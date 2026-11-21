@@ -9,7 +9,7 @@ import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { TextMessageBlock } from "./TextMessageBlock";
 
 const files = vi.hoisted(() => ({ read: vi.fn(), content: vi.fn() }));
-vi.mock("@/shared/api/client", () => ({ getTalosClient: () => ({ files }) }));
+vi.mock("@/shared/api/client", () => ({ getTalosClient: (owner?: { sessionId?: string }) => ({ files: owner?.sessionId === "talo-chat" ? files : {} }) }));
 
 it("replays mixed attachments, previews the selected image, and releases loaded image URLs", async () => {
   // jsdom lacks native dialog methods; focus and Escape are verified in the browser.
@@ -40,9 +40,9 @@ it("replays mixed attachments, previews the selected image, and releases loaded 
     expect(screen.getAllByRole("img")).toHaveLength(2);
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent("Attachment could not be loaded");
-    expect(files.read).toHaveBeenCalledWith({ fileId: "notes", sessionId: "talo-chat" });
+    expect(files.read).toHaveBeenCalledWith({ fileId: "notes" });
     expect(files.content.mock.calls.map(([request]) => request)).toEqual([
-      { fileId: "first", sessionId: "talo-chat" }, { fileId: "second", sessionId: "talo-chat" },
+      { fileId: "first" }, { fileId: "second" },
     ]);
     fireEvent.error(within(screen.getByRole("button", { name: "Preview first.png" })).getByRole("img"));
     expect(screen.queryByRole("button", { name: "Preview first.png" })).not.toBeInTheDocument();

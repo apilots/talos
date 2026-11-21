@@ -132,10 +132,10 @@ async fn test_subscribe_timeline_events_replays_after_cursor() {
 }
 
 #[tokio::test]
-async fn test_session_replay_closes_at_the_first_terminal_only_when_requested() {
+async fn test_subscribe_timeline_events_replay_continues_after_historical_terminal() {
     let store = Arc::new(RecordingAgentExecutionStore::default());
     store.append_event(turn_started("turn-1"));
-    let first_terminal = store.append_event(turn_completed("turn-1", 2));
+    store.append_event(turn_completed("turn-1", 2));
     store.append_event(turn_started("turn-2"));
     let second = store.append_event(text_delta("turn-2", 2, "second turn output"));
     store.append_event(turn_completed("turn-2", 3));
@@ -148,31 +148,23 @@ async fn test_session_replay_closes_at_the_first_terminal_only_when_requested() 
         )
         .layer(axum::Extension(test_auth()))
         .with_state(state);
-    for (query, includes_second_turn) in [
-        ("close_when_idle=true", true),
-        ("close_when_idle=true&close_on_terminal=true", false),
-    ] {
-        let resp = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri(format!("/v1/sessions/mock-session/events?{query}"))
-                    .body(Body::empty())
-                    .expect("request should build"),
-            )
-            .await
-            .expect("request should succeed");
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .expect("event body should be readable");
-        let body_text = String::from_utf8_lossy(&body);
-        assert!(body_text.contains(&event_id(first_terminal.event_seq)));
-        assert!(body_text.contains("event: subscription/terminated"));
-        assert_eq!(
-            body_text.contains(&event_id(second.event_seq)),
-            includes_second_turn
-        );
-    }
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/sessions/mock-session/events?close_when_idle=true")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("event body should be readable");
+    let body_text = String::from_utf8_lossy(&body);
+    assert!(body_text.contains("event: timeline/turn/completed"));
+    assert!(body_text.contains(&event_id(second.event_seq)));
+    assert!(body_text.contains("second turn output"));
 }
 
 #[tokio::test]

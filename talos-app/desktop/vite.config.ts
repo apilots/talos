@@ -31,7 +31,7 @@ export default defineConfig({
       fileName: () => "main.js",
     },
     rollupOptions: {
-      external: ["electron", "app-path", "open", ...nodeBuiltins],
+      external: ["electron", "app-path", "open", "undici", ...nodeBuiltins],
     },
   },
 });

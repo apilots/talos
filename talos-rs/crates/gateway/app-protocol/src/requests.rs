@@ -9,22 +9,22 @@ use talos_agent_api::{InterruptTurnRequest, SubmitTurnInputRequest};
 use talos_types::{
     AuthLogoutRequest, AuthSessionClearRequest, AuthSessionReadRequest, ConfigDeleteRequest,
     ConfigGetRequest, ConfigReloadRequest, ConfigUpdateRequest, EventUnsubscribeRequest,
-    FileListRequest, FileUpdateRequest, FileUploadRequest, FsDirectoryCreateRequest,
-    FsDirectoryReadRequest, MemoryFileListRequest, MemoryFileReadRequest, MemoryFileWriteRequest,
-    MemoryGetRequest, MemorySearchRequest, MessageQueueAddRequest, MessageQueueDeleteRequest,
-    MessageQueueListRequest, MessageQueueReorderRequest, MessageQueueStartRequest,
-    MessageQueueUpdateRequest, ModelListRequest, PluginDisableRequest, PluginEnableRequest,
-    PluginInstallRequest, PluginListRequest, PluginReadRequest, PluginSearchRequest,
-    PluginSourceAddRequest, PluginSourceListRequest, PluginSourceRefreshRequest,
-    PluginSourceRemoveRequest, PluginUninstallRequest, PluginUpdateRequest, ProfileReadRequest,
-    ProjectCreateRequest, ProjectDeleteRequest, ProjectListRequest, ProjectPatchRequest,
-    ProjectReadRequest, RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest,
-    SessionClearRequest, SessionCloseRequest, SessionCompactRequest, SessionDeleteRequest,
-    SessionGetRequest, SessionHistoryRequest, SessionListRequest, SessionPatchRequest,
-    SkillsListRequest, SkillsReadRequest, SkillsRefreshRequest, SkillsResolveRequest,
-    SkillsSuggestRequest, StartTurnRequest, SubscribeTimelineRequest, UserCurrentRequest,
-    WorkspaceDocListRequest, WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
-    WorkspaceInfoRequest,
+    FileDeleteRequest, FileListRequest, FileReadRequest, FileUpdateRequest, FileUploadRequest,
+    FsDirectoryCreateRequest, FsDirectoryReadRequest, MemoryFileListRequest, MemoryFileReadRequest,
+    MemoryFileWriteRequest, MemoryGetRequest, MemorySearchRequest, MessageQueueAddRequest,
+    MessageQueueDeleteRequest, MessageQueueListRequest, MessageQueueReorderRequest,
+    MessageQueueStartRequest, MessageQueueUpdateRequest, ModelListRequest, PluginDisableRequest,
+    PluginEnableRequest, PluginInstallRequest, PluginListRequest, PluginReadRequest,
+    PluginSearchRequest, PluginSourceAddRequest, PluginSourceListRequest,
+    PluginSourceRefreshRequest, PluginSourceRemoveRequest, PluginUninstallRequest,
+    PluginUpdateRequest, ProfileReadRequest, ProjectCreateRequest, ProjectDeleteRequest,
+    ProjectListRequest, ProjectPatchRequest, ProjectReadRequest, RecoverTimelineRequest,
+    RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
+    SessionCompactRequest, SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest,
+    SessionListRequest, SessionPatchRequest, SkillsListRequest, SkillsReadRequest,
+    SkillsRefreshRequest, SkillsResolveRequest, SkillsSuggestRequest, StartTurnRequest,
+    SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest,
+    WorkspaceDocWriteRequest, WorkspaceInfoRequest,
 };
 
 #[path = "client_method.rs"]
@@ -183,13 +183,13 @@ pub enum ClientRequestParams {
     #[serde(rename = "file/upload")]
     FileUpload(FileUploadParams),
     #[serde(rename = "file/list")]
-    FileList(FileListParams),
+    FileList(FileListRequest),
     #[serde(rename = "file/read")]
-    FileRead(FileIdParams),
+    FileRead(FileReadRequest),
     #[serde(rename = "file/content")]
-    FileContent(FileIdParams),
+    FileContent(FileReadRequest),
     #[serde(rename = "file/preview/prepare")]
-    FilePreviewPrepare(FilePreviewPrepareParams),
+    FilePreviewPrepare(talos_types::FilePreviewPrepareRequest),
     #[serde(rename = "file/preview/read")]
     FilePreviewRead(talos_types::FilePreviewReadRequest),
     #[serde(rename = "file/preview/close")]
@@ -198,7 +198,7 @@ pub enum ClientRequestParams {
     #[serde(rename = "file/update")]
     FileUpdate(FileUpdateRequest),
     #[serde(rename = "file/delete")]
-    FileDelete(FileIdParams),
+    FileDelete(FileDeleteRequest),
     #[serde(rename = "memory/file/list")]
     MemoryFileList(MemoryFileListRequest),
     #[serde(rename = "memory/file/read")]
@@ -281,49 +281,11 @@ pub enum ClientRequestParams {
     MemoryGet(MemoryGetRequest),
 }
 
-/// File list on the management host that owns the optional conversation.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-pub struct FileListParams {
-    #[serde(default)]
-    #[ts(optional)]
-    pub session_id: Option<String>,
-    #[serde(flatten)]
-    pub request: FileListRequest,
-}
-
-/// Registered files can use the conversation's management host. A session path
-/// always belongs to the session carried by its source.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(rename_all = "camelCase")]
-pub struct FilePreviewPrepareParams {
-    #[serde(default)]
-    #[ts(optional)]
-    pub session_id: Option<String>,
-    pub source: talos_types::FilePreviewSource,
-}
-
-/// Select a file on the management host that owns the optional conversation.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-pub struct FileIdParams {
-    #[serde(default)]
-    #[ts(optional)]
-    pub session_id: Option<String>,
-    pub file_id: String,
-}
-
-/// Upload bytes to the management host that owns the optional conversation.
+/// App Server upload envelope; other file methods use shared request objects directly.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct FileUploadParams {
-    #[serde(default)]
-    #[ts(optional)]
-    pub session_id: Option<String>,
     pub request: FileUploadRequest,
     pub data_base64: String,
 }

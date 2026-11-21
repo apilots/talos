@@ -29,7 +29,6 @@ pub(super) struct TimelineEventsQuery {
     limit: Option<usize>,
     turn_id: Option<String>,
     close_when_idle: Option<bool>,
-    close_on_terminal: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,7 +45,7 @@ pub(super) async fn subscribe_timeline_events_handler(
     Query(query): Query<TimelineEventsQuery>,
 ) -> Result<Response, ApiError> {
     let after_event_id = parse_cursor(query.after_event_id, &headers);
-    let close_on_terminal = query.close_on_terminal.unwrap_or(query.turn_id.is_some());
+    let close_on_terminal = query.turn_id.is_some();
     let close_when_idle = query.close_when_idle.unwrap_or(true);
     let limit = query
         .limit

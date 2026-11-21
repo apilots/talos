@@ -14,6 +14,7 @@ const mocks = {
   compactSession: vi.fn(),
   clearSession: vi.fn(),
   session: undefined as unknown,
+  sessionError: undefined as Error | undefined,
   sessionHistoryError: undefined as Error | undefined,
   sessionHistoryIsSuccess: true,
   sessionQueryEnabled: undefined as boolean | undefined,
@@ -120,7 +121,7 @@ export async function createChatFeatureMock(
     }),
     useSessionQuery: (_sessionId: string, enabled?: boolean) => {
       mocks.sessionQueryEnabled = enabled;
-      return { data: mocks.session };
+      return { data: mocks.session, error: mocks.sessionError };
     },
     useUpdateSessionModelMutation: () => ({ mutate: mocks.mutateModel }),
     useUpdateSessionPermissionModeMutation: () => ({
@@ -151,6 +152,7 @@ export function createAppStoreMock() {
 export function resetChatSessionPageMocks() {
   mocks.session = {
     context: { session_id: "sess-1" },
+    nodeId: "embedded",
     title: "Session 1",
     projectId: null,
     config: { llm: { model: "model-1" } },
@@ -164,6 +166,7 @@ export function resetChatSessionPageMocks() {
   mocks.draft = "";
   mocks.sendTurn.mockReset();
   mocks.sendTurn.mockResolvedValue(undefined);
+  mocks.sessionError = undefined;
   mocks.sessionHistoryError = undefined;
   mocks.sessionHistoryIsSuccess = true;
   mocks.isStreaming = false;

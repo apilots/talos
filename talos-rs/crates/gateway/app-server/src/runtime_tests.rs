@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::json;
 use talos_agent_api::{
-    AgentEvent, AgentEventPayload, AgentTurnRef, AgentTurnStarted, TimelineEvent,
+    AgentEvent, AgentEventPayload, AgentTurnRef, AgentTurnStarted, TimelineCursorStatus,
+    TimelineEvent, TimelineReplay,
 };
 use talos_app_protocol::errors::{NOT_INITIALIZED, PARSE_ERROR};
 use talos_app_protocol::requests::ActorCredentials;
@@ -143,7 +144,7 @@ impl AppServerApplication for MockApp {
         &self,
         _actor: &Actor,
         params: SubscribeTimelineRequest,
-    ) -> ApplicationResult<crate::ApplicationSubscription> {
+    ) -> ApplicationResult<talos_service::TimelineSubscription> {
         let live_tx = self.live_tx.lock().expect("live tx lock").as_ref().cloned();
         match live_tx {
             Some(_live_tx) => {
@@ -154,13 +155,19 @@ impl AppServerApplication for MockApp {
                     stream_txs.push(_tx);
                     subscription_id
                 };
-                Ok(crate::ApplicationSubscription {
-                    response: talos_types::SubscribeTimelineResponse {
-                        subscription_id,
-                        session_id: params.session_id,
+                Ok(talos_service::TimelineSubscription {
+                    subscription_id,
+                    session_id: params.session_id,
+                    high_water_mark_event_id: None,
+                    replay: TimelineReplay {
+                        events: Vec::new(),
                         high_water_mark_event_id: None,
+                        next_cursor: None,
+                        last_event_seq: 0,
+                        cursor_status: TimelineCursorStatus::FromBeginning,
                     },
                     events,
+                    has_live_turn: false,
                 })
             }
             None => Err(ApiError::new(ErrorCode::ResourceNotFound)),

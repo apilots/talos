@@ -229,10 +229,13 @@ async fn file_list_query_rejects_project_id_without_project_scope() {
 #[tokio::test]
 async fn app_server_file_methods_use_the_same_file_service() {
     use talos_app_protocol::requests::{
-        ClientMethod, ClientRequest, ClientRequestParams, FileIdParams, FileUploadParams,
+        ClientMethod, ClientRequest, ClientRequestParams, FileUploadParams,
     };
     use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
-    use talos_types::{FileScope, FileUpdateRequest, FileUploadRequest};
+    use talos_types::{
+        FileDeleteRequest, FileListRequest, FileReadRequest, FileScope, FileUpdateRequest,
+        FileUploadRequest,
+    };
 
     let state = test_state(false).await;
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
@@ -243,7 +246,6 @@ async fn app_server_file_methods_use_the_same_file_service() {
             ClientRequest {
                 method: ClientMethod::FileUpload,
                 params: ClientRequestParams::FileUpload(FileUploadParams {
-                    session_id: None,
                     request: FileUploadRequest {
                         filename: "diagram.png".to_string(),
                         scope: FileScope::Personal,
@@ -264,7 +266,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
             &actor,
             ClientRequest {
                 method: ClientMethod::FileList,
-                params: ClientRequestParams::FileList(Default::default()),
+                params: ClientRequestParams::FileList(FileListRequest::default()),
             },
         )
         .await
@@ -278,8 +280,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
             &actor,
             ClientRequest {
                 method: ClientMethod::FileRead,
-                params: ClientRequestParams::FileRead(FileIdParams {
-                    session_id: None,
+                params: ClientRequestParams::FileRead(FileReadRequest {
                     file_id: uploaded.file.file_id.clone(),
                 }),
             },
@@ -305,8 +306,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
             &actor,
             ClientRequest {
                 method: ClientMethod::FileDelete,
-                params: ClientRequestParams::FileDelete(FileIdParams {
-                    session_id: None,
+                params: ClientRequestParams::FileDelete(FileDeleteRequest {
                     file_id: uploaded.file.file_id.clone(),
                 }),
             },

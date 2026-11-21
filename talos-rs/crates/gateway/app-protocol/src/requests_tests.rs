@@ -192,7 +192,7 @@ fn file_methods_decode_shared_requests_and_upload_envelope() {
     .expect("file list should decode");
     assert!(matches!(
         list.params,
-        ClientRequestParams::FileList(FileListParams { .. })
+        ClientRequestParams::FileList(talos_types::FileListRequest { .. })
     ));
 }
 

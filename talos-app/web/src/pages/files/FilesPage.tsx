@@ -135,6 +135,7 @@ export function FilesPage() {
           {files.selectedFile ? (
             <FileDetailsPanel
               file={files.selectedFile}
+              nodeId={files.nodeId}
               isDeleting={files.isDeleting}
               isUpdating={files.isUpdating}
               onClose={() => files.selectFile(null)}
@@ -174,7 +175,7 @@ export function FilesPage() {
                   <button
                     className={`rounded-[var(--radius-panel)] border p-4 text-left transition ${files.selectedFile?.fileId === file.fileId ? `${selectionClasses.selected} ${selectionClasses.border}` : "border-border/80 bg-card/[0.82] hover:border-selectedBorder"}`}
                     key={file.fileId}
-                    onClick={() => { files.selectFile(file.fileId); void openResource({ kind: "file", fileId: file.fileId }); }}
+                    onClick={() => { files.selectFile(file.fileId); void openResource({ kind: "file", fileId: file.fileId, nodeId: files.nodeId }); }}
                     type="button"
                   >
                     <div className="flex items-start gap-3">
@@ -226,7 +227,7 @@ export function FilesPage() {
                   <button
                     className={`grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b px-5 py-4 text-left last:border-b-0 ${files.selectedFile?.fileId === file.fileId ? `${selectionClasses.selected} ${selectionClasses.border}` : "border-border/60 hover:bg-hover"}`}
                     key={file.fileId}
-                    onClick={() => { files.selectFile(file.fileId); void openResource({ kind: "file", fileId: file.fileId }); }}
+                    onClick={() => { files.selectFile(file.fileId); void openResource({ kind: "file", fileId: file.fileId, nodeId: files.nodeId }); }}
                     type="button"
                   >
                     <div className="truncate text-sm font-medium text-ink">{file.originalFilename}</div>

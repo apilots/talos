@@ -97,7 +97,7 @@ it("resolves Markdown resources and retains their images until an explicit refre
   const chart = screen.getByAltText("Chart"); const attached = await screen.findByAltText("Attached");
   expect(chart).toHaveAttribute("src", "talos-preview://preview-1/docs/images/100% done.png");
   expect(attached).toHaveAttribute("src", "talos-preview://picture-1/attached.png");
-  expect(api.prepare).toHaveBeenCalledWith({ source: { kind: "file", fileId: "image-1" }, sessionId: "session-1" });
+  expect(api.prepare).toHaveBeenCalledWith({ source: { kind: "file", fileId: "image-1" } });
   view.rerender(<QueryClientProvider client={view.client}><FilePreview source={{ kind: "sessionPath", sessionId: "session-1", path: "docs/report.md" }} instanceKey="session-one" connectionKey="alice" position={{ kind: "markdown", resourcePath: "docs/report.md", scrollTop: 120 }} /></QueryClientProvider>);
   expect(screen.getByAltText("Chart")).toBe(chart);
   expect(screen.getByAltText("Attached")).toBe(attached);

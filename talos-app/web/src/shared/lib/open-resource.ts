@@ -4,9 +4,10 @@ import { getDesktopBridge } from "@/shared/api/desktop-client";
 import { useAppStore } from "@/shared/store/app-store";
 import { openExternalUrl } from "./open-external";
 
+type RegisteredFileResource = Pick<Extract<WorkspaceWindow, { kind: "file" }>, "kind" | "fileId" | "nodeId">;
 type SessionFileResource = Extract<WorkspaceWindow, { kind: "sessionFile" }>;
-export type PreviewResource = SessionFileResource | { kind: "file"; fileId: string } | { kind: "webpage"; url: string };
-export type OpenResourceRequest = SessionFileResource | { kind: "file"; fileId: string } | { kind: "webpage"; url: string; intent: "preview" | "link" | "external" };
+export type PreviewResource = SessionFileResource | RegisteredFileResource | { kind: "webpage"; url: string };
+export type OpenResourceRequest = SessionFileResource | RegisteredFileResource | { kind: "webpage"; url: string; intent: "preview" | "link" | "external" };
 export function fileReferenceId(value: string) { return /^talos-file:\/\/([A-Za-z0-9_-]+)$/.exec(value)?.[1]; }
 export function resourceReference(resource: PreviewResource) { return resource.kind === "file" ? `talos-file://${resource.fileId}` : resource.kind === "sessionFile" ? resource.path : resource.url; }
 
@@ -21,9 +22,9 @@ export async function openResource(request: OpenResourceRequest): Promise<void> 
   else store.openWorkspaceWebpage(request.url);
 }
 
-export async function openResourceLink(value: string): Promise<void> {
+export async function openResourceLink(value: string, nodeId?: string): Promise<void> {
   const fileId = fileReferenceId(value);
-  if (fileId) { await openResource({ kind: "file", fileId }); return; }
+  if (fileId) { await openResource({ kind: "file", fileId, nodeId }); return; }
   if (value && (!/^[a-z][a-z\d+.-]*:/i.test(value) || value.startsWith("file://"))) {
     const context = useAppStore.getState().workspaceOwner?.context;
     if (context?.kind !== "session") throw new Error("A session is required for this file reference.");

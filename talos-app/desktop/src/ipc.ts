@@ -14,6 +14,7 @@ export const TALOS_IPC = {
   automationChanged: "talos:automation-changed",
   invoke: "talos:invoke",
   openExternal: "talos:open-external",
+  previewPrepareCloud: "talos:preview-prepare-cloud",
   previewTargets: "talos:preview-targets",
   previewOpen: "talos:preview-open",
   previewBrowser: "talos:preview-browser",

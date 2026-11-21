@@ -26,6 +26,9 @@ importers:
       '@talos/sdk-app-server':
         specifier: workspace:*
         version: link:../ts-sdk/packages/app-server
+      '@talos/sdk-browser':
+        specifier: workspace:*
+        version: link:../ts-sdk/packages/browser
       '@talos/sdk-core':
         specifier: workspace:*
         version: link:../ts-sdk/packages/core
@@ -38,6 +41,9 @@ importers:
       range-parser:
         specifier: 1.2.1
         version: 1.2.1
+      undici:
+        specifier: 7.25.0
+        version: 7.25.0
       which:
         specifier: ^7.0.0
         version: 7.0.0

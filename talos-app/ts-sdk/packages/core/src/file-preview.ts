@@ -1,9 +1,9 @@
 import { decodeFileBytes } from "./file-content";
 import decodeUriComponent from "decode-uri-component";
-import type { FilePreviewPrepareParams, FilePreviewDescriptor, FilePreviewReadRequest, FilePreviewContent, FilePreviewCloseRequest, FilePreviewCloseResponse, FilePreviewMetadata } from "./types";
+import type { FilePreviewPrepareRequest, FilePreviewDescriptor, FilePreviewReadRequest, FilePreviewContent, FilePreviewCloseRequest, FilePreviewCloseResponse, FilePreviewMetadata } from "./types";
 
 export interface FilePreviewTransport {
-  prepare(request: FilePreviewPrepareParams): Promise<FilePreviewDescriptor>;
+  prepare(request: FilePreviewPrepareRequest): Promise<FilePreviewDescriptor>;
   read(request: FilePreviewReadRequest): Promise<FilePreviewContent>;
   close(request: FilePreviewCloseRequest): Promise<FilePreviewCloseResponse>;
 }

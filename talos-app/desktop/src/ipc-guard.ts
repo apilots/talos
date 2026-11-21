@@ -5,6 +5,8 @@ type ParamGuard = (params: unknown) => boolean;
 export type DesktopRendererMethod = Exclude<
   AppProtocol.ClientMethod,
   | "initialize" | "computer/create" | "computer/rotateCredential"
+  | "computer/createManagedWorker" | "computer/startManagedWorker" | "computer/stopManagedWorker"
+  | "computer/resetManagedWorker" | "computer/deleteManagedWorker"
 >;
 
 const mcpDefinitionRef = (value: unknown) => isRecord(value) && value.type === "plugin" && typeof value.installId === "string";
@@ -15,11 +17,6 @@ const desktopOpenParams = (params:unknown) => isRecord(params) && ["nodeId","tar
   params.inputMode==="control" && typeof params.controllerId==="string" && Number.isSafeInteger(params.inputEpoch) && Number(params.inputEpoch)>=0
 );
 const emptyParams = (params: unknown) => isRecord(params);
-const managedWorkerParams = (params: unknown) =>
-  params == null || (isRecord(params) && Object.keys(params).length === 0);
-const managedWorkerAction = (params: unknown): params is Record<string, unknown> =>
-  isRecord(params) && typeof params.instanceId === "string" && typeof params.expectedGeneration === "number" &&
-  Number.isInteger(params.expectedGeneration) && params.expectedGeneration >= 0 && params.expectedGeneration <= 0xffffffff;
 const sessionParams = (params: unknown) => hasString(params, "sessionId");
 const projectParams = (params: unknown) => hasString(params, "project_id");
 const fsDirectoryReadParams = (params: unknown) =>
@@ -151,13 +148,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     (params.limit == null || (typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 0)),
   "computer/delete": (params) => hasString(params, "nodeId"),
   "computer/read": (params) => hasString(params, "nodeId"),
-  "computer/readManagedWorker": managedWorkerParams,
-  "computer/createManagedWorker": managedWorkerParams,
-  "computer/startManagedWorker": managedWorkerAction,
-  "computer/stopManagedWorker": managedWorkerAction,
-  "computer/resetManagedWorker": managedWorkerAction,
-  "computer/deleteManagedWorker": (params) =>
-    managedWorkerAction(params) && typeof params.confirmDataLoss === "boolean",
+  "computer/readManagedWorker": (params) => isRecord(params) && Object.keys(params).length === 0,
   "computer/rename": (params) => hasString(params, "nodeId") && hasString(params, "displayName"),
   "computer/setStatus": (params) => hasString(params, "nodeId") && isRecord(params) &&
     (params.status === "enabled" || params.status === "disabled"),

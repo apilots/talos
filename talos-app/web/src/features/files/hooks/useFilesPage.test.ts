@@ -8,6 +8,8 @@ import type { FileInfo } from "@talos/sdk-browser";
 
 import { classifyFile, formatFileMeta, getFileExtension, useFilesPage } from "./useFilesPage";
 
+const selection = vi.hoisted(() => ({ nodeId: "embedded", cloud: { list: vi.fn(), read: vi.fn() } }));
+
 const fileApi = vi.hoisted(() => ({
   upload: vi.fn(),
   list: vi.fn(),
@@ -17,8 +19,10 @@ const fileApi = vi.hoisted(() => ({
 }));
 
 vi.mock("@/shared/api/client", () => ({
-  getTalosClient: () => ({ files: fileApi }),
+  getTalosClient: (target?: { nodeId?: string }) => ({ files: target?.nodeId === "my-talo" ? selection.cloud : fileApi }),
 }));
+
+vi.mock("@/features/computers", () => ({ useSelectedComputerId: () => selection.nodeId }));
 
 vi.mock("@/features/chat/hooks/useChatQueries", () => ({
   useConnectionKey: () => "test-connection",
@@ -51,6 +55,7 @@ function createWrapper() {
 describe("useFilesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    selection.nodeId = "embedded";
     fileApi.list.mockResolvedValue({ data: [FILE], nextCursor: null });
     fileApi.read.mockResolvedValue({ file: FILE });
     fileApi.upload.mockResolvedValue({ file: FILE });
@@ -66,6 +71,20 @@ describe("useFilesPage", () => {
     await waitFor(() => expect(result.current.selectedFile).toEqual(FILE));
 
     expect(fileApi.read).toHaveBeenCalledWith({ fileId: FILE.fileId });
+  });
+
+  it("opens the personal Talo file library after browsing this computer's files", async () => {
+    const report = { ...FILE, fileId: "talo-report", originalFilename: "cloud-report.png" };
+    selection.cloud.list.mockResolvedValue({ data: [report], nextCursor: null });
+    selection.cloud.read.mockResolvedValue({ file: report });
+    const { result, rerender } = renderHook(() => useFilesPage(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.items).toEqual([FILE]));
+
+    selection.nodeId = "my-talo";
+    rerender();
+    await waitFor(() => expect(result.current.items).toEqual([report]));
+    act(() => result.current.selectFile(report.fileId));
+    await waitFor(() => expect(result.current.selectedFile).toEqual(report));
   });
 
   it("loads additional pages with the returned cursor", async () => {

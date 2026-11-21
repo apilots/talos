@@ -5098,7 +5098,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FileListParams"
+              "$ref": "#/definitions/FileListRequest"
             }
           },
           "required": [
@@ -5116,7 +5116,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FileIdParams"
+              "$ref": "#/definitions/FileReadRequest"
             }
           },
           "required": [
@@ -5134,7 +5134,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FileIdParams"
+              "$ref": "#/definitions/FileReadRequest"
             }
           },
           "required": [
@@ -5152,7 +5152,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FilePreviewPrepareParams"
+              "$ref": "#/definitions/FilePreviewPrepareRequest"
             }
           },
           "required": [
@@ -5224,7 +5224,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FileIdParams"
+              "$ref": "#/definitions/FileDeleteRequest"
             }
           },
           "required": [
@@ -6944,6 +6944,13 @@
             "null"
           ]
         },
+        "controlPlaneTrustedCaPem": {
+          "description": "Public PEM roots for this control plane, when custom trust is configured.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "nodeId": {
           "type": [
             "string",
@@ -7244,8 +7251,8 @@
       ],
       "type": "object"
     },
-    "FileDeleteResponse": {
-      "description": "Confirms the identifier of a deleted file.",
+    "FileDeleteRequest": {
+      "description": "Selects one file to delete for the authenticated user.",
       "properties": {
         "fileId": {
           "type": "string"
@@ -7256,18 +7263,11 @@
       ],
       "type": "object"
     },
-    "FileIdParams": {
-      "description": "Select a file on the management host that owns the optional conversation.",
+    "FileDeleteResponse": {
+      "description": "Confirms the identifier of a deleted file.",
       "properties": {
         "fileId": {
           "type": "string"
-        },
-        "sessionId": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -7329,8 +7329,8 @@
       ],
       "type": "object"
     },
-    "FileListParams": {
-      "description": "File list on the management host that owns the optional conversation.",
+    "FileListRequest": {
+      "description": "Filters one authenticated user's files with opaque cursor pagination.",
       "properties": {
         "cursor": {
           "default": null,
@@ -7358,13 +7358,6 @@
             }
           ],
           "default": null
-        },
-        "sessionId": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "tags": {
           "default": null,
@@ -7561,17 +7554,9 @@
       ],
       "type": "object"
     },
-    "FilePreviewPrepareParams": {
+    "FilePreviewPrepareRequest": {
       "additionalProperties": false,
-      "description": "Registered files can use the conversation's management host. A session path always belongs to the session carried by its source.",
       "properties": {
-        "sessionId": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "source": {
           "$ref": "#/definitions/FilePreviewSource"
         }
@@ -7655,6 +7640,18 @@
           "type": "object"
         }
       ]
+    },
+    "FileReadRequest": {
+      "description": "Selects one file owned by the authenticated user.",
+      "properties": {
+        "fileId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fileId"
+      ],
+      "type": "object"
     },
     "FileReadResponse": {
       "description": "Returns public metadata for one ready file.",
@@ -7750,20 +7747,13 @@
       "type": "object"
     },
     "FileUploadParams": {
-      "description": "Upload bytes to the management host that owns the optional conversation.",
+      "description": "App Server upload envelope; other file methods use shared request objects directly.",
       "properties": {
         "dataBase64": {
           "type": "string"
         },
         "request": {
           "$ref": "#/definitions/FileUploadRequest"
-        },
-        "sessionId": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [

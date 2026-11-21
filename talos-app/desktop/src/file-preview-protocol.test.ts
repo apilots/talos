@@ -8,7 +8,7 @@ import type { DesktopAppServerController } from "./app-server-controller";
 const electron = vi.hoisted(() => ({ handle: vi.fn(), registerSchemesAsPrivileged: vi.fn(), open: vi.fn() }));
 vi.mock("electron", () => ({ protocol: electron, app: { getPath: () => tmpdir() } }));
 vi.mock("./preview-applications", () => ({ previewApplications: async () => [{ id: "system", label: "System default", kind: "system" }], openPreviewApplication: electron.open }));
-import { FilePreviewProtocol, registerFilePreviewScheme } from "./file-preview-protocol";
+import { FilePreviewProtocol, registerDesktopSchemes } from "./file-preview-protocol";
 const descriptor: AppProtocol.FilePreviewDescriptor = { previewId: "preview-id", entryPath: "report.html", resourceBaseUrl: null, document: null,
   metadata: { name: "report.html", mimeType: "text/html", sizeBytes: 6 }, expiresAt: Math.floor(Date.now() / 1000) + 3600 };
 function setup(source = Buffer.from("report")) {
@@ -25,7 +25,7 @@ function setup(source = Buffer.from("report")) {
 }
 beforeEach(() => vi.clearAllMocks());
 it("streams native resources through the authenticated canonical range API", async () => {
-  registerFilePreviewScheme();
+  registerDesktopSchemes();
   expect(electron.registerSchemesAsPrivileged.mock.calls[0][0][0].privileges.standard).toBe(true);
   const { respond, invoke, credentials } = setup();
   const response = await respond(new Request("talos-preview://preview-id/report.html", { headers: { range: "bytes=1-3" } }));

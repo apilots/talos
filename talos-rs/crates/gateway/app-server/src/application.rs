@@ -1,7 +1,6 @@
 mod codec;
 mod dispatch;
-pub use codec::decode_file_upload_data;
-use codec::{talos_error_to_api_error, to_value};
+use codec::{decode_file_upload_data, talos_error_to_api_error, to_value};
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -10,7 +9,7 @@ use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{ClientRequest, ClientRequestParams, FileUploadParams};
 use talos_auth::CloudSessionCache;
 use talos_gateway::{Gateway, ServiceGateway};
-use talos_service::{Actor, TalosService, TimelineSubscriptionMessage};
+use talos_service::{Actor, TalosService, TimelineSubscription};
 use talos_types::{
     RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest, StartTurnRequest,
     SubscribeTimelineRequest,
@@ -36,11 +35,6 @@ where
     async fn drain(&self, timeout: Duration) -> TalosResult<()> {
         self(timeout).await
     }
-}
-
-pub struct ApplicationSubscription {
-    pub response: talos_types::SubscribeTimelineResponse,
-    pub events: tokio::sync::mpsc::Receiver<TimelineSubscriptionMessage>,
 }
 
 pub type ApplicationResult<T> = Result<T, ApiError>;
@@ -91,7 +85,7 @@ pub trait AppServerApplication: Send + Sync + 'static {
         &self,
         actor: &Actor,
         params: SubscribeTimelineRequest,
-    ) -> ApplicationResult<ApplicationSubscription>;
+    ) -> ApplicationResult<TimelineSubscription>;
 
     async fn cancel_active_turn(
         &self,
@@ -158,15 +152,11 @@ impl AppServerApplication for TalosApplicationAdapter {
         &self,
         actor: &Actor,
         mut request: SubscribeTimelineRequest,
-    ) -> ApplicationResult<ApplicationSubscription> {
+    ) -> ApplicationResult<TimelineSubscription> {
         request.replay_limit = Some(request.replay_limit.unwrap_or(self.replay_limit).max(1));
         self.app
             .open_timeline_subscription(actor, request)
             .await
-            .map(|stream| ApplicationSubscription {
-                response: stream.response(),
-                events: stream.events,
-            })
             .map_err(talos_error_to_api_error)
     }
 

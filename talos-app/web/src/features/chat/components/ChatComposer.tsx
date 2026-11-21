@@ -24,10 +24,9 @@ import { useChatComposerAttachmentDraft } from "./useChatComposerAttachmentDraft
 import { WaitingMessages } from "./WaitingMessages";
 import { ComposerCommandResponse } from "./command-response";
 
-// ─── main component ──────────────────────────────────────────────────────────
-
 export function ChatComposer({
   draft,
+  nodeId,
   initialAutomationMode,
   onRestoredAutomationModeConsumed,
   automationCommands,
@@ -82,6 +81,7 @@ export function ChatComposer({
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const attachmentDraft = useChatComposerAttachmentDraft({
+    nodeId,
     activeProjectId,
     supportedKinds: supportedAttachmentKinds,
     initialAttachments,
@@ -133,14 +133,13 @@ export function ChatComposer({
   });
 
   const handleSend = async () => {
-    if (submitting || !attachmentDraft.canSubmit(draft)) return;
+    if (disabled || submitting || !attachmentDraft.canSubmit(draft)) return;
     inputHistoryNavigation.reset();
     composerSuggestions.cancelCurrentTrigger();
     setSubmitting(true); setSendError(undefined);
-    const selected = pendingMode;
     try {
-      await attachmentDraft.submit(draft, (attachments) => onSend(attachments, selected));
-      setPendingMode((current) => current === selected ? undefined : current);
+      await attachmentDraft.submit(draft, (attachments) => onSend(attachments, pendingMode));
+      setPendingMode((current) => current === pendingMode ? undefined : current);
     } catch (failure) {
       setSendError(userVisibleError(failure, "The message could not be sent."));
     } finally { setSubmitting(false); }

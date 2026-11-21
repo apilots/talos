@@ -281,109 +281,6 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
 }
 
 #[tokio::test]
-async fn cold_personal_chat_continues_on_its_server_with_session_commands() {
-    use axum::{
-        extract::{Request, State},
-        Json, Router,
-    };
-    use serde_json::{json, Value};
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use talos_app_protocol::requests::ClientRequest;
-    use talos_app_server::AppServerApplication;
-    use talos_types::{talos::SessionSource, ApiResponse, StartTurnRequest};
-
-    const SESSION: &str = "sess_server_owned";
-    const REPLACEMENT: &str = "sess_new_personal_chat";
-    let replaced = Arc::new(AtomicBool::new(false));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
-    let router = Router::new()
-        .fallback(
-            |State(replaced): State<Arc<AtomicBool>>, request: Request| async move {
-                let path = request.uri().path().to_owned();
-                assert_eq!(request.headers()["authorization"], "Bearer owner");
-                let data = if path == "/v1/computers/managed-worker" {
-                    let session = if replaced.load(Ordering::Relaxed) {
-                        REPLACEMENT
-                    } else {
-                        SESSION
-                    };
-                    json!({"enabled": true, "instance": {"instanceId":session, "nodeId":session,
-                "conversationSessionId":session, "generation":1, "phase":"ready",
-                "cpuCores":1, "memoryBytes":1024, "diskQuota":"unsupported"}})
-                } else {
-                    let body = axum::body::to_bytes(request.into_body(), 8192)
-                        .await
-                        .unwrap();
-                    let params = serde_json::from_slice::<Value>(&body).unwrap();
-                    json!({"path":path, "params":params})
-                };
-                Json(ApiResponse::success(data))
-            },
-        )
-        .with_state(replaced.clone());
-    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let fixture = DesktopFixture::new().await;
-    let mut host = fixture.host("Desktop");
-    host.config.cloud.agent_base_url = origin;
-    let actor = Actor::regular("owner")
-        .with_user_type(UserType::Max)
-        .with_access_token("owner");
-    let turn: StartTurnRequest = serde_json::from_value(json!({
-        "sessionId": SESSION, "input":{"content":[{"type":"text", "text":"Continue"}]}
-    }))
-    .unwrap();
-    let response = host
-        .start_turn(&actor, SessionSource::http(), turn.clone())
-        .await
-        .unwrap();
-    assert_eq!(
-        response.body,
-        json!({"path":"/v1/turns/start", "params":turn})
-    );
-
-    for (method, path, params) in [
-        (
-            "session/compact",
-            format!("/v1/sessions/{SESSION}/compact"),
-            json!({"sessionId": SESSION}),
-        ),
-        (
-            "session/clear",
-            format!("/v1/sessions/{SESSION}/clear"),
-            json!({"sessionId": SESSION}),
-        ),
-        (
-            "automation/execute",
-            "/v1/automation/execute".to_owned(),
-            json!({
-                "sessionId": SESSION, "action":{"target":"goal","action":{"type":"pause","goalId":"goal"}}
-            }),
-        ),
-    ] {
-        let request = ClientRequest::decode(method, Some(params.clone())).unwrap();
-        let response = host.dispatch(&actor, request).await.unwrap();
-        assert_eq!(response.body, json!({"path": path, "params":params}));
-    }
-    replaced.store(true, Ordering::Relaxed);
-    let next_turn = StartTurnRequest {
-        session_id: REPLACEMENT.into(),
-        ..turn
-    };
-    let response = host
-        .start_turn(&actor, SessionSource::http(), next_turn.clone())
-        .await
-        .unwrap();
-    assert_eq!(
-        response.body,
-        json!({"path":"/v1/turns/start", "params":next_turn})
-    );
-    fixture.stop.cancel();
-    fixture.server.await.unwrap().unwrap();
-    server.abort();
-}
-
-#[tokio::test]
 async fn offline_desktop_reads_an_ordinary_workers_stored_session() {
     use serde_json::json;
     use talos_app_protocol::requests::ClientRequest;
@@ -435,30 +332,17 @@ async fn offline_desktop_reads_an_ordinary_workers_stored_session() {
         matches!(subscription.events.recv().await, Some(talos_service::TimelineSubscriptionMessage::Closed(closed)) if closed.reason == talos_service::TimelineSubscriptionCloseReason::Completed)
     );
 
-    // A saved Project binding identifies an ordinary conversation even without its Worker.
-    let project_chat = SessionRecord {
-        id: "offline-project-chat".into(),
-        project_id: Some("project".into()),
-        ..record.clone()
-    };
-    fixture
-        .runtime
-        .session_store
-        .insert_session_record(&project_chat)
-        .await
-        .unwrap();
     let upload = ClientRequest::decode("file/upload", Some(json!({
-        "sessionId":project_chat.id, "request":{"filename":"offline.png","scope":{"type":"personal"},"tags":[],"metadata":{}},
+        "request":{"filename":"offline.png","scope":{"type":"personal"},"tags":[],"metadata":{}},
         "dataBase64":"iVBORw0KGgo="
     }))).unwrap();
     let file = &host.dispatch(&actor, upload).await.unwrap().body["file"];
-    let list =
-        ClientRequest::decode("file/list", Some(json!({"sessionId":project_chat.id}))).unwrap();
+    let list = ClientRequest::decode("file/list", Some(json!({}))).unwrap();
     assert_eq!(
         host.dispatch(&actor, list).await.unwrap().body["data"],
         json!([file])
     );
-    let params = json!({"fileId":file["fileId"], "sessionId":record.id});
+    let params = json!({"fileId":file["fileId"]});
     let read = ClientRequest::decode("file/read", Some(params.clone())).unwrap();
     assert_eq!(
         host.dispatch(&actor, read).await.unwrap().body["file"],
@@ -470,6 +354,54 @@ async fn offline_desktop_reads_an_ordinary_workers_stored_session() {
         "iVBORw0KGgo="
     );
 
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn stdio_cannot_create_a_local_copy_of_a_known_talo_turn() {
+    use axum::{routing::get, Json, Router};
+    use serde_json::json;
+    use talos_app_protocol::requests::ClientRequest;
+    use talos_app_server::AppServerApplication;
+    use talos_types::{talos::SessionSource, ApiResponse};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let router = Router::new().route("/v1/computers/managed-worker", get(|| async {
+        Json(ApiResponse::success(json!({"enabled":true, "instance":{
+            "instanceId":"instance", "nodeId":"managed-computer", "conversationSessionId":"reserved-chat",
+            "generation":1, "phase":"ready", "cpuCores":1, "memoryBytes":1024, "diskQuota":"unsupported"
+        }})))
+    }));
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let fixture = DesktopFixture::new().await;
+    let mut host = fixture.host("Desktop");
+    host.config.cloud.agent_base_url = origin;
+    let actor = Actor::regular("owner")
+        .with_user_type(UserType::Max)
+        .with_access_token("owner");
+    let status = ClientRequest::decode("computer/readManagedWorker", None).unwrap();
+    host.dispatch(&actor, status).await.unwrap();
+    server.abort();
+    let _ = server.await;
+    for (id, node) in [
+        ("reserved-chat", None),
+        ("new-session", Some("managed-computer")),
+    ] {
+        let turn = serde_json::from_value(json!({"sessionId":id, "nodeId":node,
+            "input":{"content":[{"type":"text", "text":"Continue"}]}}))
+        .unwrap();
+        let result = host.start_turn(&actor, SessionSource::http(), turn).await;
+        assert_eq!(result.err().unwrap().code, ErrorCode::InvalidRequest);
+        assert!(fixture
+            .runtime
+            .service
+            .get_session(&actor, id)
+            .await
+            .unwrap_err()
+            .is_code(ErrorCode::ResourceNotFound));
+    }
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
 }

@@ -1,4 +1,4 @@
-import { registerFilePreviewScheme } from "./file-preview-protocol";
+import { registerDesktopSchemes } from "./file-preview-protocol";
 import path from "node:path";
 import { hostname } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -21,6 +21,7 @@ import {
 import { desktopMediaHost } from "./desktop-media";
 import { desktopBrowserHost } from "./browser-host";
 import { handleDesktopServerRequest } from "./desktop-server-requests";
+import { trustedServerUrl } from "./control-plane";
 import { resolveRendererEntryPath } from "./renderer-entry";
 import { resolveAppServerEnvironment } from "./shell-environment";
 
@@ -28,15 +29,6 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 const appIcons = new DesktopAppIcons(dirname);
 const rendererDevUrl = process.env.TALOS_DESKTOP_RENDERER_URL;
 const serverUrl = process.env.TALOS_DESKTOP_SERVER_URL?.trim();
-
-function managedServerUrl(value: string): URL {
-  const url = new URL(value);
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.username || url.password || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) {
-    throw new Error("The Desktop Server URL must use HTTPS or loopback HTTP without credentials.");
-  }
-  return url;
-}
 
 let controller: DesktopAppServerController | undefined;
 
@@ -101,10 +93,10 @@ async function createMainWindow(server?: URL): Promise<BaseWindow> {
   return window;
 }
 
-registerFilePreviewScheme();
+registerDesktopSchemes();
 
 app.whenReady().then(async () => {
-  const server = serverUrl ? managedServerUrl(serverUrl) : undefined;
+  const server = serverUrl ? trustedServerUrl(serverUrl) : undefined;
   if (!server) {
     controller = await createController();
     registerDesktopIpcHandlers(controller, appIcons);

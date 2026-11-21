@@ -43,6 +43,31 @@ def wait_for_pixels(page):
     })''', polling=100, timeout=24000)
 
 
+def submit_automation(page, base, stage, report):
+    from managed_talo import ASSISTANT, data, http, native_automation_prompt, wait
+
+    instance = data(http(base + ASSISTANT))['instance']
+    session = instance['conversationSessionId']
+    # Exercise activation on a ready Worker, including the direct link with a fresh native profile.
+    data(http(base + f"/v1/fs/directory?nodeId={instance['nodeId']}&wakeIfSleeping=true"))
+    page.get_by_role('button', name='Add', exact=True).click()
+    page.get_by_role('button', name=stage.title(), exact=True).click()
+    expect(page.get_by_test_id('automation-mode-chip')).to_contain_text(stage.title())
+    page.get_by_role('textbox').last.fill(native_automation_prompt(stage))
+    assert data(http(base + ASSISTANT))['instance']['phase'] == 'ready'
+    with page.expect_request('talos-cloud://server/v1/turns/start'):
+        page.get_by_role('button', name='Send', exact=True).click()
+
+    def registered():
+        current = data(http(base + '/v1/automation/read', {'sessionId': session}))
+        return current['goal'] if stage == 'goal' else next(iter(current['loops']), None)
+
+    task = wait(registered, f'native {stage} registered on Server')
+    row = page.get_by_test_id('automation-task-' + task['id'])
+    expect(row).to_contain_text('AUTO_CASE=', timeout=15000)
+    page.screenshot(path=report / f'electron-native-{stage}.png')
+
+
 def capture(playwright, process, endpoint, base, node_id, report, stage):
     deadline = time.monotonic() + 15
     while True:
@@ -55,13 +80,22 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
             time.sleep(.2)
     context = browser.contexts[0]
     page = context.pages[0] if context.pages else context.wait_for_event('page', timeout=15000)
-    if stage in ('initialize', 'chat'):
+    if stage in ('initialize', 'chat', 'goal', 'loop'):
         page.wait_for_function("location.protocol === 'file:' && typeof window.talos?.invoke === 'function'")
         try:
             sys.path[:0] = [str(ROOT / 'talos-e2e/scripts/browser-worker'), str(ROOT / 'talos-e2e/scripts')]
             from managed_talo import ASSISTANT, data, http, managed_resource, wait
-            chooser = page.get_by_role('tab', name='Talo', exact=True)
-            chooser.or_(page.get_by_role('link', name='Talo', exact=True)).first.click()
+            if stage == 'loop':
+                session = data(http(base + ASSISTANT))['instance']['conversationSessionId']
+                page.goto(page.url.split('#')[0] + '#/sessions/' + session)
+                page.get_by_role('tab', name='Conversation').wait_for()
+                expect(page.get_by_text('Goal completion declared; settle this Turn normally', exact=True)).to_be_visible(timeout=30000)
+            else:
+                chooser = page.get_by_role('tab', name='Talo', exact=True)
+                chooser.or_(page.get_by_role('link', name='Talo', exact=True)).first.click()
+            if stage in ('goal', 'loop'):
+                submit_automation(page, base, stage, report)
+                return
             if stage == 'chat':
                 page.get_by_text('TALO_WAKE_OK', exact=True).wait_for(timeout=30000)
                 attachment = 'native-talo.png'
@@ -102,6 +136,11 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 page.get_by_role('button', name='Add', exact=True).click()
                 page.get_by_role('button', name='Choose an existing file').click()
                 page.get_by_role('button', name=attachment, exact=True).wait_for(timeout=15000)
+                page.keyboard.press('Escape')
+                page.get_by_role('link', name='Files', exact=True).click()
+                page.locator('.files-page-content').get_by_text(document.name, exact=True).first.click()
+                expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text('Word preview first page', timeout=20000)
+                print('PASS Files lists the selected Talo file store and opens its Server-only PDF', flush=True)
                 print('PASS native Talo attachment upload, streamed reply, remote PDF and Worker path preview, and reloaded image from both chat routes', flush=True)
                 return
             page.get_by_role('button', name='Initialize Talo', exact=True).click()
@@ -173,7 +212,7 @@ def main():
     debug_port = port()
     with tempfile.TemporaryDirectory(prefix='talos-electron-') as home, (report / f'electron-{stage}.log').open('wb') as log:
         env = dict(os.environ, HOME=home, LANG='en_US.UTF-8')
-        if stage in ('initialize', 'chat'):
+        if stage in ('initialize', 'chat', 'goal', 'loop'):
             env.pop('TALOS_DESKTOP_SERVER_URL', None)
             env.pop('TALOS_DESKTOP_RENDERER_URL', None)
         else:

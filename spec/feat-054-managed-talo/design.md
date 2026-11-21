@@ -324,7 +324,7 @@ talos:
 1. **未选择电脑。** 复用 `ComputerHomePage` 的右侧主内容区，内联展示「个人电脑」和「Talo」两个 Tab，默认打开「个人电脑」。列表为空时，在此页显示通过 Talos Desktop 登录同一账号的连接指引；已有个人电脑但尚未选择时，复用 `ComputerPicker` 展示个人电脑列表，点击一项进入该电脑的工作区。点击「Talo」Tab 在同一区域显示助手页面。
 2. **已选个人电脑。** 中间侧栏现有「你的电脑」行位置改为助手入口「Talo」，点击后在右侧显示同一个助手页面。左侧保留当前个人电脑选择，已有会话继续绑定原节点。个人电脑的桌面可从电脑设备详情打开。已有 Session 的标题栏根据绑定节点的在线状态和远程桌面能力显示电脑图标，点击后打开或切换到该节点的右侧桌面 Tab。[设备详情](../../talos-app/web/src/features/computers/topology/ComputerInspector.tsx)
 
-原生 Electron 可通过 `TALOS_DESKTOP_SERVER_URL` 打开受信 Server 的产品页面。此模式使用隔离的 Electron 渲染视图和 Server 同源的 HTTP、桌面 WebSocket。Worker 继续通过出站 RPC 注册，桌面媒体经 Server 中转。独立 Desktop 继续使用本地 App Server。部署端点使用 HTTPS，本机夹具可使用回环 HTTP。
+Electron can load the trusted Server UI through `TALOS_DESKTOP_SERVER_URL` and use same-origin HTTP and desktop WebSocket. Web and standalone Desktop use the same Talos Server TypeScript SDK for personal Talo. Electron transports SDK requests to its configured Server with the configured TLS trust. The bundled App Server serves local Computers and native desktop media. In both modes the Worker registers over outbound RPC and the Server relays desktop media. Deployed endpoints use HTTPS. Local fixtures may use loopback HTTP.
 
 Talo 页面按当前账号读取托管实例。两个入口都显示同一实例的状态。尚未初始化时提供「初始化 Talo」，该流程省略硬件规格。
 
@@ -337,6 +337,10 @@ Talo 页面按当前账号读取托管实例。两个入口都显示同一实例
 Server 在 `managed_workers.conversation_session_id` 中为每个实例预留唯一 ID，通过现有托管 Worker 读取接口返回给前端。进入页面只读 Session 和历史。首次发送使用现有 Turn API，由 Service 校验账号、目标 Worker 和空的 Project 绑定，再通过现有 Session 创建流程物化会话。后续发送查询并复用同一个 Session。并发首次发送以 Session 主键收敛到同一个会话，执行仍使用现有 Turn 准入。Stop、Wake 和 Reset 保留绑定。删除 Talo 不级联删除历史，重新初始化分配新 ID。
 
 Talo 页复用 Session 详情的消息历史和底部输入框。发送后根据既有托管阶段和 Turn 状态显示启动、等待注册、就绪或处理中。右侧桌面沿用 Server 中转，启停、Reset 和删除放在对应 Talo 桌面 Tab 的菜单内。
+
+Web and Desktop submit personal Talo messages to the Talos Server that issued the conversation ID. An explicit send to an idle-sleeping Talo requests Wake. The Server verifies ownership and current Worker readiness before admitting the Turn. The phase last displayed by the client is advisory. If the Server cannot be reached, keep the draft and surface the request error. A direct link to an existing conversation retains its owner even when another Computer is selected. Only an explicitly new chat may take its target from the Computer picker.
+
+The Server owns the conversation, queue and automation definitions. The shared UI uses the authenticated Server response to bind a conversation or Computer to its SDK client. It may reuse that response from the account-scoped view cache. It reads task state from the Server after reconnect. A local history projection is for display and does not confer authority to execute a Turn or modify files.
 
 ## 8. 验收设计
 

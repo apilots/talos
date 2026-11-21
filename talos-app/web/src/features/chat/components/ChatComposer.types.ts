@@ -34,6 +34,7 @@ export interface MessageQueueController {
 }
 
 export interface ChatComposerProps {
+  nodeId?: string;
   draft: string;
   initialAutomationMode?: import("@talos/sdk-browser").AutomationMode;
   onRestoredAutomationModeConsumed?: () => void;

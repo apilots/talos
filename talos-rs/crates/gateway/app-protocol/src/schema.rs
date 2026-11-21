@@ -1,5 +1,6 @@
 use schemars::schema::{InstanceType, Schema, SchemaObject};
 use schemars::{schema_for, JsonSchema};
+use serde::Serialize;
 
 mod automation;
 mod typescript;
@@ -7,16 +8,17 @@ pub use automation::generate_typescript as generate_automation_typescript;
 use typescript::export;
 pub use typescript::generate_worker_runtime_typescript;
 
-use crate::{
-    AppServerErrorBody, AppServerErrorCode, ClientRequestParams, InitializeResponse,
-    JsonRpcMessage, ServerNotification, ServerRequest,
-};
+use crate::errors::{AppServerErrorBody, AppServerErrorCode};
+use crate::jsonrpc::JsonRpcMessage;
+use crate::notifications::ServerNotification;
+use crate::requests::{ClientRequestParams, InitializeResponse};
+use crate::server_requests::ServerRequest;
 
 pub fn json_value_schema(_generator: &mut schemars::gen::SchemaGenerator) -> Schema {
     Schema::Bool(true)
 }
 
-#[derive(serde::Serialize, JsonSchema)]
+#[derive(Serialize, JsonSchema)]
 pub struct AppProtocolSchemaRoot {
     pub jsonrpc_message: JsonRpcMessage,
     pub client_request_params: ClientRequestParams,
@@ -182,9 +184,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ClientCapabilities>());
     output.push_str(&export::<crate::requests::ActorCredentials>());
     output.push_str(&export::<crate::requests::ActorCredential>());
-    output.push_str(&export::<crate::requests::FileListParams>());
-    output.push_str(&export::<crate::requests::FilePreviewPrepareParams>());
-    output.push_str(&export::<crate::requests::FileIdParams>());
     output.push_str(&export::<crate::requests::FileUploadParams>());
     output.push_str(&export::<talos_types::DesktopWorkerIdentityResponse>());
     output.push_str(&export::<talos_types::DesktopWorkerEnrollParams>());
@@ -730,7 +729,14 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::jsonrpc::JsonRpcNotification>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcErrorResponse>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcMessage>());
-    typescript::finish(&output)
+    let mut output = output
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
+    output.truncate(output.trim_end().len());
+    output.push('\n');
+    output
 }
 
 fn export_app_server_error_code() -> String {

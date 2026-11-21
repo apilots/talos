@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { AppServerClient } from "../app-server";
 import { TalosClient } from "../client";
 
 describe("TalosClient files", () => {
@@ -20,14 +19,11 @@ describe("TalosClient files", () => {
     const uploadController = new AbortController();
     const onProgress = vi.fn();
 
-    const files: Pick<AppServerClient["files"], "upload" | "list"> = client.files;
-    await files.upload(uploadRequest, new Uint8Array([1, 2, 3]), {
-      sessionId: "talo-chat",
+    await client.files.upload(uploadRequest, new Uint8Array([1, 2, 3]), {
       signal: uploadController.signal,
       onProgress,
     });
-    await files.list({
-      sessionId: "talo-chat",
+    await client.files.list({
       cursor: "cursor-1",
       limit: 20,
       scope: { type: "project", projectId: "project-1" },
