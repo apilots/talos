@@ -65,6 +65,34 @@ export function SyncPeerDetails({
                   new Date(peer.lastHeartbeatAt * 1000).toLocaleTimeString(i18n.language)}</dd>
               </div>
               <div>
+                <dt>{t("replicationProgress")}</dt>
+                <dd>{peer.progress?.state === "caughtUp"
+                  ? t("syncCaughtUp")
+                  : peer.progress?.state === "behind" && peer.progress.downloadLagMs !== null
+                    ? t("syncLagMs", { ms: number(peer.progress.downloadLagMs) })
+                    : peer.progress?.state === "recovering"
+                      ? t("syncRecovering")
+                      : t("syncUnknown")}</dd>
+              </div>
+              {peer.progress ? (
+                <div>
+                  <dt>{t("progressConfirmedAt")}</dt>
+                  <dd>{new Date(peer.progress.observedAt * 1000).toLocaleTimeString(i18n.language)}</dd>
+                </div>
+              ) : null}
+              {peer.progress && peer.progress.pendingUploads > 0 ? (
+                <div>
+                  <dt>{t("pendingUploads")}</dt>
+                  <dd>{number(peer.progress.pendingUploads)}</dd>
+                </div>
+              ) : null}
+              {peer.progress?.sourceDelays.map((sample) => (
+                <div key={sample.sourcePeerId}>
+                  <dt title={sample.sourcePeerId}>{t("fromPeer", { peer: sample.sourcePeerId.slice(0, 8) })}</dt>
+                  <dd>{number(sample.observedDelayMs)} ms</dd>
+                </div>
+              ))}
+              <div>
                 <dt>{t("lastActivity")}</dt>
                 <dd>
                   {peer.lastActivityAt === null

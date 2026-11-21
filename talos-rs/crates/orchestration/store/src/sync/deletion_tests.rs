@@ -44,23 +44,17 @@ async fn deleted_computer_still_satisfies_history_dependencies_on_a_new_manageme
         .await
         .unwrap()
         .unwrap();
-    let (mut tx, version, changes) = target
+    let (mut tx, batch) = target
         .sync
-        .import_document(
+        .prepare_import(
+            target.adapter.as_ref(),
             &target.adapter.binding,
             &resource,
             &[exported.update],
             &exported.version,
-            None,
         )
         .await
         .unwrap();
-    let batch = SyncImportBatch {
-        scope: target.adapter.binding.scope.clone(),
-        resource,
-        version,
-        changes,
-    };
     assert!(target
         .adapter
         .missing_dependencies(&mut *tx, &batch)

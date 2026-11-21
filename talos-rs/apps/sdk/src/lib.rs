@@ -79,12 +79,12 @@ pub use talos_types::{
     SessionPatchRequest, SessionUpdateResponse, SessionUsage, StartTurnRequest, StartTurnResponse,
     SubagentOutcome, SubagentRef, SubagentSnapshot, SubagentSpawnResult, SubagentUpdate,
     SubagentUpdateKind, SubscribeTimelineRequest, SubscribeTimelineResponse, SyncMetadataCounts,
-    SyncMetricsResponse, SyncPeerMetrics, TimelineUserActionEvent, TurnCommandStatus,
-    UserActionParams, UserActionResponse, UserActionState, UserCurrentRequest, UserCurrentResponse,
-    UserPermissionMode, WorkspaceDocInfo, WorkspaceDocKind, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocSummary, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    SyncMetricsResponse, SyncPeerMetrics, SyncPeerProgress, SyncProgressState, SyncSourceDelay,
+    TimelineUserActionEvent, TurnCommandStatus, UserActionParams, UserActionResponse,
+    UserActionState, UserCurrentRequest, UserCurrentResponse, UserPermissionMode, WorkspaceDocInfo,
+    WorkspaceDocKind, WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocReadResponse, WorkspaceDocSummary, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 pub use talos_types::{
     ComputerListRequest, ComputerListResponse, CreateNodeRequest, CreatedNode,

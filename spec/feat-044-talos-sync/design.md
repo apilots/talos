@@ -1,6 +1,6 @@
 # Talos 多端同步接入
 
-Status: Implemented；本轮账号选择修复、SDK registry接入及统一8/8验收通过，见[验收结论](verification.md)。独立服务方案在[talos-sync](https://github.com/apilots/talos-sync/blob/7230f9fdf294e7ae218bdb6d3cf1c4ef60203380/spec/feat-044-talos-sync/design.md)，本文件仅维护Talos产品责任。
+Status: Implemented. Talos owns product integration; the [independent Sync contract](https://github.com/apilots/talos-sync/blob/8e60e2b612ba895c8f4bcb4e0d78c9ae86227502/spec/feat-001-talos-sync/design.md) owns the service protocol. Current acceptance evidence belongs in the integration PR and ignored output reports.
 
 同一账号在多个Desktop app-server/talos-server管理宿主拥有独立业务DB，双向同步Computer、Project、Session、完整Timeline及必要执行metadata。Session永久绑定一个Computer/Worker/Workspace，空闲可由任意授权管理端协调同Worker的下一Turn；执行中的Turn只有当前协调者。同步不迁移Worker、不触发执行。
 
@@ -30,7 +30,7 @@ flowchart TB
 | 当前协调者原Service/Store | 授权、Turn准入、结果/Timeline落库、发布实时进展。结果先本端commit，再异步共享。 |
 | Worker / Harness | 模型/工具、所有Workspace文件/配置、最终排他及最小历史游标恢复标记。没有产品Session DB。 |
 | agent-client / 中心G | 屏蔽loopback/direct/Connect；注册/租约只在G；RPC与资源返回当前协调者，不代执行、不代写其Session。 |
-| Talos同步集成lib/Store adapter | 从本地事实补采到现有 outbox，分批导入原 Store，维护 event-map、水位和共享确认。 |
+| Talos同步集成lib/Store adapter | 从本地事实补采到现有 outbox。将同步信封解码为 Talos 原生类型后分批导入原 Store，维护 event-map、水位和共享确认。 |
 | 独立Sync SDK/types/server | 唯一WSS+Loro同步协议、账号隔离、持久Ack/增量恢复；不处理执行RPC。 |
 | 原SDK/UI | 原Computer/Project/Session/API；独立Computer管理组件、相对当前宿主的本机标识、真实在线状态。 |
 
@@ -43,7 +43,22 @@ flowchart TB
 
 ## 持久化与可执行边界
 
-原 Store 事务保留业务事实及其必要的版本记录。后台采集从持久水位读取已提交的事实，失败后仍可重新采集。入站长历史分批暂存，分批事务之间让出本地写锁。最终事务一并发布文档、事实、event-map 和下载游标。
+Capture starts at a durable cut of committed Store facts. Inbound history is
+staged across bounded transactions that release the local writer between
+batches. Publication commits the document checkpoint, Store facts and event
+map together. The runner saves the account feed cursor after applying its
+contiguous prefix of documents.
+
+The [Talos Sync parser library](../../talos-rs/crates/orchestration/sync-parser/src/lib.rs)
+owns typed business payloads, outbound field selection and inbound decoding.
+The wire API carries opaque metadata fields and record bodies. When required
+data cannot be decoded, the business Store keeps its committed projection
+and feed cursor. The SDK validates a full snapshot before it reaches the same
+materialization path used for incremental updates.
+
+The protocol v2 cutover pairs the Talos parser with published
+`talos-sync-types` and `talos-sync-sdk` 0.1.8. The product test suite can
+exercise these package archives before the registry release.
 
 导入不计费、不重发工具或反思。稳定事件键与原 reducer 重建展示，原活动锁、claim 和内存 queue 留在执行端。跨端 Input、Interrupt 和 queue 仅路由当前执行协调者。
 
@@ -115,3 +130,67 @@ Single-query Sync preferences use the existing pooled read. Write/capture/import
 transactions retain their original serialization and atomicity. A read snapshot
 cannot be upgraded through the transaction write API, and SQLx owns rollback on
 drop/cancellation. This does not change History loading or Sync ownership.
+
+## Shared parsing and recovery ownership
+
+The independent Sync service owns the generic wire protocol. Talos uses one
+`talos-sync-parser` library above the SDK. Its `header`, `metadata`, `records`
+and `codec` modules are shared by capture and import: identity/relationship
+headers, merge boundaries, stable Turn/event keys and typed error serialization
+must not be reimplemented in business callers. Original event occurrence and
+persistence timestamps remain native values; rebinding never restamps them.
+The integration's shared checkpoint Store module owns snapshot/version reads,
+durable ACK persistence and retained-scope copying.
+
+### A surviving replica restoring a new Hub
+
+A verified account may replace its old Hub association with a fresh scope.
+First materialize pending old-scope outbox operations locally. At one guarded
+write cut, retain the complete canonical replicas, original event mappings and
+captured source positions; enqueue a full-baseline marker per document and
+reset Hub ACK/cursor state. Activate the new binding only after that state is
+durable. The original Loro operations, Node associations, Turn coordinators,
+notice publishers, timestamps, generations and tombstones stay unchanged.
+An original replica can subsequently return and merge its original checkpoint
+and later deltas. Native Store scans skip retained replicas, avoiding a
+reconstruction that would incorrectly identify B as A's historical source.
+
+Snapshot chunks may be referenced by the archived old scope and the new active
+scope. Retirement checks all checkpoint references before reclaiming chunks.
+Published capture batches scope copied mappings, reusing their existing atomic
+visibility and local-event identity constraints. The old pending queue is atomically replaced by baseline markers after its
+operations are materialized; the new baseline requires its own durable Hub ACK.
+The old canonical checkpoints remain available for the archived scope. Missing dependencies and incomplete
+checkpoints do not become complete by changing a Hub identity.
+
+### Computer metadata and control-plane observations
+
+Persistent Computer list/detail fields return from the current management
+host's local Store. Desktop and TUI refresh nonlocal observations in an
+account-owned background task using the Talos Server control plane. At most
+four observation RPCs run per host; reads never join those RPCs. Refreshes run
+every five seconds, and observations older than fifteen seconds become
+unavailable/unknown. Identity, name, endpoint and persistent metadata are not
+replaced by a remote NodeInfo response. Server-provided health, availability,
+lease/heartbeat and enabled status remain authoritative observations for
+nonlocal Computers. The central Server reads its own registration/connection
+state. The local embedded Worker uses its actual local availability.
+
+Registration expiry reconciliation remains owned by background management.
+Observation tasks are canceled with account maintenance and clear their
+account cache. They do not authorize execution: commands continue through the
+existing verified control-plane path. An authenticated replacement Hub is
+rediscovered after an identity conflict, with the account's retained state
+moved before starting its replacement runner.
+
+Hub recovery and Computer observations have independent account-owned tasks.
+Slow discovery or a retained-snapshot migration must not delay control-plane
+availability refresh. A stopped old transport retains its scope until the new
+handle is fully installed; migration/install failures are retried automatically,
+including when the last network error changed during discovery. Same-scope
+reuse applies only to a running handle.
+
+Sync settings serialize with current account initialization without aborting
+in-flight Worker enrollment. Explicit logout retains its cancellation boundary.
+Tests wait for published background identity and binding state; status queries
+do not perform registration or turn a pending initialization into a false identity.

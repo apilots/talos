@@ -48,6 +48,10 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
         request: Request<pb::GetNodeRequest>,
     ) -> Result<Response<pb::GetNodeResponse>, Status> {
         let node_id = request.into_inner().node_id;
+        if node_id.starts_with("status-") {
+            self.entered.send(format!("status:{node_id}")).unwrap();
+            self.release.acquire().await.unwrap().forget();
+        }
         let owner = if node_id == "foreign" {
             "other"
         } else {
@@ -471,3 +475,6 @@ async fn shutdown_rejects_a_late_computer_connection() {
         .is_err());
     fixture.finish().await;
 }
+
+#[path = "application_computer_observation_tests.rs"]
+mod observations;

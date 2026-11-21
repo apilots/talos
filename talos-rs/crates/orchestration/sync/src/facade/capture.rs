@@ -1,10 +1,9 @@
+use crate::ResourceKind;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::StorageTransaction;
-use talos_sync_types::ResourceKind;
 
 use super::{sync_error, TalosSync};
 use crate::{
-    projection,
     store::{
         self,
         staged_write::{Kind, StagedWrite},
@@ -95,13 +94,15 @@ impl TalosSync {
 
     /// Project and encode source facts without acquiring a database writer.
     pub fn prepare_capture(params: SyncCaptureParams) -> TalosResult<PreparedSyncCapture> {
-        let resource = projection::resource(&params.binding, &params.resource);
+        let resource = talos_sync_parser::resource(&params.binding, &params.resource);
         resource.validate().map_err(sync_error)?;
         let mut batches = Vec::new();
         let mut batch = Vec::new();
         let mut bytes = 0;
         for change in params.changes {
-            let Some(change) = projection::change(&params.binding, change)? else {
+            let Some(change) =
+                talos_sync_parser::encode_change(&params.binding, &resource, change)?
+            else {
                 continue;
             };
             let size = store::encode(&change)?.len();

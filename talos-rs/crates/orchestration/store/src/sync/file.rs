@@ -46,7 +46,7 @@ pub(super) async fn apply(
     adapter: &StoreSyncAdapter,
     tx: &mut dyn StorageTransaction,
     batch: &SyncImportBatch,
-    snapshot: &talos_sync_types::SyncFileSnapshot,
+    snapshot: &SyncFileSnapshot,
 ) -> TalosResult<()> {
     let file = &snapshot.file;
     let rows = tx
@@ -68,8 +68,10 @@ pub(super) async fn apply(
         ));
     }
     let project = match &file.scope {
-        talos_sync_types::generated::FileScope::Personal => None,
-        talos_sync_types::generated::FileScope::Project(project) => Some(project.as_str()),
+        FileScope::Personal => None,
+        FileScope::Project {
+            project_id: project,
+        } => Some(project.as_str()),
     };
     let metadata = serde_json::to_string(&file.metadata).map_err(codec)?;
     if snapshot.storage_peer_id == adapter.binding.peer_id && rows.is_empty() {

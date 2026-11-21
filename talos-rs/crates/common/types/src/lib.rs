@@ -90,7 +90,10 @@ pub use session_execution::SessionHistoryCursor;
 mod sync;
 mod sync_metrics;
 pub use sync::{SyncConnectionState, SyncEnableRequest, SyncStatusResponse};
-pub use sync_metrics::{SyncMetadataCounts, SyncMetricsResponse, SyncPeerMetrics};
+pub use sync_metrics::{
+    SyncMetadataCounts, SyncMetricsResponse, SyncPeerMetrics, SyncPeerProgress, SyncProgressState,
+    SyncSourceDelay,
+};
 
 mod browser_action;
 pub use browser_action::*;

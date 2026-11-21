@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::{Storage, StorageTransaction};
-use talos_sync_types::{SyncResourceKey, SyncScope};
+
+use crate::{SyncResourceKey, SyncScope};
 
 use super::{
     corrupt_record, hex,
@@ -76,7 +77,10 @@ impl Snapshot {
     ) -> TalosResult<()> {
         tx.execute(
             "UPDATE sync_snapshots SET state='retired' WHERE id=(
-                SELECT snapshot_id FROM sync_documents WHERE hub_id=? AND account_id=? AND kind=? AND resource_id=?
+                SELECT snapshot_id FROM sync_documents WHERE hub_id=?1 AND account_id=?2 AND kind=?3 AND resource_id=?4
+            ) AND NOT EXISTS (
+                SELECT 1 FROM sync_documents d WHERE d.snapshot_id=sync_snapshots.id
+                AND NOT (d.hub_id=?1 AND d.account_id=?2 AND d.kind=?3 AND d.resource_id=?4)
             )",
             &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()],
         ).await?;

@@ -97,6 +97,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &handle_b,
     )
     .await?;
+    let metrics = talos_sync_sdk::MetricsClient::new(&endpoint, Some(&ca))?;
+    let credential = credentials().await?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let observed = metrics.read_account(&credential).await?;
+            if [&a, &b].into_iter().all(|device| {
+                observed.peers.iter().any(|peer| {
+                    peer.peer_id == device.sync.peer_id()
+                        && peer.progress.as_ref().is_some_and(|progress| {
+                            progress.state == talos_sync_sdk::metrics::ProgressState::CaughtUp
+                        })
+                })
+            }) {
+                return Ok::<_, talos_sync_types::SyncError>(());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await??;
     let resource = SyncResourceKey::Project {
         project_id: project_id.clone(),
     };
@@ -285,6 +304,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &handle_b,
     )
     .await?;
+    // The receiver can see the Delete while the publisher is still
+    // finishing its bootstrap. Explicit flush requires a connected runner.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while handle_a.status().connection != talos_sync::SyncConnectionState::Connected {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
     handle_a
         .flush(SyncResourceKey::Project {
             project_id: local_delete.project_id,
@@ -292,7 +319,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     handle_a.shutdown().await?;
     handle_b.shutdown().await?;
-    let report = serde_json::json!({"passed": ["original_store_bootstrap", "realtime_incremental", "offline_outbox_restart", "same_account_bidirectional_edit", "durable_tombstone", "durable_flush_minimum_cut", "committed_resource_notifications", "offline_patch_superseded_by_remote_delete", "pending_delete_with_concurrent_remote_patch"], "sourcePeerId": a.sync.peer_id(), "targetPeerId": b.sync.peer_id(), "computerId": computer, "projectId": project_id, "scope": scope });
+    let report = serde_json::json!({"passed": ["original_store_bootstrap", "durable_store_progress", "realtime_incremental", "offline_outbox_restart", "same_account_bidirectional_edit", "durable_tombstone", "durable_flush_minimum_cut", "committed_resource_notifications", "offline_patch_superseded_by_remote_delete", "pending_delete_with_concurrent_remote_patch"], "sourcePeerId": a.sync.peer_id(), "targetPeerId": b.sync.peer_id(), "computerId": computer, "projectId": project_id, "scope": scope });
     std::fs::write(
         home.join("result.json"),
         serde_json::to_vec_pretty(&report)?,

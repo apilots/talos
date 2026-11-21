@@ -317,6 +317,32 @@ locally by the `talos-base` feature `e2e` scenario with an explicit `TALOS_SYNC_
 that larger cross-project topology is not claimed as hosted CI acceptance. See
 [Computer topology](../spec/feat-045-computer-topology/design.md).
 
+For generic-protocol recovery, build the independent Sync repository's current
+compatible Hub executable, then run from the Talos root:
+
+```sh
+TALOS_SYNC_BIN=/absolute/path/to/talos-sync \
+  just test -p talos-base --features e2e \
+  -E 'test(application_sync_tests::) or test(directory_reads_remain_local)'
+```
+
+This local acceptance starts an actual Hub child process, a TLS Talos Server
+and native management/Worker runtimes with separate homes and databases. Auth
+and model responses are controlled local fixtures; it needs no production
+credentials or paid-model requests. It covers account boundaries, automatic
+enrollment, settings/restart, remote Worker command forwarding, complete History,
+live updates, reset/deletion, offline local reads and pending writes. Its recovery
+extension stops source A and the old Hub, forces B's first migration to fail,
+checks automatic retry into an empty replacement Hub, restores cold C's complete
+history and Computer directory with original identities/timestamps, then verifies
+the following incremental notice and local reads after the replacement Hub stops.
+The observation regression blocks the real TLS control-plane response while
+checking that local directory reads return and only transient status changes
+after the response arrives. These native checks do not claim packaged Desktop,
+Docker Worker or two-physical-machine acceptance. The separately pinned Group 19
+image must support the candidate SDK protocol before running that larger group;
+its older public Hub image is not evidence for generic-protocol recovery.
+
 This PR subset keeps representative gated behavior while preventing fork code
 from receiving secrets. Provider-backed and Cloud-fixture acceptance is
 maintainer-owned; it does not run automatically for each outside contribution.

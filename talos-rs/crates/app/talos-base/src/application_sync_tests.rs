@@ -19,6 +19,8 @@ use enrollment::TopologyScenario;
 mod login;
 #[path = "application_sync_metrics_tests.rs"]
 mod metrics;
+#[path = "application_sync_recovery_tests.rs"]
+mod recovery;
 #[path = "application_sync_status_flow_tests.rs"]
 mod status_flow;
 
@@ -217,9 +219,9 @@ async fn run_topology(scenario: TopologyScenario) {
         });
     let log = std::fs::File::create(directory.path().join("sync.log")).unwrap();
     let mut hub = HubProcess(
-        std::process::Command::new(binary)
+        std::process::Command::new(&binary)
             .arg("--config")
-            .arg(hub_config)
+            .arg(&hub_config)
             .stdout(log.try_clone().unwrap())
             .stderr(log)
             .spawn()
@@ -490,6 +492,13 @@ async fn run_topology(scenario: TopologyScenario) {
             .await
             .unwrap();
         peer.service.resume_account_sync(&actor);
+        wait_for("background local Computer identity published", async || {
+            peer.service
+                .sync_status(&actor)
+                .await
+                .is_ok_and(|status| status.local_computer_id.is_some())
+        })
+        .await;
         let status = peer.service.sync_status(&actor).await.unwrap();
         assert_eq!(
             status.local_computer_id.as_deref(),
@@ -1193,6 +1202,7 @@ async fn run_topology(scenario: TopologyScenario) {
         .await
         .unwrap()
         .is_some());
+    recovery::verify(&b, &actor, &hub_config, &binary, &mut hub).await;
     close(b).await;
     server_handle.shutdown().await.unwrap();
     gateway_task.await.unwrap().unwrap();

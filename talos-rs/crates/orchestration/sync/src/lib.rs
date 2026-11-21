@@ -3,7 +3,6 @@
 mod facade;
 mod metrics;
 pub use metrics::read_account_metrics;
-mod projection;
 mod runner;
 mod store;
 mod types;

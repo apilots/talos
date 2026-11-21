@@ -31,6 +31,7 @@ pub(crate) struct ApplicationSyncStores {
 
 pub(crate) struct ApplicationSyncHost {
     pub self_weak: std::sync::Weak<Self>,
+    pub computer_observations: super::application_computer_observations::ComputerObservations,
     pub registration_retirement: tokio::sync::Mutex<()>,
     pub config: talos_config::Config,
     pub sync: Arc<talos_sync::TalosSync>,
@@ -279,7 +280,23 @@ impl ApplicationSyncHost {
             ));
         }
         if let Some(handle) = installed.get(&verified.user_id) {
-            return Ok(handle.clone());
+            if handle.scope() == &binding.scope && !handle.is_stopped() {
+                return Ok(handle.clone());
+            }
+            // Retain the retired scope until the replacement is fully installed.
+            // A transient bind/install failure must remain discoverable for retry.
+            let previous = handle.clone();
+            self.service.remove_sync_handle(&verified.user_id);
+            let observer = self
+                .sync_stores
+                .observers
+                .lock()
+                .expect("Sync observers lock")
+                .remove(&verified.user_id);
+            if let Some(observer) = observer {
+                super::application_sync_observer::join_observer(observer).await;
+            }
+            previous.shutdown().await?;
         }
         let binding = self.sync.bind_account(&verified, binding).await?;
         self.install_account_access(&verified, credentials.clone())

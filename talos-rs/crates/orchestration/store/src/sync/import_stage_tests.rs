@@ -1,24 +1,21 @@
 use super::*;
 
-async fn candidate(peer: &Peer, upload: &talos_sync::SyncExportBatch) -> SyncImportBatch {
-    let (tx, version, changes) = peer
+async fn prepare(
+    peer: &Peer,
+    upload: &talos_sync::SyncExportBatch,
+) -> TalosResult<SyncImportBatch> {
+    let (tx, batch) = peer
         .sync
-        .import_document(
+        .prepare_import(
+            peer.adapter.as_ref(),
             peer.adapter.binding(),
             &upload.resource,
             std::slice::from_ref(&upload.update),
             &upload.version,
-            None,
         )
-        .await
-        .unwrap();
-    tx.rollback().await.unwrap();
-    SyncImportBatch {
-        scope: peer.adapter.binding.scope.clone(),
-        resource: upload.resource.clone(),
-        version,
-        changes,
-    }
+        .await?;
+    tx.rollback().await?;
+    Ok(batch)
 }
 
 async fn notice(store: &DatabaseSessionStore, id: &str, text: String) {
@@ -65,8 +62,7 @@ async fn a_tombstone_releases_unpublished_history_for_a_cold_session() {
         .await
         .unwrap()
         .unwrap();
-    let batch = candidate(&target, &live).await;
-    target.adapter.prepare_import(&batch).await.unwrap();
+    prepare(&target, &live).await.unwrap();
     let staged: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM agent_events WHERE session_id=? AND import_id<>0")
             .bind(id)
@@ -89,12 +85,11 @@ async fn a_tombstone_releases_unpublished_history_for_a_cold_session() {
         .await
         .unwrap()
         .unwrap();
-    let tombstone = candidate(&target, &deleted).await;
+    let tombstone = prepare(&target, &deleted).await.unwrap();
     assert!(tombstone
         .changes
         .iter()
-        .any(|change| matches!(change, talos_sync_types::SyncChange::Delete)));
-    target.adapter.prepare_import(&tombstone).await.unwrap();
+        .any(|change| matches!(change, SyncChange::Delete)));
     let remaining: (i64, i64) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM agent_events WHERE session_id=?1),
                 (SELECT COUNT(*) FROM sync_import_stages WHERE session_id=?1)",
@@ -139,15 +134,13 @@ async fn interrupted_import_resumes_hidden_batches_and_checks_the_session_tail()
         .await
         .unwrap()
         .unwrap();
-    let batch = candidate(&target, &upload).await;
-
     target.storage.execute(
         "CREATE TRIGGER fail_second_stage_batch BEFORE INSERT ON agent_events
          WHEN NEW.import_id<>0 AND (SELECT COUNT(*) FROM agent_events WHERE import_id=NEW.import_id)>=128
          BEGIN SELECT RAISE(ABORT, 'test interruption'); END",
         &[],
     ).await.unwrap();
-    assert!(target.adapter.prepare_import(&batch).await.is_err());
+    assert!(prepare(&target, &upload).await.is_err());
     let first_stage: (i64, i64, i64) = sqlx::query_as(
         "SELECT id, next_event, complete FROM sync_import_stages WHERE session_id=?",
     )
@@ -196,7 +189,17 @@ async fn interrupted_import_resumes_hidden_batches_and_checks_the_session_tail()
         target.adapter.binding.clone(),
         Arc::new(projection),
     );
-    adapter.prepare_import(&batch).await.unwrap();
+    let (tx, _) = reopened
+        .prepare_import(
+            &adapter,
+            adapter.binding(),
+            &resource,
+            std::slice::from_ref(&upload.update),
+            &upload.version,
+        )
+        .await
+        .unwrap();
+    tx.rollback().await.unwrap();
     let (stage_id, ready): (i64, i64) =
         sqlx::query_as("SELECT id, complete FROM sync_import_stages WHERE session_id=?")
             .bind(id)
@@ -214,27 +217,17 @@ async fn interrupted_import_resumes_hidden_batches_and_checks_the_session_tail()
         .await
         .unwrap();
     run(&target, &unrelated.id, "other-turn").await;
-    let (mut tx, version, changes) = reopened
-        .import_document(
+    let (mut tx, batch) = reopened
+        .prepare_import(
+            &adapter,
             adapter.binding(),
             &resource,
             std::slice::from_ref(&upload.update),
             &upload.version,
-            None,
         )
         .await
         .unwrap();
-    adapter
-        .apply_prepared(
-            &mut *tx,
-            &SyncImportBatch {
-                version,
-                changes,
-                ..batch
-            },
-        )
-        .await
-        .unwrap();
+    adapter.apply(&mut *tx, &batch).await.unwrap();
     tx.commit().await.unwrap();
     source.sync.acknowledge(&upload).await.unwrap();
     let visible: i64 =
@@ -253,8 +246,7 @@ async fn interrupted_import_resumes_hidden_batches_and_checks_the_session_tail()
         .await
         .unwrap()
         .unwrap();
-    let batch = candidate(&target, &upload).await;
-    adapter.prepare_import(&batch).await.unwrap();
+    let batch = prepare(&target, &upload).await.unwrap();
     notice(
         &target.sessions,
         id,
@@ -263,7 +255,7 @@ async fn interrupted_import_resumes_hidden_batches_and_checks_the_session_tail()
     .await;
     collect(&target.adapter, &resource).await;
     let mut tx = target.storage.begin_transaction().await.unwrap();
-    let error = adapter.apply_prepared(&mut *tx, &batch).await.unwrap_err();
+    let error = adapter.apply(&mut *tx, &batch).await.unwrap_err();
     assert_eq!(error.error_code(), talos_error::ErrorCode::Conflict);
     tx.rollback().await.unwrap();
     let visible: i64 =

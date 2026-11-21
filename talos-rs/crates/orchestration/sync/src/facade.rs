@@ -4,15 +4,15 @@ use talos_auth::RequestIdentity;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::{Storage, StorageTransaction};
 use talos_sync_sdk::{version_equal, SyncReplica};
-use talos_sync_types::SyncError;
 
 use crate::{
-    projection, store, SyncBindParams, SyncBinding, SyncEventMapping, SyncExportBatch, SyncOptions,
+    store, SyncBindParams, SyncBinding, SyncEventMapping, SyncExportBatch, SyncOptions,
     SyncResourceKey, SyncScope, SyncVersion,
 };
 
 mod capture;
 mod materialize;
+mod rebind;
 mod state;
 
 /// Persistent management-side integration. It owns no Agent execution or token.
@@ -133,17 +133,8 @@ impl TalosSync {
                     .ok_or_else(|| TalosError::internal("Invalid outbox resource sequence."))?;
                 Ok((
                     sequence,
-                    match store::text(row, "kind")?.as_str() {
-                        "computer" => SyncResourceKey::Computer { computer_id: id },
-                        "project" => SyncResourceKey::Project { project_id: id },
-                        "session" => SyncResourceKey::Session { session_id: id },
-                        "file" => SyncResourceKey::File { file_id: id },
-                        _ => {
-                            return Err(TalosError::internal(
-                                "Invalid persisted synchronization resource kind.",
-                            ))
-                        }
-                    },
+                    talos_sync_types::SyncResourceKey::new(store::text(row, "kind")?, id)
+                        .try_into()?,
                 ))
             })
             .collect::<TalosResult<Vec<_>>>()?;
@@ -167,7 +158,7 @@ impl TalosSync {
         binding: &SyncBinding,
         resource: &SyncResourceKey,
     ) -> TalosResult<Option<SyncVersion>> {
-        let resource = projection::resource(binding, resource);
+        let resource = talos_sync_parser::resource(binding, resource);
         let mut tx = self.storage.begin_read_transaction().await?;
         self.require_binding(&mut *tx, binding).await?;
         let version = store::document_version(&mut *tx, &binding.scope, &resource).await?;
@@ -226,6 +217,9 @@ impl TalosSync {
             .as_ref()
             == Some(&binding)
         {
+            return Ok(binding);
+        }
+        if self.replace_binding(&binding).await? {
             return Ok(binding);
         }
         let mut tx = self.storage.begin_transaction().await?;
@@ -426,7 +420,7 @@ impl TalosSync {
     ) -> TalosResult<(SyncReplica, SyncVersion)> {
         match record {
             Some(record) => {
-                let document = SyncReplica::from_snapshot(resource.clone(), &record.snapshot)
+                let document = SyncReplica::from_snapshot(resource.wire(), &record.snapshot)
                     .map_err(sync_error)?;
                 document.set_writer_id(writer_id).map_err(sync_error)?;
                 if !version_equal(&document.version().map_err(sync_error)?, &record.version)
@@ -439,16 +433,19 @@ impl TalosSync {
                 Ok((document, record.acknowledged))
             }
             None => Ok((
-                SyncReplica::new(resource.clone(), writer_id).map_err(sync_error)?,
+                SyncReplica::new(resource.wire(), writer_id).map_err(sync_error)?,
                 SyncVersion::default(),
             )),
         }
     }
 }
 
-pub(crate) fn sync_error(error: SyncError) -> TalosError {
-    match projection::transcode::<_, talos_error::ApiError>(&error) {
-        Ok(error) => error.into(),
-        Err(error) => error,
-    }
+pub(crate) use talos_sync_parser::sync_error;
+
+pub(crate) fn replica_changes(
+    replica: &SyncReplica,
+    resource: &SyncResourceKey,
+    account: &str,
+) -> TalosResult<Vec<crate::SyncChange>> {
+    talos_sync_parser::decode_changes(resource, account, replica.changes().map_err(sync_error)?)
 }

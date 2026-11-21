@@ -119,25 +119,27 @@ impl SyncDataAdapter for ProjectAdapter {
     ) -> TalosResult<()> {
         for change in &batch.changes {
             match change {
-                talos_sync_types::SyncChange::Metadata { after, .. } => {
-                    let talos_sync_types::SyncResourceSnapshot::Project(project) = after.as_ref()
-                    else {
+                SyncChange::Metadata { after, .. } => {
+                    let SyncResourceSnapshot::Project(project) = after.as_ref() else {
                         continue;
                     };
-                    tx.execute("INSERT INTO projects(project_id, execution_node_id, user_id, name, directory, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at", &[&project.project_id, &project.node_id, &batch.scope.account_id, &project.name, &project.directory, &project.created_at.to_string(), &project.updated_at.to_string()]).await?;
+                    let directory = project.directory.to_str().ok_or_else(|| {
+                        TalosError::internal("Synchronized Project directory must be UTF-8.")
+                    })?;
+                    tx.execute("INSERT INTO projects(project_id, execution_node_id, user_id, name, directory, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at", &[&project.project_id, &project.node_id, &batch.scope.account_id, &project.name, directory, &project.created_at.to_string(), &project.updated_at.to_string()]).await?;
                 }
-                talos_sync_types::SyncChange::Delete => {
+                SyncChange::Delete => {
                     tx.execute(
                         "DELETE FROM projects WHERE project_id = ? AND user_id = ?",
                         &[batch.resource.id(), &batch.scope.account_id],
                     )
                     .await?;
                 }
-                talos_sync_types::SyncChange::Turn(_)
-                | talos_sync_types::SyncChange::Event(_)
-                | talos_sync_types::SyncChange::ActiveTurnMetadata(_)
-                | talos_sync_types::SyncChange::AcceptedCommand(_)
-                | talos_sync_types::SyncChange::Reset { .. } => {}
+                SyncChange::Turn(_)
+                | SyncChange::Event(_)
+                | SyncChange::ActiveTurnMetadata(_)
+                | SyncChange::AcceptedCommand(_)
+                | SyncChange::Reset { .. } => {}
             }
         }
         Ok(())
