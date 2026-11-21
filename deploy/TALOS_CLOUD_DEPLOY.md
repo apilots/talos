@@ -267,18 +267,37 @@ Install `deploy/docker/talos-worker/chromium-seccomp.json` at
 `TALOS_CHROMIUM_SECCOMP_PROFILE=/opt/talos-server/chromium-seccomp.json`
 in that deployment `.env`. The shared profile and 1 GiB shared memory support
 the Server image's embedded Browser without disabling Chromium's sandbox.
-For managed Talo, also install `compose.managed-worker.yml` beside it, set
-the Docker socket GID in `.env`, and merge `talos.worker.runtime` into the
-writable Server YAML while Server is stopped. Review `talos.server.runtime`
-against the timeouts for this installation. Use both Compose files throughout
-a managed Docker deployment. For a TLS-only installation, use just
-`-f docker-compose.yml` in the command array below:
+For managed Talo, install `compose.managed-worker.yml` beside the production
+Compose file and set the host Docker socket GID in the deployment `.env`.
+
+Review the site's writable `conf/talos.yaml` before rollout. When first enabling
+managed Talo, copy the example's `talos.worker.runtime` block only if the site
+value is absent or `null`, then set the site's image digest, Agent origin, CA
+and resource limits. Review the site's `talos.server.runtime` timeouts.
+For an existing runtime, preserve its settings and apply
+only the intended changes. While managed instances own resources, keep the
+runtime target unchanged, as required by **Settings → Runtime**.
+
+With Server still running, validate the selected Compose files and pull the
+Server image. For a TLS-only deployment, omit the managed Worker overlay.
 
 ```bash
 cd /opt/talos-server
 compose=(docker compose -f docker-compose.yml -f compose.managed-worker.yml)
 "${compose[@]}" config --quiet
 "${compose[@]}" pull talos-server
+```
+
+For managed Docker deployments, set `worker_image` in the shell to the full
+Worker image reference (including its digest) from the site's intended runtime
+configuration. Run `docker pull "$worker_image"`
+against the same Docker Engine the Server uses. Complete these pulls before
+stopping Server so the first Worker can start from the local image.
+
+If the writable YAML needs editing, run `"${compose[@]}" stop talos-server`
+and apply the reviewed changes to the existing file. Then start the service:
+
+```bash
 "${compose[@]}" up -d --no-deps --no-build --pull never talos-server
 "${compose[@]}" ps
 ```
