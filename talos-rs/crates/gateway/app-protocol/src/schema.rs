@@ -183,6 +183,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ActorCredentials>());
     output.push_str(&export::<crate::requests::ActorCredential>());
     output.push_str(&export::<crate::requests::FileListParams>());
+    output.push_str(&export::<crate::requests::FilePreviewPrepareParams>());
     output.push_str(&export::<crate::requests::FileIdParams>());
     output.push_str(&export::<crate::requests::FileUploadParams>());
     output.push_str(&export::<talos_types::DesktopWorkerIdentityResponse>());
@@ -729,14 +730,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::jsonrpc::JsonRpcNotification>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcErrorResponse>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcMessage>());
-    let mut output = output
-        .lines()
-        .map(str::trim_end)
-        .collect::<Vec<_>>()
-        .join("\n");
-    output.truncate(output.trim_end().len());
-    output.push('\n');
-    output
+    typescript::finish(&output)
 }
 
 fn export_app_server_error_code() -> String {

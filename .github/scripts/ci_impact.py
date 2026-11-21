@@ -217,6 +217,9 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                                     'talos-app/web/src/features/chat/hooks/useSessionStreaming.ts',
                                     'talos-app/web/src/features/chat/components/useComposerAttachments.ts',
                                     'talos-app/web/src/shared/api/attachment-session.ts',
+                                    'talos-app/web/src/features/files/api.ts', 'talos-app/web/src/shared/api/client.ts',
+                                    'talos-app/web/src/app/layouts/AppLayout.tsx', 'talos-app/web/src/app/layouts/RightWorkspace.tsx',
+                                    'talos-app/web/src/features/files/hooks/useFilePreview.ts',
                                     'talos-app/web/src/widgets/message-list/FileImage.tsx',
                                     'talos-app/web/src/widgets/message-list/MessageAttachments.tsx'))):
             result.targets['server'].add('case:23_browser_container/03_managed_talo')

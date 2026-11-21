@@ -13,6 +13,7 @@ use talos_types::{SubscribeTimelineRequest, SubscribeTimelineResponse};
 pub(crate) enum ChatAttachment<'a> {
     Upload(&'a talos_app_protocol::requests::FileUploadParams),
     List(&'a talos_types::FileListRequest),
+    Preview(&'a talos_types::FilePreviewSource),
     File {
         id: &'a str,
         method: Method,
@@ -26,6 +27,13 @@ impl<'a> ChatAttachment<'a> {
         match request {
             FileUpload(p) => Some((p.session_id.as_deref()?, Self::Upload(p))),
             FileList(p) => Some((p.session_id.as_deref()?, Self::List(&p.request))),
+            FilePreviewPrepare(p) => {
+                let session = match &p.source {
+                    talos_types::FilePreviewSource::File { .. } => p.session_id.as_deref()?,
+                    talos_types::FilePreviewSource::SessionPath { session_id, .. } => session_id,
+                };
+                Some((session, Self::Preview(&p.source)))
+            }
             FileRead(p) | FileContent(p) | FileDelete(p) => {
                 let (method, suffix) = match request {
                     FileContent(_) => (Method::GET, "/content"),
@@ -63,6 +71,12 @@ impl<'a> ChatAttachment<'a> {
                     }),
                 })
             }
+            Self::Preview(source) => CloudCall::post(
+                "/v1/file-previews",
+                &talos_types::FilePreviewPrepareRequest {
+                    source: source.clone(),
+                },
+            ),
             Self::List(request) => {
                 let mut query = vec![
                     ("cursor", request.cursor.clone()),
@@ -220,48 +234,26 @@ impl DesktopCloud {
             .origin
             .join(&format!("/v1/sessions/{}/events", p.session_id))
             .map_err(|_| invalid_origin())?;
-        let request = self
-            .client
-            .get(url)
-            .bearer_auth(
-                actor
-                    .access_token
-                    .as_deref()
-                    .ok_or_else(TalosError::authorization_denied)?,
-            )
-            .query(&[
-                ("after_event_id", p.since_event_id),
-                ("turn_id", p.turn_id),
-                ("limit", p.replay_limit.map(|v| v.to_string())),
-                (
-                    "close_when_idle",
-                    Some(p.close_when_idle.unwrap_or(false).to_string()),
-                ),
-                (
-                    "close_on_terminal",
-                    Some(p.close_on_terminal.unwrap_or(false).to_string()),
-                ),
-            ])
-            .send();
-        let response = tokio::time::timeout(Duration::from_secs(60), request)
-            .await
-            .map_err(|e| TalosError::from_source(ErrorCode::Timeout, "Open Server timeline.", e))?
-            .map_err(request_error)?;
-        if !response.status().is_success() {
-            return Err(
-                match response
-                    .json::<ApiResponse<Value>>()
-                    .await
-                    .map_err(request_error)?
-                {
-                    ApiResponse::Error { error } => error.into(),
-                    _ => TalosError::new(
-                        ErrorCode::ServiceUnavailable,
-                        "Invalid Server event stream.",
-                    ),
-                },
-            );
-        }
+        let token = actor
+            .access_token
+            .as_deref()
+            .ok_or_else(TalosError::authorization_denied)?;
+        let query = [
+            ("after_event_id", p.since_event_id),
+            ("turn_id", p.turn_id),
+            ("limit", p.replay_limit.map(|v| v.to_string())),
+            (
+                "close_when_idle",
+                Some(p.close_when_idle.unwrap_or(false).to_string()),
+            ),
+            (
+                "close_on_terminal",
+                Some(p.close_on_terminal.unwrap_or(false).to_string()),
+            ),
+        ];
+        let response = self
+            .with_server_bootstrap(actor, token, || self.open_timeline(token, &url, &query))
+            .await?;
         let (tx, events) = tokio::sync::mpsc::channel(64);
         tokio::spawn(async move {
             let mut stream = sse_stream::SseStream::from_bytes_stream(response.bytes_stream());
@@ -304,6 +296,40 @@ impl DesktopCloud {
             },
             events,
         })
+    }
+
+    async fn open_timeline(
+        &self,
+        token: &str,
+        url: &Url,
+        query: &[(&str, Option<String>)],
+    ) -> TalosResult<reqwest::Response> {
+        let request = self
+            .client
+            .get(url.clone())
+            .bearer_auth(token)
+            .query(query)
+            .send();
+        let response = tokio::time::timeout(Duration::from_secs(60), request)
+            .await
+            .map_err(|e| TalosError::from_source(ErrorCode::Timeout, "Open Server timeline.", e))?
+            .map_err(request_error)?;
+        if !response.status().is_success() {
+            return Err(
+                match response
+                    .json::<ApiResponse<Value>>()
+                    .await
+                    .map_err(request_error)?
+                {
+                    ApiResponse::Error { error } => error.into(),
+                    _ => TalosError::new(
+                        ErrorCode::ServiceUnavailable,
+                        "Invalid Server event stream.",
+                    ),
+                },
+            );
+        }
+        Ok(response)
     }
 }
 

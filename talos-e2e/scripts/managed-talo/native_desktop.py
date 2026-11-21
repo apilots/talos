@@ -72,6 +72,9 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 page.get_by_role('button', name='Add', exact=True).click()
                 page.get_by_role('button', name='Choose an existing file').click()
                 page.get_by_role('button', name=attachment, exact=True).click()
+                document = ROOT / 'talos-e2e/fixtures/resource-preview/matrix-word.pdf'
+                page.locator('input[type=file]').set_input_files(str(document))
+                expect(page.get_by_role('button', name='Send', exact=True)).to_be_enabled(timeout=15000)
                 page.get_by_role('textbox').last.fill('native chat verification')
                 page.get_by_role('button', name='Send', exact=True).click()
                 page.get_by_text('TALO_CHAT', exact=True).wait_for(timeout=30000)
@@ -82,6 +85,14 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 reply.wait_for(timeout=30000)
                 page.get_by_role('button', name='Preview ' + attachment, exact=True).wait_for(timeout=15000)
                 page.screenshot(path=report / 'electron-native-chat.png')
+                workspace = page.locator('#talos-right-workspace')
+                page.get_by_role('button', name=document.name, exact=True).click()
+                expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text('Word preview first page', timeout=20000)
+                page.screenshot(path=report / 'electron-remote-pdf.png')
+                workspace.get_by_role('button', name='Close ' + document.name, exact=True).click()
+                page.get_by_role('link', name='Worker report').click()
+                expect(workspace.get_by_text('Report from the Talo Worker', exact=True)).to_be_visible(timeout=15000)
+                workspace.get_by_role('button', name='Close talo-preview.txt', exact=True).click()
                 session_id = data(http(base + ASSISTANT))['instance']['conversationSessionId']
                 page.evaluate("id => { location.hash = '/sessions/' + encodeURIComponent(id) }", session_id)
                 page.get_by_role('tab', name='Conversation').wait_for()
@@ -91,7 +102,7 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 page.get_by_role('button', name='Add', exact=True).click()
                 page.get_by_role('button', name='Choose an existing file').click()
                 page.get_by_role('button', name=attachment, exact=True).wait_for(timeout=15000)
-                print('PASS native Talo attachment upload, selection, streamed reply and reloaded image from both chat routes', flush=True)
+                print('PASS native Talo attachment upload, streamed reply, remote PDF and Worker path preview, and reloaded image from both chat routes', flush=True)
                 return
             page.get_by_role('button', name='Initialize Talo', exact=True).click()
             page.get_by_role('button', name='Connect desktop', exact=True).click(timeout=120000)

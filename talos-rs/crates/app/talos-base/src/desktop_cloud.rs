@@ -15,6 +15,8 @@ use talos_types::{
 use super::application_sync::ApplicationSyncHost;
 
 pub(super) const SERVER_TICKET: &str = "server:";
+// Native resource URLs use the opaque grant as their DNS host.
+const SERVER_PREVIEW: &str = "server-";
 const TALO_PATH: &str = "/v1/computers/managed-worker";
 
 pub(super) struct CloudCall {
@@ -104,6 +106,29 @@ impl CloudCall {
                 body: None,
             },
             ClientRequestParams::Browser(request) => Self::post("/v1/browser", request)?,
+            ClientRequestParams::FilePreviewRead(request) => {
+                let Some(id) = request.preview_id.strip_prefix(SERVER_PREVIEW) else {
+                    return Ok(None);
+                };
+                Self::post(
+                    "/v1/file-previews/read",
+                    &talos_types::FilePreviewReadRequest {
+                        preview_id: id.to_owned(),
+                        ..request.clone()
+                    },
+                )?
+            }
+            ClientRequestParams::FilePreviewClose(request) => {
+                let Some(id) = request.preview_id.strip_prefix(SERVER_PREVIEW) else {
+                    return Ok(None);
+                };
+                Self::post(
+                    "/v1/file-previews/close",
+                    &talos_types::FilePreviewCloseRequest {
+                        preview_id: id.to_owned(),
+                    },
+                )?
+            }
             ClientRequestParams::DesktopOpen(request) => Self::post("/v1/desktop/open", request)?,
             ClientRequestParams::BuiltinJobList(request) => {
                 Self::post("/v1/builtin-job/list", request)?
@@ -293,6 +318,11 @@ impl DesktopCloud {
         ) {
             return value(&self.read_personal_status(actor, call, None).await?);
         }
+        if matches!(request, FilePreviewPrepare(_)) {
+            let mut grant: talos_types::FilePreviewDescriptor = self.send(actor, call).await?;
+            grant.preview_id = format!("{SERVER_PREVIEW}{}", grant.preview_id);
+            return value(&grant);
+        }
         if matches!(request, ClientRequestParams::DesktopOpen(_)) {
             let mut grant: DesktopViewGrant = self.send(actor, call).await?;
             grant.ticket = format!("{SERVER_TICKET}{}", grant.ticket);
@@ -312,11 +342,24 @@ impl DesktopCloud {
                 "Sign in to manage a cloud Computer.",
             )
         })?;
-        match self.request(token, &call).await {
+        self.with_server_bootstrap(actor, token, || self.request(token, &call))
+            .await
+    }
+
+    async fn with_server_bootstrap<T, F>(
+        &self,
+        actor: &Actor,
+        token: &str,
+        request: impl Fn() -> F,
+    ) -> TalosResult<T>
+    where
+        F: std::future::Future<Output = TalosResult<T>>,
+    {
+        match request().await {
             Err(error) if error.is_code(ErrorCode::Unauthenticated) => {
                 // A fresh Server admits this Desktop's Cloud token through the
-                // same explicit bootstrap route used by Web. An auth rejection
-                // precedes all effects of the management methods above.
+                // same explicit bootstrap route used by Web. Authentication
+                // rejects the request before the endpoint performs any work.
                 let identity: UserCurrentResponse = self
                     .request(
                         token,
@@ -330,7 +373,7 @@ impl DesktopCloud {
                 if identity.user.user_id != actor.user_id {
                     return Err(TalosError::authorization_denied());
                 }
-                self.request(token, &call).await
+                request().await
             }
             result => result,
         }

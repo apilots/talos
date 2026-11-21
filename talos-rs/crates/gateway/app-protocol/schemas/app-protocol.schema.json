@@ -5152,7 +5152,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FilePreviewPrepareRequest"
+              "$ref": "#/definitions/FilePreviewPrepareParams"
             }
           },
           "required": [
@@ -7561,9 +7561,17 @@
       ],
       "type": "object"
     },
-    "FilePreviewPrepareRequest": {
+    "FilePreviewPrepareParams": {
       "additionalProperties": false,
+      "description": "Registered files can use the conversation's management host. A session path always belongs to the session carried by its source.",
       "properties": {
+        "sessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "source": {
           "$ref": "#/definitions/FilePreviewSource"
         }

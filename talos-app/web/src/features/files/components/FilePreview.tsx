@@ -16,9 +16,9 @@ import { formatFileSize } from "../hooks/useFilesPage";
 import { TextPreview } from "./TextPreview";
 const PdfPreview = lazy(() => import("./PdfPreview"));
 
-function DocumentImage({ fileId, label, scope, instanceKey }: { fileId: string; label: string; scope: string; instanceKey: string }) {
+function DocumentImage({ fileId, label, scope, instanceKey, sessionId }: { fileId: string; label: string; scope: string; instanceKey: string; sessionId?: string }) {
   const { t } = useTranslation("files");
-  const preview = useFilePreview({ kind: "file", fileId }, scope, `${instanceKey}:image:${fileId}`);
+  const preview = useFilePreview({ kind: "file", fileId }, scope, `${instanceKey}:image:${fileId}`, sessionId);
   return preview.error ? <span role="alert">{userVisibleErrorMessage(preview.error, t("preview.loadFailed"))}</span>
     : preview.descriptor ? <img src={getTalosClient().files.preview.resourceUrl(preview.descriptor)} alt={label} /> : <span role="status">{t("preview.loading")}</span>;
 }
@@ -31,9 +31,9 @@ function DocumentScroll({ resourcePath, position, onPositionChange, children }: 
   }}>{children}</div>;
 }
 /** One resource view for every shell and source. Document transforms use the same descriptor/read/resource URL contract as source files. */
-export function FilePreview({ source, connectionKey, instanceKey, position, onPositionChange }: { source: FilePreviewSource; connectionKey: string; instanceKey: string; position?: FilePreviewPosition; onPositionChange?: (position: FilePreviewPosition | undefined) => void }) {
+export function FilePreview({ source, attachmentSessionId, connectionKey, instanceKey, position, onPositionChange }: { source: FilePreviewSource; attachmentSessionId?: string; connectionKey: string; instanceKey: string; position?: FilePreviewPosition; onPositionChange?: (position: FilePreviewPosition | undefined) => void }) {
   const { t } = useTranslation("files");
-  const preview = useFilePreview(source, connectionKey, instanceKey);
+  const preview = useFilePreview(source, connectionKey, instanceKey, attachmentSessionId);
   const descriptor = preview.descriptor;
   const document = descriptor?.document;
   const resourcePath = document?.kind === "pdf" ? document.resourcePath : descriptor?.entryPath;
@@ -76,7 +76,8 @@ export function FilePreview({ source, connectionKey, instanceKey, position, onPo
       else throw new Error("This registered file has no adjacent file source.");
     } else await openResourceLink(reference);
   }, [resourcePath, sessionId]);
-  const renderFileImage = useCallback((id: string, label: string) => <DocumentImage fileId={id} label={label} scope={connectionKey} instanceKey={instanceKey} />, [connectionKey, instanceKey]);
+  const imageSessionId = sessionId ?? attachmentSessionId;
+  const renderFileImage = useCallback((id: string, label: string) => <DocumentImage fileId={id} label={label} scope={connectionKey} instanceKey={instanceKey} sessionId={imageSessionId} />, [connectionKey, instanceKey, imageSessionId]);
   const loading = <p role="status" className="px-6 py-8 text-sm text-muted">{t("preview.loading")}</p>;
   return <section aria-label={t("preview.title")} className="flex h-full min-h-0 flex-col bg-background">
     <BrowserToolbar surface={browserUrl ? surface : undefined} source={{ kind: "file", label: source.kind === "file" ? `${t("pageLabel")} / ${location}` : location, resource, preview: descriptor }} onRefresh={preview.refresh} refreshDisabled={preview.pending || content.isFetching}>

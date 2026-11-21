@@ -2,7 +2,7 @@ use super::*;
 
 use axum::{extract::Request, http::StatusCode, Json, Router};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 use talos_types::{BuiltinJobListRequest, ManagedWorkerResponse};
@@ -17,6 +17,21 @@ async fn serve_cloud(router: Router) -> (DesktopCloud, tokio::task::JoinHandle<(
     })
     .unwrap();
     (cloud, server)
+}
+
+fn test_identity() -> UserCurrentResponse {
+    UserCurrentResponse {
+        user: talos_auth::UserDto {
+            user_id: "test-user".into(),
+            username: "example".into(),
+            email: None,
+            role: talos_auth::UserRole::User,
+            r#type: talos_auth::UserType::Max,
+            disabled: false,
+            created_at: 0,
+            updated_at: 0,
+        },
+    }
 }
 
 #[tokio::test]
@@ -46,21 +61,9 @@ async fn cloud_calls_use_the_server_origin_and_preserve_authorization_errors() {
                     }
                     (Method::GET, "/v1/user") => {
                         assert!(!admitted.swap(true, Ordering::SeqCst));
-                        let identity = UserCurrentResponse {
-                            user: talos_auth::UserDto {
-                                user_id: "test-user".into(),
-                                username: "example".into(),
-                                email: None,
-                                role: talos_auth::UserRole::User,
-                                r#type: talos_auth::UserType::Max,
-                                disabled: false,
-                                created_at: 0,
-                                updated_at: 0,
-                            },
-                        };
                         (
                             StatusCode::OK,
-                            Json(ApiResponse::success(value(&identity).unwrap())),
+                            Json(ApiResponse::success(value(&test_identity()).unwrap())),
                         )
                     }
                     (Method::GET, TALO_PATH) if !admitted.load(Ordering::SeqCst) => (
@@ -129,6 +132,69 @@ async fn cloud_calls_use_the_server_origin_and_preserve_authorization_errors() {
     }
     server.abort();
     assert!(admitted.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn personal_timeline_reconnects_with_an_uncached_server_credential() {
+    use axum::response::IntoResponse;
+    use talos_service::{TimelineSubscriptionCloseReason, TimelineSubscriptionMessage};
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let router = Router::new().fallback({
+        let requests = requests.clone();
+        move |request: Request| {
+            let step = requests.fetch_add(1, Ordering::SeqCst);
+            async move {
+                assert_eq!(request.headers()["authorization"], "Bearer test-account");
+                match (step, request.uri().path()) {
+                    (1, "/v1/user") => Json(ApiResponse::success(test_identity())).into_response(),
+                    (0 | 2, "/v1/sessions/personal/events") => {
+                        assert_eq!(
+                            request.uri().query().unwrap(),
+                            "after_event_id=cursor&turn_id=turn&limit=3&close_when_idle=false&close_on_terminal=true"
+                        );
+                        if step == 0 {
+                            return (
+                                StatusCode::UNAUTHORIZED,
+                                Json(ApiResponse::<Value>::error(talos_error::ApiError::new(
+                                    ErrorCode::Unauthenticated,
+                                ))),
+                            )
+                                .into_response();
+                        }
+                        (
+                            [("content-type", "text/event-stream")],
+                            "event: subscription/terminated\ndata: {\"reason\":\"completed\",\"message\":\"done\"}\n\n",
+                        )
+                            .into_response()
+                    }
+                    _ => panic!("unexpected reconnect request"),
+                }
+            }
+        }
+    });
+    let (cloud, server) = serve_cloud(router).await;
+    let actor = Actor::regular("test-user").with_access_token("test-account");
+    let mut subscription = cloud
+        .subscribe(
+            &actor,
+            talos_types::SubscribeTimelineRequest {
+                session_id: "personal".into(),
+                turn_id: Some("turn".into()),
+                since_event_id: Some("cursor".into()),
+                replay_limit: Some(3),
+                close_when_idle: Some(false),
+                close_on_terminal: Some(true),
+            },
+        )
+        .await
+        .unwrap();
+    let Some(TimelineSubscriptionMessage::Closed(event)) = subscription.events.recv().await else {
+        panic!("expected a terminal event on the recovered stream");
+    };
+    assert_eq!(event.reason, TimelineSubscriptionCloseReason::Completed);
+    assert_eq!(requests.load(Ordering::SeqCst), 3);
+    server.abort();
 }
 
 #[tokio::test]
@@ -228,4 +294,16 @@ async fn personal_viewer_requires_media_before_opening_and_delivers_the_first_fr
         .unwrap();
     assert_eq!(first, BANNER);
     server.abort();
+}
+
+#[test]
+fn closing_a_cloud_preview_releases_the_original_server_grant() {
+    let request = ClientRequestParams::FilePreviewClose(talos_types::FilePreviewCloseRequest {
+        preview_id: format!("{SERVER_PREVIEW}grant"),
+    });
+    let call = CloudCall::from_request(&request).unwrap().unwrap();
+    assert_eq!(call.path, "/v1/file-previews/close");
+    assert!(
+        matches!(call.body, Some(CloudBody::Json(body)) if body == serde_json::json!({"previewId":"grant"}))
+    );
 }

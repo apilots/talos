@@ -416,11 +416,48 @@ async fn offline_desktop_reads_an_ordinary_workers_stored_session() {
         json!([])
     );
 
+    let recovery =
+        ClientRequest::decode("timeline/recover", Some(json!({"sessionId":record.id}))).unwrap();
+    let replay = host.dispatch(&actor, recovery).await.unwrap().body;
+    assert_eq!(replay["replay"]["events"], json!([]));
+
+    let mut subscription = host
+        .subscribe_timeline_events(
+            &actor,
+            serde_json::from_value(json!({
+                "sessionId":record.id, "closeWhenIdle":true
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(subscription.events.recv().await, Some(talos_service::TimelineSubscriptionMessage::Closed(closed)) if closed.reason == talos_service::TimelineSubscriptionCloseReason::Completed)
+    );
+
+    // A saved Project binding identifies an ordinary conversation even without its Worker.
+    let project_chat = SessionRecord {
+        id: "offline-project-chat".into(),
+        project_id: Some("project".into()),
+        ..record.clone()
+    };
+    fixture
+        .runtime
+        .session_store
+        .insert_session_record(&project_chat)
+        .await
+        .unwrap();
     let upload = ClientRequest::decode("file/upload", Some(json!({
-        "request":{"filename":"offline.png","scope":{"type":"personal"},"tags":[],"metadata":{}},
+        "sessionId":project_chat.id, "request":{"filename":"offline.png","scope":{"type":"personal"},"tags":[],"metadata":{}},
         "dataBase64":"iVBORw0KGgo="
     }))).unwrap();
     let file = &host.dispatch(&actor, upload).await.unwrap().body["file"];
+    let list =
+        ClientRequest::decode("file/list", Some(json!({"sessionId":project_chat.id}))).unwrap();
+    assert_eq!(
+        host.dispatch(&actor, list).await.unwrap().body["data"],
+        json!([file])
+    );
     let params = json!({"fileId":file["fileId"], "sessionId":record.id});
     let read = ClientRequest::decode("file/read", Some(params.clone())).unwrap();
     assert_eq!(

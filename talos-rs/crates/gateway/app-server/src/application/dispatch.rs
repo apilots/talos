@@ -437,7 +437,12 @@ impl TalosApplicationAdapter {
             ),
             ClientRequestParams::FilePreviewPrepare(params) => to_value(
                 self.gateway
-                    .prepare_file_preview(actor, params)
+                    .prepare_file_preview(
+                        actor,
+                        talos_types::FilePreviewPrepareRequest {
+                            source: params.source,
+                        },
+                    )
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),

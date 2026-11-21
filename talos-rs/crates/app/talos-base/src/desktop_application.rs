@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 
 enum ConversationOperation<'a> {
     Read,
+    Timeline,
     Command,
     StartTurn(Option<&'a str>),
 }
@@ -90,6 +91,8 @@ impl DesktopApplication {
         let stored_node = match self.service.get_session(actor, session).await {
             // Local projections can serve reads while an ordinary Worker is offline.
             Ok(_) if matches!(operation, ConversationOperation::Read) => return Ok(None),
+            // The personal Talo conversation cannot have a Project binding.
+            Ok(info) if info.project_id.is_some() => return Ok(None),
             Ok(info) => Some(info.node_id),
             Err(error) if error.is_code(ErrorCode::ResourceNotFound) => None,
             Err(error) => return Err(error),
@@ -114,6 +117,17 @@ impl DesktopApplication {
         // Another client can replace the account's Talo after our last status read.
         match cloud.discover_conversation(actor, session).await {
             Ok(personal) => Ok(personal.then_some(cloud)),
+            // Replay the authorized local projection while its management Server is unreachable.
+            Err(error)
+                if matches!(operation, ConversationOperation::Timeline)
+                    && stored_node.is_some()
+                    && matches!(
+                        error.error_code(),
+                        ErrorCode::Timeout | ErrorCode::ServiceUnavailable
+                    ) =>
+            {
+                Ok(None)
+            }
             Err(error) => {
                 // Ordinary Workers accept an account-scoped Coordinator. A personal Talo
                 // forbids that connection, leaving its Server's original error authoritative.
@@ -238,13 +252,18 @@ impl AppServerApplication for DesktopApplication {
     ) -> ApplicationResult<ApplicationResponse> {
         if let Some((session, attachment)) = ChatAttachment::for_request(&request.params) {
             // A locally available file can be read while its ordinary Worker is offline.
-            let local_error = if matches!(
+            let local_read = matches!(
                 request.params,
                 ClientRequestParams::FileRead(_) | ClientRequestParams::FileContent(_)
-            ) && !self
-                .cloud
-                .get()
-                .is_some_and(|cloud| cloud.personal_session(actor, session) == Some(true))
+            ) || matches!(
+                &attachment,
+                ChatAttachment::Preview(talos_types::FilePreviewSource::File { .. })
+            );
+            let local_error = if local_read
+                && !self
+                    .cloud
+                    .get()
+                    .is_some_and(|cloud| cloud.personal_session(actor, session) == Some(true))
             {
                 match self.local.dispatch(actor, request.clone()).await {
                     Err(error)
@@ -274,13 +293,17 @@ impl AppServerApplication for DesktopApplication {
                 .cloud_call(self.service.files.limits().max_upload_bytes)
                 .map_err(project_error)?;
             return Ok(ApplicationResponse {
-                body: cloud.send(actor, call).await.map_err(project_error)?,
+                body: cloud
+                    .dispatch(actor, call, &request.params)
+                    .await
+                    .map_err(project_error)?,
                 started_turn: None,
             });
         }
         if let Some((session, call)) = CloudCall::chat(&request.params).map_err(project_error)? {
             use ClientRequestParams::*;
             let operation = match request.params {
+                TimelineRecover(_) => ConversationOperation::Timeline,
                 SessionGet(_) | SessionHistory(_) | SessionActiveTurn(_) | AutomationRead(_)
                 | MessageQueueList(_) => ConversationOperation::Read,
                 _ => ConversationOperation::Command,
@@ -458,7 +481,7 @@ impl AppServerApplication for DesktopApplication {
         params: SubscribeTimelineRequest,
     ) -> ApplicationResult<talos_app_server::ApplicationSubscription> {
         if let Some(cloud) = self
-            .conversation_cloud(actor, &params.session_id, ConversationOperation::Command)
+            .conversation_cloud(actor, &params.session_id, ConversationOperation::Timeline)
             .await
             .map_err(project_error)?
         {

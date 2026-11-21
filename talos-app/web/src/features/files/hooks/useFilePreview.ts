@@ -5,12 +5,12 @@ import { getTalosClient } from "@/shared/api/client";
 
 /** The mounted workspace tab owns the grant. Switching sessions keeps it alive;
  * closing the tab or changing account releases it through the captured client. */
-export function useFilePreview(source: FilePreviewSource, scope: string, instanceKey: string) {
+export function useFilePreview(source: FilePreviewSource, scope: string, instanceKey: string, attachmentSessionId?: string) {
   const [revision, setRevision] = useState(0);
   const fileId = source.kind === "file" ? source.fileId : null;
   const sessionId = source.kind === "sessionPath" ? source.sessionId : null;
   const path = source.kind === "sessionPath" ? source.path : null;
-  const key = JSON.stringify([scope, instanceKey, fileId, sessionId, path, revision]);
+  const key = JSON.stringify([scope, instanceKey, fileId, sessionId, path, attachmentSessionId, revision]);
   const [state, setState] = useState<{ key: string; descriptor?: FilePreviewDescriptor; error?: unknown }>();
   useEffect(() => {
     const client = getTalosClient().files.preview;
@@ -18,12 +18,12 @@ export function useFilePreview(source: FilePreviewSource, scope: string, instanc
     let prepared: FilePreviewDescriptor | undefined;
     const release = (descriptor: FilePreviewDescriptor) => void client.close({ previewId: descriptor.previewId }).catch(error => console.warn("Preview release failed", error));
     const source: FilePreviewSource = fileId !== null ? { kind: "file", fileId } : { kind: "sessionPath", sessionId: sessionId!, path: path! };
-    void client.prepare({ source }).then(descriptor => {
+    void client.prepare({ source, ...(attachmentSessionId && fileId !== null ? { sessionId: attachmentSessionId } : {}) }).then(descriptor => {
       if (disposed) release(descriptor);
       else { prepared = descriptor; setState({ key, descriptor }); }
     }, error => { if (!disposed) setState({ key, error }); });
     return () => { disposed = true; if (prepared) release(prepared); };
-  }, [key, fileId, sessionId, path]);
+  }, [key, fileId, sessionId, path, attachmentSessionId]);
   const current = state?.key === key ? state : undefined;
   return { descriptor: current?.descriptor, error: current?.error, pending: !current, refresh: () => setRevision(value => value + 1) };
 }

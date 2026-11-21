@@ -17,6 +17,10 @@ pub fn generate_worker_runtime_typescript() -> String {
     output.push_str(&export::<talos_types::WorkerKubernetesSettings>());
     output.push_str(&export::<talos_types::WorkerKubeconfigAuthentication>());
     output.push_str(&export::<talos_types::WorkerKubeconfigSource>());
+    finish(&output)
+}
+
+pub(super) fn finish(output: &str) -> String {
     let output = output
         .trim_end()
         .lines()

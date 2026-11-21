@@ -83,7 +83,7 @@ class ManagedFixture(Fixture):
         self.send_header("Connection", "close")
         self.end_headers()
         chat = "native chat verification" in json.dumps(request["messages"])
-        parts = ["TALO_CHAT", "_OK"] if chat else ["TALO_WAKE_OK"]
+        parts = ["TALO_CHAT", "_OK\n\n[Worker report](talo-preview.txt)"] if chat else ["TALO_WAKE_OK"]
         for part in [*parts, None]:
             delta = {"role": "assistant", "content": part} if part else {}
             finish = None if part else "stop"
@@ -329,6 +329,8 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
     print("PASS first Turn materializes the bound non-Project Talo Session and resolves the Goal Skill after Wake", flush=True)
 
     if native_stage:
+        workspace = data(http(base + f"/v1/workspace/info?nodeId={node}"))["userWorkspaceDir"]
+        observed.execute(awake, "sh", "-ec", 'mkdir -p "$1"; echo "Report from the Talo Worker" > "$1/talo-preview.txt"', "sh", workspace)
         native_stage("chat")
     exercise_access(base, ready, session)
     media(base, node, observed.compute(instance), http, data, wait, REPORT, observed.execute)
@@ -592,6 +594,9 @@ if __name__ == "__main__":
     parser.add_argument("--parity", action="store_true", help="Include personal registration and Server restart")
     parser.add_argument("--native", action="store_true", help="Initialize and view Talo in native Electron")
     args = parser.parse_args()
+    if args.native:
+        from fixture import MODEL
+        MODEL["input"] = ["text", "image", "file"]
     tmp_root = Path(os.environ["TALOS_E2E_TMP_ROOT"])
     tmp_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="talo-e2e-", dir=tmp_root) as directory:

@@ -122,7 +122,7 @@ export class AppServerClient {
 
   files = {
     preview: createFilePreviewClient({
-      prepare: (request: AppProtocol.FilePreviewPrepareRequest) => this.transport.request<AppProtocol.FilePreviewDescriptor>("file/preview/prepare", request),
+      prepare: (request: AppProtocol.FilePreviewPrepareParams) => this.transport.request<AppProtocol.FilePreviewDescriptor>("file/preview/prepare", request),
       read: (request: AppProtocol.FilePreviewReadRequest) => this.transport.request<AppProtocol.FilePreviewContent>("file/preview/read", request),
       close: (request: AppProtocol.FilePreviewCloseRequest) => this.transport.request<AppProtocol.FilePreviewCloseResponse>("file/preview/close", request),
     }, (preview, path) => {

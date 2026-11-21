@@ -110,6 +110,8 @@ class ChangeScopeTests(unittest.TestCase):
                      'talos-app/web/src/pages/home/TaloPage.tsx', 'talos-rs/crates/app/talos-base/src/desktop_cloud.rs',
                      'talos-app/web/src/features/chat/hooks/useChatSession.ts', 'talos-app/web/src/features/chat/hooks/useSessionStreaming.ts',
                      'talos-app/web/src/features/chat/components/useComposerAttachments.ts',
+                     'talos-app/web/src/features/files/api.ts', 'talos-app/web/src/shared/api/client.ts',
+                     'talos-app/web/src/features/files/hooks/useFilePreview.ts',
                      'talos-rs/crates/gateway/app-server/src/runtime/subscriptions.rs'):
             self.assertIn(target, impact([path]).targets['server'], path)
         self.assertEqual(impact(['talos-e2e/scripts/managed-talo/native_desktop.py']).targets['server'], {target})

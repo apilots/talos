@@ -189,7 +189,7 @@ pub enum ClientRequestParams {
     #[serde(rename = "file/content")]
     FileContent(FileIdParams),
     #[serde(rename = "file/preview/prepare")]
-    FilePreviewPrepare(talos_types::FilePreviewPrepareRequest),
+    FilePreviewPrepare(FilePreviewPrepareParams),
     #[serde(rename = "file/preview/read")]
     FilePreviewRead(talos_types::FilePreviewReadRequest),
     #[serde(rename = "file/preview/close")]
@@ -291,6 +291,18 @@ pub struct FileListParams {
     pub session_id: Option<String>,
     #[serde(flatten)]
     pub request: FileListRequest,
+}
+
+/// Registered files can use the conversation's management host. A session path
+/// always belongs to the session carried by its source.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct FilePreviewPrepareParams {
+    #[serde(default)]
+    #[ts(optional)]
+    pub session_id: Option<String>,
+    pub source: talos_types::FilePreviewSource,
 }
 
 /// Select a file on the management host that owns the optional conversation.

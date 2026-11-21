@@ -28,6 +28,20 @@ it("adapts identical DTOs to HTTP and app-server without reconstructing source s
   expect(http.files.preview.resourceUrl({ ...descriptor, resourceBaseUrl: "https://p.preview.example/" }, "assets/a b.png")).toBe("https://p.preview.example/assets/a%20b.png");
 });
 
+it("uses the conversation only to select the native attachment owner", async () => {
+  const request = vi.fn().mockResolvedValue(descriptor);
+  const http = new TalosClient({ request }, { stream: vi.fn() }, "https://talos.example");
+  const rpc = new AppServerClient({ request, onEvent: vi.fn() });
+  const source = { kind: "file" as const, fileId: "attachment" };
+  const params = { source, sessionId: "conversation" };
+  await http.files.preview.prepare(params);
+  await rpc.files.preview.prepare(params);
+  expect(request.mock.calls).toEqual([
+    ["https://talos.example/v1/file-previews", { method: "POST", body: JSON.stringify({ source }) }],
+    ["file/preview/prepare", params],
+  ]);
+});
+
 it("reads current size for changed session files and rejects changes during assembly", async () => {
   const read = vi.fn().mockResolvedValueOnce({ metadata: { ...descriptor.metadata, sizeBytes: 6 }, offset: 0, dataBase64: "" })
     .mockResolvedValueOnce({ metadata: { ...descriptor.metadata, sizeBytes: 7 }, offset: 0, dataBase64: Buffer.from("report").toString("base64") });
