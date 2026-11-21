@@ -1,7 +1,7 @@
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::{Row, StorageTransaction};
+use talos_sync::SyncChange;
 use talos_sync::{same_version, SyncImportBatch, SyncResourceKey, SyncVersion};
-use talos_sync_types::SyncChange;
 
 use super::{codec, metadata, session, StoreSyncAdapter};
 
@@ -217,9 +217,9 @@ async fn discard(adapter: &StoreSyncAdapter, id: i64) -> TalosResult<()> {
 pub(super) async fn publish(
     tx: &mut dyn StorageTransaction,
     batch: &SyncImportBatch,
-) -> TalosResult<bool> {
+) -> TalosResult<()> {
     if !needs_staging(batch) {
-        return Ok(false);
+        return Ok(());
     }
     let stage = pending(tx, batch).await?.ok_or_else(stale)?;
     if !stage.complete
@@ -234,7 +234,7 @@ pub(super) async fn publish(
         "UPDATE sync_import_stages SET published=1 WHERE id=?"
     };
     tx.execute(publish, &[&stage.id.to_string()]).await?;
-    Ok(true)
+    Ok(())
 }
 
 fn stale() -> TalosError {

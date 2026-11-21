@@ -1,11 +1,13 @@
 # Talos 管理节点同步持久化与流程
 
-Status: Implemented；新开关专项已通过，统一8/8验收通过，见[本轮证据](verification.md)。Hub持久化只在[独立Sync存储](https://github.com/apilots/talos-sync/blob/7230f9fdf294e7ae218bdb6d3cf1c4ef60203380/spec/feat-044-talos-sync/database.md)维护。纯Worker不建管理DB。
+Status: Implemented. Talos owns product integration; the [independent Sync contract](https://github.com/apilots/talos-sync/blob/8e60e2b612ba895c8f4bcb4e0d78c9ae86227502/spec/feat-001-talos-sync/database.md) owns the service protocol. Current acceptance evidence belongs in the integration PR and ignored output reports.
 
 ## 1. 管理节点本地表
 
 由现有 migration runner 在原业务 DB 中安装；纯 Worker 不创建这些表。
-源业务写入、capture、导入和本地游标共用原 Storage 事务，库私有 records 不暴露产品 API。
+Source writes and capture use existing Store transactions. Document import
+publishes the materialized facts and replica checkpoint together. The runner
+commits the account feed cursor after its prefix of document commits.
 
 | 表 | 关键字段 / 约束 | 必要性 |
 | --- | --- | --- |
@@ -14,7 +16,7 @@ Status: Implemented；新开关专项已通过，统一8/8验收通过，见[本
 | `sync_account_preferences` | account_id PK；enabled 0/1 | 当前管理宿主的已验证账号选择，独立于hub/binding；未保存默认沿登录启用；不作为同步事实上传。 |
 | `sync_documents` | PK hub/account/kind/resource_id；computer_id?；generation；deleted；snapshot_blob；VV；ack_VV | 唯一Loro持久文档与本地/共享版本；查询业务目录仍复用原Store，不建第二套列表索引。 |
 | `sync_outbox` | seq PK, binding/resource key, typed SyncChange[], exported_version?, created_at | 后台从已提交的本地事实补采，重启后可以继续发送。 |
-| `sync_event_map` | PK hub/account/session/generation/stable_event_key；local_event_id；local_event_seq；UNIQUE local_event_id | 去重导入、源notice识别、History分页与memory/幂等水位转换。因DB整数不能跨节点复制，这张映射有真实用途。 |
+| `sync_event_map` | PK hub/account/session/generation/stable_event_key/import_id/capture_id; UNIQUE local_event_id/capture_id | Published capture/import batches provide atomic visibility. Stable keys retain original event identity while local event sequence numbers serve native paging and watermark conversion. |
 
 event map 的 key 为版本化闭合 SyncEventKey 编码，不是临时字符串约定。
 导入事实包括原SessionConf/必要environment与来源字段、原Project/File metadata、Timeline、无事件的最小取消展示事实及必要幂等完成态（独立idempotencyKey/requestId）/进度水位；活动锁/claim/任务只由本端实际执行流程创建。Session永久绑定原Computer/Worker，换控制面不迁移Worker或目录。
@@ -27,7 +29,7 @@ clear 的 generation 在实际排他提交时递增，不能依据尚未导出�
 2. 用户真实登录；可信宿主认领sourceUser，保存已注册Computer UUID/embedded别名。共享时同一Worker主动注册agent入口，不再构建一个Worker。
 3. 账号内新数据正常启用capture/同步；旧匿名数据先明确认领，再用原Store keyset扫描Computer、所有Project（含空项目）、Session/子树、ready File及完整历史。固定导出cut，期间变更留outbox。
 4. 管理节点连接独立sync服务，account/peer鉴权；catalog返回资源键、tombstone和feed cut；room按VV补齐。
-5. 文档、原Store物化事实、event map和cursor同事务commit，然后发布既有业务通知。未到的依赖不能被空值代替。
+5. Commit each document checkpoint, its Store facts and its event map together before publishing notifications. Resolve dependencies before publication. The runner saves the catalog feed cut after it has applied all documents at that cut.
 6. 持续按committed batch导出，不等Turn结束；实时/离线重连都使用同一持久路径。
 
 sourceUser -> account授权由可信宿主和现有Auth确认，sourceUser不从远端JSON决定。
@@ -56,8 +58,8 @@ Worker读取本机最小持久历史游标标记；若最新Local事实只在B�
 1. 业务事务提交本地事实和必要的版本记录。后台按持久水位采集并发布 outbox 批次，失败时从原水位重试。先后版本的 diff 只改实际变化字段。
 2. exporter 先在 SQLite 只读快照中固定文档和 outbox 水位，再于写事务外构建 Loro 候选。每批保留其精确前缀版本。写事务复核文档和确认版本，再原子保存文档和导出水位。导入还需复核本地 outbox，避免覆盖并行提交的事实。
 3. hub/client接收后暂存import，验证scope/immutable binding、事件一致性、前驱/generation；依赖缺失先补齐，不能发布不完整terminal快照。
-4. Hub 的 document、update 和 feed 同事务持久化。客户端分批暂存长历史并在批次间让出写锁，最终事务一并发布 document、业务事实、event map 和 cursor。
-5. commit成功后替换可见文档/通知；hub提交后发上传成功Ack，client提交后只mark_committed本地恢复水位，不发送下载成功Ack。失败不推进VV/cursor，不开放跨端handoff。
+4. The Hub commits the document, update and feed together. The client stages long history in bounded batches and releases the writer between them. The final transaction publishes the document checkpoint, Store facts and event map together.
+5. The Hub acknowledges uploads after commit. The client marks the document version committed after publishing its facts. The runner advances the account feed cursor across fully applied changes and replays from the previous cursor after a gap.
 6. ACK 丢失按 VV 对账。重启后从已提交的源水位及 outbox 恢复。导入不得重新触发模型、工具或其他副作用。
 
 只有H已提交cut确认为terminal Delete，导入事务才同时淘汰该资源被删除终态覆盖的离线pending patch；这是终态覆盖，不伪造上传ACK，不能因本端候选文档含未上传Delete就清空outbox。本地未ACK Delete遇H并发patch仍保留pending并上传Delete，不阻塞其他资源。flush固定调用时原事务的seq与VV，只有H durable cut包含该VV才成功；被远端Delete覆盖则返回Conflict，不能把outbox为空当ACK成功。
@@ -88,7 +90,7 @@ clear/delete阻止旧代数据复活；删除parent tree捕获每个实际child�
 ## 7. 配置与部署
 
 配置owner派生运行策略：sync.enabled未配置时，未登录false、已验证登录/binding后true；显式false优先。DEV模板显式false，PROD可省略沿登录默认；旧匿名历史仍需认领，不因登录自动上传。
-`sync.hub_endpoint` 为完整`wss://sync.talos.love/v1/sync`，状态与enable/disable复用同一配置owner，不另造模式开关。目录/feed/全量增量复用同一连接，见[WSS协议](https://github.com/apilots/talos-sync/blob/7230f9fdf294e7ae218bdb6d3cf1c4ef60203380/spec/feat-044-talos-sync/wss-protocol.md)。
+`sync.hub_endpoint` 为完整`wss://sync.talos.love/v1/sync`，状态与enable/disable复用同一配置owner，不另造模式开关。目录/feed/全量增量复用同一连接，见[WSS协议](https://github.com/apilots/talos-sync/blob/8e60e2b612ba895c8f4bcb4e0d78c9ae86227502/spec/feat-001-talos-sync/wss-protocol.md)。
 Worker listener配置独立于runner transport，管理API与Worker RPC两个endpoint可明确自测；Desktop的stdio保留同一管理业务入口。
 共享的个人Worker默认注册 `agent.talos.love`，保留本机loopback listener；pure local不开公网注册/同步。
 不提供sync任务pull或RPC relay配置；agent连接与sync连接不能共用一个生命周期故障开关。

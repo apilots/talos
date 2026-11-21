@@ -104,7 +104,7 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
             hub_id: "hub-1".into(),
             account_id: "account-1".into(),
         },
-        &invalid_resource,
+        &invalid_resource.wire(),
     )
     .unwrap();
     let presences = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -139,7 +139,8 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
                             subscription_id: "feed".into(),
                             feed_cursor: "cut".into(),
                         },
-                        SyncControlMessage::Unsubscribe { .. } => continue,
+                        SyncControlMessage::Unsubscribe { .. }
+                        | SyncControlMessage::ReportProgress(_) => continue,
                         _ => panic!("unexpected control request"),
                     };
                     Message::Text(
@@ -179,9 +180,7 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
                                     version: vec![],
                                     extra: Some(
                                         serde_json::to_vec(
-                                            &talos_sync_types::DocumentJoinAccepted {
-                                                history_generation: 0,
-                                            },
+                                            &serde_json::json!({"historyGeneration": 0}),
                                         )
                                         .unwrap(),
                                     ),
@@ -313,27 +312,29 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
     };
     let mut original = node("Invalid local binding");
     original.node_id = local_failure.id().into();
-    let mut invalid = original.clone();
-    invalid.owner_user_id = None;
-    // Both captures fit the account scope, but forming one document must reject
-    // the immutable owner change. Other resources must still be published.
-    sync.capture(
-        &mut *transaction,
-        SyncCaptureParams {
-            binding: binding.clone(),
-            resource: local_failure.clone(),
-            changes: vec![
-                SyncChange::Metadata {
-                    before: None,
-                    after: Box::new(SyncResourceSnapshot::Computer(original.clone())),
-                },
-                SyncChange::Metadata {
-                    before: Some(Box::new(SyncResourceSnapshot::Computer(original))),
-                    after: Box::new(SyncResourceSnapshot::Computer(invalid)),
-                },
-            ],
-            created_at: 1,
+    let baseline = talos_sync_parser::encode_change(
+        &binding,
+        &local_failure,
+        SyncChange::Metadata {
+            before: None,
+            after: Box::new(SyncResourceSnapshot::Computer(original)),
         },
+    )
+    .unwrap()
+    .unwrap();
+    // A malformed durable outbox entry stays parked while unrelated resources publish.
+    let invalid = talos_sync_types::SyncChange::fields(
+        talos_sync_types::SyncHeader::default(),
+        None,
+        &talos_sync_types::SyncFields::new(),
+    );
+    crate::store::append(
+        &mut *transaction,
+        &binding,
+        &local_failure,
+        &serde_json::to_string(&[baseline, invalid]).unwrap(),
+        1,
+        "",
     )
     .await
     .unwrap();
@@ -411,7 +412,7 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
                 && binding
                     .computers
                     .iter()
-                    .any(|alias| alias.computer_id == presence.computer_id)
+                    .any(|alias| alias.computer_id == presence.resource.id())
                 && presence.valid_until - presence.observed_at == 30_000
         }));
     }
@@ -440,13 +441,18 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
         tokio::time::pause();
         tokio::time::advance(Duration::from_secs(2 * 60)).await;
         tokio::time::resume();
-        tokio::time::timeout(Duration::from_secs(10), async {
+        let recovered = tokio::time::timeout(Duration::from_secs(10), async {
             while status.borrow().pending_changes != 2 {
                 status.changed().await.unwrap();
             }
         })
-        .await
-        .expect("unchanged rejected uploads must recover after the cooldown");
+        .await;
+        assert!(
+            recovered.is_ok(),
+            "Unchanged rejected uploads must recover after the cooldown. Status: {:?}, uploads: {}",
+            handle.status(),
+            uploads.load(std::sync::atomic::Ordering::SeqCst),
+        );
         assert_eq!(
             uploads.load(std::sync::atomic::Ordering::SeqCst),
             before_retry + 8

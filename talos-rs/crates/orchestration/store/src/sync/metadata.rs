@@ -1,11 +1,10 @@
-use super::{session, transcode, StoreSyncAdapter};
+use super::{session, StoreSyncAdapter};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::StorageTransaction;
 use talos_sync::{
-    SessionExecutionBinding, SyncImportBatch, SyncResourceKey, SyncResourceSnapshot,
-    SyncSessionSnapshot, TalosSync,
+    ResourceKind, SessionExecutionBinding, SyncChange, SyncImportBatch, SyncResourceKey,
+    SyncResourceSnapshot, SyncSessionSnapshot, TalosSync,
 };
-use talos_sync_types::ResourceKind;
 use talos_types::{
     NodeHealth, NodeInfo, NodeMode, NodeStatus, ProjectInfo, ProjectStatus, ProjectStatusState,
     ProjectUnavailableReason,
@@ -205,11 +204,11 @@ pub(super) async fn apply(
     batch: &SyncImportBatch,
 ) -> TalosResult<()> {
     for change in &batch.changes {
-        let talos_sync_types::SyncChange::Metadata { after, .. } = change else {
+        let SyncChange::Metadata { after, .. } = change else {
             continue;
         };
         match after.as_ref() {
-            talos_sync_types::SyncResourceSnapshot::Computer(node) => {
+            SyncResourceSnapshot::Computer(node) => {
                 if node.owner_user_id.as_deref() != Some(&batch.scope.account_id) {
                     return Err(TalosError::new(
                         ErrorCode::PermissionDenied,
@@ -228,7 +227,7 @@ pub(super) async fn apply(
                     continue;
                 }
                 let mode = "remote";
-                let status = transcode::<_, NodeStatus>(&node.status)?;
+                let status = &node.status;
                 let status = match status {
                     NodeStatus::Enabled => "enabled",
                     NodeStatus::Disabled => "disabled",
@@ -261,12 +260,15 @@ pub(super) async fn apply(
                     })?;
                 tx.execute("INSERT INTO agent_nodes(node_id, owner_user_id, display_name, mode, endpoint, status, created_at, updated_at, system_info) VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, '')) ON CONFLICT(node_id) DO UPDATE SET display_name = excluded.display_name, endpoint = excluded.endpoint, status = excluded.status, updated_at = excluded.updated_at, system_info = excluded.system_info", &[&local, &batch.scope.account_id, &node.display_name, mode, node.endpoint.as_deref().unwrap_or_default(), status, &node.created_at.to_string(), &node.updated_at.to_string(), system_info.as_deref().unwrap_or_default()]).await?;
             }
-            talos_sync_types::SyncResourceSnapshot::Project(project) => {
+            SyncResourceSnapshot::Project(project) => {
+                let directory = project.directory.to_str().ok_or_else(|| {
+                    TalosError::internal("Synchronized Project directory must be UTF-8.")
+                })?;
                 let local = adapter.local_node(&project.node_id);
                 let existing = tx.query("SELECT execution_node_id, user_id, directory FROM projects WHERE project_id = ?", &[&project.project_id]).await?;
                 if existing.first().is_some_and(|row| {
                     row.get_string("execution_node_id").as_deref() != Some(&local)
-                        || row.get_string("directory").as_deref() != Some(&project.directory)
+                        || row.get_string("directory").as_deref() != Some(directory)
                         || ![&adapter.binding.source_user_id, &batch.scope.account_id]
                             .contains(&&row.get_string("user_id").unwrap_or_default())
                 }) {
@@ -275,12 +277,12 @@ pub(super) async fn apply(
                         "Project identity has a different immutable binding.",
                     ));
                 }
-                tx.execute("INSERT INTO projects(project_id, execution_node_id, user_id, name, directory, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at", &[&project.project_id, &local, &batch.scope.account_id, &project.name, &project.directory, &project.created_at.to_string(), &project.updated_at.to_string()]).await?;
+                tx.execute("INSERT INTO projects(project_id, execution_node_id, user_id, name, directory, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at", &[&project.project_id, &local, &batch.scope.account_id, &project.name, directory, &project.created_at.to_string(), &project.updated_at.to_string()]).await?;
             }
-            talos_sync_types::SyncResourceSnapshot::Session(session) => {
+            SyncResourceSnapshot::Session(session) => {
                 session::apply_metadata(adapter, tx, batch, session).await?
             }
-            talos_sync_types::SyncResourceSnapshot::File(file) => {
+            SyncResourceSnapshot::File(file) => {
                 super::file::apply(adapter, tx, batch, file).await?
             }
         }

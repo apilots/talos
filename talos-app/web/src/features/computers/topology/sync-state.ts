@@ -69,10 +69,11 @@ export function syncObservationState(
   const live = peers.filter((peer) => peer.connections > 0);
   if (!live.length) return SyncTopologyState.Unknown;
   return live.some(
-    (peer) =>
+    (peer) => peer.progress?.state === "behind" || peer.progress?.state === "recovering" || (
       peer.lastActivityAt !== null &&
       metrics.observedAt - peer.lastActivityAt >= 0 &&
-      metrics.observedAt - peer.lastActivityAt < 60,
+      metrics.observedAt - peer.lastActivityAt < 60
+    ),
   )
     ? SyncTopologyState.Syncing
     : SyncTopologyState.Idle;

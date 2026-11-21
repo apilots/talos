@@ -24,7 +24,7 @@ async fn seeded() -> (super::Fixture, SyncResourceKey, SyncReplica) {
         .await
         .unwrap()
         .unwrap();
-    let mut hub = SyncReplica::new(resource.clone(), 88).unwrap();
+    let mut hub = SyncReplica::new(resource.wire(), 88).unwrap();
     hub.import(std::slice::from_ref(&batch.update)).unwrap();
     hub.set_writer_id(88).unwrap();
     fixture.sync.acknowledge(&batch).await.unwrap();
@@ -50,15 +50,8 @@ async fn confirmed_hub_delete_supersedes_pending_patch_atomically_without_an_upl
         .unwrap();
     let delete = hub.apply(&[talos_sync_types::SyncChange::Delete]).unwrap();
     let hub_version = hub.version().unwrap();
-    let (transaction, _, _) = fixture
-        .sync
-        .import_document(
-            &fixture.binding,
-            &resource,
-            std::slice::from_ref(&delete),
-            &hub_version,
-            Some("terminal-cut"),
-        )
+    let (transaction, _) = fixture
+        .prepare_import(&resource, std::slice::from_ref(&delete), &hub_version)
         .await
         .unwrap();
     transaction.rollback().await.unwrap();
@@ -70,30 +63,11 @@ async fn confirmed_hub_delete_supersedes_pending_patch_atomically_without_an_upl
             .unwrap(),
         vec![resource.clone()]
     );
-    assert_eq!(
-        fixture
-            .sync
-            .download_cursor(&fixture.binding)
-            .await
-            .unwrap(),
-        None
-    );
-
-    let (transaction, _, changes) = fixture
-        .sync
-        .import_document(
-            &fixture.binding,
-            &resource,
-            &[delete],
-            &hub_version,
-            Some("terminal-cut"),
-        )
+    let (transaction, SyncImportBatch { changes, .. }) = fixture
+        .prepare_import(&resource, &[delete], &hub_version)
         .await
         .unwrap();
-    assert!(matches!(
-        changes.last(),
-        Some(talos_sync_types::SyncChange::Delete)
-    ));
+    assert!(matches!(changes.last(), Some(SyncChange::Delete)));
     transaction.commit().await.unwrap();
     assert!(fixture
         .sync
@@ -140,31 +114,22 @@ async fn local_unacknowledged_delete_survives_a_concurrent_hub_patch_until_its_a
         .flush_cut(&fixture.binding, &resource)
         .await
         .unwrap();
-    let before = match hub.changes().unwrap().remove(0) {
-        talos_sync_types::SyncChange::Metadata { after, .. } => after,
-        _ => panic!("Computer metadata"),
-    };
+    let before = hub.fields().unwrap();
     let mut after = before.clone();
-    let talos_sync_types::SyncResourceSnapshot::Computer(node) = after.as_mut() else {
-        panic!("Computer metadata")
-    };
-    node.display_name = "Changed on hub".into();
+    after.insert("/data/displayName".into(), "Changed on hub".into());
     let update = hub
-        .apply(&[talos_sync_types::SyncChange::Metadata {
-            before: Some(before),
-            after,
-        }])
+        .apply(&[talos_sync_types::SyncChange::fields(
+            hub.header().unwrap().unwrap(),
+            Some(&before),
+            &after,
+        )])
         .unwrap();
     let hub_version = hub.version().unwrap();
-    let (transaction, _, changes) = fixture
-        .sync
-        .import_document(&fixture.binding, &resource, &[update], &hub_version, None)
+    let (transaction, SyncImportBatch { changes, .. }) = fixture
+        .prepare_import(&resource, &[update], &hub_version)
         .await
         .unwrap();
-    assert!(matches!(
-        changes.last(),
-        Some(talos_sync_types::SyncChange::Delete)
-    ));
+    assert!(matches!(changes.last(), Some(SyncChange::Delete)));
     transaction.commit().await.unwrap();
     assert_eq!(
         fixture
@@ -180,9 +145,9 @@ async fn local_unacknowledged_delete_survives_a_concurrent_hub_patch_until_its_a
         .await
         .unwrap()
         .unwrap();
-    hub.import_from_peer(
+    hub.import_from_account(
         std::slice::from_ref(&batch.update),
-        &fixture.binding.peer_id,
+        &fixture.binding.scope.account_id,
     )
     .unwrap();
     assert!(hub.summary().unwrap().deleted);

@@ -20,6 +20,9 @@ mod durable_capture_tests;
 #[path = "import_stage_tests.rs"]
 mod import_stage_tests;
 
+#[path = "replica_relay_tests.rs"]
+mod replica_relay_tests;
+
 const COMPUTER: &str = "d4383755-33d1-43fd-a6ef-cf14dc2a823d";
 struct Peer {
     storage: Arc<SqliteStorage>,
@@ -254,28 +257,20 @@ async fn exchange(source: &Peer, destination: &Peer, resource: SyncResourceKey) 
         .await
         .unwrap()
     {
-        let (mut tx, version, changes) = destination
+        let (mut tx, imported) = destination
             .sync
-            .import_document(
+            .prepare_import(
+                destination.adapter.as_ref(),
                 &destination.adapter.binding,
                 &batch.resource,
                 std::slice::from_ref(&batch.update),
                 &batch.version,
-                None,
             )
             .await
             .unwrap();
         destination
             .adapter
-            .apply(
-                &mut *tx,
-                &SyncImportBatch {
-                    scope: destination.adapter.binding.scope.clone(),
-                    resource: batch.resource.clone(),
-                    version,
-                    changes,
-                },
-            )
+            .apply(&mut *tx, &imported)
             .await
             .unwrap();
         tx.commit().await.unwrap();
@@ -494,28 +489,20 @@ async fn file_source_and_child_identity_survive_import_and_source_deletion() {
         .await
         .unwrap()
         .unwrap();
-    let (mut tx, version, changes) = b
+    let (mut tx, imported) = b
         .sync
-        .import_document(
+        .prepare_import(
+            b.adapter.as_ref(),
             &b.adapter.binding,
             &resource,
             std::slice::from_ref(&batch.update),
             &batch.version,
-            None,
         )
         .await
         .unwrap();
     let dependencies = b
         .adapter
-        .missing_dependencies(
-            &mut *tx,
-            &SyncImportBatch {
-                scope: b.adapter.binding.scope.clone(),
-                resource,
-                version,
-                changes,
-            },
-        )
+        .missing_dependencies(&mut *tx, &imported)
         .await
         .unwrap();
     tx.rollback().await.unwrap();

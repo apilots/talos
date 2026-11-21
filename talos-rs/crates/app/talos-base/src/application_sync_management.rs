@@ -365,7 +365,7 @@ impl ApplicationSyncHost {
         self.refresh_presence_computers(actor, &handle).await
     }
 
-    async fn discover_document_scope(
+    pub(super) async fn discover_document_scope(
         &self,
         actor: &RequestIdentity,
         credentials: talos_sync_sdk::CredentialCallback,
@@ -692,7 +692,7 @@ impl ManagementSync for ApplicationSyncHost {
                     "Synchronization is disabled by this server's operator.",
                 ));
             }
-            let pause = self.pause_refresh(&actor.user_id).await;
+            // Sync settings must not abort an in-flight control-plane enrollment.
             let _guard = self.lifecycle.lock().await;
             let result = async {
                 if request.claim_local_history {
@@ -717,7 +717,6 @@ impl ManagementSync for ApplicationSyncHost {
                 self.read_status(actor).await
             }
             .await;
-            drop(pause);
             self.schedule_refresh(actor);
             result
         })
@@ -729,7 +728,7 @@ impl ManagementSync for ApplicationSyncHost {
             } else {
                 Some(self.verified_actor(actor).await?)
             };
-            let pause = self.pause_refresh(&actor.user_id).await;
+            // Sync settings must not abort an in-flight control-plane enrollment.
             let _guard = self.lifecycle.lock().await;
             let result = async {
                 if let Some(verified) = verified {
@@ -748,7 +747,6 @@ impl ManagementSync for ApplicationSyncHost {
                 self.read_status(actor).await
             }
             .await;
-            drop(pause);
             self.schedule_refresh(actor);
             result
         })

@@ -381,7 +381,13 @@ computerIds: Array<string>, connections: number, documentRooms: number, lastActi
 /**
  * Sync service receipt of the last solicited heartbeat pong.
  */
-lastHeartbeatAt: number | null, inboundBytesPerSecond: number, outboundBytesPerSecond: number, updatesPerSecond: number, commitP95Ms: number | null, };
+lastHeartbeatAt: number | null, progress?: SyncPeerProgress | null, inboundBytesPerSecond: number, outboundBytesPerSecond: number, updatesPerSecond: number, commitP95Ms: number | null, };
+
+export type SyncPeerProgress = { observedAt: number, lastAppliedAt: number | null, pendingUploads: number, state: SyncProgressState, downloadLagMs: number | null, sourceDelays: Array<SyncSourceDelay>, };
+
+export type SyncProgressState = "caughtUp" | "behind" | "recovering";
+
+export type SyncSourceDelay = { sourcePeerId: string, observedDelayMs: number, };
 
 export type SyncMetadataCounts = { computers: number, projects: number, sessions: number, files: number, };
 

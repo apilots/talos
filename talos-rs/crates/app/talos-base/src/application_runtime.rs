@@ -382,6 +382,7 @@ pub(crate) async fn build_application_runtime_with_policy(
     let worker_registration = Arc::new(tokio::sync::Mutex::new(registration));
     let sync_host = Arc::new_cyclic(|host| super::application_sync::ApplicationSyncHost {
         self_weak: host.clone(),
+        computer_observations: Default::default(),
         registration_retirement: Default::default(),
         config: config.clone(),
         sync: sync.clone(),

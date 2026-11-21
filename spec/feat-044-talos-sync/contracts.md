@@ -1,6 +1,6 @@
 # Talos 多端同步接入接口
 
-Status: Implemented；本轮账号选择专项已自测，统一8/8验收通过，见[本轮证据](verification.md)。共享wire结构/SDK API由[独立Sync契约](https://github.com/apilots/talos-sync/blob/7230f9fdf294e7ae218bdb6d3cf1c4ef60203380/spec/feat-044-talos-sync/contracts.md)维护，Talos只定义原业务事务接入和产品接口。
+Status: Implemented. Talos owns product integration; the [independent Sync contract](https://github.com/apilots/talos-sync/blob/8e60e2b612ba895c8f4bcb4e0d78c9ae86227502/spec/feat-001-talos-sync/contracts.md) owns the service protocol. Current acceptance evidence belongs in the integration PR and ignored output reports.
 
 ## 3. 库 API 与宿主端口
 
@@ -25,7 +25,7 @@ Status: Implemented；本轮账号选择专项已自测，统一8/8验收通过�
 | `bind_account(actor, SyncBindParams)` | Return SyncBinding after verified account/source-user/Computer association; no implicit anonymous claim. |
 | `enabled(account_id)` / `set_enabled(account_id, bool)` | Read/persist the verified account choice in this host DB, even before discovery; no network, YAML write or other-host preference propagation. |
 | `capture(tx, SyncCaptureParams)` | Append typed changes in the existing business transaction. No network await; rollback removes capture. |
-| `import_document(binding, resource, updates, version, cursor)` | Prepare the replica outside the writer. Return a staged transaction, the merged version, and the validated facts. The caller applies the facts to the original Store and commits before advancing the SDK recovery watermark. |
+| `prepare_import(adapter, binding, resource, updates, version)` | Decode and stage the candidate before acquiring the publication writer. Return the transaction and prepared import batch. The caller publishes the Store facts and replica checkpoint in that transaction before advancing the SDK recovery watermark. |
 | `start(adapter, SyncStartParams)` | Return SyncHandle; authenticate, discover, export/import and reconnect. Credentials come from existing account lifecycle. |
 | `SyncHandle::catch_up(resource, minimum_version?)` | Recover and materialize a complete resource cut on the handle's existing authenticated connection. None requests the current hub cut; an unpublished minimum fails explicitly. |
 | `SyncHandle::flush(resource)` | Fix the current transaction's committed outbox sequence and VV, then await a durable hub cut including that VV without waiting for later commits. A remote terminal Delete superseding this cut returns Conflict rather than a false ACK. Used before opening that 历史游标 to a different coordinator. |
@@ -71,6 +71,22 @@ apply 复用原 Store 的导入路径。长历史分批暂存，最终事务一�
 完成 Session 所需 Project/Computer/tree/File metadata 一并补齐；确有未到的数据明确不可执行，不用空对象兜底。
 active 展示从同步文档读取，原 agent_active_turns 只保留本端实际协调任务；导入 running 不安装假执行任务。
 本地 accounting/反思等副作用只由实际执行该 Turn 的原 owner 运行，导入采用事实替换/去重。
+## Replica relay and native provenance
+
+Sync authorizes uploads by the authenticated account's existing write
+permissions. A surviving replica may forward complete checkpoints and
+incremental operations even when their original devices are offline. The
+current uploader remains distinct from a Turn's original coordinator and
+an event's original publishing peer. Parser encoding and decoding preserve
+these sources, source providers, Node IDs and execution bindings. The Hub
+interprets only their generic header/stream/record invariants.
+
+Retain the complete checkpoint, including immutable markers, reset
+generations and tombstones. A rendered History is not sufficient to infer
+all replication state. A new Hub requires its own binding and recovery
+positions. Store publication precedes applied-feed progress, and imported
+history does not execute work or create new source identities.
+
 ## 5. 产品 API、SDK 与实时反馈
 
 现有 Computer/Project/Session/Timeline/Files API 继续唯一；新增本端 `sync/enable`、`sync/disable`、`sync/status` 及对应 HTTP 管理入口。
@@ -134,3 +150,20 @@ or create a separate cross-machine log service. Older results without these
 optional fields retain their original semantics. Matching public SDK/types and
 service support must precede use by Talos; closed older schemas reject these
 fields rather than preserving them.
+
+
+## Generic protocol and device progress
+
+The Talos parser is the single owner of document and record key mapping,
+business fields, immutable bindings, and typed validation. A Session baseline
+contains its complete available History. Subsequent changes to fields, Turns
+and events travel as Loro operations from the receiver's document version.
+Local History continues to use the materialized Store and its Timeline marker.
+
+The adapter supplies the SDK with its persisted contiguous account feed
+cursor, recovery state and pending upload count. The SDK emits periodic
+progress messages over the existing authenticated connection. The product
+status panel presents progress freshness, download backlog and each
+observable source device's last apply confirmation delay. The sequence stays
+fixed during idle periods. A new Hub uses a fresh binding and document
+baseline. Previously materialized History remains in the Store.

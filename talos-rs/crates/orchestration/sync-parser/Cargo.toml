@@ -1,0 +1,18 @@
+[package]
+name = "talos-sync-parser"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos payload projection and parsing above the Sync protocol"
+
+[dependencies]
+talos-sync-types.workspace = true
+talos-types.workspace = true
+talos-agent-api.workspace = true
+talos-error.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

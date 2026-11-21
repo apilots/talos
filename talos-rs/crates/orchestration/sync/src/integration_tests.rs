@@ -2,8 +2,8 @@ use std::{path::Path, sync::Arc};
 
 use pretty_assertions::assert_eq;
 use talos_auth::{RequestIdentity, UserRole};
-use talos_error::ErrorCode;
-use talos_storage::{SqliteStorage, Storage};
+use talos_error::{ErrorCode, TalosResult};
+use talos_storage::{SqliteStorage, Storage, StorageTransaction};
 use talos_store::project::{ProjectStore, StorageProjectStore};
 use talos_sync_sdk::SyncReplica;
 use talos_types::{NodeHealth, NodeInfo, NodeMode, NodeStatus, ProjectInfo};
@@ -35,6 +35,25 @@ struct Fixture {
     sync: TalosSync,
     binding: SyncBinding,
     _home: tempfile::TempDir,
+}
+
+impl Fixture {
+    async fn prepare_import(
+        &self,
+        resource: &SyncResourceKey,
+        updates: &[Vec<u8>],
+        version: &SyncVersion,
+    ) -> TalosResult<(Box<dyn StorageTransaction>, SyncImportBatch)> {
+        self.sync
+            .prepare_import(
+                &runner_wss::EmptyAdapter,
+                &self.binding,
+                resource,
+                updates,
+                version,
+            )
+            .await
+    }
 }
 
 fn options() -> SyncOptions {
@@ -236,19 +255,11 @@ async fn business_rollback_removes_capture_and_commit_exports_exact_project_chan
         .await
         .unwrap()
         .unwrap();
-    let mut received = SyncReplica::new(resource, 99).unwrap();
+    let mut received = SyncReplica::new(resource.wire(), 99).unwrap();
     received.import(&[batch.update]).unwrap();
-    let snapshots = received.changes().unwrap();
-    let talos_sync_types::SyncChange::Metadata { after, .. } = &snapshots[0] else {
-        panic!("project metadata")
-    };
-    let talos_sync_types::SyncResourceSnapshot::Project(actual) = after.as_ref() else {
-        panic!("project metadata")
-    };
-    assert_eq!(
-        (&actual.name, &actual.node_id),
-        (&"After".to_string(), &COMPUTER.to_string())
-    );
+    let after = received.fields().unwrap();
+    assert_eq!(after["/data/name"], "After");
+    assert_eq!(after["/data/nodeId"], COMPUTER);
     assert_eq!(
         projects
             .get_project(&before.project_id)
@@ -292,7 +303,7 @@ async fn lost_ack_restart_reuses_identity_and_does_not_duplicate_facts() {
         .unwrap();
     assert!(talos_sync_sdk::version_equal(&retry.version, &batch.version).unwrap());
     assert_eq!(retry.through_sequence, batch.through_sequence);
-    let mut receiver = SyncReplica::new(resource.clone(), 50).unwrap();
+    let mut receiver = SyncReplica::new(resource.wire(), 50).unwrap();
     receiver
         .import(&[batch.update, retry.update.clone()])
         .unwrap();
@@ -350,7 +361,7 @@ async fn lost_ack_restart_reuses_identity_and_does_not_duplicate_facts() {
         .await
         .unwrap()
         .is_none());
-    let wire = serde_json::to_value(receiver.changes().unwrap()).unwrap();
+    let wire = receiver.fields().unwrap();
     for forbidden in [
         "leaseExpiresAt",
         "lastHeartbeatAt",
@@ -358,7 +369,7 @@ async fn lost_ack_restart_reuses_identity_and_does_not_duplicate_facts() {
         "available",
         "credentialExpiresAt",
     ] {
-        assert!(wire[0]["data"]["after"]["data"].get(forbidden).is_none());
+        assert!(!wire.contains_key(&format!("/data/{forbidden}")));
     }
 }
 
@@ -414,7 +425,7 @@ async fn heartbeat_changes_do_not_capture_metadata_and_disabled_transport_keeps_
 }
 
 #[tokio::test]
-async fn transcript_import_cursor_and_event_mapping_share_the_business_commit() {
+async fn transcript_import_and_event_mapping_share_the_document_commit() {
     let source = fixture().await;
     let target = fixture().await;
     let (session, events) = transcript::session_and_events(COMPUTER);
@@ -450,14 +461,11 @@ async fn transcript_import_cursor_and_event_mapping_share_the_business_commit() 
         .await
         .unwrap()
         .unwrap();
-    let (tx, _, _) = target
-        .sync
-        .import_document(
-            &target.binding,
+    let (tx, _) = target
+        .prepare_import(
             &resource,
             std::slice::from_ref(&batch.update),
             &batch.version,
-            Some("feed-7"),
         )
         .await
         .unwrap();
@@ -468,30 +476,28 @@ async fn transcript_import_cursor_and_event_mapping_share_the_business_commit() 
         .await
         .unwrap()
         .is_none());
-    assert!(target
-        .sync
-        .download_cursor(&target.binding)
-        .await
-        .unwrap()
-        .is_none());
-    let (mut tx, version, imported) = target
-        .sync
-        .import_document(
-            &target.binding,
-            &resource,
-            &[batch.update],
-            &batch.version,
-            Some("feed-7"),
-        )
+    let mut published = SyncReplica::new(resource.wire(), 44).unwrap();
+    published
+        .import(std::slice::from_ref(&batch.update))
+        .unwrap();
+    published.set_writer_id(44).unwrap();
+    let full = published.snapshot().unwrap();
+    let (
+        mut tx,
+        SyncImportBatch {
+            version,
+            changes: imported,
+            ..
+        },
+    ) = target
+        .prepare_import(&resource, &[full], &batch.version)
         .await
         .unwrap();
     let imported_session = imported.iter().find_map(|change| match change {
-        talos_sync_types::SyncChange::Metadata { after, .. } => {
-            match projection::transcode::<_, SyncResourceSnapshot>(after.as_ref()).unwrap() {
-                SyncResourceSnapshot::Session(session) => Some(session),
-                _ => None,
-            }
-        }
+        SyncChange::Metadata { after, .. } => match after.as_ref() {
+            SyncResourceSnapshot::Session(session) => Some(session),
+            _ => None,
+        },
         _ => None,
     });
     assert_eq!(
@@ -499,26 +505,18 @@ async fn transcript_import_cursor_and_event_mapping_share_the_business_commit() 
         expected_usage
     );
     for (index, expected) in events.iter().enumerate() {
+        let key = SyncEventKey::Agent {
+            identity: expected.identity().clone(),
+            sequence: index as u64 + 1,
+        };
         let entry = imported
             .iter()
             .find_map(|change| match change {
-                talos_sync_types::SyncChange::Event(entry)
-                    if entry.key
-                        == talos_sync_types::SyncEventKey::Agent {
-                            identity: projection::transcode(expected.identity()).unwrap(),
-                            sequence: index as u64 + 1,
-                        } =>
-                {
-                    Some(entry)
-                }
+                SyncChange::Event(entry) if entry.key == key => Some(entry),
                 _ => None,
             })
             .unwrap();
-        assert_eq!(
-            projection::transcode::<_, talos_agent_api::TimelineEventPayload>(&entry.event)
-                .unwrap(),
-            *expected
-        );
+        assert_eq!(entry.event, *expected);
         target
             .sync
             .map_event(
@@ -545,11 +543,7 @@ async fn transcript_import_cursor_and_event_mapping_share_the_business_commit() 
             .document_version(&target.binding, &resource)
             .await
             .unwrap(),
-        Some(version)
-    );
-    assert_eq!(
-        target.sync.download_cursor(&target.binding).await.unwrap(),
-        Some("feed-7".into())
+        Some(version.clone())
     );
     assert!(target
         .sync
@@ -557,6 +551,88 @@ async fn transcript_import_cursor_and_event_mapping_share_the_business_commit() 
         .await
         .unwrap()
         .is_empty());
+
+    let sequence = events.len() as u64 + 1;
+    let turn_id = events[0].identity().turn_id.clone();
+    let unsupported = published
+        .apply(&[talos_sync_types::SyncChange::Record(
+            talos_sync_types::SyncRecord {
+                key: format!("unsupported:{sequence}"),
+                stream: turn_id,
+                publisher: None,
+                sequence: Some(sequence),
+                reference: None,
+                replaceable: false,
+                value: serde_json::json!({"type":"futureRequiredEvent","data":{"revision":2}}),
+            },
+        )])
+        .unwrap();
+    let result = target
+        .prepare_import(&resource, &[unsupported], &published.version().unwrap())
+        .await;
+    assert!(result.is_err());
+    assert_eq!(
+        target
+            .sync
+            .document_version(&target.binding, &resource)
+            .await
+            .unwrap(),
+        Some(version)
+    );
+    let mut read = target.storage.begin_transaction().await.unwrap();
+    let committed = target
+        .sync
+        .session_snapshot(&mut *read, &target.binding, resource.id())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(committed.session.usage.tokens, expected_usage);
+    read.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn session_execution_binding_is_checked_on_both_sides_of_the_parser() {
+    let source = fixture().await;
+    let (mut session, _) = transcript::session_and_events(COMPUTER);
+    let metadata = |snapshot| SyncChange::Metadata {
+        before: None,
+        after: Box::new(SyncResourceSnapshot::Session(Box::new(snapshot))),
+    };
+    let resource = SyncResourceKey::Session {
+        session_id: session.session.id.clone(),
+    };
+    let mut received =
+        talos_sync_parser::encode_change(&source.binding, &resource, metadata(session.clone()))
+            .unwrap()
+            .unwrap();
+    let talos_sync_types::SyncChange::Fields { edits, .. } = &mut received else {
+        panic!("expected Session metadata");
+    };
+    for edit in edits {
+        if let talos_sync_types::SyncFieldEdit::Put { key, value } = edit {
+            if key == "/data/binding" {
+                value["workspaceId"] = "".into();
+            }
+        }
+    }
+    assert_eq!(
+        talos_sync_parser::decode_changes(
+            &resource,
+            &source.binding.scope.account_id,
+            vec![received]
+        )
+        .unwrap_err()
+        .error_code(),
+        talos_error::ErrorCode::Conflict
+    );
+
+    session.binding.workspace_id.clear();
+    assert_eq!(
+        talos_sync_parser::encode_change(&source.binding, &resource, metadata(session))
+            .unwrap_err()
+            .error_code(),
+        talos_error::ErrorCode::Conflict
+    );
 }
 
 #[tokio::test]

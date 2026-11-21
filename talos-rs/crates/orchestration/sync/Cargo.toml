@@ -7,10 +7,10 @@ license.workspace = true
 description = "Transactional Talos integration for independent synchronization infrastructure"
 
 [dependencies]
+talos-sync-parser.workspace = true
 talos-sync-types.workspace = true
 talos-sync-sdk.workspace = true
 talos-types.workspace = true
-talos-agent-api.workspace = true
 talos-auth.workspace = true
 talos-storage.workspace = true
 talos-error.workspace = true
@@ -22,9 +22,10 @@ tokio.workspace = true
 tokio-util.workspace = true
 url = "2"
 tracing.workspace = true
-loro = { version = "=1.16.2", default-features = false }
 
 [dev-dependencies]
+talos-agent-api.workspace = true
+loro = { version = "=1.16.2", default-features = false }
 tokio = { workspace = true, features = ["test-util"] }
 futures-util = "0.3"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }

@@ -47,7 +47,7 @@ impl SyncHandle {
         resource: SyncResourceKey,
         minimum: Option<SyncVersion>,
     ) -> TalosResult<SyncVersion> {
-        let resource = crate::projection::resource(&self.binding, &resource);
+        let resource = talos_sync_parser::resource(&self.binding, &resource);
         resource.validate().map_err(crate::facade::sync_error)?;
         let (reply, received) = oneshot::channel();
         self.request(
@@ -65,7 +65,7 @@ impl SyncHandle {
     /// facts. The fixed outbox cut excludes later commits and survives disconnect
     /// through existing persistence; no execution lock or second queue is added.
     pub async fn flush(&self, resource: SyncResourceKey) -> TalosResult<SyncVersion> {
-        let resource = crate::projection::resource(&self.binding, &resource);
+        let resource = talos_sync_parser::resource(&self.binding, &resource);
         resource.validate().map_err(crate::facade::sync_error)?;
         self.require_connected()?;
         let source_cut = self.wait_for_capture(&resource).await?;

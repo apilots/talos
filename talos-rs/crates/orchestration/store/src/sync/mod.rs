@@ -20,7 +20,8 @@ use talos_error::{TalosError, TalosResult};
 use talos_storage::{Storage, StorageTransaction};
 use talos_sync::{
     SyncBinding, SyncChange, SyncDataAdapter, SyncExportFacts, SyncExportParams, SyncHandle,
-    SyncImportBatch, SyncResourceKey, SyncScanPage, SyncScanParams, TalosSync,
+    SyncImportBatch, SyncResourceKey, SyncResourceSnapshot, SyncScanPage, SyncScanParams,
+    TalosSync,
 };
 
 /// Original Service projection for the bound Worker's model and permissions.
@@ -228,18 +229,16 @@ impl SyncDataAdapter for StoreSyncAdapter {
     ) -> TalosResult<Vec<SyncResourceKey>> {
         let mut dependencies = Vec::new();
         for change in &batch.changes {
-            let talos_sync_types::SyncChange::Metadata { after, .. } = change else {
+            let SyncChange::Metadata { after, .. } = change else {
                 continue;
             };
             let mut required = Vec::new();
             match after.as_ref() {
-                talos_sync_types::SyncResourceSnapshot::Computer(_) => {}
-                talos_sync_types::SyncResourceSnapshot::Project(p) => {
-                    required.push(SyncResourceKey::Computer {
-                        computer_id: p.node_id.clone(),
-                    })
-                }
-                talos_sync_types::SyncResourceSnapshot::Session(s) => {
+                SyncResourceSnapshot::Computer(_) => {}
+                SyncResourceSnapshot::Project(p) => required.push(SyncResourceKey::Computer {
+                    computer_id: p.node_id.clone(),
+                }),
+                SyncResourceSnapshot::Session(s) => {
                     required.push(SyncResourceKey::Computer {
                         computer_id: s.binding.computer_id.clone(),
                     });
@@ -248,7 +247,7 @@ impl SyncDataAdapter for StoreSyncAdapter {
                             project_id: id.clone(),
                         });
                     }
-                    if let talos_sync_types::generated::SessionTreeIdentity::Subagent {
+                    if let talos_types::SessionTreeIdentity::Subagent {
                         parent,
                         tree_root_session_id,
                         ..
@@ -262,8 +261,8 @@ impl SyncDataAdapter for StoreSyncAdapter {
                         });
                     }
                 }
-                talos_sync_types::SyncResourceSnapshot::File(f) => {
-                    if let talos_sync_types::generated::FileScope::Project(id) = &f.file.scope {
+                SyncResourceSnapshot::File(f) => {
+                    if let talos_types::FileScope::Project { project_id: id } = &f.file.scope {
                         required.push(SyncResourceKey::Project {
                             project_id: id.clone(),
                         });
@@ -313,38 +312,19 @@ impl SyncDataAdapter for StoreSyncAdapter {
         tx: &mut dyn StorageTransaction,
         batch: &SyncImportBatch,
     ) -> TalosResult<()> {
-        self.apply_import(tx, batch, /*prepared*/ false).await
-    }
-
-    async fn apply_prepared(
-        &self,
-        tx: &mut dyn StorageTransaction,
-        batch: &SyncImportBatch,
-    ) -> TalosResult<()> {
-        self.apply_import(tx, batch, /*prepared*/ true).await
-    }
-}
-
-impl StoreSyncAdapter {
-    async fn apply_import(
-        &self,
-        tx: &mut dyn StorageTransaction,
-        batch: &SyncImportBatch,
-        prepared: bool,
-    ) -> TalosResult<()> {
         self.ensure_import_ready(tx, batch).await?;
         if batch
             .changes
             .iter()
-            .any(|c| matches!(c, talos_sync_types::SyncChange::Delete))
+            .any(|c| matches!(c, SyncChange::Delete))
         {
             metadata::delete(self, tx, &batch.resource).await?;
             return Ok(());
         }
-        let staged = prepared && import_stage::publish(tx, batch).await?;
+        import_stage::publish(tx, batch).await?;
         metadata::apply(self, tx, batch).await?;
         if matches!(batch.resource, SyncResourceKey::Session { .. }) {
-            session::apply(tx, batch, staged).await?;
+            session::apply(tx, batch).await?;
         }
         Ok(())
     }
@@ -355,12 +335,6 @@ pub(crate) fn codec(error: serde_json::Error) -> TalosError {
         "Process synchronized facts; technical details were withheld.",
         error,
     )
-}
-
-pub(crate) fn transcode<T: serde::Serialize, U: serde::de::DeserializeOwned>(
-    value: &T,
-) -> TalosResult<U> {
-    serde_json::from_value(serde_json::to_value(value).map_err(codec)?).map_err(codec)
 }
 
 #[cfg(test)]

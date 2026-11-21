@@ -7334,7 +7334,7 @@ dependencies = [
  "talos-memory",
  "talos-storage",
  "talos-sync",
- "talos-sync-types",
+ "talos-sync-sdk",
  "talos-types",
  "tempfile",
  "thiserror 1.0.69",
@@ -7359,6 +7359,7 @@ dependencies = [
  "talos-logging",
  "talos-storage",
  "talos-store",
+ "talos-sync-parser",
  "talos-sync-sdk",
  "talos-sync-types",
  "talos-types",
@@ -7373,10 +7374,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "talos-sync-parser"
+version = "0.1.18-SNAPSHOT"
+dependencies = [
+ "serde",
+ "serde_json",
+ "talos-agent-api",
+ "talos-error",
+ "talos-sync-types",
+ "talos-types",
+]
+
+[[package]]
 name = "talos-sync-sdk"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8f168ab2a00cb2f5e0a6066edd3c2e7c272a8985c8ec6547fa6e1c1c7f6b7d9"
+checksum = "bcbaa9adc1318b02e8a398aa6e13ae2f2003a3fb1958b866002ca0d84392a48a"
 dependencies = [
  "futures-util",
  "loro",
@@ -7387,18 +7400,20 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "talos-sync-types",
  "tokio",
  "tokio-tungstenite 0.29.0",
  "tokio-util",
  "url",
+ "zstd",
 ]
 
 [[package]]
 name = "talos-sync-types"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bde23a66ca7c51688519615a0fc41e840d6461d5cc1ebe1e1cfe28420d0ae350"
+checksum = "3e1a14f5f3ddf1a6941c8bf79d692cfee0a989db430b2cead67ad43f5ccf8ea4"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -9567,6 +9582,34 @@ dependencies = [
  "crc32fast",
  "log",
  "simd-adler32",
+]
+
+[[package]]
+name = "zstd"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50adf04cf3ec914b0b9905c9dde90c80fe74bfd701e331fc80a39c512c525278"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "498d94ad68720c89b4fbe41b9090850651e68cb2dd9210ce7ffbff3a94653819"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.1.3+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f729a06d0257428fd9d997ac8db7e1407bd0262ab016b085b36bc52957c0052d"
+dependencies = [
+ "cc",
+ "pkg-config",
 ]
 
 [[package]]

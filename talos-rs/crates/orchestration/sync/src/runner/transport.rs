@@ -1,19 +1,16 @@
-use std::{
-    collections::VecDeque,
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
+use crate::{ResourceKind, SyncResourceKey};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_sync_sdk::version_includes;
 use talos_sync_sdk::{DocumentEvent, DocumentUpdate, SyncClient, SyncDocument};
-use talos_sync_types::{ResourceKind, SyncListParams, SyncResourceKey};
+use talos_sync_types::{SyncListParams, SyncProgress};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     facade::sync_error, store, SyncBinding, SyncCaptureParams, SyncConnectionState,
-    SyncDataAdapter, SyncExportParams, SyncImportBatch, SyncScanParams, SyncStartParams, TalosSync,
+    SyncDataAdapter, SyncExportParams, SyncScanParams, SyncStartParams, TalosSync,
 };
 
 use super::{operations, FailedUpload, RunnerChannels};
@@ -97,7 +94,7 @@ async fn bootstrap<A: SyncDataAdapter>(
             })
             .await?;
         for source_resource in page.resources {
-            let resource = crate::projection::resource(binding, &source_resource);
+            let resource = talos_sync_parser::resource(binding, &source_resource);
             let mut read = sync.storage.begin_read_transaction().await?;
             if store::has_capture_baseline(&mut *read, &binding.scope, &resource).await? {
                 read.commit().await?;
@@ -120,7 +117,7 @@ async fn bootstrap<A: SyncDataAdapter>(
                 binding: binding.clone(),
                 resource: resource.clone(),
                 changes: facts.changes,
-                created_at: now(),
+                created_at: store::timestamp()?,
             })?;
             let (capture, mappings) = sync.stage_capture(capture, facts.event_mappings).await?;
             // A local commit can create the baseline between the two transactions.
@@ -156,6 +153,14 @@ async fn session<A: SyncDataAdapter>(
     phase: &mut ConnectionPhase,
 ) -> TalosResult<()> {
     *phase = ConnectionPhase::CatchUp;
+    client
+        .report_progress(SyncProgress {
+            applied_cursor: None,
+            recovering: true,
+            pending_uploads: sync.pending_changes(binding).await?,
+        })
+        .await
+        .map_err(sync_error)?;
     let mut recovery = match sync.download_cursor(binding).await? {
         Some(cursor) => CatalogRecovery {
             cursor,
@@ -187,6 +192,19 @@ async fn session<A: SyncDataAdapter>(
     });
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     let mut feed_gap = false;
+    let mut applied_cursor = if recovery.deferred.is_empty() {
+        Some(recovery.cursor.clone())
+    } else {
+        None
+    };
+    client
+        .report_progress(SyncProgress {
+            applied_cursor: applied_cursor.clone(),
+            recovering: !recovery.deferred.is_empty(),
+            pending_uploads: sync.pending_changes(binding).await?,
+        })
+        .await
+        .map_err(sync_error)?;
     loop {
         *phase = ConnectionPhase::LocalStatus;
         if !sync.enabled(&binding.scope.account_id).await? {
@@ -198,7 +216,10 @@ async fn session<A: SyncDataAdapter>(
                 let Some(batch) = batch.map_err(sync_error)? else { return Err(TalosError::new(ErrorCode::ServiceUnavailable, "Synchronization feed disconnected.")) };
                 *phase = ConnectionPhase::Download;
                 for entry in batch.entries {
-                    match download_if_newer(sync, adapter, binding, client, (&entry.resource, &entry.version), &channels.changes).await {
+                    let Some(resource) = talos_sync_parser::from_wire_key(entry.resource)? else {
+                        continue;
+                    };
+                    match download_if_newer(sync, adapter, binding, client, (&resource, &entry.version), &channels.changes).await {
                         Ok(()) => {}
                         Err(error) if error.error_code() == ErrorCode::Conflict => {
                             // Preserve the last contiguous cursor and keep
@@ -208,12 +229,13 @@ async fn session<A: SyncDataAdapter>(
                         }
                         Err(error) => return Err(error),
                     }
-                    if !sync.has_pending_through(binding, &entry.resource, i64::MAX).await? {
-                        channels.failed_uploads.remove(&entry.resource);
+                    if !sync.has_pending_through(binding, &resource, i64::MAX).await? {
+                        channels.failed_uploads.remove(&resource);
                     }
                 }
                 if !feed_gap && recovery.deferred.is_empty() {
                     commit_cursor(sync, binding, &batch.next_cursor).await?;
+                    applied_cursor = Some(batch.next_cursor);
                 }
             }
             command = channels.commands.recv() => {
@@ -236,6 +258,7 @@ async fn session<A: SyncDataAdapter>(
                         // Replay the feed from the catalog cut now that every
                         // resource at that cut has been published.
                         commit_cursor(sync, binding, &recovery.cursor).await?;
+                        applied_cursor = Some(recovery.cursor.clone());
                         feed_gap = true;
                     }
                 }
@@ -255,6 +278,14 @@ async fn session<A: SyncDataAdapter>(
         }
         *phase = ConnectionPhase::LocalStatus;
         let pending = sync.pending_changes(binding).await?;
+        client
+            .report_progress(SyncProgress {
+                applied_cursor: applied_cursor.clone(),
+                recovering: !recovery.deferred.is_empty(),
+                pending_uploads: pending,
+            })
+            .await
+            .map_err(sync_error)?;
         channels.status.send_modify(|value| {
             value.pending_changes = pending;
             value.last_error = channels
@@ -271,7 +302,7 @@ async fn catch_up<A: SyncDataAdapter>(
     adapter: &A,
     binding: &SyncBinding,
     client: &SyncClient,
-    changes: &broadcast::Sender<talos_sync_types::SyncResourceSummary>,
+    changes: &broadcast::Sender<crate::SyncResourceSummary>,
 ) -> TalosResult<CatalogRecovery> {
     let initial = client
         .catalog(SyncListParams {
@@ -293,14 +324,15 @@ async fn catch_up<A: SyncDataAdapter>(
         loop {
             let page = client
                 .catalog(SyncListParams {
-                    kind: Some(kind),
+                    namespace: Some(kind.as_str().into()),
                     cursor: cursor.clone(),
                     limit: Some(128),
-                    computer_id: None,
+                    related: None,
                 })
                 .await
                 .map_err(sync_error)?;
             for resource in page.resources {
+                let resource: crate::SyncResourceSummary = resource.try_into()?;
                 match download_if_newer(
                     sync,
                     adapter,
@@ -345,7 +377,7 @@ async fn download_if_newer<A: SyncDataAdapter>(
     binding: &SyncBinding,
     client: &SyncClient,
     target: (&SyncResourceKey, &crate::SyncVersion),
-    changes: &broadcast::Sender<talos_sync_types::SyncResourceSummary>,
+    changes: &broadcast::Sender<crate::SyncResourceSummary>,
 ) -> TalosResult<()> {
     let (resource, expected) = target;
     if let Some(version) = sync.document_version(binding, resource).await? {
@@ -370,7 +402,7 @@ pub(super) async fn download<A: SyncDataAdapter>(
     binding: &SyncBinding,
     client: &SyncClient,
     resource: &SyncResourceKey,
-    changes: &broadcast::Sender<talos_sync_types::SyncResourceSummary>,
+    changes: &broadcast::Sender<crate::SyncResourceSummary>,
 ) -> TalosResult<(SyncDocument, crate::SyncVersion)> {
     download_with_depth(sync, adapter, binding, client, resource, changes, 0).await
 }
@@ -381,7 +413,7 @@ pub(super) async fn join_document(
     committed: &crate::SyncVersion,
 ) -> TalosResult<(SyncDocument, crate::SyncVersion)> {
     let document = client
-        .open_document(resource.clone(), committed.clone())
+        .open_document(resource.wire(), committed.clone())
         .await
         .map_err(sync_error)?;
     let joined = tokio::time::timeout(Duration::from_secs(15), document.receive())
@@ -412,7 +444,7 @@ async fn download_with_depth<A: SyncDataAdapter>(
     binding: &SyncBinding,
     client: &SyncClient,
     resource: &SyncResourceKey,
-    changes: &broadcast::Sender<talos_sync_types::SyncResourceSummary>,
+    changes: &broadcast::Sender<crate::SyncResourceSummary>,
     depth: usize,
 ) -> TalosResult<(SyncDocument, crate::SyncVersion)> {
     if depth > 32 {
@@ -435,14 +467,9 @@ async fn download_with_depth<A: SyncDataAdapter>(
                     "Synchronization document disconnected.",
                 ));
             };
-            let (mut tx, mut version, facts) =
-                prepare_download(sync, adapter, binding, resource, &updates, &hub_version).await?;
-            let batch = SyncImportBatch {
-                scope: binding.scope.clone(),
-                resource: resource.clone(),
-                version: version.clone(),
-                changes: facts,
-            };
+            let (mut tx, mut batch) = sync
+                .prepare_import(adapter, binding, resource, &updates, &hub_version)
+                .await?;
             let dependencies = adapter.missing_dependencies(&mut *tx, &batch).await?;
             if !dependencies.is_empty() {
                 tx.rollback().await?;
@@ -467,30 +494,16 @@ async fn download_with_depth<A: SyncDataAdapter>(
                 }
                 // The received bytes remain owned by this call. Rebuild the cut
                 // after dependencies commit; do not await the runner's own queue.
-                let (recovered_tx, recovered_version, facts) =
-                    prepare_download(sync, adapter, binding, resource, &updates, &hub_version)
-                        .await?;
-                tx = recovered_tx;
-                version = recovered_version;
-                adapter
-                    .apply_prepared(
-                        &mut *tx,
-                        &SyncImportBatch {
-                            scope: binding.scope.clone(),
-                            resource: resource.clone(),
-                            version: version.clone(),
-                            changes: facts,
-                        },
-                    )
+                (tx, batch) = sync
+                    .prepare_import(adapter, binding, resource, &updates, &hub_version)
                     .await?;
-            } else {
-                adapter.apply_prepared(&mut *tx, &batch).await?;
             }
+            adapter.apply(&mut *tx, &batch).await?;
             tx.commit().await?;
             document
-                .mark_committed(version.clone())
+                .mark_committed(batch.version.clone())
                 .map_err(sync_error)?;
-            committed = version;
+            committed = batch.version;
             if let Some(summary) = sync.resource_summary(binding, resource).await? {
                 let _ = changes.send(summary);
             }
@@ -505,38 +518,6 @@ async fn download_with_depth<A: SyncDataAdapter>(
         )
     })??;
     Ok((document, hub_version))
-}
-
-async fn prepare_download<A: SyncDataAdapter>(
-    sync: &TalosSync,
-    adapter: &A,
-    binding: &SyncBinding,
-    resource: &SyncResourceKey,
-    updates: &[Vec<u8>],
-    version: &crate::SyncVersion,
-) -> TalosResult<(
-    Box<dyn talos_storage::StorageTransaction>,
-    crate::SyncVersion,
-    Vec<talos_sync_types::SyncChange>,
-)> {
-    sync.import_document_with(
-        binding,
-        resource,
-        updates,
-        version,
-        None,
-        |version, changes| async move {
-            let batch = SyncImportBatch {
-                scope: binding.scope.clone(),
-                resource: resource.clone(),
-                version,
-                changes,
-            };
-            adapter.prepare_import(&batch).await?;
-            Ok(batch.changes)
-        },
-    )
-    .await
 }
 
 async fn upload_pending(
@@ -668,9 +649,10 @@ pub(super) async fn upload_resource(
         ));
     }
     sync.acknowledge(&batch).await?;
+    let acknowledged_at = store::timestamp()?;
     channels
         .status
-        .send_modify(|value| value.last_acknowledged_at = Some(now()));
+        .send_modify(|value| value.last_acknowledged_at = Some(acknowledged_at));
     closed?;
     Ok(Some(acknowledged))
 }
@@ -679,10 +661,4 @@ async fn commit_cursor(sync: &TalosSync, binding: &SyncBinding, cursor: &str) ->
     let mut tx = sync.storage.begin_background_transaction().await?;
     tx.execute("UPDATE sync_bindings SET download_cursor = ? WHERE hub_id = ? AND account_id = ? AND source_user_id = ?", &[cursor, &binding.scope.hub_id, &binding.scope.account_id, &binding.source_user_id]).await?;
     tx.commit().await
-}
-
-fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs() as i64)
 }
