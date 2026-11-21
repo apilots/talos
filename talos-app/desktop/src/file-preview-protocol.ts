@@ -133,10 +133,12 @@ export class FilePreviewProtocol {
     return preview.cloud?.close({ previewId }) ?? this.runtime.invoke("file/preview/close", { previewId }, { actorCredentials: preview.actorCredentials });
   }
   private async release(previewId: string, preview: NativePreview): Promise<void> {
-    try { await this.close(preview, previewId); }
-    catch (error) {
+    const release = this.close(preview, previewId).catch(error => {
       if (!(error instanceof TalosApiError && error.apiError.code === AppProtocol.ErrorCode.ResourceNotFound)) console.error("Preview release failed", error);
-    } finally { await this.cleanup(preview); }
+    });
+    await this.cleanup(preview);
+    // The native grant is withdrawn. Sign-out only waits for local work.
+    if (!preview.cloud) await release;
   }
   private async read(preview: NativePreview, previewId: string, resourcePath: string, offset: number, limit: number): Promise<AppProtocol.FilePreviewContent> {
     const part = { previewId, resourcePath, offset, limit };

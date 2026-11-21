@@ -49,6 +49,7 @@ export interface ChatComposerProps {
   onCancel?: () => void;
   inputHistory?: SessionInputHistory;
   disabled?: boolean;
+  attachmentsDisabled?: boolean;
   permissionMode?: UserPermissionMode;
   permissionModeDisabled?: boolean;
   onPermissionModeChange?: (mode: UserPermissionMode) => void;

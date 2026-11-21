@@ -5,6 +5,7 @@ const mocks = {
   sendText: vi.fn(),
   draft: "",
   realComposer: false,
+  realSessionQuery: false,
   sendTurn: vi.fn(),
   setDraft: vi.fn(),
   refetchProjects: vi.fn(),
@@ -119,8 +120,9 @@ export async function createChatFeatureMock(
       ],
       setActiveProjectId: vi.fn(),
     }),
-    useSessionQuery: (_sessionId: string, enabled?: boolean) => {
+    useSessionQuery: (sessionId: string, enabled?: boolean, draftNodeId?: string) => {
       mocks.sessionQueryEnabled = enabled;
+      if (mocks.realSessionQuery) return actual.useSessionQuery(sessionId, enabled, draftNodeId);
       return { data: mocks.session, error: mocks.sessionError };
     },
     useUpdateSessionModelMutation: () => ({ mutate: mocks.mutateModel }),
@@ -163,6 +165,7 @@ export function resetChatSessionPageMocks() {
     },
   };
   mocks.realComposer = false;
+  mocks.realSessionQuery = false;
   mocks.draft = "";
   mocks.sendTurn.mockReset();
   mocks.sendTurn.mockResolvedValue(undefined);

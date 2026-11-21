@@ -58,7 +58,7 @@
       "checks": [
         "docker",
         "server_image",
-        "worker_image", "caddy", "display"
+        "worker_image", "caddy", "display", "chrome"
       ],
       "binaries": ["app_server"]
     }

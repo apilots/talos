@@ -43,6 +43,31 @@ def wait_for_pixels(page):
     })''', polling=100, timeout=24000)
 
 
+def sign_in(page):
+    button = page.get_by_role('button', name='Continue with Talos Cloud')
+    button.click(timeout=18000)
+    button.wait_for(state='hidden', timeout=38000)
+
+
+def verify_web_history(playwright, base, session, prompt, report):
+    browser = playwright.chromium.launch(executable_path=os.environ.get('TALOS_E2E_CHROME_BIN') or
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless=True)
+    page = browser.new_page(locale='en-US')
+    try:
+        page.goto(base)
+        sign_in(page)
+        page.goto(base + '/sessions/' + session)
+        expect(page.get_by_text(prompt, exact=True)).to_be_visible(timeout=30000)
+        expect(page.get_by_text('TALO_CHAT_OK', exact=True)).to_be_visible()
+        page.screenshot(path=report / 'web-native-chat-history.png')
+        print('PASS Web reopened the Server conversation and displayed the Desktop message and reply', flush=True)
+    except Exception:
+        page.screenshot(path=report / 'web-native-chat-history-failure.png', timeout=3000)
+        raise
+    finally:
+        browser.close()
+
+
 def submit_automation(page, base, stage, report):
     from managed_talo import ASSISTANT, data, http, native_automation_prompt, wait
 
@@ -109,8 +134,12 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 document = ROOT / 'talos-e2e/fixtures/resource-preview/matrix-word.pdf'
                 page.locator('input[type=file]').set_input_files(str(document))
                 expect(page.get_by_role('button', name='Send', exact=True)).to_be_enabled(timeout=15000)
-                page.get_by_role('textbox').last.fill('native chat verification')
-                page.get_by_role('button', name='Send', exact=True).click()
+                session_id = data(http(base + ASSISTANT))['instance']['conversationSessionId']
+                prompt = 'native chat verification'
+                page.get_by_role('textbox').last.fill(prompt)
+                with page.expect_request('talos-cloud://server/v1/turns/start') as sent:
+                    page.get_by_role('button', name='Send', exact=True).click()
+                assert sent.value.post_data_json['sessionId'] == session_id
                 page.get_by_text('TALO_CHAT', exact=True).wait_for(timeout=30000)
                 Path(os.environ['TALOS_E2E_CHAT_VISIBLE']).touch()
                 reply = page.get_by_text('TALO_CHAT_OK', exact=True)
@@ -127,7 +156,6 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 page.get_by_role('link', name='Worker report').click()
                 expect(workspace.get_by_text('Report from the Talo Worker', exact=True)).to_be_visible(timeout=15000)
                 workspace.get_by_role('button', name='Close talo-preview.txt', exact=True).click()
-                session_id = data(http(base + ASSISTANT))['instance']['conversationSessionId']
                 page.evaluate("id => { location.hash = '/sessions/' + encodeURIComponent(id) }", session_id)
                 page.get_by_role('tab', name='Conversation').wait_for()
                 page.reload()
@@ -140,6 +168,7 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 page.get_by_role('link', name='Files', exact=True).click()
                 page.locator('.files-page-content').get_by_text(document.name, exact=True).first.click()
                 expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text('Word preview first page', timeout=20000)
+                verify_web_history(playwright, base, session_id, prompt, report)
                 print('PASS Files lists the selected Talo file store and opens its Server-only PDF', flush=True)
                 print('PASS native Talo attachment upload, streamed reply, remote PDF and Worker path preview, and reloaded image from both chat routes', flush=True)
                 return
@@ -181,9 +210,7 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
     electron_version = page.evaluate(r"navigator.userAgent.match(/Electron\/[\d.]+/)?.[0]")
     assert electron_version
     try:
-        sign_in = page.get_by_role('button', name='Continue with Talos Cloud')
-        sign_in.click(timeout=18000)
-        sign_in.wait_for(state='hidden', timeout=38000)
+        sign_in(page)
         page.goto(base + '/talo')
         connect = page.get_by_role('button', name='Connect desktop', exact=True)
         connect.wait_for(timeout=22000)

@@ -95,6 +95,7 @@ class ChangeScopeTests(unittest.TestCase):
         managed = by_case[('23_browser_container/03_managed_talo.sh',)]
         self.assertEqual(task['images'], ['server'])
         self.assertEqual(managed['images'], ['server', 'worker'])
+        self.assertTrue(managed['chrome'])
         self.assertEqual(set(task['binaries']), {'server', 'cli', 'worker', 'sandbox'})
         self.assertTrue(task['docker'] and task['node'])
         self.assertIn('talos-app/web', task_roots(task))
@@ -121,7 +122,7 @@ class ChangeScopeTests(unittest.TestCase):
                      'talos-app/web/src/features/files/components/FilePreview.tsx',
                      'talos-app/web/src/features/files/hooks/useFileMetadata.ts',
                      'talos-app/web/src/features/files/hooks/useFilesPage.ts', 'talos-app/web/src/pages/files/FilesPage.tsx',
-                     'talos-app/web/src/features/files/hooks/useFilePreview.ts',
+                     'talos-app/web/src/features/files/hooks/useFilePreview.ts', 'talos-app/web/src/shared/lib/open-resource.ts',
                      'talos-app/web/src/pages/chat/useChatSessionComposer.ts',
                      'talos-app/web/src/pages/chat/ChatHomePage.tsx', 'talos-app/web/src/pages/chat/useInitialSessionInput.ts',
                      'talos-app/web/src/features/automation/composer-entry.ts',

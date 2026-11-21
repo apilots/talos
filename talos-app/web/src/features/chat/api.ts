@@ -48,7 +48,8 @@ interface CreateProjectInput {
 }
 
 export async function listModels(nodeId?: string) {
-  return getTalosClient(nodeId).models.list();
+  const client = nodeId ? await getTalosClient({ nodeId, service: "models" }) : getTalosClient();
+  return client.models.list();
 }
 
 export async function listProjects(nodeId?: string) {
@@ -61,8 +62,8 @@ export async function listSessions(nodeId?: string) {
   return response.sessions;
 }
 
-export async function getSession(sessionId: string) {
-  return getTalosClient().sessions.get({ sessionId });
+export async function getSession(sessionId: string, draftNodeId?: string) {
+  return getTalosClient().sessions.get({ sessionId }, draftNodeId);
 }
 
 export function generateSessionId() {

@@ -227,7 +227,7 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                                     'talos-app/web/src/app/layouts/AppLayout.tsx', 'talos-app/web/src/app/layouts/RightWorkspace.tsx',
                                     'talos-app/web/src/features/files/components/FilePreview.tsx',
                                     'talos-app/web/src/features/files/hooks/useFileMetadata.ts',
-                                    'talos-app/web/src/features/files/hooks/useFilePreview.ts',
+                                    'talos-app/web/src/features/files/hooks/useFilePreview.ts', 'talos-app/web/src/shared/lib/open-resource.ts',
                                     'talos-app/web/src/pages/chat/useChatSessionComposer.ts',
                                     'talos-app/web/src/pages/chat/ChatHomePage.tsx', 'talos-app/web/src/pages/chat/useInitialSessionInput.ts',
                                     'talos-app/web/src/features/automation/composer-entry.ts',

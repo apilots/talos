@@ -324,7 +324,7 @@ talos:
 1. **未选择电脑。** 复用 `ComputerHomePage` 的右侧主内容区，内联展示「个人电脑」和「Talo」两个 Tab，默认打开「个人电脑」。列表为空时，在此页显示通过 Talos Desktop 登录同一账号的连接指引；已有个人电脑但尚未选择时，复用 `ComputerPicker` 展示个人电脑列表，点击一项进入该电脑的工作区。点击「Talo」Tab 在同一区域显示助手页面。
 2. **已选个人电脑。** 中间侧栏现有「你的电脑」行位置改为助手入口「Talo」，点击后在右侧显示同一个助手页面。左侧保留当前个人电脑选择，已有会话继续绑定原节点。个人电脑的桌面可从电脑设备详情打开。已有 Session 的标题栏根据绑定节点的在线状态和远程桌面能力显示电脑图标，点击后打开或切换到该节点的右侧桌面 Tab。[设备详情](../../talos-app/web/src/features/computers/topology/ComputerInspector.tsx)
 
-Electron can load the trusted Server UI through `TALOS_DESKTOP_SERVER_URL` and use same-origin HTTP and desktop WebSocket. Web and standalone Desktop use the same Talos Server TypeScript SDK for personal Talo. Electron transports SDK requests to its configured Server with the configured TLS trust. The bundled App Server serves local Computers and native desktop media. In both modes the Worker registers over outbound RPC and the Server relays desktop media. Deployed endpoints use HTTPS. Local fixtures may use loopback HTTP.
+Electron can load the trusted Server UI through `TALOS_DESKTOP_SERVER_URL` and use same-origin HTTP and desktop WebSocket. Web and standalone Desktop use the same Talos Server TypeScript SDK for personal Talo. Electron transports SDK requests to its configured Server with the configured TLS trust. The bundled App Server serves local Computers and native desktop media. Standalone Desktop calls the owning Server for Talo lifecycle actions. The JSON-RPC Computer methods report the capabilities of their own host. In both modes the Worker registers over outbound RPC and the Server relays desktop media. Deployed endpoints use HTTPS. Local fixtures may use loopback HTTP.
 
 Talo 页面按当前账号读取托管实例。两个入口都显示同一实例的状态。尚未初始化时提供「初始化 Talo」，该流程省略硬件规格。
 

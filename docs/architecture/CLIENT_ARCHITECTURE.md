@@ -13,38 +13,16 @@ not a substitute for parity tests.
 ## Client paths
 
 ```text
-+------------------+  +------------------+  +------------------+  +------------------+
-| Web UI           |  | Desktop          |  | TUI / Command    |  | Rust SDK client  |
-+--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
-         |                     |                     |                     |
-         v                     v                     v                     v
-+------------------+  +------------------+  +------------------+  +------------------+
-| TS TalosClient   |  | TS product SDK   |  | Rust SDK         |  | Rust SDK         |
-| shared types     |  | Client + types   |  | GatewayClient    |  | GatewayClient    |
-+--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
-         |                     |                     |                     |
-         v                     v                     v                     v
-+------------------+  +------------------+  +------------------+  +------------------+
-| Browser adapter  |  | HTTP/SSE or IPC  |  | EmbeddedServer   |  | Rust AppServer   |
-| HTTP + SSE       |  | personal Worker  |  | Client           |  | Client           |
-+--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
-         |                     |                     |                     |
-         +---------------------+-----------+---------+---------------------+
-                                           |
-                                           v
-+------------------------------------------------------------------------------------+
-| HTTP Gateway | main JSON-RPC stdio | in-process Gateway | app-server               |
-+------------------------------------------+-----------------------------------------+
-                                           |
-                                           v
-+------------------------------------------------------------------------------------+
-| TalosService: shared domain responses, ApiError and durable state                  |
-+------------------------------------------+-----------------------------------------+
-                                           |
-                                           v
-+------------------------------------------------------------------------------------+
-| Store commit -> Timeline { Agent | SystemNotice } -> subscribers / History         |
-+------------------------------------------+-----------------------------------------+
+Cloud Agent requests (personal Talo)
+  Web     ─┐
+           ├─ TalosClient (HTTP/SSE) → owning Talos Server → execution Worker
+  Desktop ─┘
+Cloud desktop media
+  Web viewer or native viewer ↔ owning Talos Server ↔ Worker framebuffer and input
+Local execution
+  Desktop       → AppServerClient (IPC/stdio) → bundled App Server → local Worker
+  TUI / Command → EmbeddedServerClient        → embedded Gateway
+  Rust SDK      → AppServerClient             → JSON-RPC App Server
 ```
 
 ## Unified capability surface
@@ -88,17 +66,23 @@ Remote dispatch stays inside `agent-client`; credentials never reach the rendere
 The production UI requires sign-in. Anonymous development keeps local execution
 without registering a fictitious cloud node. Sync opt-out remains independent.
 Shared generated types and parity tests keep the browser and Desktop facades aligned.
-Web and Desktop use the same Talos Server SDK for personal Talo, including
-lifecycle, turns, history, live events, automation, and files. The browser sends
-HTTP/SSE directly. Electron transports the same SDK requests to its configured
-Server with the host's TLS trust. The local App Server serves ordinary Computers
-and bridges native desktop media. The Server-issued conversation ID determines
-the destination of subsequent operations.
+For a Server-owned cloud Agent, each client calls the owning Talos Server's
+authenticated product API through the same TypeScript SDK. Personal Talo uses
+this path for lifecycle, turns, history, live events, automation and files. The
+Server dispatches execution to its Worker. Web sends HTTP/SSE directly and
+Electron uses its configured Server endpoint and TLS trust. Desktop media has
+a separate connection through the Server that carries Worker frames and viewer
+input. The Server-issued conversation ID identifies the owner for later requests.
 An existing conversation link uses that owner even if another Computer is
 selected. If its owner cannot be resolved, an attempted send preserves the draft
 and surfaces the error. Only an explicit new chat takes the selected Computer as
 its target. Server-issued routing IDs may be cached in memory. The Server owns
 the Turn and any durable Goal or Loop across Desktop restarts.
+
+For an ordinary Worker, Desktop can remember the Server-confirmed Computer ID
+for the signed-in account and configured Server. This lets saved chats and Files
+use their authenticated local File Service during a Server outage. A first
+lookup for an unknown Computer still requires the Server.
 
 ## Rust SDK and embedded SDK
 
@@ -286,7 +270,7 @@ before Sync imports that Computer.
 - Clients own presentation, interaction, optimistic state, and reconnect UX.
 - The server owns search, matching, parsing, permission, and durable lifecycle rules.
 
-Desktop's app-server controller owns backend restart and subscription replay.
+For local JSON-RPC subscriptions, Desktop's app-server controller owns backend restart and replay. Cloud Agent subscriptions reconnect through the shared HTTP/SSE SDK.
 Replay retains the verified account ID and last delivered cursor, never a token.
 After replacement it reads the current session from the existing auth owner and
 uses that account's current credential through normal request validation. Missing,

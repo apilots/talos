@@ -45,7 +45,7 @@ export function registerDesktopIpcHandlers(
       const native = { ...descriptor, previewId: "server-" + descriptor.previewId };
       filePreviews.remember(native, actorCredentials, event.sender, epoch, {
         read: part => client.files.preview.read({ ...part, previewId: descriptor.previewId }),
-        close: () => client.files.preview.close({ previewId: descriptor.previewId }),
+        close: () => client.files.preview.close({ previewId: descriptor.previewId }, AbortSignal.timeout(5_000)),
       });
       return native;
     }));

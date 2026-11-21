@@ -288,16 +288,6 @@ impl AppServerApplication for DesktopApplication {
         source: talos_types::talos::SessionSource,
         request: StartTurnRequest,
     ) -> ApplicationResult<ApplicationResponse> {
-        if self
-            .cloud
-            .get()
-            .is_some_and(|cloud| cloud.owns_turn(actor, &request))
-        {
-            return Err(project_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "Send Talo turns to their owning Server.",
-            )));
-        }
         self.local.start_turn(actor, source, request).await
     }
 

@@ -37,7 +37,7 @@ export async function uploadFile({
   signal,
   onProgress,
 }: UploadFileRequest): Promise<FileInfo> {
-  const client = await getTalosClient({ sessionId, nodeId });
+  const client = await getTalosClient({ service: "files", sessionId, nodeId });
   signal?.throwIfAborted();
   const response = await client.files.upload(
     {

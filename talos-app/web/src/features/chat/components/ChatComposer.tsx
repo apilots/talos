@@ -38,7 +38,7 @@ export function ChatComposer({
   onDismissCommandResponse,
   onCancel,
   inputHistory,
-  disabled,
+  disabled, attachmentsDisabled = disabled,
   permissionMode = "fullAccess",
   permissionModeDisabled = false,
   onPermissionModeChange,
@@ -163,7 +163,7 @@ export function ChatComposer({
         {showProjectSelector && compact ? <ComposerCompactContext {...{ disabled, isBusy, modelTriggerRef, models, onModelChange, setModelPickerOpen, onReasoningLevelChange, reasoningLevel, selectedModel, onProjectChange, activeProjectId, projects }} /> : null}
 
         <ComposerAttachmentTray
-          disabled={Boolean(disabled)}
+          disabled={Boolean(attachmentsDisabled)}
           error={
             attachmentDraft.hasInvalidAttachments
               ? t("chat:invalidAttachments")
@@ -222,9 +222,9 @@ export function ChatComposer({
 
         <div className="flex flex-wrap items-center gap-1 px-3 pb-3 pt-1.5">
           <ComposerAttachments
-            onAutomationMode={(automationCommands ?? automation?.commands)?.length ? (mode) => { setPendingMode(mode); editorRef.current?.focus(); } : undefined}
+            onAutomationMode={!disabled && (automationCommands ?? automation?.commands)?.length ? (mode) => { setPendingMode(mode); editorRef.current?.focus(); } : undefined}
             availableFiles={attachmentDraft.availableFiles}
-            disabled={Boolean(disabled || submitting)}
+            disabled={Boolean(attachmentsDisabled || submitting)}
             hasMoreAvailable={attachmentDraft.hasMoreAvailable}
             isLoading={attachmentDraft.isLoading}
             isLoadingMore={attachmentDraft.isLoadingMore}

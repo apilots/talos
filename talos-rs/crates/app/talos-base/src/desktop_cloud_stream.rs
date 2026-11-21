@@ -2,6 +2,7 @@
 use super::*;
 use futures_util::{SinkExt, StreamExt};
 use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
+use serde_json::json;
 use talos_browser::DesktopTransport;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;

@@ -23,6 +23,8 @@ import {
 } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
 import { sessionMessageSendPolicyOptions } from "@/shared/api/session-message-send-policy";
+import { hasLocalFileStore } from "@/shared/api/client";
+import { isServiceUnavailable } from "@/shared/api/is-service-unavailable";
 import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { ChatSessionTimeline } from "./ChatSessionTimeline";
 import type { SessionLocationState } from "./chatSessionLocation";
@@ -60,6 +62,7 @@ export function ChatSessionContent({ sessionId, talo }: {
     sessionId,
     !(locationState?.initialNodeId && hasInitialSessionInput(locationState)) &&
       pendingInitialSessionId !== sessionId,
+    retryDraft?.initialNodeId,
   );
   const session = sessionQuery.data;
   const missingSession = !session && sessionQuery.error instanceof TalosApiError &&
@@ -74,7 +77,7 @@ export function ChatSessionContent({ sessionId, talo }: {
   const scope = useProductScope();
   const selectComputer = useAppStore((state) => state.selectComputer);
   const nodeId = session?.nodeId ?? reservedTalo?.nodeId ?? draftNodeId;
-  const { data: computer } = useComputer(nodeId);
+  const { data: computer, error: computerError } = useComputer(nodeId);
   const workerPhase = reservedTalo?.phase ?? computer?.managedWorkerPhase ?? (instance?.nodeId === nodeId ? instance?.phase : undefined);
   const ready = workerPhase == null ? computer?.available : workerPhase === "ready";
   const canSend = Boolean((ready || workerPhase === "sleeping") &&
@@ -84,6 +87,10 @@ export function ChatSessionContent({ sessionId, talo }: {
     if (computer) selectComputer(scope, computer);
   }, [reservedTalo?.nodeId, session?.nodeId, sessionId, scope, selectComputer]);
   const { data: modelCatalog } = useModelsQuery(nodeId);
+  const computerOffline = computer?.status !== "disabled" &&
+    (computerError ? isServiceUnavailable(computerError) : computer?.available === false);
+  const stageOfflineAttachments = Boolean(!canSend && session && !sessionQuery.error && workerPhase == null &&
+    computerOffline && hasLocalFileStore(nodeId));
   const models = modelCatalog?.models;
   const projectsView = useProjectsView(nodeId);
   const { refetch: refetchProjects } = projectsView;
@@ -137,6 +144,7 @@ export function ChatSessionContent({ sessionId, talo }: {
     nodeId,
     managedTalo: workerPhase != null,
     canSend,
+    stageOfflineAttachments,
     taloConversation: Boolean(reservedTalo),
     restoredAutomationMode: retrySkill === "goal" || retrySkill === "loop" ? retrySkill : undefined,
     onRestoredAutomationModeConsumed: () => setRetryDraft(current => current && { ...current, initialSkillSelection: undefined }),

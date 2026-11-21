@@ -17,7 +17,7 @@ export function useFilePreview(source: FilePreviewSource, scope: string, instanc
     let disposed = false;
     let release: (() => void) | undefined;
     const prepare = async () => {
-      const { files } = await getTalosClient({ sessionId, nodeId, readOnly: fileId !== null && Boolean(sessionId) });
+      const { files } = await getTalosClient({ service: "files", sessionId, nodeId });
       if (disposed) return;
       const source: FilePreviewSource = fileId !== null ? { kind: "file", fileId } : { kind: "sessionPath", sessionId: sessionId!, path: path! };
       const descriptor = await files.preview.prepare({ source });

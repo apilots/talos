@@ -25,7 +25,7 @@ vi.mock("@/shared/store/app-store", async () => {
 });
 
 const mocks = getChatSessionPageMocks();
-const apiMocks = vi.hoisted(() => ({ node: "embedded", list: vi.fn(), files: vi.fn(), draftFiles: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ node: "embedded", list: vi.fn(), files: vi.fn(), draftFiles: vi.fn(), localSession: vi.fn(), linkedSession: vi.fn() }));
 function render(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderView(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
@@ -34,6 +34,8 @@ function render(ui: ReactElement) {
 vi.mock("@/shared/api/client", () => ({ getTalosClient: (owner?: { sessionId?: string }) => ({
   automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) },
   skills: { list: apiMocks.list },
+  sessions: { get: (request: { sessionId: string }, draftNodeId?: string) =>
+    draftNodeId === "embedded" ? apiMocks.localSession(request) : apiMocks.linkedSession(request) },
   files: { list: owner?.sessionId === "sess-1" ? apiMocks.files : apiMocks.draftFiles },
 }) }));
 
@@ -229,9 +231,11 @@ describe("ChatSessionPage", () => {
     );
   });
 
-  it("keeps draft sessions sendable after the initial prompt fails", async () => {
+  it("retries an explicit local draft after its first send fails while the Server is offline", async () => {
     mocks.session = undefined;
-    mocks.sessionError = new TalosApiError({ code: "resourceNotFound", message: "Session not found.", localization: null });
+    mocks.realSessionQuery = true;
+    apiMocks.localSession.mockRejectedValue(new TalosApiError({ code: "resourceNotFound", message: "Session not found.", localization: null }));
+    apiMocks.linkedSession.mockRejectedValue(new TalosApiError({ code: "serviceUnavailable", message: "Server offline.", localization: null }));
     mocks.sessionHistoryError = new Error("session not found");
     mocks.sessionHistoryIsSuccess = false;
     mocks.sendTurn.mockResolvedValue(undefined);
@@ -265,6 +269,7 @@ describe("ChatSessionPage", () => {
     await waitFor(() => expect(mocks.setDraft).toHaveBeenCalledWith("hello"));
     expect(screen.getByTestId("chat-composer").getAttribute("data-disabled")).toBe("false");
     expect(mocks.sendText).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(apiMocks.localSession).toHaveBeenCalledWith({ sessionId: "sess-1" }));
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => expect(mocks.sendTurn).toHaveBeenCalledWith({

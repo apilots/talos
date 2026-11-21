@@ -20,7 +20,7 @@ function Attachment({ fileId }: { fileId: string }) {
   const connectionKey = useAppStore((state) => `${state.connection.authToken}|${state.connection.userId}`);
   const { data, error } = useQuery({
     queryKey: ["talos", connectionKey, "file", fileId, sessionId],
-    queryFn: async () => (await getTalosClient({ sessionId, readOnly: true })).files.read({ fileId }),
+    queryFn: async () => (await getTalosClient({ service: "files", sessionId })).files.read({ fileId }),
     refetchOnWindowFocus: false,
   });
   if (error) return <span className="text-xs text-muted" role="alert">{userVisibleErrorMessage(error, t("attachmentLoadFailed"))}</span>;

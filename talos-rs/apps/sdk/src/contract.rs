@@ -184,6 +184,8 @@ pub trait GatewayClient: Send {
         request: talos_types::RotateCredentialRequest,
     ) -> TalosResult<talos_types::NodeCredential>;
 
+    /// Reports the connected Gateway's managed Worker capability for the signed-in account.
+    /// Lifecycle methods act on that Gateway. A standalone App Server has no Worker Runtime.
     async fn read_managed_worker(&mut self) -> TalosResult<talos_types::ManagedWorkerResponse>;
 
     async fn create_managed_worker(&mut self) -> TalosResult<talos_types::ManagedWorkerResponse>;

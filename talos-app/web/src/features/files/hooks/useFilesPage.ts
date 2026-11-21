@@ -62,7 +62,7 @@ export function useFilesPage() {
     queryKey: listKey,
     initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam }) =>
-      (await getTalosClient({ nodeId })).files.list({ cursor: pageParam, limit: FILES_PAGE_SIZE }),
+      (await getTalosClient({ service: "files", nodeId })).files.list({ cursor: pageParam, limit: FILES_PAGE_SIZE }),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchOnWindowFocus: false,
   });
@@ -73,7 +73,7 @@ export function useFilesPage() {
 
   const detailQuery = useQuery({
     queryKey: fileMetadataKey(connectionKey, selectedFileId, { nodeId }),
-    queryFn: async () => (await getTalosClient({ nodeId })).files.read({ fileId: selectedFileId! }),
+    queryFn: async () => (await getTalosClient({ service: "files", nodeId })).files.read({ fileId: selectedFileId! }),
     enabled: Boolean(selectedFileId),
     refetchOnWindowFocus: false,
   });
@@ -101,7 +101,7 @@ export function useFilesPage() {
       fileId: string;
       tags: string[];
       metadata: Record<string, string>;
-    }) => (await getTalosClient({ nodeId })).files.update({ fileId, tags, metadata }),
+    }) => (await getTalosClient({ service: "files", nodeId })).files.update({ fileId, tags, metadata }),
     onSuccess: async ({ file }) => {
       queryClient.setQueryData(fileMetadataKey(connectionKey, file.fileId, { nodeId }), { file });
       await queryClient.invalidateQueries({ queryKey: listKey });
@@ -109,7 +109,7 @@ export function useFilesPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (fileId: string) => (await getTalosClient({ nodeId })).files.delete({ fileId }),
+    mutationFn: async (fileId: string) => (await getTalosClient({ service: "files", nodeId })).files.delete({ fileId }),
     onSuccess: async (_, fileId) => {
       if (selectedFileId === fileId) {
         setSelectedFileId(null);

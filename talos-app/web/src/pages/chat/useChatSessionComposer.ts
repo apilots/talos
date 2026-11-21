@@ -38,6 +38,7 @@ interface UseChatSessionComposerOptions {
   nodeId?: string;
   managedTalo: boolean;
   canSend: boolean;
+  stageOfflineAttachments: boolean;
   onDraftAccepted: () => void;
   taloConversation?: boolean;
   restoredAutomationMode?: AutomationMode;
@@ -55,6 +56,7 @@ export function useChatSessionComposer({
   nodeId,
   managedTalo,
   canSend,
+  stageOfflineAttachments,
   onDraftAccepted,
   taloConversation = false,
   restoredAutomationMode,
@@ -125,6 +127,7 @@ export function useChatSessionComposer({
   const props: ChatComposerProps = {
     nodeId,
     disabled: !canSend,
+    attachmentsDisabled: !canSend && !stageOfflineAttachments,
     automation: session ? automation : undefined,
     initialAutomationMode: restoredAutomationMode,
     onRestoredAutomationModeConsumed,
@@ -250,7 +253,8 @@ export function useChatSessionComposer({
     selectedModel: currentModel,
     sessionTotalTokens: session?.usage?.tokens.total_tokens,
     showProjectSelector: false,
-    supportedAttachmentKinds: supportedAttachmentKinds(currentModelInfo),
+    // Staged files are checked against the selected model again before sending.
+    supportedAttachmentKinds: stageOfflineAttachments && !modelCatalog ? ["image", "file"] : supportedAttachmentKinds(currentModelInfo),
   };
 
   return {

@@ -65,6 +65,16 @@ describe("Desktop session ownership", () => {
     await expect(owner.resolve({ sessionId: "ordinary", readOnly: true })).resolves.toBe(local);
   });
 
+  it("recovers an explicit local draft whose first Turn was admitted during a Server outage", async () => {
+    const { owner, local, cloud } = setup();
+    cloud.sessions.get.mockRejectedValue(new TypeError("Server offline"));
+    await expect(owner.readSession("draft", "embedded")).rejects.toBe(missing);
+    const saved = session("draft", "embedded");
+    local.sessions.get.mockResolvedValue(saved);
+    await expect(owner.readSession("draft", "embedded")).resolves.toMatchObject({ ...saved, owner: "desktop" });
+    expect(cloud.sessions.get).not.toHaveBeenCalled();
+  });
+
   it("routes a session by its own Computer across other Computer operations", async () => {
     const { owner, local, cloud } = setup();
     local.sessions.get.mockResolvedValueOnce(session("ordinary", "personal-node"));

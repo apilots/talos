@@ -226,7 +226,7 @@ export function useComposerAttachments({
     setIsLoading(true);
     setError(null);
     try {
-      const response = await (await getTalosClient({ sessionId, nodeId: draftNodeId })).files.list({ limit: 100 });
+      const response = await (await getTalosClient({ service: "files", sessionId, nodeId: draftNodeId })).files.list({ limit: 100 });
       setAvailableFiles(
         response.data.filter(
           (file) => fileMatchesScope(file, scope) && supported.has(attachmentKind(file)),
@@ -248,7 +248,7 @@ export function useComposerAttachments({
     setIsLoadingMore(true);
     setError(null);
     try {
-      const response = await (await getTalosClient({ sessionId, nodeId: draftNodeId })).files.list({
+      const response = await (await getTalosClient({ service: "files", sessionId, nodeId: draftNodeId })).files.list({
         cursor: availableNextCursor, limit: 100,
       });
       const nextFiles = response.data.filter(
