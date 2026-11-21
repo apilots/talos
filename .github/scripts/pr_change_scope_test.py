@@ -107,7 +107,8 @@ class ChangeScopeTests(unittest.TestCase):
     def test_native_talo_journey_follows_renderer_and_media_changes(self):
         target = 'case:23_browser_container/03_managed_talo'
         for path in ('talos-app/desktop/src/ipc-guard.ts', 'talos-app/desktop/src/desktop-server-requests.ts',
-                     'talos-app/web/src/pages/home/TaloPage.tsx', 'talos-rs/crates/app/talos-base/src/desktop_cloud.rs'):
+                     'talos-app/web/src/pages/home/TaloPage.tsx', 'talos-rs/crates/app/talos-base/src/desktop_cloud.rs',
+                     'talos-app/web/src/features/chat/hooks/useChatSession.ts', 'talos-rs/crates/gateway/app-server/src/runtime/subscriptions.rs'):
             self.assertIn(target, impact([path]).targets['server'], path)
         self.assertEqual(impact(['talos-e2e/scripts/managed-talo/native_desktop.py']).targets['server'], {target})
 

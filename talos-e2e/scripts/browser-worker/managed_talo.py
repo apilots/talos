@@ -33,7 +33,7 @@ from http.server import ThreadingHTTPServer
 from threading import Event, Thread
 import os, select, socket, socketserver, subprocess
 import json
-from fixture import Fixture, USER, auxiliary_response
+from fixture import Fixture, USER, auxiliary_response, wait
 from managed_talo_access import configure_accounts
 
 configure_accounts()
@@ -82,10 +82,17 @@ class ManagedFixture(Fixture):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Connection", "close")
         self.end_headers()
-        for delta, finish in [({"role": "assistant", "content": "TALO_WAKE_OK"}, None), ({}, "stop")]:
+        chat = "native chat verification" in json.dumps(request["messages"])
+        parts = ["TALO_CHAT", "_OK"] if chat else ["TALO_WAKE_OK"]
+        for part in [*parts, None]:
+            delta = {"role": "assistant", "content": part} if part else {}
+            finish = None if part else "stop"
             chunk = {"id": "talo-fixture", "object": "chat.completion.chunk", "created": 1,
                      "model": "browser-fixture", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
             self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
+            if delta.get("content") == "TALO_CHAT":
+                self.wfile.flush()
+                wait(lambda: os.path.exists("/fixture/native-chat-visible"), "Electron rendered the first chunk", seconds=40)
         self.wfile.write(b"data: [DONE]\n\n")
         self.close_connection = True
 
@@ -186,7 +193,7 @@ def phase(base, expected):
     return snapshot if snapshot and snapshot["phase"] == expected else None
 
 
-def exercise(base, instances, worker_model, faults, observed, before_delete=None, initialize=None):
+def exercise(base, instances, worker_model, faults, observed, before_delete=None, native_stage=None):
     for token, user in ACCOUNTS.items():
         current = data(http(base + "/v1/user", token=token))["user"]
         assert (current["user_id"], current["role"], current["type"]) == (
@@ -196,9 +203,9 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
     exercise_access(base)
     assert data(http(base + ASSISTANT)) == {"enabled": True, "instance": None}
     assert http(base + ASSISTANT, {}, token="no-such-fixture-user")["status"] != "success"
-    if initialize:
+    if native_stage:
         try:
-            initialize()
+            native_stage("initialize")
         finally:
             instance = data(http(base + ASSISTANT))["instance"]
             if instance:
@@ -321,6 +328,8 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
     assert saved["id"] == session and saved["nodeId"] == node and saved["projectId"] is None
     print("PASS first Turn materializes the bound non-Project Talo Session and resolves the Goal Skill after Wake", flush=True)
 
+    if native_stage:
+        native_stage("chat")
     exercise_access(base, ready, session)
     media(base, node, observed.compute(instance), http, data, wait, REPORT, observed.execute)
     if RECOVERY:
@@ -468,7 +477,7 @@ def server_healthy(container, base):
     return http(base + "/health")
 
 
-def initialize_native(files, base, rpc_port, issuer_port):
+def run_native_stage(files, base, rpc_port, issuer_port, stage):
     with ExitStack() as stack:
         home = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="talo-desktop-")))
         ingress = f"https://127.0.0.1:{free_port()}"
@@ -487,8 +496,8 @@ def initialize_native(files, base, rpc_port, issuer_port):
             "last_used_at_ms": int(time.time() * 1000), "user": ACCOUNTS[TOKEN]}))
         session.chmod(0o600)
         subprocess.run([sys.executable, str(ROOT / "talos-e2e/scripts/managed-talo/native_desktop.py"),
-                        base, "", str(REPORT), "initialize"], check=True, timeout=200,
-                       env=dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(cfg),
+                        base, "", str(REPORT), stage], check=True, timeout=200,
+                       env=dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(cfg), TALOS_E2E_CHAT_VISIBLE=str(files / "native-chat-visible"),
                                 TALOS_APP_SERVER_BIN=os.environ["TALOS_E2E_APP_SERVER_BIN"]))
 
 
@@ -562,7 +571,7 @@ def run(files, parity=False, native=False):
                 wait(lambda: server_healthy(server, base), "Server restart")
 
         exercise(base, instances, worker_model, f"http://127.0.0.1:{fault_port}", DockerObservations(), restart,
-                 initialize=(lambda: initialize_native(files, base, rpc_port, fault_port)) if native else None)
+                 native_stage=(lambda stage: run_native_stage(files, base, rpc_port, fault_port, stage)) if native else None)
 
     finally:
         (REPORT / "managed-talo-server.log").write_text(docker("logs", server, check=False))

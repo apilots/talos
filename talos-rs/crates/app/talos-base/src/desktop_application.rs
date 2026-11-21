@@ -9,7 +9,7 @@ use talos_app_server::{ApplicationResponse, ApplicationResult};
 use talos_auth::AuthService;
 use talos_config::{Config, YamlConfigStore};
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_service::{AccountService, Actor, TimelineSubscription};
+use talos_service::{AccountService, Actor};
 use talos_types::{DesktopWorkerIdentityResponse, StartTurnRequest, SubscribeTimelineRequest};
 use tokio::sync::Mutex;
 
@@ -61,6 +61,15 @@ impl DesktopApplication {
         self.cloud
             .get_or_try_init(|| async { DesktopCloud::new(&self.config.cloud) })
             .await
+    }
+
+    async fn discover_conversation(&self, actor: &Actor, session: &str) -> Option<&DesktopCloud> {
+        if actor.auth_disabled || !actor.role.can_use_managed_worker(actor.user_type) {
+            return None;
+        }
+        let cloud = self.cloud().await.ok()?;
+        let instance = cloud.discover_personal_status(actor).await?.instance?;
+        (instance.conversation_session_id.as_deref() == Some(session)).then_some(cloud)
     }
 
     pub(crate) async fn stop_registration(&self) -> TalosResult<()> {
@@ -172,6 +181,17 @@ impl AppServerApplication for DesktopApplication {
         actor: &Actor,
         request: ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
+        if let Some(cloud) = self.cloud.get() {
+            if let Some(call) = cloud
+                .chat_call(actor, &request.params)
+                .map_err(project_error)?
+            {
+                return Ok(ApplicationResponse {
+                    body: cloud.send(actor, call).await.map_err(project_error)?,
+                    started_turn: None,
+                });
+            }
+        }
         if let Some(call) = CloudCall::for_request(actor, &request.params, &self.sync_host)
             .await
             .map_err(project_error)?
@@ -304,6 +324,43 @@ impl AppServerApplication for DesktopApplication {
         source: talos_types::talos::SessionSource,
         request: StartTurnRequest,
     ) -> ApplicationResult<ApplicationResponse> {
+        let cloud = self.cloud.get();
+        let known = cloud.and_then(|cloud| cloud.personal_session(actor, &request.session_id));
+        let mut personal = cloud.filter(|_| known == Some(true));
+        // A restarted host can receive a remote turn before the renderer rereads Talo status.
+        if known.is_none()
+            && !actor.auth_disabled
+            && actor.role.can_use_managed_worker(actor.user_type)
+        {
+            if let Some(node) = request
+                .node_id
+                .as_deref()
+                .filter(|node| *node != "embedded")
+            {
+                if node
+                    != self
+                        .sync_host
+                        .local_computer_id()
+                        .await
+                        .map_err(project_error)?
+                {
+                    personal = self.discover_conversation(actor, &request.session_id).await;
+                }
+            }
+        }
+        if let Some(cloud) = personal {
+            return Ok(ApplicationResponse {
+                body: cloud
+                    .send(
+                        actor,
+                        CloudCall::post("/v1/turns/start", &request).map_err(project_error)?,
+                    )
+                    .await
+                    .map_err(project_error)?,
+                // The Server owns the turn even if the Desktop closes.
+                started_turn: None,
+            });
+        }
         self.local.start_turn(actor, source, request).await
     }
 
@@ -311,8 +368,25 @@ impl AppServerApplication for DesktopApplication {
         &self,
         actor: &Actor,
         params: SubscribeTimelineRequest,
-    ) -> ApplicationResult<TimelineSubscription> {
-        self.local.subscribe_timeline_events(actor, params).await
+    ) -> ApplicationResult<talos_app_server::ApplicationSubscription> {
+        if let Some(cloud) = self
+            .cloud
+            .get()
+            .filter(|cloud| cloud.personal_session(actor, &params.session_id) == Some(true))
+        {
+            return cloud.subscribe(actor, params).await.map_err(project_error);
+        }
+        let result = self
+            .local
+            .subscribe_timeline_events(actor, params.clone())
+            .await;
+        // Subscription replay after a host restart can precede the first managed status read.
+        if matches!(&result, Err(error) if error.code == ErrorCode::ResourceNotFound) {
+            if let Some(cloud) = self.discover_conversation(actor, &params.session_id).await {
+                return cloud.subscribe(actor, params).await.map_err(project_error);
+            }
+        }
+        result
     }
 
     async fn cancel_active_turn(

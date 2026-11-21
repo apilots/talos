@@ -50,6 +50,12 @@ impl CloudCall {
 
     pub fn personal_target(request: &ClientRequestParams) -> Option<&str> {
         match request {
+            ClientRequestParams::ModelList(params) => params.node_id.as_deref(),
+            ClientRequestParams::ConfigGet(params)
+                if params.path == talos_types::ConfigPath::SessionMessageSendPolicy =>
+            {
+                params.node_id.as_deref()
+            }
             ClientRequestParams::ComputerRead(params) => Some(&params.node_id),
             ClientRequestParams::DesktopOpen(params) => Some(&params.node_id),
             ClientRequestParams::Browser(params)
@@ -71,6 +77,18 @@ impl CloudCall {
 
     fn from_request(request: &ClientRequestParams) -> TalosResult<Option<Self>> {
         let call = match request {
+            ClientRequestParams::ModelList(p) if p.node_id.is_some() => {
+                Self::get_query("/v1/models", p)?
+            }
+            ClientRequestParams::ConfigGet(p)
+                if p.node_id.is_some()
+                    && p.path == talos_types::ConfigPath::SessionMessageSendPolicy =>
+            {
+                Self::get_query(
+                    "/v1/config/sessionMessageSendPolicy",
+                    &[("nodeId", &p.node_id)],
+                )?
+            }
             ClientRequestParams::ComputerRead(params) => Self {
                 method: Method::GET,
                 path: format!("/v1/computers/{}", params.node_id),
@@ -143,7 +161,7 @@ pub(super) struct DesktopCloud {
     client: Client,
     origin: Url,
     // A routing hint from a Server response. Every operation still authenticates with that Server.
-    personal_node: Mutex<Option<(String, String)>>,
+    personal_status: Mutex<Option<(String, ManagedWorkerResponse)>>,
 }
 
 impl DesktopCloud {
@@ -166,7 +184,7 @@ impl DesktopCloud {
         }
         let mut client = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(60));
+            .connect_timeout(Duration::from_secs(60));
         if let Some(certificate) =
             talos_service::read_worker_trusted_ca(config.agent_trusted_ca_file.as_deref())?
         {
@@ -179,31 +197,44 @@ impl DesktopCloud {
         Ok(Self {
             client: client.build().map_err(request_error)?,
             origin,
-            personal_node: Mutex::default(),
+            personal_status: Mutex::default(),
         })
     }
 
-    pub fn knows_personal_node(&self, actor: &Actor, node: &str) -> bool {
-        self.personal_node
+    fn cached_personal_status<T>(
+        &self,
+        actor: &Actor,
+        read: impl FnOnce(&ManagedWorkerResponse) -> T,
+    ) -> Option<T> {
+        self.personal_status
             .lock()
             .expect("personal Talo routing lock")
             .as_ref()
-            .is_some_and(|(owner, id)| owner == &actor.user_id && id == node)
+            .filter(|(owner, _)| !actor.auth_disabled && owner == &actor.user_id)
+            .map(|(_, status)| read(status))
+    }
+
+    pub fn knows_personal_node(&self, actor: &Actor, node: &str) -> bool {
+        self.cached_personal_status(actor, |status| {
+            status
+                .instance
+                .as_ref()
+                .is_some_and(|info| info.node_id == node)
+        }) == Some(true)
     }
 
     pub async fn discover_personal_node(&self, actor: &Actor, node: &str) -> bool {
-        match self
-            .read_personal_status(actor, CloudCall::managed_read())
+        self.discover_personal_status(actor)
             .await
-        {
-            Ok(status) => status
-                .instance
-                .is_some_and(|instance| instance.node_id == node),
-            Err(error) => {
-                talos_logging::report_error(&error);
-                false
-            }
-        }
+            .and_then(|status| status.instance)
+            .is_some_and(|info| info.node_id == node)
+    }
+
+    pub async fn discover_personal_status(&self, actor: &Actor) -> Option<ManagedWorkerResponse> {
+        self.read_personal_status(actor, CloudCall::managed_read())
+            .await
+            .inspect_err(talos_logging::report_error)
+            .ok()
     }
 
     async fn read_personal_status(
@@ -213,12 +244,9 @@ impl DesktopCloud {
     ) -> TalosResult<ManagedWorkerResponse> {
         let status: ManagedWorkerResponse = self.send(actor, call).await?;
         *self
-            .personal_node
+            .personal_status
             .lock()
-            .expect("personal Talo routing lock") = status
-            .instance
-            .as_ref()
-            .map(|instance| (actor.user_id.clone(), instance.node_id.clone()));
+            .expect("personal Talo routing lock") = Some((actor.user_id.clone(), status.clone()));
         Ok(status)
     }
 
@@ -283,6 +311,7 @@ impl DesktopCloud {
         let mut request = self
             .client
             .request(call.method.clone(), url)
+            .timeout(Duration::from_secs(60))
             .bearer_auth(token);
         if let Some(body) = &call.body {
             request = request.json(body);
@@ -303,6 +332,9 @@ impl DesktopCloud {
         }
     }
 }
+
+#[path = "desktop_cloud_chat.rs"]
+mod chat;
 
 #[path = "desktop_cloud_stream.rs"]
 mod stream;

@@ -25,7 +25,7 @@ use talos_app_protocol::requests::{
 use talos_app_protocol::version::ProtocolVersion;
 use talos_error::{ApiError, ErrorCode, TalosError, TalosResult};
 use talos_logging::report_error;
-use talos_service::{Actor, TimelineSubscription, TimelineSubscriptionMessage};
+use talos_service::{Actor, TimelineSubscriptionMessage};
 use talos_types::ApiResponse;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, OwnedSemaphorePermit};
@@ -589,11 +589,11 @@ async fn resolve_request_actor(
 
 async fn forward_subscription(
     subscription_id: String,
-    mut source: TimelineSubscription,
+    mut source: crate::ApplicationSubscription,
     outgoing_tx: mpsc::Sender<OutgoingMessage>,
     _subscription_capacity: usize,
 ) {
-    let session_id = source.session_id.clone();
+    let session_id = source.response.session_id.clone();
     while let Some(message) = source.events.recv().await {
         match message {
             TimelineSubscriptionMessage::ActiveTurnChanged(change) => {

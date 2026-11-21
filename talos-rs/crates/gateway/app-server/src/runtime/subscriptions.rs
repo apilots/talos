@@ -43,7 +43,7 @@ impl Subscriptions {
     ) -> Result<(), ()> {
         match app.subscribe_timeline_events(actor, params).await {
             Ok(subscription) => {
-                let response = subscription.response();
+                let response = &subscription.response;
                 let subscription_id = response.subscription_id.clone();
                 let body = match serde_json::to_value(response) {
                     Ok(value) => super::api_success_value(value)?,

@@ -55,11 +55,24 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
             time.sleep(.2)
     context = browser.contexts[0]
     page = context.pages[0] if context.pages else context.wait_for_event('page', timeout=15000)
-    if stage == 'initialize':
+    if stage in ('initialize', 'chat'):
         page.wait_for_function("location.protocol === 'file:' && typeof window.talos?.invoke === 'function'")
         try:
             chooser = page.get_by_role('tab', name='Talo', exact=True)
             chooser.or_(page.get_by_role('link', name='Talo', exact=True)).first.click()
+            if stage == 'chat':
+                page.get_by_text('TALO_WAKE_OK', exact=True).wait_for(timeout=30000)
+                page.get_by_role('textbox').last.fill('native chat verification')
+                page.get_by_role('button', name='Send', exact=True).click()
+                page.get_by_text('TALO_CHAT', exact=True).wait_for(timeout=30000)
+                Path(os.environ['TALOS_E2E_CHAT_VISIBLE']).touch()
+                reply = page.get_by_text('TALO_CHAT_OK', exact=True)
+                reply.wait_for(timeout=45000)
+                page.reload()
+                reply.wait_for(timeout=30000)
+                page.screenshot(path=report / 'electron-native-chat.png')
+                print('PASS native Talo reply and reloaded conversation history', flush=True)
+                return
             page.get_by_role('button', name='Initialize Talo', exact=True).click()
             page.get_by_role('button', name='Connect desktop', exact=True).click(timeout=120000)
             wait_for_pixels(page)
@@ -131,7 +144,7 @@ def main():
     debug_port = port()
     with tempfile.TemporaryDirectory(prefix='talos-electron-') as home, (report / f'electron-{stage}.log').open('wb') as log:
         env = dict(os.environ, HOME=home, LANG='en_US.UTF-8')
-        if stage == 'initialize':
+        if stage in ('initialize', 'chat'):
             env.pop('TALOS_DESKTOP_SERVER_URL', None)
             env.pop('TALOS_DESKTOP_RENDERER_URL', None)
         else:

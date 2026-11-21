@@ -25,6 +25,7 @@ impl DesktopCloud {
         let mut socket = self
             .client
             .get(url)
+            .timeout(std::time::Duration::from_secs(60))
             .version(reqwest::Version::HTTP_11)
             .header(
                 reqwest::header::ORIGIN,
