@@ -6,6 +6,7 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileInfo, FileUploadOptions } from "@talos/sdk-browser";
 
+import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { useComposerAttachments } from "./useComposerAttachments";
 
 const fileApi = vi.hoisted(() => ({
@@ -37,7 +38,7 @@ const PROJECT_FILE: FileInfo = {
   mimeType: "application/pdf",
 };
 
-function createWrapper() {
+function createWrapper(sessionId?: string) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -45,7 +46,8 @@ function createWrapper() {
     },
   });
   return function Wrapper({ children }: PropsWithChildren) {
-    return createElement(QueryClientProvider, { client: queryClient }, children);
+    return createElement(QueryClientProvider, { client: queryClient },
+      createElement(AttachmentSessionContext.Provider, { value: sessionId }, children));
   };
 }
 
@@ -75,7 +77,7 @@ describe("useComposerAttachments", () => {
           supportedKinds: ["image", "file"],
           initialAttachments: [PROJECT_FILE],
         }),
-      { wrapper: createWrapper() },
+      { wrapper: createWrapper("talo-chat") },
     );
     const image = new File(["png"], "pasted.png", { type: "image/png" });
 
@@ -90,6 +92,7 @@ describe("useComposerAttachments", () => {
       },
       image,
       {
+        sessionId: "talo-chat",
         signal: expect.any(AbortSignal),
         onProgress: expect.any(Function),
       },
@@ -236,16 +239,18 @@ describe("useComposerAttachments", () => {
           scope: { type: "project", projectId: "project-1" },
           supportedKinds: ["image", "file"],
         }),
-      { wrapper: createWrapper() },
+      { wrapper: createWrapper("talo-chat") },
     );
 
     await act(async () => result.current.loadAvailable());
+    expect(fileApi.list).toHaveBeenNthCalledWith(1, { limit: 100, sessionId: "talo-chat" });
     expect(result.current.hasMoreAvailable).toBe(true);
 
     await act(async () => result.current.loadMoreAvailable());
 
     expect(fileApi.list).toHaveBeenNthCalledWith(2, {
       cursor: "next-page",
+      sessionId: "talo-chat",
       limit: 100,
     });
     expect(result.current.availableFiles).toEqual([PERSONAL_IMAGE, PROJECT_FILE]);

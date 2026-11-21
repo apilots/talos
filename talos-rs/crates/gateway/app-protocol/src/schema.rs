@@ -1,6 +1,5 @@
 use schemars::schema::{InstanceType, Schema, SchemaObject};
 use schemars::{schema_for, JsonSchema};
-use serde::Serialize;
 
 mod automation;
 mod typescript;
@@ -8,17 +7,16 @@ pub use automation::generate_typescript as generate_automation_typescript;
 use typescript::export;
 pub use typescript::generate_worker_runtime_typescript;
 
-use crate::errors::{AppServerErrorBody, AppServerErrorCode};
-use crate::jsonrpc::JsonRpcMessage;
-use crate::notifications::ServerNotification;
-use crate::requests::{ClientRequestParams, InitializeResponse};
-use crate::server_requests::ServerRequest;
+use crate::{
+    AppServerErrorBody, AppServerErrorCode, ClientRequestParams, InitializeResponse,
+    JsonRpcMessage, ServerNotification, ServerRequest,
+};
 
 pub fn json_value_schema(_generator: &mut schemars::gen::SchemaGenerator) -> Schema {
     Schema::Bool(true)
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(serde::Serialize, JsonSchema)]
 pub struct AppProtocolSchemaRoot {
     pub jsonrpc_message: JsonRpcMessage,
     pub client_request_params: ClientRequestParams,
@@ -184,6 +182,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ClientCapabilities>());
     output.push_str(&export::<crate::requests::ActorCredentials>());
     output.push_str(&export::<crate::requests::ActorCredential>());
+    output.push_str(&export::<crate::requests::FileListParams>());
+    output.push_str(&export::<crate::requests::FileIdParams>());
     output.push_str(&export::<crate::requests::FileUploadParams>());
     output.push_str(&export::<talos_types::DesktopWorkerIdentityResponse>());
     output.push_str(&export::<talos_types::DesktopWorkerEnrollParams>());

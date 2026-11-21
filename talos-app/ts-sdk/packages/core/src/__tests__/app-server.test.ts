@@ -74,7 +74,7 @@ describe("AppServerClient", () => {
         metadata: {},
       },
       new Uint8Array([97, 98]),
-      { signal: controller.signal },
+      { signal: controller.signal, sessionId: "talo-chat" },
     );
 
     await expect(upload).rejects.toMatchObject({ name: "AbortError" });
@@ -82,7 +82,8 @@ describe("AppServerClient", () => {
       "file/upload",
       "file/delete",
     ]);
-    expect(transport.requests[1]?.params).toEqual({ fileId: "file-1" });
+    expect(transport.requests[0]?.params).toMatchObject({ sessionId: "talo-chat" });
+    expect(transport.requests[1]?.params).toEqual({ fileId: "file-1", sessionId: "talo-chat" });
   });
 
 

@@ -7,6 +7,18 @@ use std::sync::{
 };
 use talos_types::{BuiltinJobListRequest, ManagedWorkerResponse};
 
+async fn serve_cloud(router: Router) -> (DesktopCloud, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let cloud = DesktopCloud::new(&CloudConfig {
+        agent_base_url: endpoint,
+        ..CloudConfig::default()
+    })
+    .unwrap();
+    (cloud, server)
+}
+
 #[tokio::test]
 async fn cloud_calls_use_the_server_origin_and_preserve_authorization_errors() {
     let admitted = Arc::new(AtomicBool::new(false));
@@ -88,14 +100,7 @@ async fn cloud_calls_use_the_server_origin_and_preserve_authorization_errors() {
             }
         }
     });
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let endpoint = format!("http://{}", listener.local_addr().unwrap());
-    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let cloud = DesktopCloud::new(&CloudConfig {
-        agent_base_url: endpoint,
-        ..CloudConfig::default()
-    })
-    .unwrap();
+    let (cloud, server) = serve_cloud(router).await;
     let actor = Actor::regular("test-user").with_access_token("test-account");
     let call = CloudCall::from_request(&ClientRequestParams::BuiltinJobList(
         BuiltinJobListRequest {
@@ -124,4 +129,103 @@ async fn cloud_calls_use_the_server_origin_and_preserve_authorization_errors() {
     }
     server.abort();
     assert!(admitted.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn personal_timeline_forwards_the_requested_subscription_lifetime() {
+    #[derive(serde::Deserialize)]
+    struct CloseOptions {
+        close_when_idle: bool,
+        close_on_terminal: bool,
+    }
+
+    let (send, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let router = Router::new().route(
+        "/v1/sessions/personal/events",
+        axum::routing::get(
+            move |axum::extract::Query(options): axum::extract::Query<CloseOptions>| async move {
+                send.send(options).unwrap();
+                StatusCode::OK
+            },
+        ),
+    );
+    let (cloud, server) = serve_cloud(router).await;
+    let actor = Actor::regular("test-user").with_access_token("test-account");
+    for (close_when_idle, close_on_terminal) in [
+        (None, None),
+        (Some(true), Some(false)),
+        (Some(false), Some(true)),
+    ] {
+        cloud
+            .subscribe(
+                &actor,
+                talos_types::SubscribeTimelineRequest {
+                    session_id: "personal".into(),
+                    turn_id: Some("turn".into()),
+                    since_event_id: None,
+                    replay_limit: None,
+                    close_when_idle,
+                    close_on_terminal,
+                },
+            )
+            .await
+            .unwrap();
+        let options = received.recv().await.unwrap();
+        assert_eq!(
+            (options.close_when_idle, options.close_on_terminal),
+            (
+                close_when_idle.unwrap_or(false),
+                close_on_terminal.unwrap_or(false)
+            )
+        );
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn personal_viewer_requires_media_before_opening_and_delivers_the_first_frame() {
+    use axum::extract::ws::{Message, WebSocketUpgrade};
+    const BANNER: &[u8] = b"RFB 003.008\n";
+    let router = Router::new().route(
+        "/v1/desktop/stream",
+        axum::routing::get(|ws: WebSocketUpgrade| async {
+            ws.on_upgrade(|mut socket| async move {
+                let Some(Ok(Message::Text(ticket))) = socket.recv().await else {
+                    panic!("expected a ticket");
+                };
+                let credentials = serde_json::from_str::<Value>(&ticket).unwrap();
+                if credentials["ticket"] == "ready" {
+                    socket.send(Message::Binary(BANNER.to_vec())).await.unwrap();
+                }
+                let _ = socket.recv().await;
+            })
+        }),
+    );
+    let (cloud, server) = serve_cloud(router).await;
+    let actor = Actor::regular("test-user").with_access_token("test-account");
+    let stream_id = uuid::Uuid::new_v4().to_string();
+    let stalled = tokio::time::timeout(
+        Duration::from_secs(10),
+        cloud.connect_viewer(&actor, "stalled", &stream_id),
+    )
+    .await
+    .expect("silent viewer admission must finish");
+    assert_eq!(
+        stalled
+            .err()
+            .expect("a silent viewer cannot open")
+            .error_code(),
+        ErrorCode::Timeout
+    );
+    let mut transport = cloud
+        .connect_viewer(&actor, "ready", &stream_id)
+        .await
+        .unwrap();
+    let first = tokio::time::timeout(Duration::from_secs(1), transport.incoming.recv())
+        .await
+        .expect("first frame should be delivered")
+        .unwrap()
+        .unwrap();
+    assert_eq!(first, BANNER);
+    server.abort();
 }

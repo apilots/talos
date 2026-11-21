@@ -8,6 +8,7 @@ import { getTalosClient } from "@/shared/api/client";
 
 export interface UploadFileRequest {
   file: File;
+  sessionId?: string;
   scope: FileScope;
   signal?: AbortSignal;
   onProgress?: (progress: FileUploadProgress) => void;
@@ -25,6 +26,7 @@ export function isMarkdownFile(file: Pick<FileInfo, "originalFilename" | "mimeTy
 
 export async function uploadFile({
   file,
+  sessionId,
   scope,
   signal,
   onProgress,
@@ -37,7 +39,7 @@ export async function uploadFile({
       metadata: {},
     },
     file,
-    { signal, onProgress },
+    { signal, onProgress, sessionId },
   );
   return response.file;
 }

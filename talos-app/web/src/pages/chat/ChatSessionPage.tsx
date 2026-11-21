@@ -23,6 +23,7 @@ import {
 } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
 import { sessionMessageSendPolicyOptions } from "@/shared/api/session-message-send-policy";
+import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { ChatSessionTimeline } from "./ChatSessionTimeline";
 import type { SessionLocationState } from "./chatSessionLocation";
 import {
@@ -149,7 +150,7 @@ export function ChatSessionContent({ sessionId, talo }: {
     return null;
   }
 
-  return (
+  const content = (
     <div className="flex h-full w-full flex-col overflow-hidden">
       {sessionQuery.error && !locationState && !firstTaloTurn ? (
         <p role="alert" className="px-7 py-3 text-sm text-danger">
@@ -261,4 +262,7 @@ export function ChatSessionContent({ sessionId, talo }: {
       <SessionClearConfirmationDialog {...sessionComposer.clearConfirmation} />
     </div>
   );
+  // History can arrive before session metadata. A new ordinary draft has neither.
+  const attachmentSessionId = talo || session || blocks.length > 0 ? sessionId : undefined;
+  return <AttachmentSessionContext.Provider value={attachmentSessionId}>{content}</AttachmentSessionContext.Provider>;
 }

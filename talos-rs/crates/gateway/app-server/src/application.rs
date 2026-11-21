@@ -1,6 +1,7 @@
 mod codec;
 mod dispatch;
-use codec::{decode_file_upload_data, talos_error_to_api_error, to_value};
+pub use codec::decode_file_upload_data;
+use codec::{talos_error_to_api_error, to_value};
 
 use async_trait::async_trait;
 use serde_json::Value;

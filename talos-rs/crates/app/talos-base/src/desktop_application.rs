@@ -1,5 +1,5 @@
 //! Desktop identity and enrollment over the existing management runtime.
-use super::desktop_cloud::{CloudCall, DesktopCloud};
+use super::desktop_cloud::{ChatAttachment, CloudCall, DesktopCloud};
 use async_trait::async_trait;
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
@@ -12,6 +12,12 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::{AccountService, Actor};
 use talos_types::{DesktopWorkerIdentityResponse, StartTurnRequest, SubscribeTimelineRequest};
 use tokio::sync::Mutex;
+
+enum ConversationOperation<'a> {
+    Read,
+    Command,
+    StartTurn(Option<&'a str>),
+}
 
 pub(crate) struct DesktopApplication {
     service: Arc<talos_service::TalosService>,
@@ -63,13 +69,62 @@ impl DesktopApplication {
             .await
     }
 
-    async fn discover_conversation(&self, actor: &Actor, session: &str) -> Option<&DesktopCloud> {
+    async fn conversation_cloud(
+        &self,
+        actor: &Actor,
+        session: &str,
+        operation: ConversationOperation<'_>,
+    ) -> TalosResult<Option<&DesktopCloud>> {
         if actor.auth_disabled || !actor.role.can_use_managed_worker(actor.user_type) {
-            return None;
+            return Ok(None);
         }
-        let cloud = self.cloud().await.ok()?;
-        let instance = cloud.discover_personal_status(actor).await?.instance?;
-        (instance.conversation_session_id.as_deref() == Some(session)).then_some(cloud)
+        if let Some(cloud) = self.cloud.get() {
+            if let Some(personal) = cloud.personal_session(actor, session) {
+                return Ok(personal.then_some(cloud));
+            }
+        }
+        let requested_node = match operation {
+            ConversationOperation::StartTurn(node) => node,
+            _ => None,
+        };
+        let stored_node = match self.service.get_session(actor, session).await {
+            // Local projections can serve reads while an ordinary Worker is offline.
+            Ok(_) if matches!(operation, ConversationOperation::Read) => return Ok(None),
+            Ok(info) => Some(info.node_id),
+            Err(error) if error.is_code(ErrorCode::ResourceNotFound) => None,
+            Err(error) => return Err(error),
+        };
+        let target = stored_node.as_deref().or(requested_node);
+        if let Some(target) = target {
+            if target == "embedded"
+                || target == self.sync_host.local_computer_id().await?
+                || self
+                    .sync_host
+                    .sync_stores
+                    .connections
+                    .lock()
+                    .await
+                    .get(target)
+                    .is_some_and(|(owner, _)| owner == &actor.user_id)
+            {
+                return Ok(None);
+            }
+        }
+        let cloud = self.cloud().await?;
+        // Another client can replace the account's Talo after our last status read.
+        match cloud.discover_conversation(actor, session).await {
+            Ok(personal) => Ok(personal.then_some(cloud)),
+            Err(error) => {
+                // Ordinary Workers accept an account-scoped Coordinator. A personal Talo
+                // forbids that connection, leaving its Server's original error authoritative.
+                if let Some(target) = target {
+                    if self.sync_host.resolve_computer(actor, target).await.is_ok() {
+                        return Ok(None);
+                    }
+                }
+                Err(error)
+            }
+        }
     }
 
     pub(crate) async fn stop_registration(&self) -> TalosResult<()> {
@@ -181,9 +236,58 @@ impl AppServerApplication for DesktopApplication {
         actor: &Actor,
         request: ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
-        if let Some(cloud) = self.cloud.get() {
-            if let Some(call) = cloud
-                .chat_call(actor, &request.params)
+        if let Some((session, attachment)) = ChatAttachment::for_request(&request.params) {
+            // A locally available file can be read while its ordinary Worker is offline.
+            let local_error = if matches!(
+                request.params,
+                ClientRequestParams::FileRead(_) | ClientRequestParams::FileContent(_)
+            ) && !self
+                .cloud
+                .get()
+                .is_some_and(|cloud| cloud.personal_session(actor, session) == Some(true))
+            {
+                match self.local.dispatch(actor, request.clone()).await {
+                    Err(error)
+                        if matches!(
+                            error.code,
+                            ErrorCode::ResourceNotFound | ErrorCode::ServiceUnavailable
+                        ) =>
+                    {
+                        Some(error)
+                    }
+                    result => return result,
+                }
+            } else {
+                None
+            };
+            let Some(cloud) = self
+                .conversation_cloud(actor, session, ConversationOperation::Command)
+                .await
+                .map_err(project_error)?
+            else {
+                if let Some(error) = local_error {
+                    return Err(error);
+                }
+                return self.local.dispatch(actor, request).await;
+            };
+            let call = attachment
+                .cloud_call(self.service.files.limits().max_upload_bytes)
+                .map_err(project_error)?;
+            return Ok(ApplicationResponse {
+                body: cloud.send(actor, call).await.map_err(project_error)?,
+                started_turn: None,
+            });
+        }
+        if let Some((session, call)) = CloudCall::chat(&request.params).map_err(project_error)? {
+            use ClientRequestParams::*;
+            let operation = match request.params {
+                SessionGet(_) | SessionHistory(_) | SessionActiveTurn(_) | AutomationRead(_)
+                | MessageQueueList(_) => ConversationOperation::Read,
+                _ => ConversationOperation::Command,
+            };
+            if let Some(cloud) = self
+                .conversation_cloud(actor, session, operation)
+                .await
                 .map_err(project_error)?
             {
                 return Ok(ApplicationResponse {
@@ -324,31 +428,15 @@ impl AppServerApplication for DesktopApplication {
         source: talos_types::talos::SessionSource,
         request: StartTurnRequest,
     ) -> ApplicationResult<ApplicationResponse> {
-        let cloud = self.cloud.get();
-        let known = cloud.and_then(|cloud| cloud.personal_session(actor, &request.session_id));
-        let mut personal = cloud.filter(|_| known == Some(true));
-        // A restarted host can receive a remote turn before the renderer rereads Talo status.
-        if known.is_none()
-            && !actor.auth_disabled
-            && actor.role.can_use_managed_worker(actor.user_type)
+        if let Some(cloud) = self
+            .conversation_cloud(
+                actor,
+                &request.session_id,
+                ConversationOperation::StartTurn(request.node_id.as_deref()),
+            )
+            .await
+            .map_err(project_error)?
         {
-            if let Some(node) = request
-                .node_id
-                .as_deref()
-                .filter(|node| *node != "embedded")
-            {
-                if node
-                    != self
-                        .sync_host
-                        .local_computer_id()
-                        .await
-                        .map_err(project_error)?
-                {
-                    personal = self.discover_conversation(actor, &request.session_id).await;
-                }
-            }
-        }
-        if let Some(cloud) = personal {
             return Ok(ApplicationResponse {
                 body: cloud
                     .send(
@@ -370,23 +458,13 @@ impl AppServerApplication for DesktopApplication {
         params: SubscribeTimelineRequest,
     ) -> ApplicationResult<talos_app_server::ApplicationSubscription> {
         if let Some(cloud) = self
-            .cloud
-            .get()
-            .filter(|cloud| cloud.personal_session(actor, &params.session_id) == Some(true))
+            .conversation_cloud(actor, &params.session_id, ConversationOperation::Command)
+            .await
+            .map_err(project_error)?
         {
             return cloud.subscribe(actor, params).await.map_err(project_error);
         }
-        let result = self
-            .local
-            .subscribe_timeline_events(actor, params.clone())
-            .await;
-        // Subscription replay after a host restart can precede the first managed status read.
-        if matches!(&result, Err(error) if error.code == ErrorCode::ResourceNotFound) {
-            if let Some(cloud) = self.discover_conversation(actor, &params.session_id).await {
-                return cloud.subscribe(actor, params).await.map_err(project_error);
-            }
-        }
-        result
+        self.local.subscribe_timeline_events(actor, params).await
     }
 
     async fn cancel_active_turn(

@@ -14,7 +14,7 @@ fn file_upload_base64_accepts_only_canonical_standard_padding() {
         let error = decode_file_upload_data(invalid, 100)
             .expect_err("non-canonical Base64 should be rejected");
         assert_eq!(
-            error,
+            error.to_api_error(),
             ApiError::with_message(
                 ErrorCode::InvalidRequest,
                 "The file upload is not valid standard Base64."
@@ -28,7 +28,7 @@ fn file_upload_base64_checks_encoded_and_decoded_limits() {
     let encoded_error = decode_file_upload_data("YWJjZA==", 3)
         .expect_err("encoded input should be rejected before decoding");
     assert_eq!(
-        encoded_error,
+        encoded_error.to_api_error(),
         ApiError::with_message(
             ErrorCode::UploadTooLarge,
             "The encoded file upload exceeds the configured size limit."
@@ -38,7 +38,7 @@ fn file_upload_base64_checks_encoded_and_decoded_limits() {
     let decoded_error = decode_file_upload_data("YWJj", 2)
         .expect_err("decoded input should be checked after decoding");
     assert_eq!(
-        decoded_error,
+        decoded_error.to_api_error(),
         ApiError::with_message(
             ErrorCode::UploadTooLarge,
             "The decoded file upload exceeds the configured size limit."

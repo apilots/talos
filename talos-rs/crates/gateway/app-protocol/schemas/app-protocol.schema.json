@@ -5098,7 +5098,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FileListRequest"
+              "$ref": "#/definitions/FileListParams"
             }
           },
           "required": [
@@ -5116,7 +5116,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FileReadRequest"
+              "$ref": "#/definitions/FileIdParams"
             }
           },
           "required": [
@@ -5134,7 +5134,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FileReadRequest"
+              "$ref": "#/definitions/FileIdParams"
             }
           },
           "required": [
@@ -5224,7 +5224,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FileDeleteRequest"
+              "$ref": "#/definitions/FileIdParams"
             }
           },
           "required": [
@@ -7244,8 +7244,8 @@
       ],
       "type": "object"
     },
-    "FileDeleteRequest": {
-      "description": "Selects one file to delete for the authenticated user.",
+    "FileDeleteResponse": {
+      "description": "Confirms the identifier of a deleted file.",
       "properties": {
         "fileId": {
           "type": "string"
@@ -7256,11 +7256,18 @@
       ],
       "type": "object"
     },
-    "FileDeleteResponse": {
-      "description": "Confirms the identifier of a deleted file.",
+    "FileIdParams": {
+      "description": "Select a file on the management host that owns the optional conversation.",
       "properties": {
         "fileId": {
           "type": "string"
+        },
+        "sessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -7322,8 +7329,8 @@
       ],
       "type": "object"
     },
-    "FileListRequest": {
-      "description": "Filters one authenticated user's files with opaque cursor pagination.",
+    "FileListParams": {
+      "description": "File list on the management host that owns the optional conversation.",
       "properties": {
         "cursor": {
           "default": null,
@@ -7351,6 +7358,13 @@
             }
           ],
           "default": null
+        },
+        "sessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "tags": {
           "default": null,
@@ -7634,18 +7648,6 @@
         }
       ]
     },
-    "FileReadRequest": {
-      "description": "Selects one file owned by the authenticated user.",
-      "properties": {
-        "fileId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "fileId"
-      ],
-      "type": "object"
-    },
     "FileReadResponse": {
       "description": "Returns public metadata for one ready file.",
       "properties": {
@@ -7740,13 +7742,20 @@
       "type": "object"
     },
     "FileUploadParams": {
-      "description": "App Server upload envelope; other file methods use shared request objects directly.",
+      "description": "Upload bytes to the management host that owns the optional conversation.",
       "properties": {
         "dataBase64": {
           "type": "string"
         },
         "request": {
           "$ref": "#/definitions/FileUploadRequest"
+        },
+        "sessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

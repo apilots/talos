@@ -1,3 +1,5 @@
+import { useContext } from "react";
+import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { useQuery } from "@tanstack/react-query";
 import { Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -14,10 +16,11 @@ export function MessageAttachments({ fileIds }: { fileIds: string[] }) {
 
 function Attachment({ fileId }: { fileId: string }) {
   const { t } = useTranslation("chat");
+  const sessionId = useContext(AttachmentSessionContext);
   const connectionKey = useAppStore((state) => `${state.connection.authToken}|${state.connection.userId}`);
   const { data, error } = useQuery({
-    queryKey: ["talos", connectionKey, "file", fileId],
-    queryFn: () => getTalosClient().files.read({ fileId }),
+    queryKey: ["talos", connectionKey, "file", fileId, sessionId],
+    queryFn: () => getTalosClient().files.read({ fileId, sessionId }),
     refetchOnWindowFocus: false,
   });
   if (error) return <span className="text-xs text-muted" role="alert">{userVisibleErrorMessage(error, t("attachmentLoadFailed"))}</span>;

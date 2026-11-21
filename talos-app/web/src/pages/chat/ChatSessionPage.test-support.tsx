@@ -98,6 +98,7 @@ export async function createChatFeatureMock(
             id: "model-1",
             name: "Model 1",
             provider: "mock",
+            input: ["text", "image"],
             reasoning: true,
             reasoning_effort: "medium",
             selection_capabilities: { reasoning: "effort", reasoning_efforts: ["light", "medium", "high", "xhigh"], fast: true, default_fast: false, default_reasoning_effort: "medium" },

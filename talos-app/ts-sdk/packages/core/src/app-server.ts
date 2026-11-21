@@ -16,11 +16,8 @@ import type {
   MemorySearchResponse,
   FsDirectoryCreateResponse,
   FsDirectoryReadResponse,
-  FileDeleteRequest,
   FileDeleteResponse,
-  FileListRequest,
   FileListResponse,
-  FileReadRequest,
   FileReadResponse,
   FileUpdateRequest,
   FileUpdateResponse,
@@ -136,7 +133,7 @@ export class AppServerClient {
     upload: async (
       request: FileUploadRequest,
       data: FileUploadData,
-      options: FileUploadOptions = {},
+      options: FileUploadOptions & { sessionId?: string } = {},
     ): Promise<FileUploadResponse> => {
       throwIfUploadAborted(options.signal);
       const totalBytes = data instanceof Blob ? data.size : data.byteLength;
@@ -146,12 +143,14 @@ export class AppServerClient {
       const response = await this.transport.request<FileUploadResponse>("file/upload", {
         request,
         dataBase64: encodeBase64(bytes),
+        sessionId: options.sessionId,
       } satisfies AppProtocol.FileUploadParams);
       if (options.signal?.aborted) {
         try {
-          await this.transport.request<FileDeleteResponse>("file/delete", {
+          await this.files.delete({
             fileId: response.file.fileId,
-          } satisfies FileDeleteRequest);
+            sessionId: options.sessionId,
+          });
         } catch (cleanupError) {
           throw new Error("Cancelled file upload cleanup failed.", { cause: cleanupError });
         }
@@ -160,15 +159,15 @@ export class AppServerClient {
       options.onProgress?.({ loadedBytes: totalBytes, totalBytes });
       return response;
     },
-    list: (request: FileListRequest = {}): Promise<FileListResponse> =>
+    list: (request: AppProtocol.FileListParams = {}): Promise<FileListResponse> =>
       this.transport.request("file/list", request),
-    read: (request: FileReadRequest): Promise<FileReadResponse> =>
+    read: (request: AppProtocol.FileIdParams): Promise<FileReadResponse> =>
       this.transport.request("file/read", request),
-    content: (request: FileReadRequest): Promise<import("./types").FileDownloadResponse> =>
+    content: (request: AppProtocol.FileIdParams): Promise<import("./types").FileDownloadResponse> =>
       this.transport.request<import("./generated/app-protocol").FileContentResponse>("file/content", request).then(decodeFileContent),
     update: (request: FileUpdateRequest): Promise<FileUpdateResponse> =>
       this.transport.request("file/update", request),
-    delete: (request: FileDeleteRequest): Promise<FileDeleteResponse> =>
+    delete: (request: AppProtocol.FileIdParams): Promise<FileDeleteResponse> =>
       this.transport.request("file/delete", request),
   };
 

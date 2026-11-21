@@ -279,3 +279,160 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
     fixture.server.await.unwrap().unwrap();
     cloud.abort();
 }
+
+#[tokio::test]
+async fn cold_personal_chat_continues_on_its_server_with_session_commands() {
+    use axum::{
+        extract::{Request, State},
+        Json, Router,
+    };
+    use serde_json::{json, Value};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use talos_app_protocol::requests::ClientRequest;
+    use talos_app_server::AppServerApplication;
+    use talos_types::{talos::SessionSource, ApiResponse, StartTurnRequest};
+
+    const SESSION: &str = "sess_server_owned";
+    const REPLACEMENT: &str = "sess_new_personal_chat";
+    let replaced = Arc::new(AtomicBool::new(false));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let router = Router::new()
+        .fallback(
+            |State(replaced): State<Arc<AtomicBool>>, request: Request| async move {
+                let path = request.uri().path().to_owned();
+                assert_eq!(request.headers()["authorization"], "Bearer owner");
+                let data = if path == "/v1/computers/managed-worker" {
+                    let session = if replaced.load(Ordering::Relaxed) {
+                        REPLACEMENT
+                    } else {
+                        SESSION
+                    };
+                    json!({"enabled": true, "instance": {"instanceId":session, "nodeId":session,
+                "conversationSessionId":session, "generation":1, "phase":"ready",
+                "cpuCores":1, "memoryBytes":1024, "diskQuota":"unsupported"}})
+                } else {
+                    let body = axum::body::to_bytes(request.into_body(), 8192)
+                        .await
+                        .unwrap();
+                    let params = serde_json::from_slice::<Value>(&body).unwrap();
+                    json!({"path":path, "params":params})
+                };
+                Json(ApiResponse::success(data))
+            },
+        )
+        .with_state(replaced.clone());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let fixture = DesktopFixture::new().await;
+    let mut host = fixture.host("Desktop");
+    host.config.cloud.agent_base_url = origin;
+    let actor = Actor::regular("owner")
+        .with_user_type(UserType::Max)
+        .with_access_token("owner");
+    let turn: StartTurnRequest = serde_json::from_value(json!({
+        "sessionId": SESSION, "input":{"content":[{"type":"text", "text":"Continue"}]}
+    }))
+    .unwrap();
+    let response = host
+        .start_turn(&actor, SessionSource::http(), turn.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        response.body,
+        json!({"path":"/v1/turns/start", "params":turn})
+    );
+
+    for (method, path, params) in [
+        (
+            "session/compact",
+            format!("/v1/sessions/{SESSION}/compact"),
+            json!({"sessionId": SESSION}),
+        ),
+        (
+            "session/clear",
+            format!("/v1/sessions/{SESSION}/clear"),
+            json!({"sessionId": SESSION}),
+        ),
+        (
+            "automation/execute",
+            "/v1/automation/execute".to_owned(),
+            json!({
+                "sessionId": SESSION, "action":{"target":"goal","action":{"type":"pause","goalId":"goal"}}
+            }),
+        ),
+    ] {
+        let request = ClientRequest::decode(method, Some(params.clone())).unwrap();
+        let response = host.dispatch(&actor, request).await.unwrap();
+        assert_eq!(response.body, json!({"path": path, "params":params}));
+    }
+    replaced.store(true, Ordering::Relaxed);
+    let next_turn = StartTurnRequest {
+        session_id: REPLACEMENT.into(),
+        ..turn
+    };
+    let response = host
+        .start_turn(&actor, SessionSource::http(), next_turn.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        response.body,
+        json!({"path":"/v1/turns/start", "params":next_turn})
+    );
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn offline_desktop_reads_an_ordinary_workers_stored_session() {
+    use serde_json::json;
+    use talos_app_protocol::requests::ClientRequest;
+    use talos_app_server::AppServerApplication;
+
+    let fixture = DesktopFixture::new().await;
+    let mut record = session_record();
+    record.conf.model_selection =
+        Some(talos_types::resolve_default_model_selection(&fixture.config.llm).unwrap());
+    fixture
+        .runtime
+        .session_store
+        .insert_session_record(&record)
+        .await
+        .unwrap();
+    let actor = Actor::regular(&record.user_id)
+        .with_user_type(UserType::Max)
+        .with_access_token("offline");
+    let mut host = fixture.host("Offline Desktop");
+    host.config.cloud.agent_base_url = "http://127.0.0.1:0".into();
+
+    let request =
+        ClientRequest::decode("session/get", Some(json!({"sessionId":record.id}))).unwrap();
+    let response = host.dispatch(&actor, request).await.unwrap();
+    assert_eq!(response.body["session"]["nodeId"], record.execution_node_id);
+    let history =
+        ClientRequest::decode("session/history", Some(json!({"sessionId":record.id}))).unwrap();
+    assert_eq!(
+        host.dispatch(&actor, history).await.unwrap().body["data"],
+        json!([])
+    );
+
+    let upload = ClientRequest::decode("file/upload", Some(json!({
+        "request":{"filename":"offline.png","scope":{"type":"personal"},"tags":[],"metadata":{}},
+        "dataBase64":"iVBORw0KGgo="
+    }))).unwrap();
+    let file = &host.dispatch(&actor, upload).await.unwrap().body["file"];
+    let params = json!({"fileId":file["fileId"], "sessionId":record.id});
+    let read = ClientRequest::decode("file/read", Some(params.clone())).unwrap();
+    assert_eq!(
+        host.dispatch(&actor, read).await.unwrap().body["file"],
+        *file
+    );
+    let content = ClientRequest::decode("file/content", Some(params)).unwrap();
+    assert_eq!(
+        host.dispatch(&actor, content).await.unwrap().body["dataBase64"],
+        "iVBORw0KGgo="
+    );
+
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+}

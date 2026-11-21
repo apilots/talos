@@ -11,7 +11,7 @@ import tempfile
 import time
 from urllib.parse import urlsplit
 
-from playwright.sync_api import Error, sync_playwright
+from playwright.sync_api import Error, expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[3]
 DESKTOP = ROOT / 'talos-app/desktop'
@@ -58,10 +58,20 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
     if stage in ('initialize', 'chat'):
         page.wait_for_function("location.protocol === 'file:' && typeof window.talos?.invoke === 'function'")
         try:
+            sys.path[:0] = [str(ROOT / 'talos-e2e/scripts/browser-worker'), str(ROOT / 'talos-e2e/scripts')]
+            from managed_talo import ASSISTANT, data, http, managed_resource, wait
             chooser = page.get_by_role('tab', name='Talo', exact=True)
             chooser.or_(page.get_by_role('link', name='Talo', exact=True)).first.click()
             if stage == 'chat':
                 page.get_by_text('TALO_WAKE_OK', exact=True).wait_for(timeout=30000)
+                attachment = 'native-talo.png'
+                image = page.screenshot(clip={'x': 0, 'y': 0, 'width': 8, 'height': 8})
+                page.locator('input[type=file]').set_input_files({'name': attachment, 'mimeType': 'image/png', 'buffer': image})
+                expect(page.get_by_role('button', name='Send', exact=True)).to_be_enabled(timeout=15000)
+                page.get_by_role('button', name='Remove ' + attachment, exact=True).click()
+                page.get_by_role('button', name='Add', exact=True).click()
+                page.get_by_role('button', name='Choose an existing file').click()
+                page.get_by_role('button', name=attachment, exact=True).click()
                 page.get_by_role('textbox').last.fill('native chat verification')
                 page.get_by_role('button', name='Send', exact=True).click()
                 page.get_by_text('TALO_CHAT', exact=True).wait_for(timeout=30000)
@@ -70,8 +80,18 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 reply.wait_for(timeout=45000)
                 page.reload()
                 reply.wait_for(timeout=30000)
+                page.get_by_role('button', name='Preview ' + attachment, exact=True).wait_for(timeout=15000)
                 page.screenshot(path=report / 'electron-native-chat.png')
-                print('PASS native Talo reply and reloaded conversation history', flush=True)
+                session_id = data(http(base + ASSISTANT))['instance']['conversationSessionId']
+                page.evaluate("id => { location.hash = '/sessions/' + encodeURIComponent(id) }", session_id)
+                page.get_by_role('tab', name='Conversation').wait_for()
+                page.reload()
+                reply.wait_for(timeout=30000)
+                page.get_by_role('button', name='Preview ' + attachment, exact=True).wait_for(timeout=15000)
+                page.get_by_role('button', name='Add', exact=True).click()
+                page.get_by_role('button', name='Choose an existing file').click()
+                page.get_by_role('button', name=attachment, exact=True).wait_for(timeout=15000)
+                print('PASS native Talo attachment upload, selection, streamed reply and reloaded image from both chat routes', flush=True)
                 return
             page.get_by_role('button', name='Initialize Talo', exact=True).click()
             page.get_by_role('button', name='Connect desktop', exact=True).click(timeout=120000)
@@ -81,8 +101,6 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
             release = page.get_by_role('button', name='Return to agent', exact=True)
             release.wait_for()
             wait_for_pixels(page)
-            sys.path[:0] = [str(ROOT / 'talos-e2e/scripts/browser-worker'), str(ROOT / 'talos-e2e/scripts')]
-            from managed_talo import ASSISTANT, data, http, managed_resource, wait
             from media import shift_pressed
             instance = data(http(base + ASSISTANT))['instance']['instanceId']
             worker, = managed_resource('container', instance)

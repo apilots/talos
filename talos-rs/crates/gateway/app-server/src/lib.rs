@@ -5,8 +5,8 @@ pub use desktop_host::{DesktopHostBridge, DesktopHostEvent};
 mod runtime;
 
 pub use application::{
-    AppServerApplication, ApplicationResponse, ApplicationResult, ApplicationSubscription,
-    BackgroundTaskDrain, TalosApplicationAdapter,
+    decode_file_upload_data, AppServerApplication, ApplicationResponse, ApplicationResult,
+    ApplicationSubscription, BackgroundTaskDrain, TalosApplicationAdapter,
 };
 pub use auth::{ActorCredentialValidator, AuthServiceCredentialValidator};
 pub use runtime::{

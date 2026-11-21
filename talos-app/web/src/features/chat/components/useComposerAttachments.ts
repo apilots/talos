@@ -1,6 +1,6 @@
 import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { AppProtocol } from "@talos/sdk-browser";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
   FileInfo,
@@ -9,6 +9,7 @@ import type {
 } from "@talos/sdk-browser";
 
 import { fileListQueryKey, uploadFile } from "@/features/files/api";
+import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { getTalosClient } from "@/shared/api/client";
 import { useConnectionKey } from "../hooks/useChatQueries";
 
@@ -65,6 +66,7 @@ export function useComposerAttachments({
 }: UseComposerAttachmentsOptions) {
   const queryClient = useQueryClient();
   const connectionKey = useConnectionKey();
+  const sessionId = useContext(AttachmentSessionContext);
   const [items, setItems] = useState<ComposerAttachmentItem[]>(() =>
     initialAttachments.map((file) => readyItem(file)),
   );
@@ -166,6 +168,7 @@ export function useComposerAttachments({
           const uploaded = await uploadFile({
             file: item.file,
             scope,
+            sessionId,
             signal: controller.signal,
             onProgress: (progress) => {
               setItems((current) =>
@@ -219,7 +222,7 @@ export function useComposerAttachments({
     setIsLoading(true);
     setError(null);
     try {
-      const response = await getTalosClient().files.list({ limit: 100 });
+      const response = await getTalosClient().files.list({ limit: 100, sessionId });
       setAvailableFiles(
         response.data.filter(
           (file) => fileMatchesScope(file, scope) && supported.has(attachmentKind(file)),
@@ -242,8 +245,7 @@ export function useComposerAttachments({
     setError(null);
     try {
       const response = await getTalosClient().files.list({
-        cursor: availableNextCursor,
-        limit: 100,
+        cursor: availableNextCursor, limit: 100, sessionId,
       });
       const nextFiles = response.data.filter(
         (file) => fileMatchesScope(file, scope) && supported.has(attachmentKind(file)),

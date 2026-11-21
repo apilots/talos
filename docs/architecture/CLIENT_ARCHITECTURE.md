@@ -87,8 +87,9 @@ Remote dispatch stays inside `agent-client`; credentials never reach the rendere
 The production UI requires sign-in. Anonymous development keeps local execution
 without registering a fictitious cloud node. Sync opt-out remains independent.
 Shared generated types and parity tests keep the browser and Desktop facades aligned.
-Desktop routes chat turns, history and live events for the personal Talo conversation
-to the Server that supplied its session ID. The Server owns the turn across Desktop restarts.
+Desktop routes personal Talo turns, history, live events, session commands and chat
+attachments to the Server that supplied the session ID. The Server owns the turn
+across Desktop restarts.
 
 ## Rust SDK and embedded SDK
 

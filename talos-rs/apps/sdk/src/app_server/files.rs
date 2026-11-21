@@ -5,6 +5,7 @@ use talos_types::FileUploadRequest;
 
 pub(super) fn file_upload_params(request: FileUploadRequest, data: Bytes) -> FileUploadParams {
     FileUploadParams {
+        session_id: None,
         request,
         data_base64: base64::engine::general_purpose::STANDARD.encode(data),
     }

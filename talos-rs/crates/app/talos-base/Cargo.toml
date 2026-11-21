@@ -12,6 +12,7 @@ e2e = []
 [dependencies]
 chrono = { workspace = true }
 base64.workspace = true
+bytes.workspace = true
 talos-browser.workspace = true
 talos-sync = { workspace = true }
 talos-sync-sdk = { workspace = true }
@@ -21,7 +22,7 @@ subtle = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-reqwest = { workspace = true, features = ["stream"] }
+reqwest = { workspace = true, features = ["stream", "multipart"] }
 sse-stream = "0.2.6"
 serde_urlencoded = "0.7"
 reqwest-websocket = "0.5.1"
@@ -68,7 +69,6 @@ talos-worker = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 axum = "0.7"
 talos-plugin = { workspace = true }
-bytes = { workspace = true }
 rcgen = "0.14"
 talos-mcp = { workspace = true }
 tempfile = "3"

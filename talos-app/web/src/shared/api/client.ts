@@ -1,4 +1,4 @@
-import { createBrowserTalosClient } from "@talos/sdk-browser";
+import { createBrowserTalosClient, type AppServerClient } from "@talos/sdk-browser";
 
 import { connectionScope } from "@/shared/store/connection-scope";
 import { bindComputerTarget } from "./computer-target";
@@ -45,7 +45,8 @@ export type TalosWebClient = {
     "list" | "add" | "update" | "delete" | "reorder" | "start"
   >;
   projects: Methods<BrowserTalosClient["projects"], "list" | "create" | "patch" | "delete">;
-  files: Methods<BrowserTalosClient["files"], "upload" | "list" | "read" | "content" | "update" | "delete" | "preview">;
+  files: Methods<AppServerClient["files"], "upload" | "list" | "read" | "content"> &
+    Methods<BrowserTalosClient["files"], "update" | "delete" | "preview">;
   fs: {
     directory: Methods<BrowserTalosClient["fs"]["directory"], "read" | "create">;
   };

@@ -213,7 +213,12 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                                     'talos-rs/crates/gateway/http/src/server/desktop', 'talos-rs/crates/gateway/http/src/server/events',
                                     'talos-rs/crates/gateway/app-server/src/runtime/subscriptions', 'talos-rs/crates/gateway/app-server/src/application.rs',
                                     'talos-rs/crates/gateway/app-server/src/runtime.rs', 'talos-app/web/src/pages/chat/ChatSessionPage',
-                                    'talos-app/web/src/features/chat/hooks/useChatSession'))):
+                                    'talos-app/web/src/features/chat/hooks/useChatSession',
+                                    'talos-app/web/src/features/chat/hooks/useSessionStreaming.ts',
+                                    'talos-app/web/src/features/chat/components/useComposerAttachments.ts',
+                                    'talos-app/web/src/shared/api/attachment-session.ts',
+                                    'talos-app/web/src/widgets/message-list/FileImage.tsx',
+                                    'talos-app/web/src/widgets/message-list/MessageAttachments.tsx'))):
             result.targets['server'].add('case:23_browser_container/03_managed_talo')
         if path.startswith(OWNER_CONTROLS_INPUTS):
             result.targets['server'].add(OWNER_CONTROLS_TARGET)

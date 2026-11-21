@@ -20,7 +20,16 @@ const TALO_PATH: &str = "/v1/computers/managed-worker";
 pub(super) struct CloudCall {
     method: Method,
     path: String,
-    body: Option<Value>,
+    body: Option<CloudBody>,
+}
+
+enum CloudBody {
+    Json(Value),
+    Upload {
+        metadata: String,
+        filename: String,
+        bytes: bytes::Bytes,
+    },
 }
 
 impl CloudCall {
@@ -94,26 +103,14 @@ impl CloudCall {
                 path: format!("/v1/computers/{}", params.node_id),
                 body: None,
             },
-            ClientRequestParams::Browser(request) => Self {
-                method: Method::POST,
-                path: "/v1/browser".into(),
-                body: Some(value(request)?),
-            },
-            ClientRequestParams::DesktopOpen(request) => Self {
-                method: Method::POST,
-                path: "/v1/desktop/open".into(),
-                body: Some(value(request)?),
-            },
-            ClientRequestParams::BuiltinJobList(request) => Self {
-                method: Method::POST,
-                path: "/v1/builtin-job/list".to_owned(),
-                body: Some(value(request)?),
-            },
-            ClientRequestParams::BuiltinJobControl(request) => Self {
-                method: Method::POST,
-                path: "/v1/builtin-job/control".to_owned(),
-                body: Some(value(request)?),
-            },
+            ClientRequestParams::Browser(request) => Self::post("/v1/browser", request)?,
+            ClientRequestParams::DesktopOpen(request) => Self::post("/v1/desktop/open", request)?,
+            ClientRequestParams::BuiltinJobList(request) => {
+                Self::post("/v1/builtin-job/list", request)?
+            }
+            ClientRequestParams::BuiltinJobControl(request) => {
+                Self::post("/v1/builtin-job/control", request)?
+            }
             ClientRequestParams::ComputerReadManagedWorker(_) => Self::managed_read(),
             ClientRequestParams::ComputerCreateManagedWorker(_) => Self {
                 method: Method::POST,
@@ -132,10 +129,10 @@ impl CloudCall {
             ClientRequestParams::ComputerDeleteManagedWorker(request) => Self {
                 method: Method::POST,
                 path: Self::talo_action_path(&request.instance_id, "delete")?,
-                body: Some(json!({
+                body: Some(CloudBody::Json(json!({
                     "expectedGeneration": request.expected_generation,
                     "confirmDataLoss": request.confirm_data_loss,
-                })),
+                }))),
             },
             _ => return Ok(None),
         };
@@ -146,7 +143,9 @@ impl CloudCall {
         Ok(Self {
             method: Method::POST,
             path: Self::talo_action_path(&request.instance_id, action)?,
-            body: Some(json!({ "expectedGeneration": request.expected_generation })),
+            body: Some(CloudBody::Json(
+                json!({ "expectedGeneration": request.expected_generation }),
+            )),
         })
     }
 
@@ -157,11 +156,21 @@ impl CloudCall {
     }
 }
 
+struct PersonalStatus {
+    owner: String,
+    response: ManagedWorkerResponse,
+    last_other_session: Option<String>,
+}
+
+fn personal_conversation_id(status: &ManagedWorkerResponse) -> Option<&str> {
+    status.instance.as_ref()?.conversation_session_id.as_deref()
+}
+
 pub(super) struct DesktopCloud {
     client: Client,
     origin: Url,
     // A routing hint from a Server response. Every operation still authenticates with that Server.
-    personal_status: Mutex<Option<(String, ManagedWorkerResponse)>>,
+    personal_status: Mutex<Option<PersonalStatus>>,
 }
 
 impl DesktopCloud {
@@ -204,19 +213,20 @@ impl DesktopCloud {
     fn cached_personal_status<T>(
         &self,
         actor: &Actor,
-        read: impl FnOnce(&ManagedWorkerResponse) -> T,
+        read: impl FnOnce(&PersonalStatus) -> T,
     ) -> Option<T> {
         self.personal_status
             .lock()
             .expect("personal Talo routing lock")
             .as_ref()
-            .filter(|(owner, _)| !actor.auth_disabled && owner == &actor.user_id)
-            .map(|(_, status)| read(status))
+            .filter(|cached| !actor.auth_disabled && cached.owner == actor.user_id)
+            .map(read)
     }
 
     pub fn knows_personal_node(&self, actor: &Actor, node: &str) -> bool {
-        self.cached_personal_status(actor, |status| {
-            status
+        self.cached_personal_status(actor, |cached| {
+            cached
+                .response
                 .instance
                 .as_ref()
                 .is_some_and(|info| info.node_id == node)
@@ -231,7 +241,7 @@ impl DesktopCloud {
     }
 
     pub async fn discover_personal_status(&self, actor: &Actor) -> Option<ManagedWorkerResponse> {
-        self.read_personal_status(actor, CloudCall::managed_read())
+        self.read_personal_status(actor, CloudCall::managed_read(), None)
             .await
             .inspect_err(talos_logging::report_error)
             .ok()
@@ -241,12 +251,27 @@ impl DesktopCloud {
         &self,
         actor: &Actor,
         call: CloudCall,
+        queried_session: Option<&str>,
     ) -> TalosResult<ManagedWorkerResponse> {
         let status: ManagedWorkerResponse = self.send(actor, call).await?;
-        *self
+        let mut cached = self
             .personal_status
             .lock()
-            .expect("personal Talo routing lock") = Some((actor.user_id.clone(), status.clone()));
+            .expect("personal Talo routing lock");
+        let last_other_session = queried_session
+            .filter(|id| Some(*id) != personal_conversation_id(&status))
+            .map(str::to_owned)
+            .or_else(|| {
+                cached
+                    .take()
+                    .filter(|old| old.owner == actor.user_id)
+                    .and_then(|old| old.last_other_session)
+            });
+        *cached = Some(PersonalStatus {
+            owner: actor.user_id.clone(),
+            response: status.clone(),
+            last_other_session,
+        });
         Ok(status)
     }
 
@@ -256,8 +281,17 @@ impl DesktopCloud {
         call: CloudCall,
         request: &ClientRequestParams,
     ) -> TalosResult<Value> {
-        if matches!(request, ClientRequestParams::ComputerReadManagedWorker(_)) {
-            return value(&self.read_personal_status(actor, call).await?);
+        use ClientRequestParams::*;
+        if matches!(
+            request,
+            ComputerReadManagedWorker(_)
+                | ComputerCreateManagedWorker(_)
+                | ComputerStartManagedWorker(_)
+                | ComputerStopManagedWorker(_)
+                | ComputerResetManagedWorker(_)
+                | ComputerDeleteManagedWorker(_)
+        ) {
+            return value(&self.read_personal_status(actor, call, None).await?);
         }
         if matches!(request, ClientRequestParams::DesktopOpen(_)) {
             let mut grant: DesktopViewGrant = self.send(actor, call).await?;
@@ -314,7 +348,22 @@ impl DesktopCloud {
             .timeout(Duration::from_secs(60))
             .bearer_auth(token);
         if let Some(body) = &call.body {
-            request = request.json(body);
+            request = match body {
+                CloudBody::Json(value) => request.json(value),
+                CloudBody::Upload {
+                    metadata,
+                    filename,
+                    bytes,
+                } => {
+                    let file =
+                        reqwest::multipart::Part::stream(bytes.clone()).file_name(filename.clone());
+                    request.multipart(
+                        reqwest::multipart::Form::new()
+                            .text("metadata", metadata.clone())
+                            .part("file", file),
+                    )
+                }
+            };
         }
         let response = request.send().await.map_err(request_error)?;
         let status = response.status();
@@ -335,6 +384,7 @@ impl DesktopCloud {
 
 #[path = "desktop_cloud_chat.rs"]
 mod chat;
+pub(super) use chat::ChatAttachment;
 
 #[path = "desktop_cloud_stream.rs"]
 mod stream;

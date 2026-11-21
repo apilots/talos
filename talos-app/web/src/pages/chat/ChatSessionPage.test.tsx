@@ -24,7 +24,7 @@ vi.mock("@/shared/store/app-store", async () => {
 });
 
 const mocks = getChatSessionPageMocks();
-const apiMocks = vi.hoisted(() => ({ node: "embedded", list: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ node: "embedded", list: vi.fn(), files: vi.fn() }));
 function render(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderView(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
@@ -33,6 +33,7 @@ function render(ui: ReactElement) {
 vi.mock("@/shared/api/client", () => ({ getTalosClient: () => ({
   automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) },
   skills: { list: apiMocks.list },
+  files: { list: apiMocks.files },
 }) }));
 
 function NavigateAwayButton() {
@@ -76,6 +77,21 @@ describe("ChatSessionPage", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it.each([
+    ["saved", "sess-1"],
+    ["unsaved", undefined],
+  ] as const)("selects attachments for a %s session reached via its ordinary chat URL", async (kind, sessionId) => {
+    if (kind === "unsaved") mocks.session = undefined;
+    mocks.realComposer = true;
+    apiMocks.files.mockReset().mockResolvedValue({ data: [], nextCursor: null });
+    renderSessionPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose an existing file" }));
+
+    await waitFor(() => expect(apiMocks.files).toHaveBeenCalledWith({ limit: 100, sessionId }));
   });
 
   it("keeps model and project changes local before the session exists", () => {
