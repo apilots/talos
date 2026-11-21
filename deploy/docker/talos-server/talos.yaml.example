@@ -48,18 +48,21 @@ talos:
   worker:
     runtime:
       kind: DockerEngine
-      # Shared baseline for either backend without its own worker block.
-#       image: ghcr.io/apilots/talos-worker@sha256:<published-image-digest>
-#       control_plane_endpoint: https://agent.example.com
+      # Optional shared connection for backends without a worker block.
+      # image: ghcr.io/apilots/talos-worker@sha256:<published-image-digest>
+      # control_plane_endpoint: https://agent.example.com
       # trusted_ca_file: /run/talos-tls/worker-ca.pem
       docker_engine:
         socket_path: /var/run/docker.sock
         worker:
-          # Published v0.1.17-1 multi-platform Worker image.
+          # Pin the Worker release digest and use this deployment's Agent origin.
           image: ghcr.io/apilots/talos-worker@sha256:42d9c8433fb1bda619e087451a46abb0fd5be1520ea1f35253b9a118d0355181
           control_plane_endpoint: https://agent.talos.love
           trusted_ca_file: null
-#         resources: {cpu_cores: 4, memory_bytes: 8589934592, shm_bytes: 1073741824}
+        resources:
+          cpu_cores: 4
+          memory_bytes: 8589934592
+          shm_bytes: 1073741824
 #       kubernetes:
 #         # worker: {image: <pinned-image>, control_plane_endpoint: <https-origin>, trusted_ca_file: null}
 #         namespace: default
@@ -71,12 +74,12 @@ talos:
 #         kubeconfig_source: InCluster
 #         kubeconfig_path: null
 #         kubeconfig_context: null
-#   server:
-#     runtime:
-#       idle_timeout_seconds: 900
-#       request_wait_seconds: 45
-#       start_timeout_seconds: 120
-#       wake_cooldown_seconds: 60
+  server:
+    runtime:
+      idle_timeout_seconds: 900
+      request_wait_seconds: 45
+      start_timeout_seconds: 120
+      wake_cooldown_seconds: 60
 
 cloud:
   agent_base_url: https://agent.talos.love

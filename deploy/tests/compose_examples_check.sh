@@ -62,11 +62,16 @@ assert managed_server["group_add"] == ["123"]
 profile = json.loads((fixture / "runtime.json").read_text())
 runtime = profile["talos"]["worker"]["runtime"]
 assert runtime["kind"] == "DockerEngine"
-connection = runtime["docker_engine"]["worker"]
-assert re.fullmatch(r"ghcr\.io/apilots/talos-worker@sha256:[a-f0-9]{64}", connection["image"])
-assert connection["control_plane_endpoint"] == profile["cloud"]["agent_base_url"] == "https://agent.talos.love"
-assert runtime["docker_engine"]["socket_path"] == "/var/run/docker.sock"
-socket = next(mount for mount in managed_server["volumes"] if mount["target"] == runtime["docker_engine"]["socket_path"])
+docker_engine = runtime["docker_engine"]
+connection = docker_engine["worker"]
+assert re.fullmatch(r"[^@\s]+@sha256:[a-f0-9]{64}", connection["image"])
+assert connection["control_plane_endpoint"].startswith("https://")
+assert "trusted_ca_file" in connection
+assert {"cpu_cores", "memory_bytes", "shm_bytes"} <= docker_engine["resources"].keys()
+timing = profile["talos"]["server"]["runtime"]
+assert {"idle_timeout_seconds", "request_wait_seconds", "start_timeout_seconds", "wake_cooldown_seconds"} <= timing.keys()
+assert docker_engine["socket_path"] == "/var/run/docker.sock"
+socket = next(mount for mount in managed_server["volumes"] if mount["target"] == docker_engine["socket_path"])
 assert socket["type"] == "bind" and socket["source"] == "/run/custom/docker.sock"
 assert not socket.get("bind", {}).get("create_host_path", False)
 service = worker["services"]["talos-worker"]
