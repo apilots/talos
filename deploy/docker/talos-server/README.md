@@ -27,14 +27,14 @@ It requires the reviewed runtime configuration and certificates before startup.
 `talos.yaml.example` lists shared runtime settings and the central TLS listener.
 Both Server and Worker images package the shared `conf/talos-prod.yaml` as
 their default `conf/talos.yaml`;
-the production example additionally enables the central listener and TLS.
+the production example additionally enables the central TLS listener and DockerEngine.
 Preserve any saved Worker identity when applying settings to an existing home.
-Use the [Talos Server production guide](../../TALOS_SERVER.md) for preparation,
+Use the [Talos Server production guide](../../TALOS_CLOUD_DEPLOY.md) for preparation,
 proxy routing and acceptance.
 
 Set `TALOS_SERVER_DATA_VOLUME` and `TALOS_SERVER_TLS_DIR` in `.env` to the existing
-deployment resources. Select this profile explicitly when working in this example
-directory:
+deployment resources. With the supplied DockerEngine runtime, use the overlay in
+the next section. For a TLS-only Server, omit `talos.worker.runtime` and run:
 
 ~~~bash
 docker compose -f compose.production.yml config --quiet
@@ -50,11 +50,14 @@ Talo is an opt-in managed AI assistant. Run Talos Server and its Talo Workers on
 one Linux host with the same Docker Engine. Enable authentication and the
 existing TLS Agent node control plane in the Server configuration. Use
 `talos.worker.runtime` from [the sample configuration](talos.yaml.example).
-Choose a published Worker image pinned by digest. Set
+Set the deployment-specific values in the writable `$TALOS_HOME/conf/talos.yaml`.
+Under `docker_engine.worker`, choose a published Worker image pinned by digest. Set
 `control_plane_endpoint` to the HTTPS Agent ingress reachable from the Worker
 network. The loopback-only ports published by this Compose file are available to
 the host ingress, so the Worker uses the ingress hostname. For a private CA,
-mount its certificate into Server and set `trusted_ca_file`.
+mount its certificate into Server and set `trusted_ca_file`. Set per-Worker CPU,
+memory and shared memory under `docker_engine.resources` and lifecycle timeouts
+under `talos.server.runtime`.
 
 Add the managed Worker overlay to the production profile. On the Linux host,
 set `TALOS_DOCKER_GID` in `.env` to the result of
@@ -97,8 +100,7 @@ files elsewhere, copy that profile too and set `TALOS_CHROMIUM_SECCOMP_PROFILE`
 to its absolute deployed path. Do not use privileged mode or disable the sandbox.
 
 The profiles do not impose a fixed process memory limit. Set a measured deployment
-budget that accommodates the Server, embedded Worker and browser workload rather
-than the old 1 GiB Server-only allowance. Browser/CDP/VNC listeners remain private;
+budget that accommodates the Server, embedded Worker and browser workload. Browser/CDP/VNC listeners remain private;
 installing their resources does not change authentication defaults. The embedded
 Worker supports Browser tools, desktop viewing and control through the existing
 same-origin WebSocket endpoint. Its in-process transport reuses the same bounded
