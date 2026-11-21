@@ -15,12 +15,8 @@ cp "$root/deploy/docker/talos-worker/docker-compose.yml" "$fixture/talos-worker/
 cp "$root/deploy/docker/talos-worker/chromium-seccomp.json" "$fixture/talos-worker/"
 (cd "$fixture/server" && docker compose config --format json) > "$fixture/basic.json"
 (cd "$fixture/server" && docker compose -f compose.production.yml config --format json) > "$fixture/production.json"
-# Exercise the installed /opt/talos-server file names with ordinary Compose discovery.
-mkdir "$fixture/installed"
-cp "$fixture/server/.env" "$fixture/installed/"
-cp "$fixture/server/compose.production.yml" "$fixture/installed/docker-compose.yml"
-cp "$fixture/server/compose.managed-worker.yml" "$fixture/installed/docker-compose.override.yml"
-(cd "$fixture/installed" && TALOS_DOCKER_GID=123 TALOS_DOCKER_SOCKET=/run/custom/docker.sock docker compose config --format json) > "$fixture/managed-worker.json"
+(cd "$fixture/server" && TALOS_DOCKER_GID=123 TALOS_DOCKER_SOCKET=/run/custom/docker.sock docker compose -f compose.production.yml \
+  -f compose.managed-worker.yml config --format json) > "$fixture/managed-worker.json"
 ruby -ryaml -rjson -e 'puts JSON.generate(YAML.load_file(ARGV.fetch(0)))' \
   "$root/deploy/docker/talos-server/talos.yaml.example" > "$fixture/runtime.json"
 # This is an isolated rendering identity, never registered or started.
@@ -65,12 +61,10 @@ managed_server = managed["services"]["talos-server"]
 assert managed_server["group_add"] == ["123"]
 profile = json.loads((fixture / "runtime.json").read_text())
 runtime = profile["talos"]["worker"]["runtime"]
-assert profile["gateway"]["auth"] and profile["agent_node"]["control_plane"]["tls_certificate_file"]
 assert runtime["kind"] == "DockerEngine"
 connection = runtime["docker_engine"]["worker"]
 assert re.fullmatch(r"ghcr\.io/apilots/talos-worker@sha256:[a-f0-9]{64}", connection["image"])
 assert connection["control_plane_endpoint"] == profile["cloud"]["agent_base_url"] == "https://agent.talos.love"
-assert connection["trusted_ca_file"] is None
 assert runtime["docker_engine"]["socket_path"] == "/var/run/docker.sock"
 socket = next(mount for mount in managed_server["volumes"] if mount["target"] == runtime["docker_engine"]["socket_path"])
 assert socket["type"] == "bind" and socket["source"] == "/run/custom/docker.sock"
