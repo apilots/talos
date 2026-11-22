@@ -35,7 +35,7 @@ async fn large_snapshot_chunks_become_visible_with_the_document_and_reclaim_afte
         .unwrap()
         .is_none());
 
-    let summary = talos_sync_types::SyncResourceSummary {
+    let summary = SyncResourceSummary {
         resource: resource.clone(),
         computer_id: Some(COMPUTER.into()),
         version: SyncVersion::default(),
@@ -126,14 +126,15 @@ async fn restart_accepts_equivalent_encoded_versions_but_rejects_a_changed_cut()
         .unwrap()
         .unwrap();
     fixture.sync.acknowledge(&baseline).await.unwrap();
-    let mut merged = SyncReplica::new(resource.clone(), 10_000).unwrap();
+    let mut merged = SyncReplica::new(resource.wire(), 10_000).unwrap();
     merged.import(&[baseline.update]).unwrap();
     let snapshot = merged.snapshot().unwrap();
     for writer in 20_000..20_032 {
-        let mut peer = SyncReplica::from_snapshot(resource.clone(), &snapshot).unwrap();
+        let mut peer = SyncReplica::from_snapshot(resource.wire(), &snapshot).unwrap();
         peer.set_writer_id(writer).unwrap();
-        let change = crate::projection::change(
+        let change = talos_sync_parser::encode_change(
             &fixture.binding,
+            &resource,
             SyncChange::Metadata {
                 before: Some(Box::new(SyncResourceSnapshot::Computer(node("Baseline")))),
                 after: Box::new(SyncResourceSnapshot::Computer(node(&format!(
@@ -146,15 +147,8 @@ async fn restart_accepts_equivalent_encoded_versions_but_rejects_a_changed_cut()
         merged.import(&[peer.apply(&[change]).unwrap()]).unwrap();
     }
     let version = merged.version().unwrap();
-    let (tx, _, _) = fixture
-        .sync
-        .import_document(
-            &fixture.binding,
-            &resource,
-            &[merged.snapshot().unwrap()],
-            &version,
-            None,
-        )
+    let (tx, _) = fixture
+        .prepare_import(&resource, &[merged.snapshot().unwrap()], &version)
         .await
         .unwrap();
     tx.commit().await.unwrap();

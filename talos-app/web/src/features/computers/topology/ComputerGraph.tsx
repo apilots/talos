@@ -5,12 +5,15 @@ import type { AppProtocol } from "@talos/sdk-core";
 import {
   computerPeers,
   computerSyncState,
+  computerLocalSyncStatus,
+  controlPlanePeer,
   controlPlaneSyncState,
   computerPlatform,
   type ComputerService,
   type FlowLayer,
 } from "./observations";
 import { syncStateLabel, SyncTopologyState } from "./sync-state";
+import { SyncProgressSummary } from "./SyncProgressSummary";
 
 export interface ComputerGraphProps {
   nodes: AppProtocol.NodeInfo[];
@@ -39,8 +42,9 @@ export function ComputerGraph({
 }: ComputerGraphProps) {
   const { t } = useTranslation("computers");
   const marker = useId().replaceAll(":", "");
-  const height = Math.max(510, nodes.length * 126 + 80);
+  const height = Math.max(510, nodes.length * 156 + 80);
   const planeState = controlPlaneSyncState(metrics, syncStatus);
+  const planePeer = controlPlanePeer(metrics);
   return (
     <div
       className="cmp-canvas-scroll"
@@ -81,7 +85,7 @@ export function ComputerGraph({
             ))}
           </defs>
           {nodes.map((node, index) => {
-            const y = 125 + index * 126;
+            const y = 140 + index * 156;
             const peers = computerPeers(metrics, node.nodeId);
             const state = computerSyncState(metrics, node.nodeId, syncStatus);
             return (
@@ -90,7 +94,7 @@ export function ComputerGraph({
                   <path
                     data-flow="execution"
                     data-computer-id={node.nodeId}
-                    d={`M286,125 C375,125 375,${y - 12} 468,${y - 12}`}
+                    d={`M286,125 C375,125 375,${y - 15} 468,${y - 15}`}
                     className={`cmp-execution-wire ${node.available ? "" : "is-offline"}`}
                     markerStart={`url(#${marker}-execution)`}
                     markerEnd={`url(#${marker}-execution)`}
@@ -102,7 +106,7 @@ export function ComputerGraph({
                   <path
                     data-flow="sync"
                     data-computer-id={node.nodeId}
-                    d={`M286,365 C405,365 405,${y + 20} 468,${y + 20}`}
+                    d={`M286,365 C405,365 405,${y + 25} 468,${y + 25}`}
                     data-sync-state={state}
                     className={`cmp-sync-wire is-${state}`}
                     markerStart={`url(#${marker}-sync)`}
@@ -151,7 +155,8 @@ export function ComputerGraph({
           {metrics?.controlPlanePeerId || planeState === SyncTopologyState.Disabled ? (
             <>
               <ArrowLeftRight size={15} />
-              <span data-sync-state={planeState}>{t(syncStateLabel[planeState])}</span>
+              <SyncProgressSummary metrics={metrics} peers={planePeer ? [planePeer] : []}
+                syncStatus={metrics?.controlPlanePeerId === syncStatus?.peerId || planeState === SyncTopologyState.Disabled ? syncStatus : undefined} />
             </>
           ) : (
             <span>{t("controlPlaneSyncUnknown")}</span>
@@ -178,14 +183,13 @@ export function ComputerGraph({
         </button>
         {nodes.map((node, index) => {
           const peers = computerPeers(metrics, node.nodeId);
-          const state = computerSyncState(metrics, node.nodeId, syncStatus);
           const Icon = node.systemInfo?.os === "macOs" ? Laptop : Server;
           return (
             <button
               key={node.nodeId}
               type="button"
-              style={{ top: 70 + index * 126 }}
-              className={`cmp-device ${selectedId === node.nodeId ? "is-selected" : ""} ${layer === "sync" && peers.length === 0 ? "is-dimmed" : ""}`}
+              style={{ top: 70 + index * 156 }}
+              className={`cmp-device ${selectedId === node.nodeId ? "is-selected" : ""}`}
               onClick={() => onInspect(node.nodeId)}
               aria-label={t("inspectComputer", { name: node.displayName })}
               aria-pressed={selectedId === node.nodeId}
@@ -210,9 +214,8 @@ export function ComputerGraph({
                         : "offline",
                   )}
                 </span>
-                <span data-sync-state={state} className={`cmp-sync-status is-${state}`}>
-                  {t(syncStateLabel[state])}
-                </span>
+                <SyncProgressSummary metrics={metrics} peers={peers}
+                  syncStatus={computerLocalSyncStatus(metrics, node.nodeId, syncStatus)} />
               </footer>
             </button>
           );

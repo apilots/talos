@@ -7,6 +7,39 @@ use agent_protocol::{
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
 impl AgentNodeClient {
+    /// Fetch the signed-in owner's directory, including authoritative live status.
+    pub async fn list_computers(
+        &self,
+        access_token: &str,
+        cursor: Option<String>,
+    ) -> TalosResult<talos_types::NodePage> {
+        let response =
+            pb::agent_node_management_client::AgentNodeManagementClient::new(self.channel.clone())
+                .list_nodes(actor_request(
+                    access_token,
+                    pb::ListNodesRequest {
+                        cursor,
+                        limit: 100,
+                        owner_only: true,
+                    },
+                )?)
+                .await
+                .map_err(crate::decode_rpc_status)?
+                .into_inner();
+        match response.result.ok_or_else(malformed)? {
+            pb::list_nodes_response::Result::Page(page) => Ok(talos_types::NodePage {
+                data: page
+                    .data
+                    .into_iter()
+                    .map(node_pb::decode_info)
+                    .collect::<TalosResult<_>>()?,
+                next_cursor: page.next_cursor,
+            }),
+            pb::list_nodes_response::Result::Failure(error) => {
+                Err(error_pb::decode_failure(error)?)
+            }
+        }
+    }
     pub async fn delete_computer(
         &self,
         access_token: &str,

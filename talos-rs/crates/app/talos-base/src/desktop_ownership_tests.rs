@@ -114,6 +114,9 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
     .await
     .unwrap();
 
+    // Freeze all account maintenance so a directory pull cannot consume the
+    // one-request authorization fault intended for the local access check.
+    let maintenance = restarted.sync_host.pause_refresh(&owner.user_id).await;
     let lifecycle = restarted.sync_host.lifecycle.try_lock().unwrap();
     let registration = restarted.worker_registration.lock().await.take().unwrap();
     registration.shutdown().await.unwrap();
@@ -232,7 +235,9 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
     // Hold publication of the saved document handle. Worker registration must
     // complete before document initialization can even reach its bad CA.
     let documents = restarted.sync_host.sync_stores.handles.lock().await;
+    drop(maintenance);
     drop(lifecycle);
+    restarted.service.resume_account_sync(&owner);
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if restarted.sync_host.local_owner.read().unwrap().as_deref() == Some("user-1") {

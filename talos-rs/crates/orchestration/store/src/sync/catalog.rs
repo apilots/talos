@@ -15,9 +15,7 @@ pub(super) async fn scan(
     let rows = storage
         .query(
             r#"WITH resources(kind, id) AS (
-        SELECT 'computer', node_id FROM agent_nodes WHERE owner_user_id = ?1 AND node_id <> 'embedded'
-        UNION ALL SELECT 'computer', node_id FROM computer_deletions WHERE owner_user_id = ?1
-        UNION ALL SELECT 'project', project_id FROM projects WHERE user_id = ?2
+        SELECT 'project', project_id FROM projects WHERE user_id = ?2
         UNION ALL SELECT 'session', session_key FROM sessions WHERE user_id = ?2
         UNION ALL SELECT 'file', file_id FROM files WHERE owner_user_id = ?2 AND status = 'ready'
     )

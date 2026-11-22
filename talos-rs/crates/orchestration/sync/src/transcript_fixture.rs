@@ -129,7 +129,7 @@ pub(super) fn session_and_events(
         },
     ];
     // Original attachment, media and selected-question fields must survive
-    // generated schema conversion and the transactional Loro import unchanged.
+    // Talos parser and transactional Loro import unchanged.
     for (index, content) in [
         AgentUserContent::File {
             file_id: "source-file".into(),

@@ -447,6 +447,20 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
 
 #[tokio::test]
 async fn saved_document_transport_starts_while_worker_gateway_is_stalled() {
+    document_transport_starts_while_worker_gateway_is_stalled(DocumentBinding::Retained).await;
+}
+
+#[tokio::test]
+async fn first_document_discovery_starts_while_worker_gateway_is_stalled() {
+    document_transport_starts_while_worker_gateway_is_stalled(DocumentBinding::Undiscovered).await;
+}
+
+enum DocumentBinding {
+    Retained,
+    Undiscovered,
+}
+
+async fn document_transport_starts_while_worker_gateway_is_stalled(binding: DocumentBinding) {
     use axum::{routing::post, Json, Router};
     use serde_json::json;
     use talos_sync::{SyncBindParams, SyncScope};
@@ -491,21 +505,23 @@ async fn saved_document_transport_starts_while_worker_gateway_is_stalled() {
     .unwrap();
     let actor = Actor::regular("account").with_access_token("fixture-token");
     let verified = runtime.sync_host.verified_actor(&actor).await.unwrap();
-    runtime
-        .sync
-        .bind_account(
-            &verified,
-            SyncBindParams {
-                scope: SyncScope {
-                    hub_id: "saved-hub".into(),
-                    account_id: actor.user_id.clone(),
+    if matches!(binding, DocumentBinding::Retained) {
+        runtime
+            .sync
+            .bind_account(
+                &verified,
+                SyncBindParams {
+                    scope: SyncScope {
+                        hub_id: "saved-hub".into(),
+                        account_id: actor.user_id.clone(),
+                    },
+                    source_user_id: actor.user_id.clone(),
+                    computers: vec![],
                 },
-                source_user_id: actor.user_id.clone(),
-                computers: vec![],
-            },
-        )
-        .await
-        .unwrap();
+            )
+            .await
+            .unwrap();
+    }
     runtime.service.resume_account_sync(&actor);
 
     let (_worker_connection, _) = tokio::time::timeout(Duration::from_secs(3), gateway.accept())
@@ -517,13 +533,15 @@ async fn saved_document_transport_starts_while_worker_gateway_is_stalled() {
             .await
             .expect("saved document transport must dial while Worker TLS is stalled")
             .unwrap();
-    assert!(runtime
-        .sync_host
-        .sync_stores
-        .handles
-        .lock()
-        .await
-        .contains_key(&actor.user_id));
+    if matches!(binding, DocumentBinding::Retained) {
+        assert!(runtime
+            .sync_host
+            .sync_stores
+            .handles
+            .lock()
+            .await
+            .contains_key(&actor.user_id));
+    }
     assert!(runtime.sync_host.lifecycle.try_lock().is_err());
 
     runtime.shutdown_sync().await.unwrap();

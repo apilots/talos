@@ -3,12 +3,14 @@ use schemars::{schema_for, JsonSchema};
 use serde::Serialize;
 
 mod automation;
+mod error_codes;
+use error_codes::{export_app_server_error_code, export_error_code_runtime_enum};
 mod typescript;
 pub use automation::generate_typescript as generate_automation_typescript;
 use typescript::export;
 pub use typescript::generate_worker_runtime_typescript;
 
-use crate::errors::{AppServerErrorBody, AppServerErrorCode};
+use crate::errors::AppServerErrorBody;
 use crate::jsonrpc::JsonRpcMessage;
 use crate::notifications::ServerNotification;
 use crate::requests::{ClientRequestParams, InitializeResponse};
@@ -324,6 +326,9 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SyncConnectionState>());
     output.push_str(&export::<talos_types::SyncMetricsResponse>());
     output.push_str(&export::<talos_types::SyncPeerMetrics>());
+    output.push_str(&export::<talos_types::SyncPeerProgress>());
+    output.push_str(&export::<talos_types::SyncProgressState>());
+    output.push_str(&export::<talos_types::SyncSourceDelay>());
     output.push_str(&export::<talos_types::SyncMetadataCounts>());
     output.push_str(&export::<talos_types::SyncStatusResponse>());
     output.push_str("export type * from \"./worker-runtime\";\n\n");
@@ -737,71 +742,6 @@ pub fn generate_typescript() -> String {
     output.truncate(output.trim_end().len());
     output.push('\n');
     output
-}
-
-fn export_app_server_error_code() -> String {
-    let variants = [
-        ("ParseError", AppServerErrorCode::ParseError),
-        ("InvalidRequest", AppServerErrorCode::InvalidRequest),
-        ("MethodNotFound", AppServerErrorCode::MethodNotFound),
-        ("InvalidParams", AppServerErrorCode::InvalidParams),
-        ("InternalError", AppServerErrorCode::InternalError),
-        ("NotInitialized", AppServerErrorCode::NotInitialized),
-        ("AlreadyInitialized", AppServerErrorCode::AlreadyInitialized),
-    ];
-    let union = variants
-        .iter()
-        .map(|(_, code)| code.as_i32().to_string())
-        .collect::<Vec<_>>()
-        .join(" | ");
-    let entries = variants
-        .iter()
-        .map(|(name, code)| format!("  {name}: {},", code.as_i32()))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "export type AppServerErrorCode = {union};\n\
-         export const AppServerErrorCode = {{\n{entries}\n\
-         }} as const satisfies Record<string, AppServerErrorCode>;\n\n"
-    )
-}
-
-fn export_error_code_runtime_enum() -> String {
-    let schema = schema_for!(talos_error::ErrorCode);
-    let Some(values) = schema.schema.enum_values else {
-        return String::new();
-    };
-
-    let entries = values
-        .into_iter()
-        .filter_map(|value| {
-            value
-                .as_str()
-                .map(|code| (error_code_key(code), code.to_string()))
-        })
-        .map(|(key, code)| format!("  {key}: \"{code}\","))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    format!("export const ErrorCode = {{\n{entries}\n}} as const satisfies Record<string, ErrorCode>;\n\n")
-}
-
-fn error_code_key(code: &str) -> String {
-    let mut key = String::new();
-    let mut uppercase_next = true;
-    for ch in code.chars() {
-        if ch == '_' || ch == '-' {
-            uppercase_next = true;
-            continue;
-        }
-        if uppercase_next {
-            key.extend(ch.to_uppercase());
-            uppercase_next = false;
-        } else {
-            key.push(ch);
-        }
-    }
-    key
 }
 
 pub fn string_schema() -> Schema {

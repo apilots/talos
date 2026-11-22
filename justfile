@@ -141,3 +141,7 @@ docker-worker-build image="talos-worker:local":
     set -euo pipefail
     cd ..
     docker build -f build/worker/Dockerfile -t "{{image}}" ..
+
+# Generate the Parser-owned profile for an existing schema-v1 Sync Hub database.
+gen-sync-upgrade-mapping:
+    cargo run --quiet -p talos-sync-parser --example v1_upgrade_mapping > ../conf/sync-v1-upgrade-mapping.json

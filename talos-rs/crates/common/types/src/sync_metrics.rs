@@ -50,8 +50,44 @@ pub struct SyncPeerMetrics {
     /// Sync service receipt of the last solicited heartbeat pong.
     #[ts(type = "number | null")]
     pub last_heartbeat_at: Option<i64>,
+    #[ts(optional = nullable)]
+    pub progress: Option<SyncPeerProgress>,
     pub inbound_bytes_per_second: f64,
     pub outbound_bytes_per_second: f64,
     pub updates_per_second: f64,
     pub commit_p95_ms: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum SyncProgressState {
+    CaughtUp,
+    Behind,
+    Recovering,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct SyncSourceDelay {
+    pub source_peer_id: String,
+    #[ts(type = "number")]
+    pub observed_delay_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct SyncPeerProgress {
+    #[ts(type = "number")]
+    pub observed_at: i64,
+    #[ts(type = "number | null")]
+    pub last_applied_at: Option<i64>,
+    #[ts(type = "number")]
+    pub pending_uploads: u64,
+    pub state: SyncProgressState,
+    #[ts(type = "number | null")]
+    pub download_lag_ms: Option<u64>,
+    pub source_delays: Vec<SyncSourceDelay>,
 }

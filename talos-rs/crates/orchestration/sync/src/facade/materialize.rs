@@ -1,15 +1,16 @@
 use std::{future, sync::Arc};
 
+use crate::SyncResourceSummary;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::StorageTransaction;
+use talos_sync_parser::SessionProjection;
 use talos_sync_sdk::{version_equal, version_includes, version_union, SyncReplica};
-use talos_sync_types::SyncResourceSummary;
 
-use super::{
-    state::{changes_session_projection, SessionProjection},
-    sync_error, TalosSync,
+use super::{sync_error, TalosSync};
+use crate::{
+    store, SyncBinding, SyncChange, SyncDataAdapter, SyncExportBatch, SyncImportBatch,
+    SyncResourceKey, SyncVersion,
 };
-use crate::{projection, store, SyncBinding, SyncExportBatch, SyncResourceKey, SyncVersion};
 
 const MAX_CONCURRENT_RETRIES: usize = 3;
 const OUTBOX_PAGE_SIZE: usize = 128;
@@ -31,7 +32,7 @@ struct Materialized<T> {
     through: Option<i64>,
     version: SyncVersion,
     value: T,
-    imported: Vec<talos_sync_types::SyncChange>,
+    imported: Vec<SyncChange>,
 }
 
 struct ReplicaWrite {
@@ -110,13 +111,17 @@ impl TalosSync {
                 "Invalid synchronization batch limit.",
             ));
         }
-        let resource = projection::resource(binding, &resource);
+        let resource = talos_sync_parser::resource(binding, &resource);
         let Some(result) = self
             .materialize(
                 binding,
                 &resource,
                 OutboxCut::Export { limit, through },
-                export_prefix,
+                |replica, acknowledged, prefix| {
+                    replica
+                        .export_through(acknowledged, prefix)
+                        .map_err(sync_error)
+                },
                 unchanged_import,
             )
             .await?
@@ -135,48 +140,16 @@ impl TalosSync {
         }))
     }
 
-    /// Prepare downloaded facts without the writer, then stage the merge and
-    /// return its transaction. The host applies the original Store facts in
-    /// that transaction before committing and marking the version as committed.
-    pub async fn import_document(
+    /// Decode the document and prepare Store facts before taking the publication
+    /// transaction. The caller applies the returned batch and commits that transaction.
+    pub async fn prepare_import(
         &self,
+        adapter: &impl SyncDataAdapter,
         binding: &SyncBinding,
         resource: &SyncResourceKey,
         updates: &[Vec<u8>],
         downloaded_version: &SyncVersion,
-        download_cursor: Option<&str>,
-    ) -> TalosResult<(
-        Box<dyn StorageTransaction>,
-        SyncVersion,
-        Vec<talos_sync_types::SyncChange>,
-    )> {
-        self.import_document_with(
-            binding,
-            resource,
-            updates,
-            downloaded_version,
-            download_cursor,
-            unchanged_import,
-        )
-        .await
-    }
-
-    pub(crate) async fn import_document_with<F>(
-        &self,
-        binding: &SyncBinding,
-        resource: &SyncResourceKey,
-        updates: &[Vec<u8>],
-        downloaded_version: &SyncVersion,
-        download_cursor: Option<&str>,
-        prepare: impl FnMut(SyncVersion, Vec<talos_sync_types::SyncChange>) -> F + Send,
-    ) -> TalosResult<(
-        Box<dyn StorageTransaction>,
-        SyncVersion,
-        Vec<talos_sync_types::SyncChange>,
-    )>
-    where
-        F: future::Future<Output = TalosResult<Vec<talos_sync_types::SyncChange>>> + Send,
-    {
+    ) -> TalosResult<(Box<dyn StorageTransaction>, SyncImportBatch)> {
         let updates = Arc::<[Vec<u8>]>::from(updates);
         let downloaded_version = downloaded_version.clone();
         let writer_id = self.writer_id;
@@ -203,7 +176,16 @@ impl TalosSync {
                         version_union(acknowledged, &downloaded_version).map_err(sync_error)?;
                     replica.deleted_at(&downloaded_version).map_err(sync_error)
                 },
-                prepare,
+                |version, changes| async move {
+                    let batch = SyncImportBatch {
+                        scope: binding.scope.clone(),
+                        resource: resource.clone(),
+                        version,
+                        changes,
+                    };
+                    adapter.prepare_import(&batch).await?;
+                    Ok(batch.changes)
+                },
             )
             .await?
             .expect("import prepares a version even without pending changes");
@@ -213,14 +195,15 @@ impl TalosSync {
             // local pending delete that has never been acknowledged.
             tx.execute("DELETE FROM sync_outbox WHERE seq IN (SELECT seq FROM visible_sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?)", &[&binding.scope.hub_id, &binding.scope.account_id, resource.kind().as_str(), resource.id()]).await?;
         }
-        if let Some(cursor) = download_cursor {
-            tx.execute(
-                "UPDATE sync_bindings SET download_cursor = ? WHERE hub_id = ? AND account_id = ?",
-                &[cursor, &binding.scope.hub_id, &binding.scope.account_id],
-            )
-            .await?;
-        }
-        Ok((tx, result.version, result.imported))
+        Ok((
+            tx,
+            SyncImportBatch {
+                scope: binding.scope.clone(),
+                resource: resource.clone(),
+                version: result.version,
+                changes: result.imported,
+            },
+        ))
     }
 
     async fn materialize<T: Send + 'static, F>(
@@ -232,10 +215,10 @@ impl TalosSync {
             + Send
             + Sync
             + 'static,
-        mut prepare: impl FnMut(SyncVersion, Vec<talos_sync_types::SyncChange>) -> F + Send,
+        mut prepare: impl FnMut(SyncVersion, Vec<SyncChange>) -> F + Send,
     ) -> TalosResult<Option<Materialized<T>>>
     where
-        F: future::Future<Output = TalosResult<Vec<talos_sync_types::SyncChange>>> + Send,
+        F: future::Future<Output = TalosResult<Vec<SyncChange>>> + Send,
     {
         let importing = matches!(cut, OutboxCut::Import);
         let apply = Arc::new(apply);
@@ -265,6 +248,7 @@ impl TalosSync {
                 .map(|record| (record.version.clone(), record.acknowledged.clone()));
             let apply = apply.clone();
             let resource_key = resource.clone();
+            let account = binding.scope.account_id.clone();
             let writer_id = self.writer_id;
             let (version, value, write, imported) = tokio::task::spawn_blocking(move || {
                 let mut refresh_session_projection = importing
@@ -278,9 +262,16 @@ impl TalosSync {
                     .rows
                     .iter()
                     .filter(|row| row.exported_version.is_none());
-                refresh_session_projection |= pending
-                    .clone()
-                    .any(|row| row.changes.iter().any(changes_session_projection));
+                if !refresh_session_projection {
+                    'batches: for row in pending.clone() {
+                        for change in &row.changes {
+                            if SessionProjection::needs_refresh(change)? {
+                                refresh_session_projection = true;
+                                break 'batches;
+                            }
+                        }
+                    }
+                }
                 // Freeze each local prefix before merging any remote operations.
                 let versions = replica
                     .apply_batches(pending.clone().map(|row| row.changes.as_slice()))
@@ -298,7 +289,7 @@ impl TalosSync {
                     prefix
                 };
                 let imported = if importing {
-                    replica.changes().map_err(sync_error)?
+                    crate::facade::replica_changes(&replica, &resource_key, &account)?
                 } else {
                     Vec::new()
                 };
@@ -310,7 +301,7 @@ impl TalosSync {
                             store::encode(&SessionProjection::from_changes(&imported))?
                         } else {
                             store::encode(&SessionProjection::from_changes(
-                                &replica.changes().map_err(sync_error)?,
+                                &crate::facade::replica_changes(&replica, &resource_key, &account)?,
                             ))?
                         };
                         Some(encoded)
@@ -318,7 +309,7 @@ impl TalosSync {
                         None
                     };
                     Some(ReplicaWrite {
-                        summary: replica.summary().map_err(sync_error)?,
+                        summary: replica.summary().map_err(sync_error)?.try_into()?,
                         snapshot: replica.snapshot().map_err(sync_error)?,
                         acknowledged,
                         exported,
@@ -456,39 +447,9 @@ impl TalosSync {
 
 fn unchanged_import(
     _: SyncVersion,
-    changes: Vec<talos_sync_types::SyncChange>,
-) -> impl future::Future<Output = TalosResult<Vec<talos_sync_types::SyncChange>>> + Send {
+    changes: Vec<SyncChange>,
+) -> impl future::Future<Output = TalosResult<Vec<SyncChange>>> + Send {
     future::ready(Ok(changes))
-}
-
-fn export_prefix(
-    replica: &mut SyncReplica,
-    acknowledged: &mut SyncVersion,
-    prefix: &SyncVersion,
-) -> TalosResult<Vec<u8>> {
-    if version_equal(&replica.version().map_err(sync_error)?, prefix).map_err(sync_error)? {
-        return replica.export_since(acknowledged).map_err(sync_error);
-    }
-    // A newer prefix may already be in the saved replica. Loro's own update
-    // range excludes those ops while keeping the existing Hub checkpoint.
-    let decode = |version: &SyncVersion| {
-        if version.version_vector.is_empty() {
-            Ok(loro::VersionVector::default())
-        } else {
-            loro::VersionVector::decode(&version.version_vector)
-        }
-    };
-    let buffer = replica.snapshot().map_err(sync_error)?;
-    let result = (|| {
-        let from = decode(acknowledged)?;
-        let to = decode(prefix)?;
-        let doc = loro::LoroDoc::from_snapshot(&buffer)?;
-        doc.export(loro::ExportMode::updates_in_range(
-            to.sub_iter(&from).collect::<Vec<_>>(),
-        ))
-    })();
-    result
-        .map_err(|error| TalosError::internal_with_source("Export synchronization prefix.", error))
 }
 
 fn checkpoint_matches(

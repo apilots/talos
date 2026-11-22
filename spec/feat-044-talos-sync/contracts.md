@@ -1,6 +1,6 @@
 # Talos 多端同步接入接口
 
-Status: Implemented；本轮账号选择专项已自测，统一8/8验收通过，见[本轮证据](verification.md)。共享wire结构/SDK API由[独立Sync契约](https://github.com/apilots/talos-sync/blob/7230f9fdf294e7ae218bdb6d3cf1c4ef60203380/spec/feat-044-talos-sync/contracts.md)维护，Talos只定义原业务事务接入和产品接口。
+Status: Implemented. Talos owns product integration; the [independent Sync contract](https://github.com/apilots/talos-sync/blob/8e60e2b612ba895c8f4bcb4e0d78c9ae86227502/spec/feat-001-talos-sync/contracts.md) owns the service protocol. Current acceptance evidence belongs in the integration PR and ignored output reports.
 
 ## 3. 库 API 与宿主端口
 
@@ -25,7 +25,7 @@ Status: Implemented；本轮账号选择专项已自测，统一8/8验收通过�
 | `bind_account(actor, SyncBindParams)` | Return SyncBinding after verified account/source-user/Computer association; no implicit anonymous claim. |
 | `enabled(account_id)` / `set_enabled(account_id, bool)` | Read/persist the verified account choice in this host DB, even before discovery; no network, YAML write or other-host preference propagation. |
 | `capture(tx, SyncCaptureParams)` | Append typed changes in the existing business transaction. No network await; rollback removes capture. |
-| `import_document(binding, resource, updates, version, cursor)` | Prepare the replica outside the writer. Return a staged transaction, the merged version, and the validated facts. The caller applies the facts to the original Store and commits before advancing the SDK recovery watermark. |
+| `prepare_import(adapter, binding, resource, updates, version)` | Decode and stage the candidate before acquiring the publication writer. Return the transaction and prepared import batch. The caller publishes the Store facts and replica checkpoint in that transaction before advancing the SDK recovery watermark. |
 | `start(adapter, SyncStartParams)` | Return SyncHandle; authenticate, discover, export/import and reconnect. Credentials come from existing account lifecycle. |
 | `SyncHandle::catch_up(resource, minimum_version?)` | Recover and materialize a complete resource cut on the handle's existing authenticated connection. None requests the current hub cut; an unpublished minimum fails explicitly. |
 | `SyncHandle::flush(resource)` | Fix the current transaction's committed outbox sequence and VV, then await a durable hub cut including that VV without waiting for later commits. A remote terminal Delete superseding this cut returns Conflict rather than a false ACK. Used before opening that 历史游标 to a different coordinator. |
@@ -68,9 +68,25 @@ pub trait SyncDataAdapter: Send + Sync {
 
 scan 按 sourceUser/既有 keyset 返回资源键和 nextCursor；export固定原事务的generation/high-water cut；分页不拼接reset前后。已有资源初次绑定须在启用增量业务hook前完成baseline capture，不能用缺少原字段的diff重建空文档。
 apply 复用原 Store 的导入路径。长历史分批暂存，最终事务一并发布事实、文档和 cursor。导入标记禁止再次采集和触发业务工作流。
-完成 Session 所需 Project/Computer/tree/File metadata 一并补齐；确有未到的数据明确不可执行，不用空对象兜底。
+Complete the required Project/tree/File metadata before publishing a Session. Computer registration is independently cached from Talos Server and is not a Sync import dependency. Preserve the original Node ID; missing execution dependencies fail explicitly.
 active 展示从同步文档读取，原 agent_active_turns 只保留本端实际协调任务；导入 running 不安装假执行任务。
 本地 accounting/反思等副作用只由实际执行该 Turn 的原 owner 运行，导入采用事实替换/去重。
+## Replica relay and native provenance
+
+Sync authorizes uploads by the authenticated account's existing write
+permissions. A surviving replica may forward complete checkpoints and
+incremental operations even when their original devices are offline. The
+current uploader remains distinct from a Turn's original coordinator and
+an event's original publishing peer. Parser encoding and decoding preserve
+these sources, source providers, Node IDs and execution bindings. The Hub
+interprets only their generic header/stream/record invariants.
+
+Retain the complete checkpoint, including immutable markers, reset
+generations and tombstones. A rendered History is not sufficient to infer
+all replication state. A new Hub requires its own binding and recovery
+positions. Store publication precedes applied-feed progress, and imported
+history does not execute work or create new source identities.
+
 ## 5. 产品 API、SDK 与实时反馈
 
 现有 Computer/Project/Session/Timeline/Files API 继续唯一；新增本端 `sync/enable`、`sync/disable`、`sync/status` 及对应 HTTP 管理入口。
@@ -92,8 +108,8 @@ SDK/UI 按 endpoint/account/Computer/Session 隔离缓存，断连展示最后�
 
 ## 已实现的宿主接入（阶段3）
 
-- `TalosApplicationRuntime::start_account_sync(&RequestIdentity, SyncBindParams, CredentialCallback) -> Arc<SyncHandle>`：原AuthService复核账号及本机Computer alias；安装原四个Store的账号capture binding，启动SDK runner，将导入事实通知到原Timeline。自动登录和持久enable/disable由阶段4产品流程负责。
-- `TalosApplicationRuntime::connect_computer(&RequestIdentity, computer_id)`：G认证/部署发现、Coordinator.Connect、Harness/Environment客户端与连接回收内聚在宿主。自身Computer保留loopback Harness，但仍建立到G的管理回传连接。同步导入目录不颁发本地凭据/租约，不重复注册。
+- `TalosApplicationRuntime::start_account_sync(&RequestIdentity, SyncBindParams, CredentialCallback) -> Arc<SyncHandle>`：原AuthService复核账号及本机Computer alias；安装 Project/Session/File Store 的账号 capture binding，启动SDK runner，将导入事实通知到原Timeline。自动登录和持久enable/disable由阶段4产品流程负责。
+- `TalosApplicationRuntime::connect_computer(&RequestIdentity, computer_id)`：G认证/部署发现、Coordinator.Connect、Harness/Environment客户端与连接回收内聚在宿主。自身Computer保留loopback Harness，但仍建立到G的管理回传连接。The Server directory cache copies no credentials or leases and never registers a replica.
 - `shutdown_sync()`：关闭已安装管理连接/runner；未确认历史游标仍为Local，不伪造Shared确认。网络恢复沿已有status/flush确认历史游标。
 - 原Service使用`ActiveSessionCommands`闭合原Input/Interrupt/六项MessageQueue DTO；原FileService使用`FilePeerAccess`读取源正文和源侧改删。两者由宿主的同一个G SDK/账号credential callback组装，不在Sync库中处理RPC或业务授权。
 - 原通知增加`session/activeTurnChanged`，只承载Session ID及原SessionActiveTurnResponse。Timeline缺口仍从本端原Store replay；管理端导入通知积压后按账号分页刷新原投影，不创建fake claim。
@@ -119,7 +135,7 @@ Computer定义只由中心G原AgentNodeService创建/变更，Desktop节点表�
 
 原NodeInfo新增可选`systemInfo: NodeSystemInfo`，结构固定：`os: linux | macOs`、`osVersion?`、`architecture`、`hostname?`、`cpuModel?`、`logicalCpuCount`、`memoryBytes`、`boardModel?`、`networkInterfaces: {name, macAddress}[]`、`graphics: string[]`、`workerVersion`。无IP、凭据、序列号或任意JSON扩展字段。空/未知的可选字段在UI隐藏，系统采集错误不影响执行身份；展示自报告信息不用于授权。
 
-Worker通过原RegisterParams的可选systemInfo上报，G验证固定结构/限长、与注册租约事务更新原agent_nodes.system_info列；SQLx编码typed JSON并按原Computer事实同步。租约/心跳仍为实时状态，不把健康状态变成CRDT权威。本机未云注册时由管理组装引用同Worker采集结果填充原Computer视图；其他端不重采集远端信息。原PB、原SDK、sync生成投影同源更新，无新详情协议/存储。
+Worker通过原RegisterParams的可选systemInfo上报，G验证固定结构/限长、与注册租约事务更新原agent_nodes.system_info列；SQLx stores typed JSON; clients receive it through the Server-owned directory refresh.租约/心跳仍为实时状态，不把健康状态变成CRDT权威。本机未云注册时由管理组装引用同Worker采集结果填充原Computer视图；其他端不重采集远端信息。The existing Node protobuf/SDK preserves the complete typed NodeInfo, including optional managedWorkerPhase; no parallel details protocol is introduced.
 
 采集实现：Talos `crates/infra/system-info` 独立lib `talos-system-info::collect()`；使用最新[sysinfo 0.39.6](https://docs.rs/sysinfo/0.39.6/sysinfo/)和[wgpu 30.0.1](https://docs.rs/wgpu/30.0.1/wgpu/)（仅std/Metal/Vulkan，无窗口、设备申请或着色器编译）。不自写/proc/sysfs/system_profiler解析；GPU无驱动/容器未透传时为空。sysinfo给出Linux cgroup可见内存上限；不声明物理宿主配置。每个Worker启动采集一次，注册复用；本机未注册展示同一份信息。
 
@@ -134,3 +150,60 @@ or create a separate cross-machine log service. Older results without these
 optional fields retain their original semantics. Matching public SDK/types and
 service support must precede use by Talos; closed older schemas reject these
 fields rather than preserving them.
+
+
+## Generic protocol and device progress
+
+The Talos parser is the single owner of document and record key mapping,
+business fields, immutable bindings, and typed validation. A Session baseline
+contains its complete available History. Subsequent changes to fields, Turns
+and events travel as Loro operations from the receiver's document version.
+Local History continues to use the materialized Store and its Timeline marker.
+
+The adapter supplies the SDK with its persisted contiguous account feed
+cursor, recovery state and pending upload count. The SDK emits periodic
+progress messages over the existing authenticated connection. The product
+status panel presents progress freshness, download backlog and each
+observable source device's last apply confirmation delay. The sequence stays
+fixed during idle periods. A new Hub uses a fresh binding and document
+baseline. Previously materialized History remains in the Store.
+
+## Authoritative directory contract
+
+`AgentNodeClient::list_computers` pages the authenticated owner's Computers with
+`ListNodesRequest.owner_only = true` and a page size of 100. The existing general
+admin list behavior remains separate. `NodeInfo.managed_worker_phase` survives
+protobuf encoding and decoding without string interpretation or dropped variants.
+
+The host's account-owned background task publishes only complete validated pulls
+into the existing local Node Store. It refreshes every five seconds, uses a
+five-second RPC timeout and a four-RPC host limit, and expires live observations
+after fifteen seconds. Reads consume the cache without waiting for Sync or the
+network. Confirmed create/update/rename/status/delete operations update it
+immediately and cannot be overwritten by older pulls. Directory replacement is
+atomic and removes absent cache-only rows before local SQL pagination.
+
+Computer capture hooks and baseline scans are removed. Retained Computer
+checkpoints remain relayable history, but import/delete cannot mutate registration,
+selectors or execution credentials. The Parser's released-v1 upgrade preserves
+causal operations and source/time mappings; the common checkpoint owner atomically
+persists the conversion and keeps materialized and pending outbox cuts distinct.
+
+
+## Startup replica upgrade contract
+
+`TalosSync::upgrade_local_replicas()` is a trusted offline startup operation. The
+existing `talos-upgrade` task receives the same writer-gated Storage owner as the
+future runtime and scans every retained scope, not only the signed-in user.
+`bind_account` and replacement binding no longer execute schema conversion.
+`require_upgraded_replicas` rejects an inconsistent database/upgrade-ledger pair
+before runtime assembly. The task runs with Sync disabled and preserves pending
+outbox changes, materialized-prefix proofs, original ACK cuts and local facts.
+
+`talos-sync-parser::v1_upgrade_mapping_json()` produces the application-owned Hub
+profile from the same immutable field definitions used by normal Header
+construction. The generated file is versioned and validated against the Sync
+service's mapping schema. `relatedIdSource: resourceId` handles Computer
+self-association even if an old stored index was null; other associated
+resources use `storedIndex`. Record bodies remain opaque; typed Parser decoding
+checks protocol identity without reserializing optional defaults into old ops.

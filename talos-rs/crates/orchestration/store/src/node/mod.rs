@@ -1,3 +1,4 @@
+mod cache;
 mod deletion;
 mod managed_worker;
 

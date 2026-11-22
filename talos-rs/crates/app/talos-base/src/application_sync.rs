@@ -31,6 +31,7 @@ pub(crate) struct ApplicationSyncStores {
 
 pub(crate) struct ApplicationSyncHost {
     pub self_weak: std::sync::Weak<Self>,
+    pub computer_directory: super::application_computer_directory::ComputerDirectory,
     pub registration_retirement: tokio::sync::Mutex<()>,
     pub config: talos_config::Config,
     pub sync: Arc<talos_sync::TalosSync>,
@@ -217,7 +218,6 @@ impl ApplicationSyncHost {
         ));
         self.sync_stores.sessions.install_sync(adapter.clone())?;
         self.sync_stores.projects.install_sync(adapter.clone())?;
-        self.sync_stores.nodes.install_sync(adapter.clone())?;
         self.sync_stores.files.install_sync(adapter.clone())?;
         adapter.start_capture();
         Ok(adapter)
@@ -279,7 +279,23 @@ impl ApplicationSyncHost {
             ));
         }
         if let Some(handle) = installed.get(&verified.user_id) {
-            return Ok(handle.clone());
+            if handle.scope() == &binding.scope && !handle.is_stopped() {
+                return Ok(handle.clone());
+            }
+            // Retain the retired scope until the replacement is fully installed.
+            // A transient bind/install failure must remain discoverable for retry.
+            let previous = handle.clone();
+            self.service.remove_sync_handle(&verified.user_id);
+            let observer = self
+                .sync_stores
+                .observers
+                .lock()
+                .expect("Sync observers lock")
+                .remove(&verified.user_id);
+            if let Some(observer) = observer {
+                super::application_sync_observer::join_observer(observer).await;
+            }
+            previous.shutdown().await?;
         }
         let binding = self.sync.bind_account(&verified, binding).await?;
         self.install_account_access(&verified, credentials.clone())
@@ -366,6 +382,7 @@ impl ApplicationSyncHost {
             }
         };
         let gateway = self.gateway_client().await?;
+        let directory_started = std::time::Instant::now();
         let remote = if local {
             None
         } else {
@@ -426,9 +443,7 @@ impl ApplicationSyncHost {
             return Ok(());
         }
         if let Some(node) = remote {
-            self.sync_stores
-                .nodes
-                .remember_remote_computer(&node)
+            self.cache_server_computer(&actor.user_id, &node, directory_started)
                 .await?;
             self.coordinator
                 .replace_remote_node(

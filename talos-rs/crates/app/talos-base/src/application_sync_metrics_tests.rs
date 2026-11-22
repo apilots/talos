@@ -2,6 +2,7 @@
 use super::*;
 use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
 use talos_error::ErrorCode;
+use talos_store::project::ProjectStore;
 
 pub(super) async fn verify_late_enrollment(
     config: Config,
@@ -52,6 +53,17 @@ pub(super) async fn verify_late_enrollment(
         .unwrap()
         .computers
         .is_empty());
+    let project = runtime
+        .sync_host
+        .sync_stores
+        .projects
+        .create_project_for_owner(
+            "Created before automatic enrollment",
+            &runtime.config.talos_paths().data_dir.join("late-project"),
+            ACCOUNT,
+        )
+        .await
+        .unwrap();
     runtime.service.resume_account_sync(actor);
     wait_for("background late enrollment", async || {
         runtime
@@ -67,17 +79,75 @@ pub(super) async fn verify_late_enrollment(
     let local = status
         .local_computer_id
         .expect("later enrollment must succeed");
-    assert!(Arc::ptr_eq(
-        &handle,
+    wait_for("late enrolled capture alias", async || {
         runtime
-            .sync_host
-            .sync_stores
-            .handles
-            .lock()
+            .sync
+            .account_binding(&identity)
             .await
-            .get(ACCOUNT)
             .unwrap()
-    ));
+            .is_some_and(|binding| {
+                binding.computers
+                    == vec![talos_sync::ComputerAlias {
+                        source_node_id: "embedded".into(),
+                        computer_id: local.clone(),
+                    }]
+            })
+    })
+    .await;
+    let binding = runtime
+        .sync
+        .account_binding(&identity)
+        .await
+        .unwrap()
+        .unwrap();
+    let handle = runtime.sync_host.sync_stores.handles.lock().await[ACCOUNT].clone();
+    let resource = talos_sync::SyncResourceKey::Project {
+        project_id: project.project_id.clone(),
+    };
+    wait_for(
+        "pre-enrollment Project baseline acknowledged by Hub",
+        async || {
+            runtime
+                .sync
+                .document_version(&binding, &resource)
+                .await
+                .unwrap()
+                .is_some()
+                && runtime.sync.pending_changes(&binding).await.unwrap() == 0
+        },
+    )
+    .await;
+    let baseline = runtime
+        .sync
+        .document_version(&binding, &resource)
+        .await
+        .unwrap()
+        .unwrap();
+    runtime
+        .sync_host
+        .sync_stores
+        .projects
+        .patch_project(
+            &project.project_id,
+            &talos_types::ProjectPatch {
+                name: Some("Changed after automatic enrollment".into()),
+            },
+        )
+        .await
+        .unwrap();
+    wait_for(
+        "late enrollment following Project increment acknowledged",
+        async || {
+            runtime
+                .sync
+                .document_version(&binding, &resource)
+                .await
+                .unwrap()
+                .is_some_and(|version| version != baseline)
+                && runtime.sync.pending_changes(&binding).await.unwrap() == 0
+        },
+    )
+    .await;
     wait_for("late enrolled Computer presence", async || {
         runtime
             .service
@@ -90,15 +160,16 @@ pub(super) async fn verify_late_enrollment(
             })
     })
     .await;
-    // Observation refresh must not rewrite capture identity or restart execution.
-    assert!(runtime
-        .sync
-        .account_binding(&identity)
-        .await
-        .unwrap()
-        .unwrap()
-        .computers
-        .is_empty());
+    // Ordinary observations keep the confirmed capture identity and transport.
+    assert_eq!(
+        runtime
+            .sync
+            .account_binding(&identity)
+            .await
+            .unwrap()
+            .unwrap(),
+        binding
+    );
     assert_eq!(
         handle.status().connection,
         talos_sync::SyncConnectionState::Connected

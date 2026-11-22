@@ -42,17 +42,11 @@ async fn claimed_embedded_computer_and_session_use_the_same_permanent_uuid() {
             computer_id: COMPUTER.into()
         }
     );
-    let mut remote = talos_sync_sdk::SyncReplica::new(computer.resource.clone(), 41).unwrap();
+    let mut remote = talos_sync_sdk::SyncReplica::new(computer.resource.wire(), 41).unwrap();
     remote.import(&[computer.update]).unwrap();
-    let facts = remote.changes().unwrap();
-    let talos_sync_types::SyncChange::Metadata { after, .. } = &facts[0] else {
-        panic!("Computer metadata")
-    };
-    let talos_sync_types::SyncResourceSnapshot::Computer(node) = after.as_ref() else {
-        panic!("Computer metadata")
-    };
-    assert_eq!(node.node_id, COMPUTER);
-    assert_eq!(node.owner_user_id.as_deref(), Some("account-1"));
+    let after = remote.fields().unwrap();
+    assert_eq!(after["/data/nodeId"], COMPUTER);
+    assert_eq!(after["/data/ownerUserId"], "account-1");
 
     let (session, _) = super::transcript::session_and_events("embedded");
     let original_binding = session.binding.clone();
@@ -74,21 +68,18 @@ async fn claimed_embedded_computer_and_session_use_the_same_permanent_uuid() {
         .await
         .unwrap()
         .unwrap();
-    let mut remote = talos_sync_sdk::SyncReplica::new(resource, 42).unwrap();
+    let mut remote = talos_sync_sdk::SyncReplica::new(resource.wire(), 42).unwrap();
     remote.import(&[batch.update]).unwrap();
-    let facts = remote.changes().unwrap();
-    let talos_sync_types::SyncChange::Metadata { after, .. } = &facts[0] else {
-        panic!("Session metadata")
-    };
-    let talos_sync_types::SyncResourceSnapshot::Session(session) = after.as_ref() else {
-        panic!("Session metadata")
-    };
-    assert_eq!(session.session.node_id, COMPUTER);
-    assert_eq!(session.binding.computer_id, COMPUTER);
-    assert_eq!(session.binding.agent_id, original_binding.agent_id);
-    assert_eq!(session.binding.workspace_id, original_binding.workspace_id);
+    let after = remote.fields().unwrap();
+    assert_eq!(after["/data/session/nodeId"], COMPUTER);
+    assert_eq!(after["/data/binding"]["computerId"], COMPUTER);
+    assert_eq!(after["/data/binding"]["agentId"], original_binding.agent_id);
     assert_eq!(
-        session.binding.workspace_user_id,
+        after["/data/binding"]["workspaceId"],
+        original_binding.workspace_id
+    );
+    assert_eq!(
+        after["/data/binding"]["workspaceUserId"],
         original_binding.workspace_user_id
     );
 }
@@ -240,6 +231,9 @@ async fn reconnect_checks_known_and_deferred_resources_without_taking_the_writer
         .unwrap();
     let connected =
         tokio::time::timeout(Duration::from_secs(2), credentials_requested.notified()).await;
+    assert!(!handle.is_stopped());
+    handle.shutdown().await.unwrap();
+    assert!(handle.is_stopped());
     handle.shutdown().await.unwrap();
     writer.rollback().await.unwrap();
     connected.expect("reconnect must request credentials while the SQLite writer is occupied");
@@ -351,17 +345,12 @@ async fn local_capture_wins_a_race_with_the_initial_projection() {
     assert_eq!(rows.len(), 1);
     let changes: Vec<talos_sync_types::SyncChange> =
         serde_json::from_str(&rows[0].get_string("changes_json").unwrap()).unwrap();
-    let [talos_sync_types::SyncChange::Metadata {
-        before: None,
-        after,
-    }] = changes.as_slice()
-    else {
-        panic!("expected one initial Computer snapshot");
-    };
-    let talos_sync_types::SyncResourceSnapshot::Computer(computer) = after.as_ref() else {
-        panic!("expected Computer metadata");
-    };
-    assert_eq!(computer.display_name, "Foreground commit");
+    let mut replica = talos_sync_sdk::SyncReplica::new(resource.wire(), 1).unwrap();
+    replica.apply(&changes).unwrap();
+    assert_eq!(
+        replica.fields().unwrap()["/data/displayName"],
+        "Foreground commit"
+    );
 }
 
 #[tokio::test]
@@ -463,7 +452,7 @@ async fn fixed_flush_cut_does_not_include_later_committed_changes() {
         .await
         .unwrap()
         .unwrap();
-    let mut hub = talos_sync_sdk::SyncReplica::new(resource.clone(), 42).unwrap();
+    let mut hub = talos_sync_sdk::SyncReplica::new(resource.wire(), 42).unwrap();
     hub.import(std::slice::from_ref(&first.update)).unwrap();
     assert!(talos_sync_sdk::version_equal(&hub.version().unwrap(), &minimum).unwrap());
     assert!(!hub.summary().unwrap().deleted);
@@ -488,7 +477,7 @@ async fn fixed_flush_cut_does_not_include_later_committed_changes() {
         .unwrap()
         .unwrap();
     let mut next =
-        talos_sync_sdk::SyncReplica::from_snapshot(resource.clone(), &hub.snapshot().unwrap())
+        talos_sync_sdk::SyncReplica::from_snapshot(resource.wire(), &hub.snapshot().unwrap())
             .unwrap();
     next.import(&[later.update]).unwrap();
     assert!(next.summary().unwrap().deleted);
@@ -496,15 +485,8 @@ async fn fixed_flush_cut_does_not_include_later_committed_changes() {
     hub.set_writer_id(42).unwrap();
     let remote_delete = hub.apply(&[talos_sync_types::SyncChange::Delete]).unwrap();
     let hub_version = hub.version().unwrap();
-    let (transaction, _, _) = fixture
-        .sync
-        .import_document(
-            &fixture.binding,
-            &resource,
-            &[remote_delete],
-            &hub_version,
-            None,
-        )
+    let (transaction, _) = fixture
+        .prepare_import(&resource, &[remote_delete], &hub_version)
         .await
         .unwrap();
     transaction.commit().await.unwrap();
@@ -561,27 +543,25 @@ async fn offline_backlog_larger_than_one_thousand_rows_recovers_before_remote_im
         .await
         .unwrap()
         .unwrap();
-    let (transaction, version, changes) = fixture
-        .sync
-        .import_document(
-            &fixture.binding,
-            &resource,
-            &[],
-            &SyncVersion::default(),
-            None,
-        )
+    let (
+        transaction,
+        SyncImportBatch {
+            version, changes, ..
+        },
+    ) = fixture
+        .prepare_import(&resource, &[], &SyncVersion::default())
         .await
         .unwrap();
     transaction.commit().await.unwrap();
-    let talos_sync_types::SyncChange::Metadata { after, .. } = &changes[0] else {
+    let SyncChange::Metadata { after, .. } = &changes[0] else {
         panic!("Computer metadata")
     };
-    let talos_sync_types::SyncResourceSnapshot::Computer(node) = after.as_ref() else {
+    let SyncResourceSnapshot::Computer(node) = after.as_ref() else {
         panic!("Computer metadata")
     };
     assert_eq!(node.display_name, "offline-1049");
     let mut acknowledged_rows = 0;
-    let mut hub = talos_sync_sdk::SyncReplica::new(resource.clone(), 42).unwrap();
+    let mut hub = talos_sync_sdk::SyncReplica::new(resource.wire(), 42).unwrap();
     while let Some(batch) = fixture
         .sync
         .export_pending(&fixture.binding, resource.clone(), 128)

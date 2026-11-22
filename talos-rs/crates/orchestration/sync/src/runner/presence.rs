@@ -1,5 +1,5 @@
 //! Advertise only this management host's verified Computer aliases, without durable state.
-use crate::{facade::sync_error, TalosSync};
+use crate::{facade::sync_error, SyncResourceKey, TalosSync};
 use std::{
     collections::BTreeSet,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -34,15 +34,19 @@ async fn publish(sync: &TalosSync, computers: &[String], client: &SyncClient) ->
         .as_millis() as i64;
     let computers: BTreeSet<_> = computers.iter().collect();
     for computer_id in computers {
+        let resource = SyncResourceKey::Computer {
+            computer_id: computer_id.clone(),
+        }
+        .wire();
         // Release the ephemeral room after each publication; never retain it between ticks.
         let channel = client
-            .open_presence(computer_id.clone())
+            .open_presence(resource.clone())
             .await
             .map_err(sync_error)?;
         let sent = channel
             .set(SyncPresence {
                 peer_id: sync.peer_id().into(),
-                computer_id: computer_id.clone(),
+                resource,
                 observed_at,
                 valid_until: observed_at + 30_000,
             })

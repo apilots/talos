@@ -14,7 +14,7 @@ Use the published `talos-sync-sdk` Metrics client and its canonical types for ve
 
 The read-only `sync/metrics` and `GET /v1/sync/metrics` expose the authenticated account's current peer observations, safe Sync endpoint, freshness and resource counts. No request parameters select a user. Offline, unsupported or unauthorized telemetry fails explicitly; the UI retains Computer management and renders the Sync relationship as unknown.
 
-Fixed Control Plane and Talos Sync nodes anchor the graph. Gray bidirectional execution/resource paths use existing Computer availability. Violet dashed bidirectional Sync paths require current upstream Computer presence mappings; a peer is not a Computer and one peer may advertise multiple Computers. Missing peer observations cannot identify the device's process role or prove remote convergence. Pure Workers have no direct Sync observation/edge. The fixed Control Plane-to-Sync relationship requires the current management host to be a Control Plane with its exact peer identity; a missing live observation renders that relationship unknown. Management runners publish only their verified own Computer aliases through the existing ephemeral presence SDK every ten seconds with a thirty-second expiry. Presence rooms close after each publication, so they do not reserve document-room capacity; pure Workers never run this management path. Publication runs as one connection-scoped future polled alongside the document session through Tokio select, so slow or missing presence replies cannot stall feed handling, uploads or management commands. It is cancelled with the connection and releases SDK room/upload guards before client shutdown; no detached worker or independent lifecycle is introduced. Publication failures are logged independently and never terminate otherwise functional document synchronization. After delayed enrollment, the original verified management owner refreshes the existing handle's ephemeral Computer observation set using Tokio watch; immutable durable capture aliases, execution selection and Worker lifetime remain unchanged.
+Fixed Control Plane and Talos Sync nodes anchor the graph. Gray bidirectional execution/resource paths use existing Computer availability. Violet dashed bidirectional Sync paths require current upstream Computer presence mappings; a peer is not a Computer and one peer may advertise multiple Computers. Missing peer observations cannot identify the device's process role or prove remote convergence. Pure Workers have no direct Sync observation/edge. The fixed Control Plane-to-Sync relationship requires the current management host to be a Control Plane with its exact peer identity; a missing live observation renders that relationship unknown. Management runners publish only their verified own Computer aliases through the existing ephemeral presence SDK every ten seconds with a thirty-second expiry. Presence rooms close after each publication, so they do not reserve document-room capacity; pure Workers never run this management path. Publication runs as one connection-scoped future polled alongside the document session through Tokio select, so slow or missing presence replies cannot stall feed handling, uploads or management commands. It is cancelled with the connection and releases SDK room/upload guards before client shutdown; no detached worker or independent lifecycle is introduced. Publication failures are logged independently and never terminate otherwise functional document synchronization. After delayed enrollment, the original verified management owner first reconciles a missing embedded Computer capture alias through the existing enrollment owner. This can replace the transport handle once and bootstrap facts produced before registration was available. An established source UUID remains immutable; a different UUID cannot silently rebind old history. After capture is complete, ordinary presence or Worker-connection recovery refreshes the existing handle's ephemeral observations through Tokio watch without replacing the handle, changing execution selection or creating another Worker lifetime.
 
 Reuse paginated server-owned Computer search. Topology and list display the same loaded directory window, show loaded/total counts and preserve inspection. Load more remains explicit; do not present a partial window as the full account topology. Details and existing rename/status/recovery controls retain permissions and structured errors. Reuse Talos i18n for all Chinese/English labels and unknown/empty/loading/error states.
 
@@ -53,3 +53,96 @@ Computer **offline** belongs to the existing directory/execution availability mo
 On a failed metrics refetch, retain only the last verified endpoint from the existing account/management-host query cache. The graph and service details may show that address while live observations, peer counts and resource statistics remain unavailable. No previous-account/host endpoint is shown after a scope change or logout; a successful read replaces it. No address has been verified before the first successful observation, so that address remains unknown.
 
 The account Sync control owns one error notice for this page. A known Sync transport ServiceUnavailable/Timeout condition uses the contextual locale message; connection state remains a separate enum label. Other operation failures and conflicts preserve their specific structured error presentation. Telemetry and inspector views do not repeat the same failure. English source messages are not compared or parsed. This presentation rule does not alter the canonical ApiError, retry policy or synchronization protocol.
+
+## Shared download progress presentation
+
+Graph cards, the list and the inspector reuse one compact presentation of three
+independent facts: Sync connection/activity, Hub download progress or lag, and
+pending uploads. Caught up means that the recipient downloaded through the
+observed Hub cut. It does not confirm that another source has uploaded its private
+pending changes. A heartbeat confirms transport liveness; recent document
+activity controls flow animation. Behind or recovering download progress alone
+never starts an activity animation. Keep keyboard inspection controls and the
+existing reduced-motion behavior.
+
+Use the existing fifteen-second account snapshot freshness guard for both the
+compact summary and peer details. An expired snapshot cannot provide current
+progress, lag, heartbeat, source-delay samples, activity times or stored resource
+counts. Show unknown progress and a clear expiry explanation. The verified
+endpoint may remain visible. Exact-host local status still owns its transport
+errors and current pending outbox even when account telemetry is unavailable.
+Peer progress confirmation time remains a separate observation: the SDK normally
+reports idle progress on its twenty-second heartbeat cadence, so its timestamp
+must not be mistaken for the five-second metrics fetch timestamp or a new
+document write.
+
+For multiple live peers mapped to one Computer, deduplicate peer identities and
+show recovering before behind, then unknown if any report is missing, and caught
+up only when every mapped live peer confirms it. For behind peers, display the
+largest reported download lag; a missing lag remains behind without a fabricated
+number. If recovering and behind peers coexist, retain recovery and the available
+lag. Sum pending uploads only when each peer has a report; the exact local peer's
+current outbox replaces its reported count rather than adding the same work
+twice. Show the oldest available progress confirmation time. Details retain each
+peer's individual observations for inspection.
+
+Per-source delay values are historical Hub-commit-to-recipient-progress-report
+samples. They exclude time waiting to upload, do not claim current end-to-end
+latency, and are not ping RTT. Keep this explanation next to the detailed samples
+in both supported locales. Missing peer mappings cannot establish whether a
+Computer supports Sync and must not visually demote that Computer.
+
+The Server directory alone owns machine totals. The Sync service inspector shows
+stored Project, Session and File resources; retained Computer document counts do
+not appear as a second machine total in normal topology.
+
+### Reusable progress verification
+
+Focused hosted unit coverage exercises both locales across graph, list and
+inspector: idle with pending uploads, caught up, behind without document activity,
+recovering, expiry hiding old progress and source samples, mixed peer reports,
+missing reports, duplicate peer mappings, local outbox replacement and unchanged
+activity-based wire states. Existing page tests preserve inspection, execution
+selection, pagination and failure behavior.
+
+For browser acceptance, use an authenticated account with a mapped management
+Computer and a second peer. Switch topology/list and inspect each Computer while
+publishing changes in each direction. Check that pending uploads remain visible
+independently of Hub download progress, and that idle heartbeat refreshes do not
+animate document flow. Inspect historical source-delay wording, interrupt metrics
+reads until the snapshot expires, then confirm that all three views show unknown
+progress and no previous delay sample. Restore metrics and verify recovery.
+Repeat in English and Chinese at narrow and wide widths, use keyboard inspection
+and enable reduced motion. A Server directory with more retained Hub Computer
+documents must still show only the Server directory machine total. Real multi-peer
+acceptance remains separate from hosted unit coverage.
+
+### Inspector layout and duration display
+
+Anchor PostCSS's Tailwind configuration and content scanning to their own config
+files so starting Vite from another working directory cannot silently omit the
+product utility styles. Metadata uses a compact two-column label/value grid;
+both columns can shrink and long hostnames, identifiers and endpoints wrap
+inside the inspector rather than forcing horizontal overflow.
+
+Show numeric zero duration alongside a confirmed caught-up download. Known
+backlog and historical delivery durations use localized milliseconds, seconds,
+minutes or hours through the existing shared duration formatter. Callers that
+omit its locale retain their current compact timing format. Missing or stale
+progress stays unknown and must never become a fabricated zero.
+
+Render the most recent valid Sync heartbeat as relative age, with an absolute
+machine-readable timestamp and full local timestamp available on hover.
+Heartbeat age measures freshness of the connection observation; it does not
+measure the age of unapplied Hub records. A fresh heartbeat can coexist with a
+large download backlog, and an idle peer can remain caught up without advancing
+the document sequence. Reuse the existing page refresh cadence; no per-peer timer
+or protocol change is required.
+
+Keep the same metadata rows and Sync metrics card when a Computer is offline,
+unknown, disabled or in error. Directory-owned hardware/identity information and
+last-known heartbeat timestamps remain readable; absent fields and unavailable
+live samples display `N/A`. A missing peer uses the same metric rows with unknown
+values, rather than replacing the card with an explanatory paragraph. Retained
+peer identity and heartbeat age are historical facts, not proof of a live link.
+Show offline execution advice on the existing Open action tooltip.

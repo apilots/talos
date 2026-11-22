@@ -169,6 +169,7 @@ pub fn encode_info(info: NodeInfo) -> pb::NodeInfo {
         owner_user_id: info.owner_user_id,
         available: info.available,
         credential_expires_at: info.credential_expires_at,
+        managed_worker_phase: info.managed_worker_phase.map(encode_managed_phase),
     }
 }
 
@@ -252,7 +253,10 @@ pub fn decode_info(value: pb::NodeInfo) -> TalosResult<NodeInfo> {
         pb::NodeMode::Unspecified => return Err(invalid_response()),
     };
     Ok(NodeInfo {
-        managed_worker_phase: None,
+        managed_worker_phase: value
+            .managed_worker_phase
+            .map(decode_managed_phase)
+            .transpose()?,
         system_info: value.system_info.map(decode_system_info).transpose()?,
         node_id: value.node_id,
         display_name: value.display_name,
@@ -341,3 +345,45 @@ fn decode_system_info(value: pb::NodeSystemInfo) -> TalosResult<talos_types::Nod
             .collect(),
     })
 }
+
+fn encode_managed_phase(value: talos_types::ManagedWorkerPhase) -> i32 {
+    match value {
+        talos_types::ManagedWorkerPhase::Provisioning => {
+            pb::ManagedWorkerPhase::Provisioning as i32
+        }
+        talos_types::ManagedWorkerPhase::Starting => pb::ManagedWorkerPhase::Starting as i32,
+        talos_types::ManagedWorkerPhase::WaitingForRegistration => {
+            pb::ManagedWorkerPhase::WaitingForRegistration as i32
+        }
+        talos_types::ManagedWorkerPhase::Ready => pb::ManagedWorkerPhase::Ready as i32,
+        talos_types::ManagedWorkerPhase::Sleeping => pb::ManagedWorkerPhase::Sleeping as i32,
+        talos_types::ManagedWorkerPhase::Stopped => pb::ManagedWorkerPhase::Stopped as i32,
+        talos_types::ManagedWorkerPhase::Offline => pb::ManagedWorkerPhase::Offline as i32,
+        talos_types::ManagedWorkerPhase::Stopping => pb::ManagedWorkerPhase::Stopping as i32,
+        talos_types::ManagedWorkerPhase::Resetting => pb::ManagedWorkerPhase::Resetting as i32,
+        talos_types::ManagedWorkerPhase::Deleting => pb::ManagedWorkerPhase::Deleting as i32,
+        talos_types::ManagedWorkerPhase::Failed => pb::ManagedWorkerPhase::Failed as i32,
+    }
+}
+fn decode_managed_phase(value: i32) -> TalosResult<talos_types::ManagedWorkerPhase> {
+    match pb::ManagedWorkerPhase::try_from(value).map_err(|_| invalid_response())? {
+        pb::ManagedWorkerPhase::Provisioning => Ok(talos_types::ManagedWorkerPhase::Provisioning),
+        pb::ManagedWorkerPhase::Starting => Ok(talos_types::ManagedWorkerPhase::Starting),
+        pb::ManagedWorkerPhase::WaitingForRegistration => {
+            Ok(talos_types::ManagedWorkerPhase::WaitingForRegistration)
+        }
+        pb::ManagedWorkerPhase::Ready => Ok(talos_types::ManagedWorkerPhase::Ready),
+        pb::ManagedWorkerPhase::Sleeping => Ok(talos_types::ManagedWorkerPhase::Sleeping),
+        pb::ManagedWorkerPhase::Stopped => Ok(talos_types::ManagedWorkerPhase::Stopped),
+        pb::ManagedWorkerPhase::Offline => Ok(talos_types::ManagedWorkerPhase::Offline),
+        pb::ManagedWorkerPhase::Stopping => Ok(talos_types::ManagedWorkerPhase::Stopping),
+        pb::ManagedWorkerPhase::Resetting => Ok(talos_types::ManagedWorkerPhase::Resetting),
+        pb::ManagedWorkerPhase::Deleting => Ok(talos_types::ManagedWorkerPhase::Deleting),
+        pb::ManagedWorkerPhase::Failed => Ok(talos_types::ManagedWorkerPhase::Failed),
+        pb::ManagedWorkerPhase::Unspecified => Err(invalid_response()),
+    }
+}
+
+#[cfg(test)]
+#[path = "node_pb_tests.rs"]
+mod tests;

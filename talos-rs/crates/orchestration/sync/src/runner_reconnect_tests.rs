@@ -55,9 +55,7 @@ async fn cold_recovery_defers_one_resource_without_blocking_the_connection() {
 async fn deferred_import_keeps_connection_live(saved_cursor: Option<&'static str>) {
     use talos_storage::Storage;
     use talos_sync_sdk::loro_protocol::{self, BatchId, Permission, ProtocolMessage};
-    use talos_sync_types::{
-        DocumentJoinAccepted, ResourceKind, SyncFeedEntry, SyncResourceSummary,
-    };
+    use talos_sync_types::{SyncFeedEntry, SyncResourceSummary};
 
     let (listener, acceptor, trusted_ca) = tls_listener().await;
     let fixture = fixture_with_options(
@@ -86,8 +84,9 @@ async fn deferred_import_keeps_connection_live(saved_cursor: Option<&'static str
         };
         let mut metadata = super::node(name);
         metadata.node_id = resource.id().into();
-        let change = crate::projection::change(
+        let change = talos_sync_parser::encode_change(
             &fixture.binding,
+            &resource,
             SyncChange::Metadata {
                 before: None,
                 after: Box::new(SyncResourceSnapshot::Computer(metadata)),
@@ -95,20 +94,20 @@ async fn deferred_import_keeps_connection_live(saved_cursor: Option<&'static str
         )
         .unwrap()
         .unwrap();
-        let mut replica = talos_sync_sdk::SyncReplica::new(resource.clone(), writer).unwrap();
+        let mut replica = talos_sync_sdk::SyncReplica::new(resource.wire(), writer).unwrap();
         let update = replica.apply(&[change]).unwrap();
         let version = replica.version().unwrap();
-        let room = talos_sync_types::room_id(&fixture.binding.scope, &resource).unwrap();
+        let room = talos_sync_types::room_id(&fixture.binding.scope, &resource.wire()).unwrap();
         documents.insert(room, (version.clone(), update));
         entries.push(SyncFeedEntry {
-            resource,
+            resource: resource.wire(),
             version,
             deleted: false,
             reset: false,
         });
     }
-    let deferred = entries[0].resource.clone();
-    let healthy = entries[1].resource.clone();
+    let deferred = SyncResourceKey::try_from(entries[0].resource.clone()).unwrap();
+    let healthy = SyncResourceKey::try_from(entries[1].resource.clone()).unwrap();
     let peer = tokio::spawn(async move {
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = acceptor.accept(tcp).await.unwrap();
@@ -178,12 +177,12 @@ async fn deferred_import_keeps_connection_live(saved_cursor: Option<&'static str
                                 saved_cursor.is_none(),
                                 "a saved cursor skips catalog recovery"
                             );
-                            let resources = if params.kind == Some(ResourceKind::Computer) {
+                            let resources = if params.namespace.as_deref() == Some("computer") {
                                 entries
                                     .iter()
                                     .map(|entry| SyncResourceSummary {
                                         resource: entry.resource.clone(),
-                                        computer_id: Some(entry.resource.id().into()),
+                                        related: None,
                                         version: entry.version.clone(),
                                         deleted: false,
                                     })
@@ -209,6 +208,7 @@ async fn deferred_import_keeps_connection_live(saved_cursor: Option<&'static str
                                 .await
                                 .unwrap();
                         }
+                        SyncControlMessage::ReportProgress(_) => {}
                         other => panic!("Unexpected control frame: {other:?}"),
                     }
                 }
@@ -224,9 +224,9 @@ async fn deferred_import_keeps_connection_live(saved_cursor: Option<&'static str
                                 permission: Permission::Write,
                                 version: version.version_vector.clone(),
                                 extra: Some(
-                                    serde_json::to_vec(&DocumentJoinAccepted {
-                                        history_generation: version.history_generation,
-                                    })
+                                    serde_json::to_vec(&serde_json::json!({
+                                        "historyGeneration": version.history_generation,
+                                    }))
                                     .unwrap(),
                                 ),
                             }))
@@ -438,7 +438,8 @@ async fn fixed_reconnect_interval_recovers_short_feeds_and_refreshed_credentials
                                     feed_cursor: "cut".into(),
                                 }
                             }
-                            SyncControlMessage::Unsubscribe { .. } => continue,
+                            SyncControlMessage::Unsubscribe { .. }
+                            | SyncControlMessage::ReportProgress(_) => continue,
                             other => panic!("unexpected control frame {other:?}"),
                         };
                         Message::Text(
