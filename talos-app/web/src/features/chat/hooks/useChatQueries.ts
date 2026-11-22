@@ -102,11 +102,11 @@ export function useProjectsView(nodeId?: string) {
   };
 }
 
-export function useSessionQuery(sessionId: string, enabled = true, draftNodeId?: string) {
+export function useSessionQuery(sessionId: string, enabled = true) {
   const connectionKey = useConnectionKey();
   return useQuery({
     queryKey: chatKeys.session(connectionKey, sessionId),
-    queryFn: () => getSession(sessionId, draftNodeId),
+    queryFn: () => getSession(sessionId),
     select: detail => detail.session,
     enabled: Boolean(sessionId) && enabled,
   });

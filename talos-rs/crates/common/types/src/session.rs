@@ -211,6 +211,24 @@ pub struct SessionListEntry {
     pub has_active_turn: bool,
 }
 
+/// Product purpose assigned when a Session is created.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum SessionKind {
+    Standard,
+    Talo,
+}
+
+impl SessionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Talo => "talo",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
@@ -219,6 +237,8 @@ pub struct SessionInfo {
     #[ts(rename = "nodeId")]
     pub node_id: String,
     pub id: String,
+    #[ts(inline)]
+    pub session_kind: SessionKind,
     pub title: String,
     pub user_id: String,
     pub source_type: talos::SessionSourceType,

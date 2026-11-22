@@ -5,12 +5,13 @@ pub use talos_types::SessionTreeIdentity;
 use serde::{Deserialize, Serialize};
 use talos_types::{
     talos::{SessionSourceProvider, SessionSourceType, TalosSessionEnvironment, TokenUsage},
-    SessionConf, SessionUsage, DEFAULT_SESSION_TITLE,
+    SessionConf, SessionKind, SessionUsage, DEFAULT_SESSION_TITLE,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionRecord {
     pub id: String,
+    pub session_kind: SessionKind,
     pub agent_id: String,
     pub execution_node_id: String,
     pub tree_identity: SessionTreeIdentity,

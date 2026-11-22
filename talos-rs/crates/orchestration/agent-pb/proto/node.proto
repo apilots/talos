@@ -55,6 +55,21 @@ message NodeInfo {
   optional string owner_user_id = 11; bool available = 12;
   optional int64 credential_expires_at = 13;
   NodeSystemInfo system_info = 14;
+  optional ManagedWorkerPhase managed_worker_phase = 15;
+}
+enum ManagedWorkerPhase {
+  MANAGED_WORKER_PHASE_UNSPECIFIED = 0;
+  MANAGED_WORKER_PHASE_PROVISIONING = 1;
+  MANAGED_WORKER_PHASE_STARTING = 2;
+  MANAGED_WORKER_PHASE_WAITING_FOR_REGISTRATION = 3;
+  MANAGED_WORKER_PHASE_READY = 4;
+  MANAGED_WORKER_PHASE_SLEEPING = 5;
+  MANAGED_WORKER_PHASE_STOPPED = 6;
+  MANAGED_WORKER_PHASE_OFFLINE = 7;
+  MANAGED_WORKER_PHASE_STOPPING = 8;
+  MANAGED_WORKER_PHASE_RESETTING = 9;
+  MANAGED_WORKER_PHASE_DELETING = 10;
+  MANAGED_WORKER_PHASE_FAILED = 11;
 }
 message NodeCredential { string node_id = 1; string token = 2; int64 expires_at = 3; }
 message CreateNodeRequest {
@@ -71,7 +86,7 @@ message VerifySavedRegistrationRequest { NodeAuth auth = 1; }
 message GetNodeResponse { oneof result { NodeInfo node = 1; Failure failure = 2; } }
 message NodeDeployments { repeated Deployment deployments = 1; }
 message GetDeploymentsResponse { oneof result { NodeDeployments deployments = 1; Failure failure = 2; } }
-message ListNodesRequest { optional string cursor = 1; uint32 limit = 2; }
+message ListNodesRequest { optional string cursor = 1; uint32 limit = 2; bool owner_only = 3; }
 message NodePage { repeated NodeInfo data = 1; optional string next_cursor = 2; }
 message ListNodesResponse { oneof result { NodePage page = 1; Failure failure = 2; } }
 // Full replacement of mutable management fields; ownership is immutable.

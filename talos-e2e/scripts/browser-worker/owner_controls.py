@@ -114,7 +114,7 @@ def sign_in(context, page, web, account):
     page.wait_for_function("!location.pathname.startsWith('/auth/')")
 
 
-def web_acceptance(web, computer):
+def web_acceptance(web, computer, display_name):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=os.environ.get('TALOS_E2E_CHROME_BIN') or
             '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless=True)
@@ -142,7 +142,8 @@ def web_acceptance(web, computer):
             page.goto(web + '/computers', wait_until='domcontentloaded')
             view = page.get_by_role('button', name='View computer', exact=True)
             expect(page.get_by_role('heading', name='Connection topology')).to_be_visible()
-            page.get_by_role('button', name='Inspect talos', exact=True).click()
+            page.get_by_role('button', name=f'Inspect {display_name}', exact=True).click()
+            expect(view).to_be_visible(timeout=20_000)
             view.click()
             expect(page.get_by_text('View only', exact=True)).to_be_visible(timeout=20_000)
             page.wait_for_function('''() => [...document.querySelectorAll("canvas")].some(canvas => {
@@ -286,21 +287,39 @@ def main():
         computer = owner_node['nodeId']
         assert owner_node['ownerUserId'] == data(http(web + '/v1/user'))['user']['user_id']
         assert not data(http(web + '/v1/computers', token=QA_TOKEN))['data']
-        web_acceptance(web, computer)
+        web_acceptance(web, computer, owner_node['displayName'])
         print('CASE authenticated_web_owner_jobs_and_pixels PASS', flush=True)
 
         admin = Desktop(stack, directory / 'desktop-admin', issuer, ingress, cert)
         admin.login('Administrator', 'admin')
         assert admin.call('sync/status')['connection'] == 'disabled'
-        assert not admin.has_computer(computer), 'Desktop must start without the cloud Computer directory'
+        def cached_computer():
+            rows = admin.call('computer/list', {})['data']
+            return next((row for row in rows if row['nodeId'] == computer), None)
+
+        cached = wait(cached_computer, 'Computer discovered from Server with Sync disabled')
+        assert cached['displayName'] == owner_node['displayName']
+        confirmed_name = 'Renamed from Desktop with Sync disabled'
+        renamed = admin.call('computer/rename', {'nodeId': computer, 'displayName': confirmed_name})
+        assert renamed['displayName'] == confirmed_name
+        assert cached_computer()['displayName'] == confirmed_name
+        assert admin.call('computer/read', {'nodeId': computer})['displayName'] == confirmed_name
+        server_name = 'Renamed directly at Server'
+        code, response = http_response(web + f'/v1/computers/{computer}/name',
+            {'nodeId': computer, 'displayName': server_name}, method='PATCH')
+        assert code == 200 and data(response)['displayName'] == server_name
+        wait(lambda: cached_computer()['displayName'] == server_name,
+             'Periodic directory refresh after a direct Server rename')
+        assert admin.call('sync/status')['connection'] == 'disabled'
+        print('CASE no_sync_directory_and_bidirectional_rename_refresh PASS', flush=True)
         binding = controls(computer,
             lambda: admin.call('builtinJob/list', {'computerId': computer}),
             lambda request: admin.call('builtinJob/control', request))
-        assert not admin.has_computer(computer), 'Built-in job forwarding unexpectedly seeded the local directory'
+        assert admin.has_computer(computer), 'Server directory cache lost the registered Computer'
         read = {'nodeId': computer, 'operation': {'kind': 'read'}}
         snapshot = admin.call('browser/operate', read)
         assert snapshot['display']['kind'] == 'dockerDesktop'
-        assert admin.has_computer(computer), 'Authenticated connection did not record the Computer'
+        assert admin.has_computer(computer), 'Computer connection changed the Server directory cache'
         viewer = DesktopViewer(admin, admin.call('desktop/open', open_request(computer, snapshot)))
         try:
             viewer.frame(REPORT / 'desktop-embedded-desktop.png')

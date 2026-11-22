@@ -62,8 +62,8 @@ export async function listSessions(nodeId?: string) {
   return response.sessions;
 }
 
-export async function getSession(sessionId: string, draftNodeId?: string) {
-  return getTalosClient().sessions.get({ sessionId }, draftNodeId);
+export async function getSession(sessionId: string) {
+  return getTalosClient().sessions.get({ sessionId });
 }
 
 export function generateSessionId() {
@@ -229,7 +229,8 @@ export async function startTimelineTurn(
   request: StartTurnRequest,
   onAcceptedMessageId?: (messageId: string) => void,
 ): Promise<string> {
-  const client = await getTalosClient({ sessionId: request.sessionId, nodeId: request.nodeId });
+  // The Composer supplies a Computer only for the initial Turn of a new chat.
+  const client = await getTalosClient(request.nodeId ? { nodeId: request.nodeId } : { sessionId: request.sessionId });
   const ack = await client.turns.start(request);
   if (!ack.messageId) {
     throw new Error(`Message ack did not include messageId: ${ack.turnId}`);

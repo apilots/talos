@@ -9,7 +9,7 @@ export const productQueries = new QueryClient({
 export const managedWorkerKey = (scope: string) => ["talos", scope, "managed-worker"] as const;
 export const sessionDetailKey = (scope: string, id: string) => ["talos", scope, "session", id] as const;
 
-/** The transport that returned this authorized Session. Browser only has one transport. */
+/** A standard session can exist only on the Server when Desktop Sync is off. */
 export interface SessionDetail {
   session: SessionInfo;
   owner?: "desktop" | "server";

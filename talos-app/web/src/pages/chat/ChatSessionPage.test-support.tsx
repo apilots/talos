@@ -120,9 +120,9 @@ export async function createChatFeatureMock(
       ],
       setActiveProjectId: vi.fn(),
     }),
-    useSessionQuery: (sessionId: string, enabled?: boolean, draftNodeId?: string) => {
+    useSessionQuery: (sessionId: string, enabled?: boolean) => {
       mocks.sessionQueryEnabled = enabled;
-      if (mocks.realSessionQuery) return actual.useSessionQuery(sessionId, enabled, draftNodeId);
+      if (mocks.realSessionQuery) return actual.useSessionQuery(sessionId, enabled);
       return { data: mocks.session, error: mocks.sessionError };
     },
     useUpdateSessionModelMutation: () => ({ mutate: mocks.mutateModel }),

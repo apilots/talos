@@ -1,8 +1,8 @@
 # Talos 多端同步接入
 
-Status: Implemented；本轮账号选择修复、SDK registry接入及统一8/8验收通过，见[验收结论](verification.md)。独立服务方案在[talos-sync](https://github.com/apilots/talos-sync/blob/7230f9fdf294e7ae218bdb6d3cf1c4ef60203380/spec/feat-044-talos-sync/design.md)，本文件仅维护Talos产品责任。
+Status: Implemented. Talos owns product integration; the [independent Sync contract](https://github.com/apilots/talos-sync/blob/8e60e2b612ba895c8f4bcb4e0d78c9ae86227502/spec/feat-001-talos-sync/design.md) owns the service protocol. Current acceptance evidence belongs in the integration PR and ignored output reports.
 
-同一账号在多个Desktop app-server/talos-server管理宿主拥有独立业务DB，双向同步Computer、Project、Session、完整Timeline及必要执行metadata。Session永久绑定一个Computer/Worker/Workspace，空闲可由任意授权管理端协调同Worker的下一Turn；执行中的Turn只有当前协调者。同步不迁移Worker、不触发执行。
+Management hosts keep independent product databases. Sync replicates account-owned Project, Session, complete Timeline and required execution metadata. Talos Server owns the Computer directory and registration state; clients refresh that directory independently of Sync. Sessions retain their original Computer/Worker/Workspace binding. An authorized manager may coordinate the next idle Turn on the same Worker; a running Turn has one coordinator. Replication never migrates Workers or starts execution.
 
 ```mermaid
 flowchart TB
@@ -30,7 +30,7 @@ flowchart TB
 | 当前协调者原Service/Store | 授权、Turn准入、结果/Timeline落库、发布实时进展。结果先本端commit，再异步共享。 |
 | Worker / Harness | 模型/工具、所有Workspace文件/配置、最终排他及最小历史游标恢复标记。没有产品Session DB。 |
 | agent-client / 中心G | 屏蔽loopback/direct/Connect；注册/租约只在G；RPC与资源返回当前协调者，不代执行、不代写其Session。 |
-| Talos同步集成lib/Store adapter | 从本地事实补采到现有 outbox，分批导入原 Store，维护 event-map、水位和共享确认。 |
+| Talos同步集成lib/Store adapter | 从本地事实补采到现有 outbox。将同步信封解码为 Talos 原生类型后分批导入原 Store，维护 event-map、水位和共享确认。 |
 | 独立Sync SDK/types/server | 唯一WSS+Loro同步协议、账号隔离、持久Ack/增量恢复；不处理执行RPC。 |
 | 原SDK/UI | 原Computer/Project/Session/API；独立Computer管理组件、相对当前宿主的本机标识、真实在线状态。 |
 
@@ -43,7 +43,21 @@ flowchart TB
 
 ## 持久化与可执行边界
 
-原 Store 事务保留业务事实及其必要的版本记录。后台采集从持久水位读取已提交的事实，失败后仍可重新采集。入站长历史分批暂存，分批事务之间让出本地写锁。最终事务一并发布文档、事实、event-map 和下载游标。
+Capture starts at a durable cut of committed Store facts. Inbound history is
+staged across bounded transactions that release the local writer between
+batches. Publication commits the document checkpoint, Store facts and event
+map together. The runner saves the account feed cursor after applying its
+contiguous prefix of documents.
+
+The [Talos Sync parser library](../../talos-rs/crates/orchestration/sync-parser/src/lib.rs)
+owns typed business payloads, outbound field selection and inbound decoding.
+The wire API carries opaque metadata fields and record bodies. When required
+data cannot be decoded, the business Store keeps its committed projection
+and feed cursor. The SDK validates a full snapshot before it reaches the same
+materialization path used for incremental updates.
+
+The protocol v2 cutover pairs the Talos parser with published
+`talos-sync-types` and `talos-sync-sdk` 0.1.8. The lockfile consumes these published registry packages without local source patches.
 
 导入不计费、不重发工具或反思。稳定事件键与原 reducer 重建展示，原活动锁、claim 和内存 queue 留在执行端。跨端 Input、Interrupt 和 queue 仅路由当前执行协调者。
 
@@ -101,6 +115,18 @@ Cloud Auth classifies a remote HTTP500 as temporary service unavailability,
 like502--504, so first admission can recover with the same credential even before
 an Auth refresh task exists. Other internal errors remain terminal; the host does
 not inspect Cloud response text or manage a separate authentication retry loop.
+Document discovery/restoration and Worker enrollment run independently after the
+same verified account admission. Hub recovery does not wait for a Worker connection.
+A first document binding may temporarily have no local Computer alias. Once
+automatic enrollment confirms this host's owned UUID, the existing enrollment
+capture owner fills only a missing `embedded` association, replaces the account
+adapter/handle as needed, and bootstraps local Projects/Sessions created during
+that gap. Existing source UUID associations cannot be rebound. Retained bindings
+without a live handle follow the same reconciliation; disabled Sync retains its
+opt-out while installing the confirmed capture association without starting H.
+Presence then uses the current handle. Ordinary observations and G stream recovery
+reuse a handle whose capture association is already complete.
+
 The Sync server's independent shared-authorization fix is owned by talos-sync;
 updating the product alone cannot change a previously released service image.
 Full selected-session History and running-Turn Live remain the existing local
@@ -115,3 +141,163 @@ Single-query Sync preferences use the existing pooled read. Write/capture/import
 transactions retain their original serialization and atomicity. A read snapshot
 cannot be upgraded through the transaction write API, and SQLx owns rollback on
 drop/cancellation. This does not change History loading or Sync ownership.
+
+## Shared parsing and recovery ownership
+
+The independent Sync service owns the generic wire protocol. Talos uses one
+`talos-sync-parser` library above the SDK. Its `header`, `metadata`, `records`
+and `codec` modules are shared by capture and import: identity/relationship
+headers, merge boundaries, stable Turn/event keys and typed error serialization
+must not be reimplemented in business callers. Original event occurrence and
+persistence timestamps remain native values; rebinding never restamps them.
+The integration's shared checkpoint Store module owns snapshot/version reads,
+durable ACK persistence and retained-scope copying.
+
+### A surviving replica restoring a new Hub
+
+A verified account may replace its old Hub association with a fresh scope.
+First materialize pending old-scope outbox operations locally. At one guarded
+write cut, retain the complete canonical replicas, original event mappings and
+captured source positions; enqueue a full-baseline marker per document and
+reset Hub ACK/cursor state. Activate the new binding only after that state is
+durable. The original Loro operations, Node associations, Turn coordinators,
+notice publishers, timestamps, generations and tombstones stay unchanged.
+An original replica can subsequently return and merge its original checkpoint
+and later deltas. Native Store scans skip retained replicas, avoiding a
+reconstruction that would incorrectly identify B as A's historical source.
+
+Snapshot chunks may be referenced by the archived old scope and the new active
+scope. Retirement checks all checkpoint references before reclaiming chunks.
+Published capture batches scope copied mappings, reusing their existing atomic
+visibility and local-event identity constraints. The old pending queue is atomically replaced by baseline markers after its
+operations are materialized; the new baseline requires its own durable Hub ACK.
+The old canonical checkpoints remain available for the archived scope. Missing dependencies and incomplete
+checkpoints do not become complete by changing a Hub identity.
+
+### Server-owned Computer directory
+
+Talos Server is authoritative for Computer registration, identity, name,
+endpoint, enabled state, managed lifecycle phase, system information and live
+availability. Desktop and TUI periodically fetch the signed-in account's full
+paged directory through the existing Node SDK, even with Sync disabled or an
+empty/unavailable Hub. Administrative clients also request owner-only pages.
+The central Server reads its own registry. A trusted local embedded Worker
+retains its actual local availability.
+
+One account-owned task refreshes every five seconds. Pages contain at most 100
+entries, each RPC has a five-second deadline, and a host-wide semaphore permits
+four concurrent directory RPCs. All pages must validate before publication;
+duplicate identities, foreign owners and repeated cursors fail the pull. The
+existing local Store publishes the complete cache in one transaction: upsert
+confirmed entries and remove absent cache-only rows before SQL filtering,
+pagination or counting. Credentials, leases and managed Worker records are not
+copied or pruned. Fresh Server results supersede legacy Sync-only deletion
+markers for the same owner.
+
+List/detail remain local reads and never await a directory or Sync request.
+Failed pulls preserve the last complete directory; status older than fifteen
+seconds becomes unavailable/unknown. Confirmed create/update/rename/status/delete
+operations write through the same cache owner immediately. Confirmations,
+including deletions, override older in-flight pulls. A Server-authorized connection
+may seed first-access metadata through the same publication owner; a delayed
+handshake cannot replace newer observations or resurrect removed entries.
+Create/update/rename/status responses carry their local request-start instant through
+that same publication owner. If a newer observation or complete-directory absence
+was published during the request, local timestamps cannot order the remote commits.
+Re-read the current NodeInfo from Server under the publication lock, with a
+five-second deadline including connection setup, then validate and persist that
+result. A confirmed `ResourceNotFound` or `ResourceExpired` records deletion and
+returns `ResourceExpired`, preserving the Server's typed removal descriptor.
+Unavailable or denied confirmations preserve the cache and propagate their errors
+for update, rename and status changes.
+An older directory snapshot cannot suppress a later successful create or rename.
+Create validates the Server response against the requested owner, remote mode,
+metadata and credential identity before its cache effect. Once Server has committed,
+that effect cannot discard the one-time credential: the handling owner reports a
+confirmation or persistence failure separately and returns the committed creation
+with unknown/unavailable health, without publishing its older metadata. Credential
+delivery does not imply successful cache publication or continued registration;
+a concurrent deletion can already have invalidated it. The next normal directory
+refresh reconciles the cache. Administrator creation for another owner returns its
+credential without entering the administrator's account cache. No credential is
+persisted in the client directory. Normal uncontended mutations need no additional
+RPC. This conflict path can delay other cache publications for up to five seconds;
+list/detail remain local reads and do not take this lock.
+Publication time governs absence checks even when the paged pull started before
+the management request. The Store must never receive the superseded response as
+current directory state; create's degraded response describes the committed
+creation rather than asserting current registration or availability.
+The durable cache survives restart without network access. Its last-known identities
+remain selectable for local history reads, but a restart has no fresh remote
+availability observations. Remote execution still requires a reachable Talos Server;
+cached metadata does not provide an offline command transport or queue.
+Account cancellation clears
+transient state; another account cannot consume its observations.
+
+Fresh Sync capture does not scan or capture Computers. Retained Computer
+checkpoints can still be converted and relayed to preserve historical causality,
+but their imports and tombstones cannot change the directory or retire a
+registration. Session/Project import has no Computer-document dependency;
+original Node IDs remain native history bindings. Actual command/file access
+still passes existing Server/Worker authorization and reachability checks.
+
+Hub recovery and directory maintenance have independent account-owned tasks.
+Slow discovery or snapshot conversion must not delay directory refresh. An
+authenticated replacement Hub is rediscovered after an identity conflict; the
+old retained state moves before the replacement runner starts. Migration/install
+failures retry automatically. Same-scope reuse requires a running handle.
+
+### Released replica upgrade
+
+Published SDK 0.1.7 replicas use document schema v1; generic SDK 0.1.8 uses v2.
+The existing `talos-upgrade` startup framework runs one versioned task across
+all local retained account scopes, including dormant accounts and disabled Sync,
+before assembling Services or transports. It needs no login, token or network.
+The Talos Parser performs the one-time persisted conversion. It imports the official Loro JSON
+operation history, maps Talos containers/fields to generic headers and records,
+and preserves operation IDs, dependencies, counters, Lamport clocks, source IDs,
+native timestamps, generations and tombstones. An independent generic Header operation uses a deterministic reserved writer
+derived from Hub/account/resource identity. Its empty dependency set, counter,
+Lamport clock and timestamp match the Hub conversion even when offline local
+facts differ. A reserved-writer collision fails explicitly. Re-encoding native values as new historical operations would
+lose causality and is prohibited. The production dependency remains SDK 0.1.8;
+the released SDK is used only to regenerate committed test fixtures.
+
+Conversion builds and stages snapshots outside the publication writer. A bounded
+compare-and-swap checks the original document and ACK version using official
+VersionVector semantics, then persists the checkpoint, projection and schema
+marker atomically. Existing non-null materialization proofs are conservatively
+promoted to the complete converted checkpoint; null proofs remain unmaterialized.
+This prevents reset/delete or old metadata replay while preserving a pending
+native tail. Raw v1 outbox payloads use the shared Parser encoder. An unchanged Hub keeps the original truthful ACK cut; an empty upload marker
+ensures the new Header is acknowledged even if no user edits are pending. The
+old download cursor is cleared for catalog recovery. A replacement Hub still
+gets fresh ACK/feed state and a complete baseline; conversion is not a Hub ACK.
+Malformed or racing retained data fails without retiring the old binding.
+
+Sync settings serialize with current account initialization without aborting
+in-flight Worker enrollment. Explicit logout retains its cancellation boundary.
+Tests wait for published background identity and binding state; status queries
+do not perform registration or turn a pending initialization into a false identity.
+
+
+### Shared startup-upgrade deployment profile
+
+The independent Hub upgrades its own database before opening its listener; it
+retains the Hub identity and historical documents. SQL alone cannot rewrite the
+Loro envelope. Its isolated historical-protocol adapter preserves the opaque
+record body and original operations. Talos owns the declarative Header rules in
+`conf/sync-v1-upgrade-mapping.json`, generated by
+`just gen-sync-upgrade-mapping` from the Parser's normal Header field selection.
+The Hub reads that application profile through `upgrade.v1_mapping_file`; its
+Kernel has no Talos DTOs or business field paths. Supply the profile only for an
+initialized v1 Hub upgrade. Fresh and current-schema Hub databases need none.
+
+Local upgrade is registered as `202611220001_sync_replicas_v2` in the existing
+product ledger. Each checkpoint/schema/projection and proof update commits
+atomically; interruption retries unfinished documents. Success is verified
+against persisted schema markers even if an unrelated completed ledger was
+restored. Login only opens upgraded state. Archived checkpoints are converted
+without creating fake account bindings or credentials. Opaque historical record
+JSON is preserved without adding current DTO defaults; Parser decoding still
+validates the native object and the protocol identity envelope.

@@ -10,7 +10,7 @@ impl DatabaseAgentNodeStore {
         node_id: &str,
         owner: &str,
     ) -> TalosResult<()> {
-        let mut tx = self.begin_write(node_id).await?;
+        let mut tx = self.begin_write().await?;
         let existing: Option<String> = sqlx::query_scalar("SELECT owner_user_id FROM agent_nodes WHERE node_id = ? UNION ALL SELECT owner_user_id FROM computer_deletions WHERE node_id = ?")
             .bind(node_id).bind(node_id).fetch_optional(&mut *tx).await.map_err(|error| database_error("read deleted Computer owner", error))?;
         if existing
@@ -43,8 +43,7 @@ impl DatabaseAgentNodeStore {
             .map_err(|error| database_error("read Computer deletion", error))
     }
 
-    /// Immediate write transaction excludes concurrent durable admission. Sync capture
-    /// records the same deletion; no Project, Session, attachment or disk data is removed.
+    /// Retire the registration without removing Project, Session, attachment or disk data.
     pub(super) async fn delete_registration(
         &self,
         node_id: &str,
@@ -52,7 +51,7 @@ impl DatabaseAgentNodeStore {
         expected_lease_token_hash: Option<[u8; 32]>,
         now_at: i64,
     ) -> TalosResult<()> {
-        let mut tx = self.begin_write(node_id).await?;
+        let mut tx = self.begin_write().await?;
         super::managed_worker::ensure_node_has_no_active_turn(&mut tx, node_id).await?;
         delete_registration_in(&mut tx, node_id, owner, expected_lease_token_hash, now_at).await?;
         tx.commit().await

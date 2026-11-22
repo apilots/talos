@@ -900,6 +900,7 @@ fn test_config() -> TalosConfig {
 
 fn test_session() -> SessionRecord {
     SessionRecord {
+        session_kind: talos_types::SessionKind::Standard,
         id: "s1".to_string(),
         agent_id: "default".to_string(),
         execution_node_id: "embedded".to_string(),

@@ -1,4 +1,4 @@
-//! Restore durable local capture after explicit Worker enrollment.
+//! Restore durable local capture after confirmed Worker enrollment.
 use super::application_sync::ApplicationSyncHost;
 use talos_auth::RequestIdentity;
 use talos_error::{ErrorCode, TalosError, TalosResult};
@@ -26,7 +26,8 @@ impl ApplicationSyncHost {
         result
     }
 
-    async fn install_enrolled_capture(
+    /// Caller holds the account lifecycle lock; retirement serializes alias publication.
+    pub(super) async fn install_enrolled_capture(
         &self,
         actor: &Actor,
         verified: &RequestIdentity,

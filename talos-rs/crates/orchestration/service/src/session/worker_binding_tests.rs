@@ -74,6 +74,10 @@ async fn session_uses_worker_catalog_and_saved_workspace_after_default_changes()
         service.session_info(&record).await.unwrap().node_id,
         "worker-a"
     );
+    assert_eq!(
+        service.session_info(&record).await.unwrap().session_kind,
+        talos_types::SessionKind::Standard
+    );
     config.write().unwrap().workspaces.default_workspace_id = "other".into();
     let context = service
         .build_agent_context(&record, AgentTurnRef::new(&record.id, "turn-1"))

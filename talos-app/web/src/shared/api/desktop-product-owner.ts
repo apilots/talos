@@ -23,15 +23,14 @@ function ordinaryWorkerKey(scope: string, endpoint: string | undefined, nodeId: 
   return endpoint && JSON.stringify(["talos", scope, endpoint, "ordinary-worker", nodeId]);
 }
 
-export function isVerifiedDesktopWorker(queries: QueryClient, scope: string, nodeId?: string | null, endpoint?: string) {
-  if (!nodeId) return false;
+function isVerifiedDesktopWorker(queries: QueryClient, scope: string, nodeId: string, endpoint?: string) {
   const sync = queries.getQueryData<AppProtocol.SyncStatusResponse>(["talos", scope, "sync"]);
-  if (nodeId === "embedded" || sync?.localComputerId === nodeId) return true;
+  if (sync?.localComputerId === nodeId) return true;
   const key = ordinaryWorkerKey(scope, endpoint, nodeId);
   return Boolean(key && withWorkerStorage(storage => storage.getItem(key)) === "1");
 }
 
-/** Resolve an immutable target using Server identity and the authorized local projection. */
+/** Resolve an immutable target using its session kind or, before admission, its Computer. */
 export function desktopProductOwner(
   local: TalosWebClient, cloud: TalosWebClient, queries: QueryClient, scope: string, canUseTalo: boolean, signedIn = canUseTalo,
   controlPlaneEndpoint?: string,
@@ -69,62 +68,57 @@ export function desktopProductOwner(
       throw error;
     }
   };
-  const readCloudSession = async (sessionId: string): Promise<SessionDetail> => ({
-    ...(await cloud.sessions.get({ sessionId })), owner: "server",
-  });
-  const readProjectedSession = async (sessionId: string, projection: SessionDetail, options: OwnerOptions): Promise<SessionDetail> => {
+  // A standard chat can live on either transport. Talo always belongs to the Server.
+  const sessionOwner = (kind: AppProtocol.SessionInfo["sessionKind"], source: TalosWebClient) =>
+    ({ standard: source, talo: cloud })[kind];
+
+  async function sessionRoute(sessionId: string, admitDraft: boolean): Promise<{
+    client: TalosWebClient;
+    detail?: AppProtocol.SessionGetResponse;
+  }> {
+    const cached = queries.getQueryData<SessionDetail>(sessionDetailKey(scope, sessionId));
+    if (cached) return { client: sessionOwner(cached.session.sessionKind, cached.owner === "server" ? cloud : local) };
+
+    const readRoute = async (source: TalosWebClient) => {
+      const detail = await source.sessions.get({ sessionId });
+      const client = sessionOwner(detail.session.sessionKind, source);
+      return { client, detail: client === source ? detail : undefined };
+    };
     try {
-      if ((await forNode(projection.session.nodeId, options)) === local) return { ...projection, owner: "desktop" };
+      return await readRoute(local);
     } catch (error) {
-      // Removing a Talo deletes its directory entry, while Server retains its conversations.
-      if (!signedIn || !isMissing(error)) throw error;
-      try { return await readCloudSession(sessionId); }
-      catch (historyError) {
-        if (!options.service && options.readOnly && (isMissing(historyError) || isServiceUnavailable(historyError))) return { ...projection, owner: "desktop" };
-        throw historyError;
+      if (signedIn && error instanceof TalosApiError && error.code === AppProtocol.ErrorCode.PermissionDenied) {
+        // Local access checks can hide a synchronized Talo after an account downgrade.
+        const detail = await cloud.sessions.get({ sessionId });
+        if (detail.session.sessionKind !== "talo") throw error;
+        return { client: cloud, detail };
+      }
+      if (!isMissing(error)) throw error;
+      if (!signedIn) {
+        if (admitDraft) return { client: local };
+        throw error;
       }
     }
-    return readCloudSession(sessionId);
-  };
-  const readSession = async (sessionId: string, draftNodeId?: string, service?: ProductTarget["service"]): Promise<SessionDetail> => {
-    const cached = queries.getQueryData<SessionDetail>(sessionDetailKey(scope, sessionId));
-    if (cached?.owner === "server" || knownManaged()?.conversationSessionId === sessionId) return readCloudSession(sessionId);
-    // An uncertain first send can only have created the session on its explicit target.
-    if (draftNodeId) {
-      if ((await forNode(draftNodeId)) === cloud) return readCloudSession(sessionId);
-      return { ...(await local.sessions.get({ sessionId })), owner: "desktop" };
-    }
-    let projection: SessionDetail;
+
+    // The Server may already hold a session that has not synchronized to Desktop.
     try {
-      projection = await local.sessions.get({ sessionId });
+      return await readRoute(cloud);
     } catch (error) {
-      // Server retains authorized history after its original managed Computer is deleted.
-      if (signedIn && isMissing(error)) return readCloudSession(sessionId);
+      if (admitDraft && isMissing(error)) {
+        if (knownManaged()?.conversationSessionId === sessionId) return { client: cloud };
+        if (canUseTalo && (await readManaged()).instance?.conversationSessionId === sessionId) return { client: cloud };
+      }
       throw error;
     }
-    return readProjectedSession(sessionId, projection, { readOnly: true, service });
+  }
+
+  const readSession = async (sessionId: string): Promise<SessionDetail> => {
+    const { client, detail } = await sessionRoute(sessionId, false);
+    const response = detail ?? await client.sessions.get({ sessionId });
+    return { ...response, owner: client === cloud ? "server" : "desktop" };
   };
-  const resolve = async (target: ProductTarget) => {
-    const { sessionId, nodeId, readOnly, service } = target;
-    if (!sessionId) return forNode(nodeId, target);
-    const key = sessionDetailKey(scope, sessionId);
-    const cached = queries.getQueryData<SessionDetail>(key);
-    if (cached?.owner === "server" || knownManaged()?.conversationSessionId === sessionId) return cloud;
-    if (cached) {
-      const detail = await readProjectedSession(sessionId, cached, target);
-      if (detail.owner === "server") queries.setQueryData(key, detail);
-      return detail.owner === "server" ? cloud : local;
-    }
-    if (nodeId) return forNode(nodeId, target);
-    if (!signedIn) return local;
-    try {
-      const detail = await queries.ensureQueryData({ queryKey: key, queryFn: () => readSession(sessionId, undefined, service) });
-      if (detail.owner === "server") return cloud;
-      return readOnly && !service ? local : forNode(detail.session.nodeId, target);
-    } catch (error) {
-      if (isMissing(error) && canUseTalo && (await readManaged()).instance?.conversationSessionId === sessionId) return cloud;
-      throw error;
-    }
-  };
+  const resolve = async (target: ProductTarget) => target.sessionId
+    ? (await sessionRoute(target.sessionId, true)).client
+    : forNode(target.nodeId, target);
   return { readSession, resolve };
 }

@@ -12,6 +12,7 @@ use crate::TuiApp;
 
 fn session_info() -> SessionInfo {
     SessionInfo {
+        session_kind: talos_types::SessionKind::Standard,
         node_id: "embedded".into(),
         id: "sess-status".to_string(),
         title: "Status Session".to_string(),

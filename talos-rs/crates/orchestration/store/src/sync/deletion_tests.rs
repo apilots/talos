@@ -1,17 +1,18 @@
 use super::*;
 
 #[tokio::test]
-async fn deleted_computer_still_satisfies_history_dependencies_on_a_new_management_host() {
+async fn replicated_computer_tombstone_preserves_server_directory_and_does_not_block_history() {
     let source = peer(true).await;
     let target = peer(false).await;
     registered_computer(&source).await;
+    registered_computer(&target).await;
     source
         .sessions
         .insert_session_record(&record("retained-history"))
         .await
         .unwrap();
     run(&source, "retained-history", "turn-1").await;
-    let nodes = DatabaseAgentNodeStore::new(&source.storage).with_sync(source.adapter.clone());
+    let nodes = DatabaseAgentNodeStore::new(&source.storage);
     nodes
         .delete_owned(
             COMPUTER,
@@ -33,7 +34,7 @@ async fn deleted_computer_still_satisfies_history_dependencies_on_a_new_manageme
         .get(COMPUTER)
         .await
         .unwrap()
-        .is_none());
+        .is_some());
     let resource = SyncResourceKey::Session {
         session_id: "retained-history".into(),
     };
@@ -44,23 +45,17 @@ async fn deleted_computer_still_satisfies_history_dependencies_on_a_new_manageme
         .await
         .unwrap()
         .unwrap();
-    let (mut tx, version, changes) = target
+    let (mut tx, batch) = target
         .sync
-        .import_document(
+        .prepare_import(
+            target.adapter.as_ref(),
             &target.adapter.binding,
             &resource,
             &[exported.update],
             &exported.version,
-            None,
         )
         .await
         .unwrap();
-    let batch = SyncImportBatch {
-        scope: target.adapter.binding.scope.clone(),
-        resource,
-        version,
-        changes,
-    };
     assert!(target
         .adapter
         .missing_dependencies(&mut *tx, &batch)
@@ -81,7 +76,13 @@ async fn deleted_computer_still_satisfies_history_dependencies_on_a_new_manageme
         .await
         .unwrap()
         .is_none());
-    assert!(target.storage.execute("INSERT INTO agent_nodes(node_id,owner_user_id,display_name,mode,status,created_at,updated_at) VALUES (?, 'account-1','Stale','remote','enabled',1,1)", &[COMPUTER]).await.is_err());
+    let deletions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM computer_deletions WHERE node_id=?")
+            .bind(COMPUTER)
+            .fetch_one(target.storage.pool())
+            .await
+            .unwrap();
+    assert_eq!(deletions, 0);
 }
 
 #[tokio::test]
@@ -273,7 +274,7 @@ async fn local_registration_retirement_freezes_history_and_new_enrollment_uses_a
 }
 
 #[tokio::test]
-async fn imported_own_deletion_snapshots_history_before_new_local_work() {
+async fn replicated_deletion_does_not_retire_capture_before_server_confirmation() {
     let source = peer(false).await;
     let target = peer(true).await;
     registered_computer(&source).await;
@@ -284,7 +285,6 @@ async fn imported_own_deletion_snapshots_history_before_new_local_work() {
         .unwrap();
     run(&target, "pre-import-history", "turn-1").await;
     DatabaseAgentNodeStore::new(&source.storage)
-        .with_sync(source.adapter.clone())
         .delete_owned(
             COMPUTER,
             "account-1",
@@ -306,6 +306,13 @@ async fn imported_own_deletion_snapshots_history_before_new_local_work() {
         .insert_session_record(&record("post-import-local"))
         .await
         .unwrap();
+    collect(
+        &target.adapter,
+        &SyncResourceKey::Session {
+            session_id: "post-import-local".into(),
+        },
+    )
+    .await;
     assert!(target
         .sync
         .export_pending(
@@ -317,7 +324,7 @@ async fn imported_own_deletion_snapshots_history_before_new_local_work() {
         )
         .await
         .unwrap()
-        .is_none());
+        .is_some());
     target
         .sessions
         .retire_local_registration("account-1", COMPUTER)
@@ -341,7 +348,7 @@ async fn imported_own_deletion_snapshots_history_before_new_local_work() {
             .unwrap()
             .unwrap()
             .execution_node_id,
-        "embedded"
+        COMPUTER
     );
     assert!(target
         .sessions

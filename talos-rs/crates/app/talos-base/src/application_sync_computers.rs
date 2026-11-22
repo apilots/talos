@@ -209,8 +209,26 @@ impl ApplicationSyncHost {
         let local = self.local_computer_id().await?;
         let own = self.owns_local_computer(actor).await?;
         if own && info.node_id == "embedded" {
-            info.node_id = local.clone();
-            info.owner_user_id = Some(actor.user_id.clone());
+            // The private Worker alias must expose the same durable metadata as
+            // remote replicas, rather than its generic embedded placeholder name.
+            match self
+                .service
+                .nodes
+                .read_computer(
+                    actor,
+                    talos_types::GetNodeRequest {
+                        node_id: local.clone(),
+                    },
+                )
+                .await
+            {
+                Ok(registered) => info = registered,
+                Err(error) if error.is_code(ErrorCode::ResourceNotFound) => {
+                    info.node_id = local.clone();
+                    info.owner_user_id = Some(actor.user_id.clone());
+                }
+                Err(error) => return Err(error),
+            }
         }
         if info.node_id == "embedded" {
             info.system_info = Some(self.worker.system_info().clone());
@@ -218,47 +236,10 @@ impl ApplicationSyncHost {
         if info.node_id == "embedded" || actor.auth_disabled {
             return Ok(info);
         }
-        let verified = self.verified_actor(actor).await?;
-        let result = self
-            .gateway_client()
-            .await?
-            .get_node(
-                verified.access_token.as_deref().expect("verified token"),
-                &info.node_id,
-            )
-            .await;
-        match result {
-            Ok(live) => info = live,
-            Err(error)
-                if matches!(
-                    error.error_code(),
-                    ErrorCode::ServiceUnavailable | ErrorCode::Timeout
-                ) =>
-            {
-                info.available = false;
-            }
-            Err(error)
-                if own && info.node_id == local && error.is_code(ErrorCode::ResourceExpired) =>
-            {
-                self.observe_registration_removal(&verified, &local).await?;
-                info.node_id = "embedded".into();
-                info.mode = talos_types::NodeMode::Embedded;
-                info.owner_user_id = Some(actor.user_id.clone());
-                info.available = true;
-                info.system_info = Some(self.worker.system_info().clone());
-                return Ok(info);
-            }
-            Err(error) if error.is_code(ErrorCode::ResourceExpired) => {
-                self.sync_stores
-                    .nodes
-                    .reconcile_deleted_registration(&info.node_id, &actor.user_id)
-                    .await?;
-                return Err(error);
-            }
-            Err(error) => return Err(error),
+        if self.config.agent_node.control_plane.is_none() {
+            self.computer_directory.apply(&actor.user_id, &mut info)?;
         }
         if own && info.node_id == local {
-            // Cloud revocation or an offline G never revokes this host's private loopback credential.
             info.available = true;
             info.system_info = Some(self.worker.system_info().clone());
         }

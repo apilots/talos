@@ -73,11 +73,31 @@ Server dispatches execution to its Worker. Web sends HTTP/SSE directly and
 Electron uses its configured Server endpoint and TLS trust. Desktop media has
 a separate connection through the Server that carries Worker frames and viewer
 input. The Server-issued conversation ID identifies the owner for later requests.
-An existing conversation link uses that owner even if another Computer is
-selected. If its owner cannot be resolved, an attempted send preserves the draft
+An existing conversation retains its persisted `sessionKind` across Sync and
+account tier changes. Upgrade uses managed ownership known to that host; a Desktop
+projection accepts the Server's `talo` classification for the same Worker binding
+when Sync supplies it. The Talos Parser owns this application field; generic Sync
+transports its Header and opaque metadata. Upgrade publishes known managed
+ownership through the existing metadata collector. Desktop routes `talo` sessions to the owning Server. For a
+`standard` session it uses its local record when available, or the Server that
+holds the session when it has not synced. Sidebar selection does not change this route. If its owner cannot be resolved, an attempted send preserves the draft
 and surfaces the error. Only an explicit new chat takes the selected Computer as
 its target. Server-issued routing IDs may be cached in memory. The Server owns
-the Turn and any durable Goal or Loop across Desktop restarts.
+the Turn and any durable Goal or Loop across Desktop restarts. After admission, clients
+read session and execution state from the Server APIs and event stream. Reopening
+a Talo conversation restores its state from the Server.
+
+For a new chat, Home submits the first Turn through the selected Computer's existing SDK
+route and waits for admission before opening the session URL. A rejected submission
+keeps the current Composer text, attachments and Goal/Loop selection for manual retry.
+The session ID stays stable for the current account and Computer while Home remains
+mounted. An unchanged manual retry reuses the submitted request body and idempotency
+key; editing the input or options starts a new request identity. After acknowledgement,
+Home clears the submitted text and opens the persisted session directly. If the user has
+left Home, acknowledgement clears only the matching submitted text and preserves the
+current navigation. Unsubmitted attachment and mode selections belong to the current
+Composer. Session pages read persisted details, history and execution state from their
+owning service.
 
 For an ordinary Worker, Desktop can remember the Server-confirmed Computer ID
 for the signed-in account and configured Server. This lets saved chats and Files

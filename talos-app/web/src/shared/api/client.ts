@@ -5,7 +5,7 @@ import { connectionScope } from "@/shared/store/connection-scope";
 import { bindComputerTarget } from "./computer-target";
 import { actorCredentialsFromToken, createDesktopTalosClient, getDesktopBridge } from "./desktop-client";
 import { canUseTalo } from "@/shared/types/account";
-import { desktopProductOwner, isVerifiedDesktopWorker, type ProductTarget } from "./desktop-product-owner";
+import { desktopProductOwner, type ProductTarget } from "./desktop-product-owner";
 import { productQueries, type SessionDetail } from "./product-queries";
 import { resolveServerBaseUrl } from "./server-base-url";
 import { useAppStore, getConnectionSettings } from "@/shared/store/app-store";
@@ -42,7 +42,7 @@ export type TalosWebClient = {
     | "activeTurn"
     | "history"
     | "recoverTimeline"
-  > & { get: (request: { sessionId: string }, draftNodeId?: string) => Promise<SessionDetail> };
+  > & { get: (request: { sessionId: string }) => Promise<SessionDetail> };
   messageQueue: Methods<
     BrowserTalosClient["messageQueue"],
     "list" | "add" | "update" | "delete" | "reorder" | "start"
@@ -99,12 +99,6 @@ export function resetTalosClientFactory() {
   clientFactory = undefined;
 }
 
-export function hasLocalFileStore(nodeId?: string) {
-  if (!getDesktopBridge()) return false;
-  const connection = getConnectionSettings();
-  return isVerifiedDesktopWorker(productQueries, connectionScope(connection), nodeId, connection.controlPlaneEndpoint);
-}
-
 type ClientTarget = ProductTarget | { service: "server" };
 
 export function getTalosClient(nodeId?: string): TalosWebClient;
@@ -151,6 +145,6 @@ export function getTalosClient(target?: string | ClientTarget): TalosWebClient |
   const routing = desktopProductOwner(local, cloud, productQueries, scope, canUseTalo(state.connection),
     state.connection.authStatus === "authenticated", state.connection.controlPlaneEndpoint);
   if (request) return routing.resolve(request).then(bind);
-  const host = { ...local, sessions: { ...local.sessions, get: ({ sessionId }: { sessionId: string }, draftNodeId?: string) => routing.readSession(sessionId, draftNodeId) } };
+  const host = { ...local, sessions: { ...local.sessions, get: ({ sessionId }: { sessionId: string }) => routing.readSession(sessionId) } };
   return nodeId ? bindComputerTarget(host, nodeId, id => routing.resolve({ nodeId: id })) : host;
 }

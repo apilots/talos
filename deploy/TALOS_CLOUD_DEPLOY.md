@@ -26,7 +26,7 @@ Each backend can define `worker` with its own digest-pinned `image`,
 `control_plane_endpoint` (the HTTPS Agent origin reachable from the Worker)
 and `trusted_ca_file` (a PEM certificate bundle available to Server, or
 `null` for system trust). A backend without a `worker` block inherits the
-legacy connection fields directly under `talos.worker.runtime`. The Server
+shared connection fields directly under `talos.worker.runtime`. The Server
 validates the deployed profile. In Settings, saving that profile preserves
 the other profile. The idle sleep timeout is shared.
 
@@ -136,8 +136,9 @@ the authenticated Computer API. Registration never accepts a self-selected owner
 
 Set `TALOS_SERVER_IMAGE` and `TALOS_SERVER_VERSION` in the deployment
 `.env` to a published image containing the selected Runtime. When enabling
-managed Talo, also pin its compatible Worker image by digest in
-the selected profile or legacy `talos.worker.runtime.image`. Published versions provide amd64/arm64 images.
+managed Talo with the Docker profile, pin the compatible Worker image by digest
+in `talos.worker.runtime.docker_engine.worker.image`. Published versions provide
+amd64/arm64 images.
 Route HTTP and gRPC to the same Server instance because its live Registry and
 Connect handles belong to that process.
 
@@ -168,7 +169,8 @@ Do not copy a macOS PATH or browser executable into the Linux service.
 
 ### Persistence and configuration
 
-The observed home volume is `talos-server_talos-data`, mounted at
+Set `TALOS_SERVER_DATA_VOLUME` to this installation’s home volume (the example
+uses `talos-server_talos-data`), mounted at
 `/home/talos/.talos`. Compose declares it **external** so a wrong/missing name
 fails instead of silently creating an empty replacement. Confirm its exact name
 and contents before any authorized application. Do not run `down -v` or prune.
@@ -244,11 +246,8 @@ reverse proxy. Outbound-only nodes need no public listener or private CA rollout
 The RPC listener reads its certificate at startup; certificate replacement needs
 a controlled Talos restart, followed by reconnect acceptance.
 
-The public endpoint currently traverses Cloudflare. Confirm gRPC is enabled and
-TLS/HTTP2 ALPN is supported on 443 before public acceptance. Cloudflare documents
-403 responses when zone gRPC is disabled; the observed 403 HTML is evidence of a
-blocked path, not proof of the exact setting. Account-wide changes can affect
-other sites and need separate review; this preparation does not change them.
+For a Cloudflare-proxied Agent origin, enable gRPC for the zone and verify
+HTTP/2 over TLS on port 443 before accepting public Worker registrations.
 See [Cloudflare gRPC requirements](https://developers.cloudflare.com/network/grpc-connections/),
 [Caddy upstream TLS](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 and [Nginx gRPC](https://nginx.org/en/docs/http/ngx_http_grpc_module.html).
@@ -268,18 +267,37 @@ Install `deploy/docker/talos-worker/chromium-seccomp.json` at
 `TALOS_CHROMIUM_SECCOMP_PROFILE=/opt/talos-server/chromium-seccomp.json`
 in that deployment `.env`. The shared profile and 1 GiB shared memory support
 the Server image's embedded Browser without disabling Chromium's sandbox.
-For managed Talo, also install `compose.managed-worker.yml` beside it, set
-the Docker socket GID in `.env`, and configure `DockerEngine` in the
-persistent Server YAML. Use the same Compose files for validation, rollout,
-and status checks:
+For managed Talo, install `compose.managed-worker.yml` beside the production
+Compose file and set the host Docker socket GID in the deployment `.env`.
+
+Review the site's writable `conf/talos.yaml` before rollout. When first enabling
+managed Talo, copy the example's `talos.worker.runtime` block only if the site
+value is absent or `null`, then set the site's image digest, Agent origin, CA
+and resource limits. Review the site's `talos.server.runtime` timeouts.
+For an existing runtime, preserve its settings and apply
+only the intended changes. While managed instances own resources, keep the
+runtime target unchanged, as required by **Settings → Runtime**.
+
+With Server still running, validate the selected Compose files and pull the
+Server image. For a TLS-only deployment, omit the managed Worker overlay.
 
 ```bash
 cd /opt/talos-server
-compose=(docker compose -f docker-compose.yml)
-# Add the overlay for a Server configured to manage Talo with Docker Engine.
-# compose+=(-f compose.managed-worker.yml)
+compose=(docker compose -f docker-compose.yml -f compose.managed-worker.yml)
 "${compose[@]}" config --quiet
 "${compose[@]}" pull talos-server
+```
+
+For managed Docker deployments, set `worker_image` in the shell to the full
+Worker image reference (including its digest) from the site's intended runtime
+configuration. Run `docker pull "$worker_image"`
+against the same Docker Engine the Server uses. Complete these pulls before
+stopping Server so the first Worker can start from the local image.
+
+If the writable YAML needs editing, run `"${compose[@]}" stop talos-server`
+and apply the reviewed changes to the existing file. Then start the service:
+
+```bash
 "${compose[@]}" up -d --no-deps --no-build --pull never talos-server
 "${compose[@]}" ps
 ```
@@ -353,6 +371,4 @@ to bypass a failed login, registration or history assertion.
 Record image/source, topology, timestamps, actual assertions and limitations in
 ignored root `output/`; summarize results and blockers in the deployment PR. Label local isolated
 processes, Docker NAT and real public/physical-machine checks separately.
-Unavailable infrastructure or product defects stay failed/blocked/not run; app
-code changes require a separate task. Configuration/script repairs stay in the
-production-preparation PR.
+Record any unavailable checks and their outstanding acceptance criteria.

@@ -137,7 +137,7 @@ def event_handler(fixture):
 
 def session(identity, fixture):
     return dict(id=identity, title='Long JSON session' if identity == LONG else 'Short JSON session',
-        nodeId='embedded', userId='anonymous', sourceType='http', sourceProvider='http',
+        nodeId='embedded', sessionKind='standard', userId='anonymous', sourceType='http', sourceProvider='http',
         modelSelection={'modelRef': {'provider': 'json-fixture', 'id': 'opaque-7f82'}, 'reasoningEffort': None},
         configuredDefaultMode='fullAccess', effectiveMode='fullAccess', createdAt=int(time.time() * 1000) - 10800000,
         lastActivity=int(time.time() * 1000), messageCount=len(fixture.turn['messages']) if identity == LONG else 0,

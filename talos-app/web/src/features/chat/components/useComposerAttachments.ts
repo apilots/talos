@@ -38,7 +38,6 @@ interface UseComposerAttachmentsOptions {
   nodeId?: string;
   scope: FileScope;
   supportedKinds: ComposerAttachmentKind[];
-  initialAttachments?: FileInfo[];
 }
 
 function attachmentKind(file: Pick<FileInfo, "mimeType">): ComposerAttachmentKind {
@@ -64,15 +63,12 @@ export function useComposerAttachments({
   nodeId,
   scope,
   supportedKinds,
-  initialAttachments = [],
 }: UseComposerAttachmentsOptions) {
   const queryClient = useQueryClient();
   const connectionKey = useConnectionKey();
   const sessionId = useContext(AttachmentSessionContext);
   const draftNodeId = sessionId ? undefined : nodeId;
-  const [items, setItems] = useState<ComposerAttachmentItem[]>(() =>
-    initialAttachments.map((file) => readyItem(file)),
-  );
+  const [items, setItems] = useState<ComposerAttachmentItem[]>([]);
   const [availableFiles, setAvailableFiles] = useState<FileInfo[]>([]);
   const [availableNextCursor, setAvailableNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -80,21 +76,6 @@ export function useComposerAttachments({
   const [error, setError] = useState<AppProtocol.ApiError | null>(null);
   const controllers = useRef(new Map<string, AbortController>());
   const nextUploadId = useRef(1);
-  const initialKey = initialAttachments.map((file) => file.fileId).join("\u0000");
-  const previousInitialKey = useRef(initialKey);
-
-  useEffect(() => {
-    if (previousInitialKey.current === initialKey) {
-      return;
-    }
-    previousInitialKey.current = initialKey;
-    for (const controller of controllers.current.values()) {
-      controller.abort();
-    }
-    controllers.current.clear();
-    setItems(initialAttachments.map((file) => readyItem(file)));
-  }, [initialAttachments, initialKey]);
-
   useEffect(
     () => () => {
       for (const controller of controllers.current.values()) {

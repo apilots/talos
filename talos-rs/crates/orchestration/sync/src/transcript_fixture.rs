@@ -16,6 +16,7 @@ pub(super) fn session_and_events(
     };
     let session = SyncSessionSnapshot {
         session: SessionInfo {
+            session_kind: talos_types::SessionKind::Standard,
             node_id: computer_id.into(),
             id: identity.session_id.clone(),
             title: "Tool result history".into(),
@@ -129,7 +130,7 @@ pub(super) fn session_and_events(
         },
     ];
     // Original attachment, media and selected-question fields must survive
-    // generated schema conversion and the transactional Loro import unchanged.
+    // Talos parser and transactional Loro import unchanged.
     for (index, content) in [
         AgentUserContent::File {
             file_id: "source-file".into(),

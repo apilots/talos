@@ -43,6 +43,7 @@ impl SessionStore for MockSessionStore {
 
     async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
         Ok(Some(SessionRecord {
+            session_kind: talos_types::SessionKind::Standard,
             id: session_id.to_string(),
             agent_id: "default".to_string(),
             execution_node_id: "embedded".to_string(),

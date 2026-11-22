@@ -97,6 +97,7 @@ pub(crate) async fn test_session_store(
     let (store, nodes) = test_database_stores().await;
     store
         .insert_session_record(&SessionRecord {
+            session_kind: talos_types::SessionKind::Standard,
             id: "mock-session".to_string(),
             agent_id: "default".to_string(),
             execution_node_id: "embedded".to_string(),

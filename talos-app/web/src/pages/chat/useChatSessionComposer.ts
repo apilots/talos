@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useProductScope } from "@/features/computers";
 import { getTalosClient } from "@/shared/api/client";
-import type { AutomationMode, ModelListResponse, ModelRef, SessionInfo } from "@talos/sdk-browser";
+import type { ModelListResponse, ModelRef, SessionInfo } from "@talos/sdk-browser";
 
 import {
   modelInfoForRef,
@@ -23,14 +23,12 @@ import {
 } from "@/features/chat";
 import { UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import type { ReasoningLevel } from "@/shared/types/ui";
-import type { SessionLocationState } from "./chatSessionLocation";
 import { useSessionCommands } from "./useSessionCommands";
 import { useSessionPermissionMode } from "./useSessionPermissionMode";
 import { useSelectedSessionProject } from "./useSelectedSessionProject";
 
 interface UseChatSessionComposerOptions {
   chat: ReturnType<typeof useChatSession>;
-  locationState: SessionLocationState | null;
   modelCatalog?: ModelListResponse;
   projectsView: ReturnType<typeof useProjectsView>;
   session?: SessionInfo;
@@ -39,16 +37,12 @@ interface UseChatSessionComposerOptions {
   managedTalo: boolean;
   canSend: boolean;
   stageOfflineAttachments: boolean;
-  onDraftAccepted: () => void;
   taloConversation?: boolean;
-  restoredAutomationMode?: AutomationMode;
-  onRestoredAutomationModeConsumed?: () => void;
 }
 
 /** Owns session-specific model, project, permission, and command wiring for the Composer. */
 export function useChatSessionComposer({
   chat,
-  locationState,
   modelCatalog,
   projectsView,
   session,
@@ -57,18 +51,11 @@ export function useChatSessionComposer({
   managedTalo,
   canSend,
   stageOfflineAttachments,
-  onDraftAccepted,
   taloConversation = false,
-  restoredAutomationMode,
-  onRestoredAutomationModeConsumed,
 }: UseChatSessionComposerOptions) {
-  const [draftModel, setDraftModel] = useState<ModelRef | undefined>(locationState?.initialModel);
-  const [draftReasoningLevel, setDraftReasoningLevel] = useState<ReasoningLevel | undefined>(
-    locationState?.initialReasoningLevel,
-  );
-  const [draftProjectId, setDraftProjectId] = useState<string | undefined>(
-    locationState?.initialProjectId,
-  );
+  const [draftModel, setDraftModel] = useState<ModelRef>();
+  const [draftReasoningLevel, setDraftReasoningLevel] = useState<ReasoningLevel>();
+  const [draftProjectId, setDraftProjectId] = useState<string>();
   const { mutate: updateSessionModel } = useUpdateSessionModelMutation(sessionId);
   const activeSessionModelSelection = useConfiguredSessionModelSelection({
     catalog: modelCatalog,
@@ -89,7 +76,6 @@ export function useChatSessionComposer({
         : reasoningLevelForEffort(modelCatalog?.defaultModelSelection.reasoningEffort ?? null));
   const permissionMode = useSessionPermissionMode({
     blocked: Boolean(chat.isStreaming || chat.pendingUserAction),
-    initialMode: locationState?.initialPermissionMode,
     persistedMode: session?.effectiveMode,
     sessionExists: Boolean(session),
     sessionId,
@@ -129,9 +115,7 @@ export function useChatSessionComposer({
     disabled: !canSend,
     attachmentsDisabled: !canSend && !stageOfflineAttachments,
     automation: session ? automation : undefined,
-    initialAutomationMode: restoredAutomationMode,
-    onRestoredAutomationModeConsumed,
-    automationCommands: session ? automation.commands : initialCommands.data?.data,
+      automationCommands: session ? automation.commands : initialCommands.data?.data,
     activeProjectId: selectedProjectId,
     commandResponse: sessionCommands.response,
     commandStatus: {
@@ -143,7 +127,6 @@ export function useChatSessionComposer({
     },
     contextUsage: session?.usage?.context,
     draft: chat.draft,
-    initialAttachments: locationState?.initialAttachments,
     inputHistory: chat.inputHistory,
     isCancelling: chat.isCancelling,
     isStreaming: chat.isStreaming,
@@ -239,7 +222,6 @@ export function useChatSessionComposer({
         };
         if (prepared.prompt !== text) await chat.sendTurn(options, prepared.prompt);
         else await chat.sendTurn(options);
-        if (ownerRef.current === owner) onDraftAccepted();
         return;
       }
       return prepared.prompt !== text

@@ -2,12 +2,13 @@
 
 import { createElement, type PropsWithChildren } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileInfo, FileUploadOptions } from "@talos/sdk-browser";
 
 import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { useComposerAttachments } from "./useComposerAttachments";
+import { ComposerAttachmentTray } from "./ComposerAttachmentTray";
 
 const fileApi = vi.hoisted(() => ({
   upload: vi.fn(),
@@ -76,10 +77,10 @@ describe("useComposerAttachments", () => {
         useComposerAttachments({
           scope: { type: "project", projectId: "project-1" },
           supportedKinds: ["image", "file"],
-          initialAttachments: [PROJECT_FILE],
         }),
       { wrapper: createWrapper("talo-chat") },
     );
+    act(() => result.current.select(PROJECT_FILE));
     const image = new File(["png"], "pasted.png", { type: "image/png" });
 
     await act(async () => result.current.upload([image]));
@@ -147,6 +148,30 @@ describe("useComposerAttachments", () => {
     expect(result.current.items).toEqual([
       expect.objectContaining({ id: itemId, status: "ready", file: PERSONAL_IMAGE }),
     ]);
+  });
+
+  it("displays consumed upload bytes while the total remains unknown", async () => {
+    let options: FileUploadOptions | undefined;
+    fileApi.upload.mockImplementation((_request, _data, uploadOptions: FileUploadOptions) => {
+      options = uploadOptions;
+      return new Promise(() => {});
+    });
+    function Harness() {
+      const attachments = useComposerAttachments({ scope: { type: "personal" }, supportedKinds: ["image"] });
+      return <>
+        <button onClick={() => void attachments.upload([new File(["png"], "pasted.png", { type: "image/png" })])}>Upload</button>
+        <ComposerAttachmentTray disabled={false} error={attachments.error} items={attachments.items} onRemove={attachments.remove} />
+      </>;
+    }
+    const view = render(<Harness />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    await waitFor(() => expect(options?.onProgress).toBeDefined());
+
+    act(() => options?.onProgress?.({ loadedBytes: 2048, totalBytes: null }));
+
+    expect(screen.getByText("· 2.0 KiB")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBeNull();
+    view.unmount();
   });
 
   it("cancels an uploading item when it is removed", async () => {

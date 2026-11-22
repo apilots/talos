@@ -12957,6 +12957,9 @@
             "null"
           ]
         },
+        "sessionKind": {
+          "$ref": "#/definitions/SessionKind"
+        },
         "sourceProvider": {
           "$ref": "#/definitions/SessionSourceProvider"
         },
@@ -12997,12 +13000,21 @@
         "messageCount",
         "modelSelection",
         "nodeId",
+        "sessionKind",
         "sourceProvider",
         "sourceType",
         "title",
         "userId"
       ],
       "type": "object"
+    },
+    "SessionKind": {
+      "description": "Product purpose assigned when a Session is created.",
+      "enum": [
+        "standard",
+        "talo"
+      ],
+      "type": "string"
     },
     "SessionListEntry": {
       "description": "A live Session list row. Activity is derived from existing Turn facts; immutable SessionInfo and synchronized metadata remain unchanged.",
@@ -13055,6 +13067,9 @@
             "null"
           ]
         },
+        "sessionKind": {
+          "$ref": "#/definitions/SessionKind"
+        },
         "sourceProvider": {
           "$ref": "#/definitions/SessionSourceProvider"
         },
@@ -13096,6 +13111,7 @@
         "messageCount",
         "modelSelection",
         "nodeId",
+        "sessionKind",
         "sourceProvider",
         "sourceType",
         "title",
@@ -14544,6 +14560,16 @@
         "peerId": {
           "type": "string"
         },
+        "progress": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SyncPeerProgress"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "updatesPerSecond": {
           "format": "double",
           "type": "number"
@@ -14557,6 +14583,75 @@
         "outboundBytesPerSecond",
         "peerId",
         "updatesPerSecond"
+      ],
+      "type": "object"
+    },
+    "SyncPeerProgress": {
+      "properties": {
+        "downloadLagMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lastAppliedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "observedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "pendingUploads": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sourceDelays": {
+          "items": {
+            "$ref": "#/definitions/SyncSourceDelay"
+          },
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/definitions/SyncProgressState"
+        }
+      },
+      "required": [
+        "observedAt",
+        "pendingUploads",
+        "sourceDelays",
+        "state"
+      ],
+      "type": "object"
+    },
+    "SyncProgressState": {
+      "enum": [
+        "caughtUp",
+        "behind",
+        "recovering"
+      ],
+      "type": "string"
+    },
+    "SyncSourceDelay": {
+      "properties": {
+        "observedDelayMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sourcePeerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "observedDelayMs",
+        "sourcePeerId"
       ],
       "type": "object"
     },

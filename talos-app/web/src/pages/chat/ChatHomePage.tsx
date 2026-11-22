@@ -8,6 +8,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChatComposer,
   generateSessionId,
+  createInitialTurnRequest,
+  startTimelineTurn,
+  modelSelectionForRef,
   supportedAttachmentKinds,
   modelInfoForRef,
   modelPickerOptions,
@@ -19,7 +22,7 @@ import {
   useModelsQuery,
   useProjectsView,
 } from "@/features/chat";
-import { useComputers, useProductScope } from "@/features/computers";
+import { useComputers, useManagedWorkerStatus, useProductScope } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
 import type {
@@ -47,15 +50,20 @@ export function ChatHomePage() {
   const activeProjectId = projectsView.activeProjectId;
   const setActiveProjectId = projectsView.setActiveProjectId;
   const computers = useComputers();
-  const managedPhase = computers.selected?.managedWorkerPhase;
+  const { status: managedStatus } = useManagedWorkerStatus();
+  const instance = managedStatus.data?.instance;
+  const managedPhase = instance?.nodeId === computers.selectedId
+    ? instance.phase : computers.selected?.managedWorkerPhase;
   const canSend = managedPhase == null
     ? computers.selected?.available
     : managedPhase === "ready" || managedPhase === "sleeping";
   const scope = useProductScope();
   const draftKey = JSON.stringify([scope, computers.selectedId, "home"]);
-  const ownerRef = useRef<string | undefined>(draftKey);
-  ownerRef.current = draftKey;
-  useEffect(() => { ownerRef.current = draftKey; return () => { ownerRef.current = undefined; }; }, [draftKey]);
+  const admission = useMemo(() => ({ draftKey, sessionId: generateSessionId() }), [draftKey]);
+  const submission = useRef<{ body: string; requestId: string } | undefined>(undefined);
+  const ownerRef = useRef<typeof admission | undefined>(admission);
+  ownerRef.current = admission;
+  useEffect(() => { ownerRef.current = admission; return () => { ownerRef.current = undefined; }; }, [admission]);
   const commands = useQuery({ queryKey: ["talos", scope, "automation-commands"],
     queryFn: async () => (await getTalosClient({ nodeId: computers.selectedId })).automation.commandCatalog({}),
     enabled: canSend, staleTime: Infinity });
@@ -95,33 +103,31 @@ export function ChatHomePage() {
     navigate(location.pathname, { replace: true, state: null });
   }, [draftKey, saveDraft, location.pathname, locationState?.initialDraft, navigate]);
 
-  async function handleStartDraft(
+  async function handleStartSession(
     initialPrompt?: string,
     attachments: FileInfo[] = [],
     mode?: AutomationMode,
   ) {
     if (!canSend) return;
     const prepared = await prepareAutomationMessage(initialPrompt ?? "", mode, computers.selectedId, managedPhase != null);
-    if (ownerRef.current !== draftKey) return;
+    if (ownerRef.current !== admission) return;
     if (prepared.kind === "management") throw automationRequestError("chatRequired");
     const trimmed = prepared.prompt.trim();
-    setDraft("");
-    const sessionId = generateSessionId();
-    navigate(`/sessions/${sessionId}`, {
-      state: trimmed || attachments.length > 0
-        ? {
-            initialNodeId: computers.selectedId,
-            initialPrompt: trimmed ?? "",
-            ...(prepared.skillSelection ? { initialSkillSelection: prepared.skillSelection } : {}),
-            initialModel: selectedModel,
-            initialReasoningLevel: selectedReasoningLevel,
-            initialPermissionMode: permissionMode,
-            initialProjectId: activeProject?.id,
-            initialProject: activeProject,
-            initialAttachments: attachments.length > 0 ? attachments : undefined,
-          }
-        : undefined,
+    const request = createInitialTurnRequest(admission.sessionId, trimmed, {
+      nodeId: computers.selectedId,
+      skillSelection: prepared.skillSelection,
+      fileIds: attachments.map(file => file.fileId),
+      modelSelection: modelSelectionForRef(models, selectedModel, selectedReasoningLevel),
+      userPermissionMode: permissionMode,
+      project: activeProject,
     });
+    const body = JSON.stringify(request);
+    if (submission.current?.body !== body) submission.current = { body, requestId: crypto.randomUUID() };
+    request.clientRequestId = submission.current.requestId;
+    await startTimelineTurn(request);
+    // Clear only the input acknowledged by the service.
+    if (useAppStore.getState().composerDrafts[admission.draftKey] === initialPrompt) saveDraft(admission.draftKey, "");
+    if (ownerRef.current === admission) navigate(`/sessions/${admission.sessionId}`);
   }
 
   async function handleCreateProject(input: string | { directory: string; name?: string }) {
@@ -168,7 +174,7 @@ export function ChatHomePage() {
           onPermissionModeChange={handlePermissionModeChange}
           onProjectChange={setActiveProjectId}
           onReasoningLevelChange={setSelectedReasoningLevel}
-          onSend={(attachments, mode) => handleStartDraft(draft, attachments, mode)}
+          onSend={(attachments, mode) => handleStartSession(draft, attachments, mode)}
           permissionMode={permissionMode}
           projects={projects}
           selectedModel={selectedModel ? modelRefKey(selectedModel) : undefined}

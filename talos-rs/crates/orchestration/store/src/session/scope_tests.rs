@@ -20,6 +20,7 @@ fn record(
     current_directory: Option<PathBuf>,
 ) -> SessionRecord {
     SessionRecord {
+        session_kind: talos_types::SessionKind::Standard,
         id: id.to_string(),
         agent_id: "agent-a".to_string(),
         execution_node_id: "embedded".to_string(),
@@ -144,6 +145,7 @@ async fn test_insert_and_get_session_record_roundtrip() {
         Some("project-1".to_string()),
         Some(PathBuf::from("/repo")),
     );
+    record.session_kind = talos_types::SessionKind::Talo;
     record.execution_node_id = "laptop-1".to_string();
     record.conf = SessionConf {
         model_selection: Some(ModelSelection {

@@ -169,6 +169,29 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 page.locator('.files-page-content').get_by_text(document.name, exact=True).first.click()
                 expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text('Word preview first page', timeout=20000)
                 verify_web_history(playwright, base, session_id, prompt, report)
+                page.get_by_role('link', name='New chat', exact=True).click()
+                expect(page.get_by_role('heading', name='Start with one clear prompt', exact=True)).to_be_visible()
+                page.locator('textarea:visible').fill('native chat verification from Home')
+                with page.expect_request('talos-cloud://server/v1/turns/start') as admitted:
+                    page.get_by_role('button', name='Send', exact=True).click()
+                request = admitted.value.post_data_json
+                home_session = request['sessionId']
+                home_node = data(http(base + ASSISTANT))['instance']['nodeId']
+                assert home_session != session_id and request['nodeId'] == home_node
+                page.wait_for_url('**#/sessions/' + home_session, timeout=30000)
+                page.get_by_text('TALO_CHAT_OK', exact=True).wait_for(timeout=30000)
+                saved = data(http(base + '/v1/sessions/' + home_session))['session']
+                assert saved['sessionKind'] == 'talo' and saved['nodeId'] == home_node
+
+                def completed_home_turn():
+                    turns = data(http(base + '/v1/sessions/' + home_session + '/history?limit=10'))['data']
+                    return len(turns) == 1 and turns[0]['result']['status'] == 'completed'
+
+                wait(completed_home_turn, 'Home first Turn persisted once')
+                page.reload()
+                page.get_by_text('TALO_CHAT_OK', exact=True).wait_for(timeout=30000)
+                page.screenshot(path=report / 'electron-home-admitted-chat.png')
+                print('PASS Home admits one Server-owned Turn before opening its saved conversation; reload does not resubmit', flush=True)
                 print('PASS Files lists the selected Talo file store and opens its Server-only PDF', flush=True)
                 print('PASS native Talo attachment upload, streamed reply, remote PDF and Worker path preview, and reloaded image from both chat routes', flush=True)
                 return

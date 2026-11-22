@@ -23,10 +23,13 @@ talos-error = { workspace = true }
 talos-fs = { workspace = true }
 talos-memory = { workspace = true }
 talos-store = { workspace = true }
+talos-storage = { workspace = true }
+talos-sync = { workspace = true }
 talos-types = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+talos-sync-sdk.workspace = true
 tempfile = "3"
 tokio = { workspace = true }
 

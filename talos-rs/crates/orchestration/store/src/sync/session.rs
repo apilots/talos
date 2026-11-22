@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
-use super::{codec, transcode, StoreSyncAdapter};
+use super::{codec, StoreSyncAdapter};
+use talos_agent_api::{AgentEventPayload, TimelineEventPayload};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::{Row, StorageTransaction};
-use talos_sync::{SyncEventKey, SyncImportBatch};
-use talos_sync_types::{SyncChange, SyncSessionSnapshot, SyncTimelineEntry};
+use talos_sync::{
+    SyncChange, SyncEventKey, SyncImportBatch, SyncResourceSnapshot, SyncSessionSnapshot,
+    SyncTimelineEntry,
+};
 
 pub(crate) async fn key_at(
     adapter: &StoreSyncAdapter,
@@ -84,9 +87,7 @@ pub(super) async fn apply_metadata(
             ));
         }
         let record = crate::session::DatabaseSessionStore::parse_session_record(row)?;
-        if transcode::<_, talos_sync_types::generated::SessionTreeIdentity>(&record.tree_identity)?
-            != snapshot.tree_identity
-        {
+        if record.tree_identity != snapshot.tree_identity {
             return Err(TalosError::new(
                 ErrorCode::Conflict,
                 "Session tree identity cannot change.",
@@ -94,8 +95,8 @@ pub(super) async fn apply_metadata(
         }
     }
     let (parent_session, parent_turn, root, path) = match &snapshot.tree_identity {
-        talos_sync_types::generated::SessionTreeIdentity::Primary => (None, None, None, None),
-        talos_sync_types::generated::SessionTreeIdentity::Subagent {
+        talos_types::SessionTreeIdentity::Primary => (None, None, None, None),
+        talos_types::SessionTreeIdentity::Subagent {
             parent,
             tree_root_session_id,
             path,
@@ -109,29 +110,27 @@ pub(super) async fn apply_metadata(
             )
         }
     };
-    let source_type = serde_json::to_value(session.source_type)
-        .map_err(codec)?
-        .as_str()
-        .expect("original source type")
-        .to_owned();
-    let source_provider = serde_json::to_value(session.source_provider)
-        .map_err(codec)?
-        .as_str()
-        .expect("original provider")
-        .to_owned();
+    let source_type = session.source_type.as_str();
+    let source_provider = serde_json::to_value(&session.source_provider).map_err(codec)?;
+    let source_provider = source_provider.as_str().expect("original provider");
     let conf = serde_json::to_string(&snapshot.conf).map_err(codec)?;
     let environment = serde_json::to_string(&snapshot.environment).map_err(codec)?;
     let usage = serde_json::to_string(&session.usage).map_err(codec)?;
-    tx.execute(r#"INSERT INTO sessions(session_key, agent_id, execution_node_id, workspace_id, workspace_user_id, user_id, title, source_type, source_provider, channel_id, thread_id, environment_json, conf_json, current_directory, project_id, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, parent_session_id, parent_turn_id, tree_root_session_id, agent_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, 0, 0, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
-        ON CONFLICT(session_key) DO UPDATE SET title = excluded.title, conf_json = excluded.conf_json, current_directory = excluded.current_directory, last_activity = excluded.last_activity, message_count = excluded.message_count, usage_json = excluded.usage_json"#, &[&session.id, &snapshot.binding.agent_id, &local, &snapshot.binding.workspace_id, &snapshot.binding.workspace_user_id, &batch.scope.account_id, &session.title, &source_type, &source_provider, snapshot.channel_id.as_deref().unwrap_or_default(), snapshot.thread_id.as_deref().unwrap_or_default(), &environment, &conf, session.current_directory.as_deref().unwrap_or_default(), session.project_id.as_deref().unwrap_or_default(), &session.created_at.to_string(), &session.last_activity.to_string(), &session.message_count.to_string(), &usage, parent_session.unwrap_or_default(), parent_turn.unwrap_or_default(), root.unwrap_or_default(), path.unwrap_or_default()]).await?;
+    let current_directory = match session.current_directory.as_ref() {
+        Some(path) => path
+            .to_str()
+            .ok_or_else(|| TalosError::internal("Synchronized Session directory must be UTF-8."))?,
+        None => "",
+    };
+    tx.execute(r#"INSERT INTO sessions(session_key, session_kind, agent_id, execution_node_id, workspace_id, workspace_user_id, user_id, title, source_type, source_provider, channel_id, thread_id, environment_json, conf_json, current_directory, project_id, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, parent_session_id, parent_turn_id, tree_root_session_id, agent_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, 0, 0, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
+        ON CONFLICT(session_key) DO UPDATE SET session_kind = CASE WHEN sessions.session_kind = 'talo' THEN sessions.session_kind ELSE excluded.session_kind END, title = excluded.title, conf_json = excluded.conf_json, current_directory = excluded.current_directory, last_activity = excluded.last_activity, message_count = excluded.message_count, usage_json = excluded.usage_json"#, &[&session.id, session.session_kind.as_str(), &snapshot.binding.agent_id, &local, &snapshot.binding.workspace_id, &snapshot.binding.workspace_user_id, &batch.scope.account_id, &session.title, source_type, source_provider, snapshot.channel_id.as_deref().unwrap_or_default(), snapshot.thread_id.as_deref().unwrap_or_default(), &environment, &conf, current_directory, session.project_id.as_deref().unwrap_or_default(), &session.created_at.to_string(), &session.last_activity.to_string(), &session.message_count.to_string(), &usage, parent_session.unwrap_or_default(), parent_turn.unwrap_or_default(), root.unwrap_or_default(), path.unwrap_or_default()]).await?;
     Ok(())
 }
 
 pub(super) async fn apply(
     tx: &mut dyn StorageTransaction,
     batch: &SyncImportBatch,
-    staged: bool,
 ) -> TalosResult<()> {
     let session_id = batch.resource.id();
     let generation = batch.version.history_generation;
@@ -158,12 +157,7 @@ pub(super) async fn apply(
         &[&generation.to_string(), session_id],
     )
     .await?;
-    if !staged {
-        for entry in ordered_events(&batch.changes)? {
-            import_event(tx, batch, entry).await?;
-        }
-    }
-    let latest_turn_seq = batch.changes.iter().filter(|c| matches!(c, SyncChange::Event(e) if matches!(&e.event, talos_sync_types::generated::TimelineEventPayload::Agent(a) if matches!(a.payload, talos_sync_types::generated::AgentEventPayload::TurnCompleted(_))))).count();
+    let latest_turn_seq = batch.changes.iter().filter(|c| matches!(c, SyncChange::Event(e) if matches!(&e.event, TimelineEventPayload::Agent(a) if matches!(a.payload, AgentEventPayload::TurnCompleted(_))))).count();
     tx.execute(
         "UPDATE sessions SET latest_turn_seq = ? WHERE session_key = ?",
         &[&latest_turn_seq.to_string(), session_id],
@@ -185,7 +179,7 @@ pub(super) async fn apply(
             commands.push((seq, command));
         }
         if let SyncChange::Metadata { after, .. } = change {
-            if let talos_sync_types::SyncResourceSnapshot::Session(snapshot) = after.as_ref() {
+            if let SyncResourceSnapshot::Session(snapshot) = after.as_ref() {
                 let through = match &snapshot.memory_processed_through {
                     Some(key) => local_seq(tx, batch, key).await?.ok_or_else(|| {
                         TalosError::new(
@@ -201,22 +195,17 @@ pub(super) async fn apply(
     }
     commands.sort_by_key(|(seq, _)| *seq);
     for (seq, command) in commands {
-        let command_name = match command.command {
-            talos_sync_types::generated::IdempotentCommand::TurnSubmission => "turn_submission",
-            talos_sync_types::generated::IdempotentCommand::TurnInput => "turn_input",
-        };
+        let command_name = command.command.as_str();
         let outcome = match command.status {
-            talos_sync_types::generated::TurnCommandStatus::Pending => {
+            talos_types::TurnCommandStatus::Pending => {
                 return Err(TalosError::new(
                     ErrorCode::Conflict,
                     "Pending command is not a completed synchronization fact.",
                 ))
             }
-            talos_sync_types::generated::TurnCommandStatus::Accepted => "accepted",
-            talos_sync_types::generated::TurnCommandStatus::Failed => "failed",
-            talos_sync_types::generated::TurnCommandStatus::FailedNoFirstEvent => {
-                "failed_no_first_event"
-            }
+            talos_types::TurnCommandStatus::Accepted => "accepted",
+            talos_types::TurnCommandStatus::Failed => "failed",
+            talos_types::TurnCommandStatus::FailedNoFirstEvent => "failed_no_first_event",
         };
         let current = tx.query("SELECT request_id, request_hash, turn_id, status, committed_event_seq, record_expires_at FROM agent_command_idempotency WHERE session_id = ? AND command = ? AND idempotency_key = ?", &[session_id, command_name, &command.idempotency_key]).await?;
         let persisted_at = tx
@@ -295,13 +284,9 @@ pub(super) fn ordered_events(changes: &[SyncChange]) -> TalosResult<Vec<&SyncTim
         .collect::<Vec<_>>();
     events.sort_by_key(|e| {
         let (turn, sequence) = match &e.key {
-            talos_sync_types::SyncEventKey::Agent { identity, sequence } => {
-                (identity.turn_id.as_str(), *sequence)
-            }
-            talos_sync_types::SyncEventKey::Notice { .. } => match &e.event {
-                talos_sync_types::generated::TimelineEventPayload::SystemNotice(n) => {
-                    (n.identity.turn_id.as_str(), u64::MAX)
-                }
+            SyncEventKey::Agent { identity, sequence } => (identity.turn_id.as_str(), *sequence),
+            SyncEventKey::Notice { .. } => match &e.event {
+                TimelineEventPayload::SystemNotice(n) => (n.identity.turn_id.as_str(), u64::MAX),
                 _ => ("", u64::MAX),
             },
         };
@@ -317,22 +302,10 @@ pub(super) fn ordered_events(changes: &[SyncChange]) -> TalosResult<Vec<&SyncTim
 async fn local_seq(
     tx: &mut dyn StorageTransaction,
     batch: &SyncImportBatch,
-    key: &talos_sync_types::SyncEventKey,
+    key: &SyncEventKey,
 ) -> TalosResult<Option<i64>> {
     let key = serde_json::to_string(key).map_err(codec)?;
     Ok(tx.query("SELECT local_event_seq FROM visible_sync_event_map WHERE hub_id = ? AND account_id = ? AND session_id = ? AND generation = ? AND stable_event_key = ?", &[&batch.scope.hub_id, &batch.scope.account_id, batch.resource.id(), &batch.version.history_generation.to_string(), &key]).await?.first().and_then(|r| r.get_i64("local_event_seq")))
-}
-
-async fn import_event(
-    tx: &mut dyn StorageTransaction,
-    batch: &SyncImportBatch,
-    entry: &SyncTimelineEntry,
-) -> TalosResult<()> {
-    let mut events = new_events(tx, batch, &[entry]).await?;
-    if let Some(event) = events.pop() {
-        event.insert(tx, batch, 0).await?;
-    }
-    Ok(())
 }
 
 pub(super) async fn new_events(
@@ -385,9 +358,7 @@ fn verify_existing_event(entry: &SyncTimelineEntry, row: &Row) -> TalosResult<()
         ));
     }
     let existing = crate::session::agent_execution::notice::parse(row)?;
-    if transcode::<_, talos_sync_types::generated::TimelineEventPayload>(&existing.event)?
-        != entry.event
-    {
+    if existing.event != entry.event {
         return Err(TalosError::new(
             ErrorCode::Conflict,
             "Stable event identity has different contents.",
@@ -407,16 +378,15 @@ pub(super) struct ImportEvent {
 
 impl ImportEvent {
     fn from_entry(entry: &SyncTimelineEntry) -> TalosResult<Self> {
-        let event: talos_agent_api::TimelineEventPayload = transcode(&entry.event)?;
-        let (identity, sequence, occurred_at, payload) = match event {
-            talos_agent_api::TimelineEventPayload::Agent(e) => (
-                e.identity,
+        let (identity, sequence, occurred_at, payload) = match &entry.event {
+            TimelineEventPayload::Agent(e) => (
+                e.identity.clone(),
                 e.sequence.to_string(),
                 e.occurred_at,
                 serde_json::to_string(&e.payload).map_err(codec)?,
             ),
-            talos_agent_api::TimelineEventPayload::SystemNotice(e) => (
-                e.identity,
+            TimelineEventPayload::SystemNotice(e) => (
+                e.identity.clone(),
                 String::new(),
                 e.occurred_at,
                 serde_json::to_string(&e.notice).map_err(codec)?,

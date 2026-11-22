@@ -259,6 +259,7 @@ impl SessionStore for DatabaseSessionStore {
         let row = Row::new(
             vec![
                 "session_key".to_string(),
+                "session_kind".to_string(),
                 "user_id".to_string(),
                 "source_type".to_string(),
                 "source_provider".to_string(),
@@ -285,6 +286,7 @@ impl SessionStore for DatabaseSessionStore {
             ],
             vec![
                 Value::String(record.id.clone()),
+                Value::String(record.session_kind.as_str().to_owned()),
                 Value::String(record.user_id.clone()),
                 Value::String(record.source_type.as_str().to_string()),
                 Value::String(record.source_provider.as_str().to_string()),
@@ -383,7 +385,7 @@ impl SessionStore for DatabaseSessionStore {
         let rows = self
             .storage
             .query(
-                "SELECT session_key, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
+                "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
                 &[tree_root_session_id, agent_path.as_str()],
             )
             .await?;
@@ -391,7 +393,7 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let mut sql = "SELECT session_key, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions".to_string();
+        let mut sql = "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions".to_string();
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);

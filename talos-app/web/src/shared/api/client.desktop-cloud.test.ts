@@ -24,14 +24,14 @@ function desktopAccount() {
   };
   const scope = connectionScope(connection);
   useAppStore.setState({ connection, selectedComputers: { [scope]: "embedded" } });
-  productQueries.setQueryData(managedWorkerKey(scope), { enabled: true, instance: { nodeId: "talo", conversationSessionId: "managed-chat" } });
   const http = vi.fn().mockImplementation(async () => Response.json({ status: "success", data: { ticket: "one-use" } }));
   vi.stubGlobal("fetch", http);
-  return { http, invoke, prepareCloud };
+  return { http, invoke, prepareCloud, scope };
 }
 
 it("opens the managed desktop through the authenticated Server SDK and keeps the selected local Worker on stdio", async () => {
-  const { http, invoke } = desktopAccount();
+  const { http, invoke, scope } = desktopAccount();
+  productQueries.setQueryData(managedWorkerKey(scope), { enabled: true, instance: { nodeId: "talo", conversationSessionId: "managed-chat" } });
   const grant = await getTalosClient("talo").desktop.open({
     nodeId: "talo", targetId: "managed", viewerId: "viewer", generation: "1", inputMode: "readOnly", controllerId: null, inputEpoch: null,
   });
@@ -45,6 +45,7 @@ it("opens the managed desktop through the authenticated Server SDK and keeps the
 
 it("prepares an attachment on its Server and uses the issued native grant for presentation and release", async () => {
   const { invoke, prepareCloud } = desktopAccount();
+  invoke.mockResolvedValueOnce({ status: "success", data: { session: { id: "managed-chat", sessionKind: "talo" } } });
   const { files } = await getTalosClient({ sessionId: "managed-chat", readOnly: true });
   const source = { kind: "file", fileId: "cloud-file" } satisfies AppProtocol.FilePreviewSource;
   const descriptor = await files.preview.prepare({ source });

@@ -1,8 +1,7 @@
-import { fetchEventSource } from "@microsoft/fetch-event-source";
-import { describe, expect, it, vi } from "vitest";
-import { AppProtocol, createBrowserTalosClient } from "./index";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AppProtocol, createBrowserTalosClient, type TimelineEvent } from "./index";
 
-vi.mock("@microsoft/fetch-event-source", { spy: true });
+afterEach(() => vi.unstubAllGlobals());
 
 describe("authenticated Server recovery", () => {
   const baseUrl = "talos-cloud://server";
@@ -38,23 +37,66 @@ describe("authenticated Server recovery", () => {
     const client = createBrowserTalosClient({ baseUrl, getToken, getUserId, fetch: request });
     await client.files.upload({ filename: "file.txt", scope: { type: "personal" }, tags: [], metadata: {} },
       new Uint8Array([1]), { onProgress: vi.fn() });
-    expect(request.mock.calls[0][1]?.body).toBeInstanceOf(FormData);
+    expect(request.mock.calls[0][1]?.body).toBeInstanceOf(ReadableStream);
   });
 
-  it("reopens SSE with its original cursor and latest Last-Event-ID through the selected fetch", async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(unauthorized())
-      .mockResolvedValueOnce(success({ user: { user_id: getUserId() } }))
-      .mockResolvedValueOnce(new Response(null, { headers: { "content-type": "text/event-stream" } }));
-    vi.mocked(fetchEventSource).mockImplementation(async (url, options) => {
-      const response = await options.fetch!(url, { headers: { ...options.headers, "last-event-id": "live-id" }, signal: options.signal });
-      await options.onopen?.(response);
+  it.each(["https://server.example", baseUrl])("delivers each SSE event once across visibility and Server recovery at %s", async (serverUrl) => {
+    const document = Object.assign(new EventTarget(), { hidden: false });
+    vi.stubGlobal("document", document);
+    vi.stubGlobal("window", { clearTimeout, setTimeout });
+    let streamRequests = 0;
+    const lastEventIds: Array<string | null> = [];
+    const request = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/user") return success({ user: { user_id: getUserId() } });
+      lastEventIds.push(new Headers(init?.headers).get("last-event-id"));
+      if (++streamRequests === 2) return unauthorized();
+
+      // Match the gateway's query-first cursor selection during replay.
+      const cursor = url.searchParams.get("after_event_id") ?? new Headers(init?.headers).get("last-event-id");
+      const lastSequence = Number(cursor?.slice(3) ?? 0);
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason), { once: true });
+          for (let sequence = lastSequence + 1; sequence <= (streamRequests === 1 ? 3 : 4); sequence++) {
+            const event: TimelineEvent = {
+              eventId: `ev_${sequence}`, eventSeq: sequence, persistedAt: sequence,
+              event: { type: "agent", data: {
+                identity: { sessionId: "session", turnId: "turn" }, sequence, occurredAt: sequence,
+                payload: { type: "turnStarted", data: {} },
+              } },
+            };
+            controller.enqueue(new TextEncoder().encode(`id: ${event.eventId}\ndata: ${JSON.stringify(event)}\n\n`));
+          }
+        },
+      });
+      return new Response(body, { headers: { "content-type": "text/event-stream" } });
     });
-    const client = createBrowserTalosClient({ baseUrl, getToken, getUserId, fetch: request });
+    const client = createBrowserTalosClient({ baseUrl: serverUrl, getToken, getUserId, fetch: request });
+    const controller = new AbortController();
     const onOpen = vi.fn();
-    await client.turns.events("session", "saved-id", vi.fn(), undefined, { onOpen });
-    expect(onOpen).toHaveBeenCalledOnce();
-    expect(request.mock.calls[2]).toEqual(request.mock.calls[0]);
-    expect(request.mock.calls[2][0]).toBe(baseUrl + "/v1/sessions/session/events?after_event_id=saved-id");
-    expect(new Headers(request.mock.calls[2][1]?.headers).get("last-event-id")).toBe("live-id");
+    const delivered: string[] = [];
+    const subscription = client.turns.events("session", "ev_1", (event) => delivered.push(event.eventId), controller.signal, { onOpen, persistent: true });
+    try {
+      await vi.waitFor(() => expect(delivered).toEqual(["ev_2", "ev_3"]));
+      document.hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      // Browser visibility changes arrive in separate tasks after abort settles.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(request.mock.calls[0][1]?.signal?.aborted).toBe(true);
+      document.hidden = false;
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.waitFor(() => expect(delivered).toContain("ev_4"));
+
+      expect(delivered).toEqual(["ev_2", "ev_3", "ev_4"]);
+      expect(onOpen).toHaveBeenCalledTimes(2);
+      expect(request.mock.calls[0][0]).toBe(serverUrl + "/v1/sessions/session/events?after_event_id=ev_1&close_when_idle=false");
+      expect(request.mock.calls[3]).toEqual(request.mock.calls[1]);
+      expect(new URL(String(request.mock.calls[3][0])).searchParams.get("after_event_id")).toBe("ev_3");
+      expect(lastEventIds).toEqual([null, "ev_3", "ev_3"]);
+    } finally {
+      controller.abort();
+      await subscription;
+    }
   });
 });

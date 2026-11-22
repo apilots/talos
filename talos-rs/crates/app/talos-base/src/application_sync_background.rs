@@ -217,6 +217,12 @@ async fn maintain_account(
     mut failures: tokio::sync::watch::Receiver<Option<talos_error::ApiError>>,
     _lifetime: RefreshLifetime,
 ) {
+    let _directory = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(
+        super::application_computer_directory::maintain(host.clone(), updates.clone()),
+    ));
+    let _hub_recovery = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(
+        super::application_sync_hub_recovery::maintain_hub_identity(host.clone(), updates.clone()),
+    ));
     let mut wake_reason = RefreshWake::Started;
     loop {
         let Some(owner) = host.upgrade() else { break };

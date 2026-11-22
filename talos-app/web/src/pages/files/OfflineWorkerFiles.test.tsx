@@ -22,7 +22,7 @@ afterEach(() => {
   useAppStore.setState(useAppStore.getInitialState());
 });
 
-async function offlineOrdinaryWorker() {
+async function offlineOrdinaryWorker(verifyNode: boolean) {
   const invoke = vi.fn();
   Object.defineProperty(window, "talos", { configurable: true, value: { invoke } });
   const http = vi.fn();
@@ -34,13 +34,14 @@ async function offlineOrdinaryWorker() {
   const projectId = "project";
   const file = { fileId: "notes", originalFilename: "notes.txt", mimeType: "text/plain", tags: [],
     sizeBytes: 5, metadata: {}, createdAt: 1, updatedAt: 1, scope: { type: "project", projectId } as const };
-  http.mockResolvedValueOnce(Response.json({ status: "success", data: { nodeId, managedWorkerPhase: null } }));
-  await getTalosClient({ nodeId });
-  expect(http).toHaveBeenCalledWith(expect.stringContaining(nodeId), expect.objectContaining({
-    headers: expect.objectContaining({ Authorization: "Bearer alice-token" }),
-  }));
-
-  productQueries.clear();
+  if (verifyNode) {
+    http.mockResolvedValueOnce(Response.json({ status: "success", data: { nodeId, managedWorkerPhase: null } }));
+    await getTalosClient({ nodeId });
+    expect(http).toHaveBeenCalledWith(expect.stringContaining(nodeId), expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: "Bearer alice-token" }),
+    }));
+    productQueries.clear();
+  }
   http.mockReset().mockRejectedValue(new TypeError("Server offline"));
   invoke.mockImplementation(async (method: string, params: AppProtocol.FileUploadParams) => {
     if (method === "computer/read" || method === "model/list") return { status: "error", error: {
@@ -52,7 +53,7 @@ async function offlineOrdinaryWorker() {
     const modelRef = { provider: "fixture", id: "document-model" };
     const modelSelection = { modelRef, reasoningEffort: null };
     const responses: Record<string, unknown> = {
-      "session/get": { session: { id: sessionId, nodeId, projectId, messageCount: 1, modelSelection, effectiveMode: "askForApproval" } },
+      "session/get": { session: { id: sessionId, sessionKind: "standard", nodeId, projectId, messageCount: 1, modelSelection, effectiveMode: "askForApproval" } },
       "session/active_turn": { activeTurn: null },
       "session/history": { data: [], nextCursor: null, lastStableEventId: null },
       "automation/read": { sessionId, goal: null, loops: [] },
@@ -72,7 +73,7 @@ async function offlineOrdinaryWorker() {
 }
 
 it("lists and uploads Files for a verified ordinary Worker after an offline restart", async () => {
-  const { file, wrapper, invoke, http } = await offlineOrdinaryWorker();
+  const { file, wrapper, invoke, http } = await offlineOrdinaryWorker(true);
   const { container } = render(<MemoryRouter><FilesPage /></MemoryRouter>, { wrapper });
   await screen.findByText(file.originalFilename);
   fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -83,8 +84,8 @@ it("lists and uploads Files for a verified ordinary Worker after an offline rest
   expect(http).not.toHaveBeenCalled();
 });
 
-it("lists and stages a project attachment in a saved ordinary chat after an offline restart", async () => {
-  const { file, wrapper, invoke, sessionId } = await offlineOrdinaryWorker();
+it("stages a project attachment in a saved standard chat without prior online Computer verification", async () => {
+  const { file, wrapper, invoke, sessionId } = await offlineOrdinaryWorker(false);
   const { container } = render(<MemoryRouter><ChatSessionContent sessionId={sessionId} /></MemoryRouter>, { wrapper });
   await waitFor(() => expect((screen.getByRole("button", { name: "Add" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 4_000 });
   fireEvent.click(screen.getByRole("button", { name: "Add" }));

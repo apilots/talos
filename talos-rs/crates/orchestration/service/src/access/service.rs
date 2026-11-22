@@ -177,8 +177,9 @@ impl ResourceAccessService {
             ));
         }
         self.ensure_session_visibility(actor, &record)?;
-        self.ensure_managed_node_access(actor, &record.execution_node_id)
-            .await?;
+        if record.session_kind == talos_types::SessionKind::Talo {
+            actor.ensure_managed_worker_access()?;
+        }
         Ok(record)
     }
 

@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AppProtocol } from "@talos/sdk-browser";
+import { formatFileSize } from "@/features/files";
 import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
 import type { ComposerAttachmentItem } from "./useComposerAttachments";
@@ -134,7 +135,12 @@ export function ComposerAttachmentTray({
                   >
                     {item.status === "failed"
                       ? `${t("attachmentUploadFailed")}: ${failure}`
-                      : fileTypeLabel(filename)}
+                      : <>
+                        {fileTypeLabel(filename)}
+                        {item.status === "uploading" && item.progress ? (
+                          <span className="normal-case"> · {formatFileSize(item.progress.loadedBytes)}</span>
+                        ) : null}
+                      </>}
                   </span>
                 </span>
                 {item.status === "uploading" ? (

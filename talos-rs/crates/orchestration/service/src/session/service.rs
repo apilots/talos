@@ -156,6 +156,7 @@ impl SessionService {
             .user_permission_mode
             .unwrap_or(configured_default_mode);
         Ok(SessionInfo {
+            session_kind: record.session_kind,
             node_id: record.execution_node_id.clone(),
             id: record.id.clone(),
             title: record.title.clone(),
@@ -523,8 +524,14 @@ impl SessionService {
         params: CreateSessionParams,
         tree_identity: SessionTreeIdentity,
     ) -> TalosResult<SessionRecord> {
-        self.worker_environment(&params.execution_node_id, &params.user_id)
-            .await?
+        let session_kind = self
+            .authorize_worker(&params.execution_node_id, &params.user_id)
+            .await?;
+        let worker = self
+            .coordinator
+            .worker_environment(&params.execution_node_id, &params.user_id)
+            .await?;
+        worker
             .workspace_info(Self::environment_context(
                 &params.user_id,
                 Some(params.workspace_id.clone()),
@@ -537,8 +544,7 @@ impl SessionService {
         let effective_selection = match requested_selection {
             Some(selection) => selection,
             None => {
-                self.worker_environment(&params.execution_node_id, &params.user_id)
-                    .await?
+                worker
                     .list_models(Self::environment_context(&params.user_id, None))
                     .await?
                     .default_model_selection
@@ -563,6 +569,7 @@ impl SessionService {
         let now = chrono::Utc::now().timestamp_millis();
         let source = params.source;
         let record = SessionRecord {
+            session_kind,
             id: session_id,
             agent_id: params.target_agent,
             execution_node_id: params.execution_node_id,

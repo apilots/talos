@@ -381,6 +381,7 @@ fn record_for(
         ..SessionConf::default()
     };
     SessionRecord {
+        session_kind: talos_types::SessionKind::Standard,
         id: session_id.to_string(),
         agent_id: "default".to_string(),
         execution_node_id: "embedded".to_string(),
@@ -443,6 +444,26 @@ async fn regular_actor_cannot_load_another_users_session() {
         .await
         .expect_err("other user session should be hidden");
     assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
+}
+
+#[tokio::test]
+async fn retired_talo_history_uses_the_owners_current_cloud_access() {
+    let mut session = record_for("owner", "archive", None, None);
+    session.session_kind = talos_types::SessionKind::Talo;
+    session.execution_node_id = "retired-worker".into();
+    let store = Arc::new(RecordingSessionStore::from_records(vec![session]));
+    let access = recording_access_service(Arc::new(NoopAgentCoordinator), store);
+    let actor = Actor::regular("owner");
+    assert!(access
+        .load_session(&actor, "archive")
+        .await
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::PermissionDenied));
+    let actor = actor.with_user_type(talos_auth::UserType::Max);
+    assert_eq!(
+        access.load_session(&actor, "archive").await.unwrap().id,
+        "archive"
+    );
 }
 
 #[tokio::test]

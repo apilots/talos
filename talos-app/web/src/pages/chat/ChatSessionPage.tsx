@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { SessionTracingPanel, TraceTabs } from "@/features/tracing";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import {
   ChatComposer,
@@ -23,15 +23,10 @@ import {
 } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
 import { sessionMessageSendPolicyOptions } from "@/shared/api/session-message-send-policy";
-import { hasLocalFileStore } from "@/shared/api/client";
+import { isDesktopRuntime } from "@/shared/api/desktop-client";
 import { isServiceUnavailable } from "@/shared/api/is-service-unavailable";
 import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { ChatSessionTimeline } from "./ChatSessionTimeline";
-import type { SessionLocationState } from "./chatSessionLocation";
-import {
-  hasInitialSessionInput,
-  useInitialSessionInput,
-} from "./useInitialSessionInput";
 import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
 import { useChatSessionComposer } from "./useChatSessionComposer";
 
@@ -53,35 +48,23 @@ export function ChatSessionContent({ sessionId, talo }: {
     setView(next);
   };
   const navigate = useNavigate();
-  const location = useLocation();
-  const locationState = talo ? null : location.state as SessionLocationState | null;
-  const [pendingInitialSessionId, setPendingInitialSessionId] =
-    useState<string>();
-  const [retryDraft, setRetryDraft] = useState<SessionLocationState>();
-  const sessionQuery = useSessionQuery(
-    sessionId,
-    !(locationState?.initialNodeId && hasInitialSessionInput(locationState)) &&
-      pendingInitialSessionId !== sessionId,
-    retryDraft?.initialNodeId,
-  );
+  const sessionQuery = useSessionQuery(sessionId);
   const session = sessionQuery.data;
   const missingSession = !session && sessionQuery.error instanceof TalosApiError &&
     sessionQuery.error.code === AppProtocol.ErrorCode.ResourceNotFound;
-  const draftNodeId = locationState?.initialNodeId ?? retryDraft?.initialNodeId;
-  const checkReservation = Boolean(!talo && missingSession && !draftNodeId);
+  const checkReservation = Boolean(!talo && missingSession);
   const { status } = useManagedWorkerStatus(checkReservation);
   const instance = talo ?? status.data?.instance;
   const reservedTalo = instance?.conversationSessionId === sessionId ? instance : undefined;
   const firstTaloTurn = Boolean(missingSession && reservedTalo);
-  const newDraft = Boolean(!session && draftNodeId && (!sessionQuery.error || missingSession));
   const scope = useProductScope();
   const selectComputer = useAppStore((state) => state.selectComputer);
-  const nodeId = session?.nodeId ?? reservedTalo?.nodeId ?? draftNodeId;
+  const nodeId = session?.nodeId ?? reservedTalo?.nodeId;
   const { data: computer, error: computerError } = useComputer(nodeId);
   const workerPhase = reservedTalo?.phase ?? computer?.managedWorkerPhase ?? (instance?.nodeId === nodeId ? instance?.phase : undefined);
   const ready = workerPhase == null ? computer?.available : workerPhase === "ready";
   const canSend = Boolean((ready || workerPhase === "sleeping") &&
-    ((session && !sessionQuery.error) || newDraft || firstTaloTurn));
+    ((session && !sessionQuery.error) || firstTaloTurn));
   useEffect(() => {
     const computer = session?.nodeId ?? reservedTalo?.nodeId;
     if (computer) selectComputer(scope, computer);
@@ -89,9 +72,8 @@ export function ChatSessionContent({ sessionId, talo }: {
   const { data: modelCatalog } = useModelsQuery(nodeId);
   const computerOffline = computer?.status !== "disabled" &&
     (computerError ? isServiceUnavailable(computerError) : computer?.available === false);
-  const stageOfflineAttachments = Boolean(!canSend && session && !sessionQuery.error && workerPhase == null &&
-    computerOffline && hasLocalFileStore(nodeId));
-  const models = modelCatalog?.models;
+  const stageOfflineAttachments = Boolean(!canSend && isDesktopRuntime() && session?.sessionKind === "standard" &&
+    !sessionQuery.error && computerOffline);
   const projectsView = useProjectsView(nodeId);
   const { refetch: refetchProjects } = projectsView;
   useEffect(() => {
@@ -105,8 +87,6 @@ export function ChatSessionContent({ sessionId, talo }: {
   const chat = useChatSession(sessionId, session?.messageCount, workerPhase, sendPolicy);
   const {
     blocks,
-    setDraft,
-    sendText,
     isStreaming,
     isCancelling,
     canRetryResponse,
@@ -121,7 +101,6 @@ export function ChatSessionContent({ sessionId, talo }: {
     pendingUserAction,
   } = chat;
   const submitUserAction = useSubmitUserActionMutation(sessionId);
-  const projects = projectsView.projects;
   const sessionHistoryError = sessionHistoryQuery.error;
   const shouldShowMessageList =
     firstTaloTurn || blocks.length > 0 ||
@@ -133,10 +112,8 @@ export function ChatSessionContent({ sessionId, talo }: {
     streamError,
   });
 
-  const retrySkill = retryDraft?.initialSkillSelection?.name;
   const sessionComposer = useChatSessionComposer({
     chat,
-    locationState: locationState ?? retryDraft ?? null,
     modelCatalog,
     projectsView,
     session,
@@ -146,24 +123,6 @@ export function ChatSessionContent({ sessionId, talo }: {
     canSend,
     stageOfflineAttachments,
     taloConversation: Boolean(reservedTalo),
-    restoredAutomationMode: retrySkill === "goal" || retrySkill === "loop" ? retrySkill : undefined,
-    onRestoredAutomationModeConsumed: () => setRetryDraft(current => current && { ...current, initialSkillSelection: undefined }),
-    onDraftAccepted: () => {
-      setRetryDraft(undefined);
-      if (locationState) navigate(location.pathname, { replace: true, state: null });
-    },
-  });
-  useInitialSessionInput({
-    onPendingSessionChange: setPendingInitialSessionId,
-    onRestoreDraft: setRetryDraft,
-    locationPathname: location.pathname,
-    locationState: newDraft && canSend ? locationState : null,
-    models,
-    navigate,
-    projects,
-    sendText,
-    sessionId,
-    setDraft,
   });
 
   if (!sessionId) {
@@ -173,7 +132,7 @@ export function ChatSessionContent({ sessionId, talo }: {
 
   const content = (
     <div className="flex h-full w-full flex-col overflow-hidden">
-      {sessionQuery.error && !newDraft && !firstTaloTurn ? (
+      {sessionQuery.error && !firstTaloTurn ? (
         <p role="alert" className="px-7 py-3 text-sm text-danger">
           {userVisibleErrorMessage(
             sessionQuery.error,

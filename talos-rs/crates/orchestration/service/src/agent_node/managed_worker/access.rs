@@ -17,7 +17,7 @@ impl<'a> ManagedCaller<'a> {
 
     pub(super) fn authorize(self, managed: &ManagedWorkers) -> TalosResult<()> {
         match self {
-            Self::Request(actor) => ensure_managed_worker_actor(actor),
+            Self::Request(actor) => actor.ensure_managed_worker_access(),
             Self::Dispatch(owner) if managed.auth.has_verified_managed_worker_access(owner) => {
                 Ok(())
             }
@@ -39,7 +39,7 @@ impl AgentNodeService {
         else {
             return Ok(None);
         };
-        ensure_managed_worker_actor(actor)?;
+        actor.ensure_managed_worker_access()?;
         if record.owner_user_id != actor.user_id {
             return Err(not_found());
         }
@@ -71,23 +71,26 @@ impl AgentNodeService {
         Ok(())
     }
 
-    pub(crate) async fn ensure_managed_dispatch_access(
+    pub(crate) async fn authorize_session_dispatch(
         &self,
         owner: &str,
         node_id: &str,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<talos_types::SessionKind> {
         if node_id != "embedded" && self.is_managed_worker_node(node_id).await? {
             ManagedCaller::Dispatch(owner).authorize(self.managed_runtime()?)?;
+            return Ok(talos_types::SessionKind::Talo);
         }
-        Ok(())
+        Ok(talos_types::SessionKind::Standard)
     }
 }
 
-pub(super) fn ensure_managed_worker_actor(actor: &Actor) -> TalosResult<()> {
-    if !actor.can_use_managed_worker() {
-        return Err(managed_worker_access_denied());
+impl Actor {
+    pub(crate) fn ensure_managed_worker_access(&self) -> TalosResult<()> {
+        if !self.can_use_managed_worker() {
+            return Err(managed_worker_access_denied());
+        }
+        ensure_management_actor(self)
     }
-    ensure_management_actor(actor)
 }
 
 fn managed_worker_access_denied() -> TalosError {

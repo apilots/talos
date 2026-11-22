@@ -1,14 +1,11 @@
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use talos_agent_api::{ActiveTurnState, TimelineEventPayload};
-use talos_types::{
-    AgentTurnRef, FileInfo, IdempotentCommand, NodeInfo, ProjectInfo, SessionConf, SessionInfo,
-    SessionTreeIdentity, TalosSessionEnvironment, TurnCommandStatus,
+pub use talos_sync_parser::{
+    ComputerAlias, ResourceKind, SessionExecutionBinding, SyncAcceptedCommand,
+    SyncActiveTurnMetadata, SyncBinding, SyncChange, SyncEventKey, SyncFileSnapshot,
+    SyncResourceKey, SyncResourceSnapshot, SyncResourceSummary, SyncSessionSnapshot,
+    SyncTimelineEntry, SyncTurnMetadata,
 };
-
-pub use talos_sync_types::{
-    ComputerAlias, SessionExecutionBinding, SyncBinding, SyncResourceKey, SyncScope, SyncVersion,
-};
+pub use talos_sync_types::{SyncScope, SyncVersion};
 
 /// Local configuration. Account credentials remain in the existing auth owner.
 #[derive(Debug, Clone)]
@@ -22,113 +19,6 @@ pub struct SyncBindParams {
     pub scope: SyncScope,
     pub source_user_id: String,
     pub computers: Vec<ComputerAlias>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum SyncEventKey {
-    Agent {
-        identity: AgentTurnRef,
-        sequence: u64,
-    },
-    Notice {
-        peer_id: String,
-        source_event_id: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncSessionSnapshot {
-    pub session: SessionInfo,
-    pub conf: SessionConf,
-    pub environment: Option<TalosSessionEnvironment>,
-    pub channel_id: Option<String>,
-    pub thread_id: Option<String>,
-    pub binding: SessionExecutionBinding,
-    pub tree_identity: SessionTreeIdentity,
-    pub memory_processed_through: Option<SyncEventKey>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncFileSnapshot {
-    pub file: FileInfo,
-    pub storage_peer_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-pub enum SyncResourceSnapshot {
-    Computer(NodeInfo),
-    Project(ProjectInfo),
-    Session(Box<SyncSessionSnapshot>),
-    File(SyncFileSnapshot),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncTurnMetadata {
-    pub identity: AgentTurnRef,
-    pub coordinator_id: String,
-    pub previous_turn_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncTimelineEntry {
-    pub key: SyncEventKey,
-    pub event: TimelineEventPayload,
-    pub persisted_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncActiveTurnMetadata {
-    pub identity: AgentTurnRef,
-    pub state: ActiveTurnState,
-    pub updated_at: i64,
-    pub last_event: SyncEventKey,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncAcceptedCommand {
-    pub command: IdempotentCommand,
-    pub idempotency_key: String,
-    pub request_id: String,
-    pub request_hash: String,
-    pub identity: AgentTurnRef,
-    pub message_id: String,
-    pub status: TurnCommandStatus,
-    pub committed_event: SyncEventKey,
-    pub expires_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(
-    tag = "type",
-    content = "data",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum SyncChange {
-    Metadata {
-        before: Option<Box<SyncResourceSnapshot>>,
-        after: Box<SyncResourceSnapshot>,
-    },
-    Turn(SyncTurnMetadata),
-    Event(SyncTimelineEntry),
-    ActiveTurnMetadata(SyncActiveTurnMetadata),
-    AcceptedCommand(SyncAcceptedCommand),
-    Reset {
-        history_generation: u64,
-    },
-    Delete,
 }
 
 /// Canonical facts to project into the existing outbox.
@@ -205,7 +95,7 @@ pub struct SyncImportBatch {
     pub scope: SyncScope,
     pub resource: SyncResourceKey,
     pub version: SyncVersion,
-    pub changes: Vec<talos_sync_types::SyncChange>,
+    pub changes: Vec<SyncChange>,
 }
 
 pub use talos_types::SyncConnectionState;

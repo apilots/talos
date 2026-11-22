@@ -2,7 +2,7 @@
 use super::*;
 use agent_protocol::{AgentSessionContext, WorkerEnvironment, WorkerEnvironmentContext};
 use talos_config::EffectiveWorkspace;
-use talos_types::{ModelInfo, ModelSelection};
+use talos_types::{ModelInfo, ModelSelection, SessionKind};
 
 impl SessionService {
     pub(super) fn environment_context(
@@ -15,11 +15,11 @@ impl SessionService {
             workspace_id,
         }
     }
-    pub(super) async fn worker_environment(
+    pub(super) async fn authorize_worker(
         &self,
         node_id: &str,
         user_id: &str,
-    ) -> TalosResult<Arc<dyn WorkerEnvironment>> {
+    ) -> TalosResult<SessionKind> {
         if node_id == "embedded"
             && self
                 .embedded_admin_auth
@@ -29,10 +29,16 @@ impl SessionService {
             return Err(crate::access::embedded_access_denied());
         }
         if let Some(nodes) = &self.managed_nodes {
-            nodes
-                .ensure_managed_dispatch_access(user_id, node_id)
-                .await?;
+            return nodes.authorize_session_dispatch(user_id, node_id).await;
         }
+        Ok(SessionKind::Standard)
+    }
+    pub(super) async fn worker_environment(
+        &self,
+        node_id: &str,
+        user_id: &str,
+    ) -> TalosResult<Arc<dyn WorkerEnvironment>> {
+        self.authorize_worker(node_id, user_id).await?;
         self.coordinator.worker_environment(node_id, user_id).await
     }
     pub(super) async fn model_info_for_selection(

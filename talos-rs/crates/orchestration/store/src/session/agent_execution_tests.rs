@@ -126,6 +126,7 @@ fn waiting(sequence: u64, action_id: &str) -> AgentEvent {
 
 fn session_record() -> SessionRecord {
     SessionRecord {
+        session_kind: talos_types::SessionKind::Standard,
         id: "session-1".to_string(),
         agent_id: "default".to_string(),
         execution_node_id: "embedded".to_string(),

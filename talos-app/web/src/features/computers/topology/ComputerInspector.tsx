@@ -13,7 +13,7 @@ import { ComputerDetails } from "../ComputerDetails";
 import { ComputerDesktopButton } from "../ComputerDesktop";
 import { SyncPeerDetails } from "./SyncPeerDetails";
 import { ComputerRegistrationActions } from "./ComputerRegistrationActions";
-import { computerPeers } from "./observations";
+import { computerPeers, computerLocalSyncStatus } from "./observations";
 
 interface Props {
   nodeId: string;
@@ -104,22 +104,14 @@ export function ComputerInspector({
           )}
         </p>
       </div>
-      <Button className="w-full" onClick={() => onOpen(node.nodeId)}>
+      <Button className="w-full" title={!phase && !node.available ? t("computers:offlineHelp") : undefined} onClick={() => onOpen(node.nodeId)}>
         {t("computers:open")}
       </Button>
-      {!phase && !node.available ? (
-        <p className="cmp-footnote">{t("computers:offlineHelp")}</p>
-      ) : null}
       <ComputerDesktopButton nodeId={node.nodeId} online={node.available} />
       <SyncPeerDetails
         peers={peers}
         metrics={metrics}
-        syncStatus={
-          syncStatus?.localComputerId === node.nodeId ||
-          peers.some((peer) => peer.peerId === syncStatus?.peerId)
-            ? syncStatus
-            : undefined
-        }
+        syncStatus={computerLocalSyncStatus(metrics, node.nodeId, syncStatus)}
       />
       <ComputerDetails node={node} controlPlane={controlPlane} />
       {personal ? (

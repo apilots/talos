@@ -36,8 +36,6 @@ export interface MessageQueueController {
 export interface ChatComposerProps {
   nodeId?: string;
   draft: string;
-  initialAutomationMode?: import("@talos/sdk-browser").AutomationMode;
-  onRestoredAutomationModeConsumed?: () => void;
   automationCommands?: import("@talos/sdk-browser").AppProtocol.AutomationCommandDescriptor[];
   onDraftChange: (value: string) => void;
   automation?: import("@/features/automation/useSessionAutomation").SessionAutomationController;
@@ -68,7 +66,6 @@ export interface ChatComposerProps {
   onReasoningLevelChange?: (level: ReasoningLevel) => void;
   showProjectSelector?: boolean;
   compact?: boolean;
-  initialAttachments?: FileInfo[];
   supportedAttachmentKinds?: ComposerAttachmentKind[];
   messageQueue?: MessageQueueController;
 }

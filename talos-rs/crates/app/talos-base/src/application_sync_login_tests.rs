@@ -9,11 +9,24 @@ pub(super) async fn verify(
     let fresh = build_application_runtime_with_migration_dir(fresh_config, migration)
         .await
         .unwrap();
-    // No hub association exists yet. Consent must persist without discovery.
+    // Signed-in accounts follow the installed default; registration and Sync
+    // initialize in the background before explicit settings mutations.
+    fresh.service.resume_account_sync(actor);
+    wait_for("first-login background Computer enrollment", async || {
+        fresh
+            .service
+            .sync_status(actor)
+            .await
+            .is_ok_and(|status| status.local_computer_id.is_some())
+    })
+    .await;
+    wait_for("first-login document binding", async || {
+        !fresh.sync.saved_bindings().await.unwrap().is_empty()
+    })
+    .await;
     let before_config = std::fs::read(fresh.config.source_path()).unwrap();
     let disabled = fresh.service.disable_sync(actor).await.unwrap();
     assert_eq!(disabled.configured_enabled, Some(false));
-    assert!(fresh.sync.saved_bindings().await.unwrap().is_empty());
     assert_eq!(
         std::fs::read(fresh.config.source_path()).unwrap(),
         before_config
@@ -29,7 +42,7 @@ pub(super) async fn verify(
         disabled.connection,
         talos_types::SyncConnectionState::Disabled
     );
-    assert!(fresh.sync.saved_bindings().await.unwrap().is_empty());
+    assert!(!fresh.sync.saved_bindings().await.unwrap().is_empty());
     fresh
         .service
         .enable_sync(actor, Default::default())

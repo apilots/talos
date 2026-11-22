@@ -501,6 +501,7 @@ async fn commit_completed_history_turn(
 
 fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> SessionRecord {
     SessionRecord {
+        session_kind: talos_types::SessionKind::Standard,
         id: session_id.to_string(),
         agent_id: "dream-agent".to_string(),
         execution_node_id: "embedded".to_string(),

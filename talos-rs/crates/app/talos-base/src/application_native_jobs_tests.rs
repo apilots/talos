@@ -46,6 +46,7 @@ async fn insert_session(storage: Arc<SqliteStorage>, owner: &str) {
     let store = DatabaseSessionStore::new(storage).await.unwrap();
     store
         .insert_session_record(&SessionRecord {
+            session_kind: talos_types::SessionKind::Standard,
             id: format!("session-{owner}"),
             agent_id: "talos".into(),
             execution_node_id: "embedded".into(),

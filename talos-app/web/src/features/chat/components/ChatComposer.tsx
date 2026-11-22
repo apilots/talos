@@ -1,6 +1,7 @@
+import type { AutomationMode } from "@talos/sdk-browser";
 import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { AutomationEditDialog } from "@/features/automation/AutomationEditDialog";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/shared/lib/cn";
@@ -18,7 +19,7 @@ import { availableComposerCommands } from "./composer-input/composer-suggestions
 import { useComposerSuggestions } from "./composer-input/useComposerSuggestions";
 import { useComposerSuggestionActions } from "./composer-input/useComposerSuggestionActions";
 import { useComposerInputHistory } from "./composer-input/useComposerInputHistory";
-import { EMPTY_ATTACHMENT_KINDS, EMPTY_ATTACHMENTS } from "./ChatComposer.defaults";
+import { EMPTY_ATTACHMENT_KINDS } from "./ChatComposer.defaults";
 import type * as Composer from "./ChatComposer.types";
 import { useChatComposerAttachmentDraft } from "./useChatComposerAttachmentDraft";
 import { WaitingMessages } from "./WaitingMessages";
@@ -27,8 +28,6 @@ import { ComposerCommandResponse } from "./command-response";
 export function ChatComposer({
   draft,
   nodeId,
-  initialAutomationMode,
-  onRestoredAutomationModeConsumed,
   automationCommands,
   onDraftChange,
   onSend,
@@ -57,7 +56,6 @@ export function ChatComposer({
   onReasoningLevelChange,
   showProjectSelector = true,
   compact = false,
-  initialAttachments = EMPTY_ATTACHMENTS,
   supportedAttachmentKinds = EMPTY_ATTACHMENT_KINDS,
   messageQueue,
   automation,
@@ -67,12 +65,7 @@ export function ChatComposer({
   const reasoningLevel = configuredReasoningLevel ?? reasoningLevelForEffort(selectionCapabilities?.default_reasoning_effort ?? null);
   const commandRunning = commandResponse?.kind === "compact" && commandResponse.state === "running";
   const isBusy = Boolean(isStreaming || isCancelling || commandRunning);
-  const [pendingMode, setPendingMode] = useState(initialAutomationMode);
-  useEffect(() => {
-    if (!initialAutomationMode) return;
-    setPendingMode(initialAutomationMode);
-    onRestoredAutomationModeConsumed?.();
-  }, [initialAutomationMode, onRestoredAutomationModeConsumed]);
+  const [pendingMode, setPendingMode] = useState<AutomationMode>();
   const [sendError, setSendError] = useState<ReturnType<typeof userVisibleError>>();
   const [submitting, setSubmitting] = useState(false);
   const [cursorIndex, setCursorIndex] = useState(() => draft.length);
@@ -84,8 +77,7 @@ export function ChatComposer({
     nodeId,
     activeProjectId,
     supportedKinds: supportedAttachmentKinds,
-    initialAttachments,
-  });
+    });
   const commandIds = useMemo(
     () => [...availableComposerCommands({
       hasModels: !isBusy && models.length > 0 && Boolean(onModelChange),

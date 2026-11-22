@@ -33,6 +33,7 @@ pub use agent_node_rpc::{
     NodeResourceServices, NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc,
 };
 mod application_automation;
+mod application_computer_directory;
 mod application_desktop;
 mod application_managed_worker;
 mod application_runtime;
@@ -43,6 +44,7 @@ mod application_sync_computers;
 mod application_sync_deletion;
 mod application_sync_enrollment;
 mod application_sync_files;
+mod application_sync_hub_recovery;
 mod application_sync_management;
 mod application_sync_metrics;
 mod application_sync_observer;

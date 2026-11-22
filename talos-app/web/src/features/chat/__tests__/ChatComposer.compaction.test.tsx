@@ -4,6 +4,7 @@ import "@/shared/i18n/setup";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { FileInfo } from "@talos/sdk-browser";
+import { resetTalosClientFactory, setTalosClientFactory, type TalosWebClient } from "@/shared/api/client";
 import { ChatComposer } from "../components/ChatComposer";
 import { useChatSession } from "../hooks/useChatSession";
 import { useAppStore } from "@/shared/store/app-store";
@@ -35,16 +36,20 @@ function Harness() {
   return <ChatComposer draft={chat.draft} onDraftChange={chat.setDraft}
     onSend={(attachments, mode) => chat.sendTurn({ fileIds: attachments.map((file) => file.fileId), skillSelection: mode ? { name: mode, path: `/worker/system/${mode}/SKILL.md` } : undefined })}
     models={[]} projects={createDefaultProjects()} activeProjectId={UNBOUND_PROJECT_ID} onProjectChange={vi.fn()} showProjectSelector={false}
-    isStreaming automation={automationController()} supportedAttachmentKinds={["file"]} initialAttachments={[attachment]} />;
+    isStreaming automation={automationController()} supportedAttachmentKinds={["file"]} />;
 }
 beforeEach(() => {
+  setTalosClientFactory(() => ({ files: { list: async () => ({ data: [attachment], nextCursor: null }) } }) as unknown as TalosWebClient);
   useAppStore.setState({ streams: {}, composerDrafts: {} });
   backend.add.mockReset().mockResolvedValue(undefined); backend.start.mockClear(); backend.streamText.mockClear();
   applyStreamEvent("sess-1", contextCompactionStarted("compact-1", "summarizing", null, 1));
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); resetTalosClientFactory(); });
 it("retains draft, mode and attachments when the real send hook rejects automatic compaction, then queues once after it finishes", async () => {
   renderWithQueryClient(<Harness />);
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose an existing file" }));
+  fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
   setComposerValue("Fix tests");
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   fireEvent.click(screen.getByRole("button", { name: "Goal" }));

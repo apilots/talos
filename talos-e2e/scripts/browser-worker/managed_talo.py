@@ -340,6 +340,7 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
             raise AssertionError("Talo Turn did not publish a terminal event")
     ready = wait(lambda: phase(base, "ready"), "ready after first Turn")
     saved = data(http(base + f"/v1/sessions/{session}"))["session"]
+    assert saved["sessionKind"] == "talo", saved
     assert saved["id"] == session and saved["nodeId"] == node and saved["projectId"] is None
     print("PASS first Turn materializes the bound non-Project Talo Session and resolves the Goal Skill after Wake", flush=True)
 

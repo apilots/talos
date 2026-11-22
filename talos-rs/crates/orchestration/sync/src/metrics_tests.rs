@@ -4,20 +4,24 @@ use talos_sync_sdk::metrics::{MetadataCounts, PeerMetrics};
 
 fn account() -> AccountMetrics {
     AccountMetrics {
-        api_version: 1,
+        api_version: talos_sync_types::metrics::METRICS_VERSION,
         observed_at: 1_700_000_123_456,
         last_flushed_at: Some(1_700_000_120_123),
         complete: true,
         account_id: "account-a".into(),
         metadata: MetadataCounts {
-            computers: 2,
-            projects: 3,
-            sessions: 4,
-            files: 5,
+            documents: 14,
+            by_namespace: [("computer", 2), ("project", 3), ("session", 4), ("file", 5)]
+                .map(|(name, count)| (name.into(), count))
+                .into(),
         },
         peers: vec![PeerMetrics {
             peer_id: "peer-a".into(),
-            computer_ids: vec!["computer-a".into()],
+            presence_keys: vec![talos_sync_types::SyncResourceKey::new(
+                "computer",
+                "computer-a",
+            )],
+            progress: None,
             connections: 2,
             document_rooms: 3,
             last_activity_at: Some(1_700_000_122_999),
@@ -50,6 +54,7 @@ fn projection_preserves_observations_and_converts_only_timestamps_to_seconds() {
             peers: vec![SyncPeerMetrics {
                 peer_id: "peer-a".into(),
                 computer_ids: vec!["computer-a".into()],
+                progress: None,
                 connections: 2,
                 document_rooms: 3,
                 last_activity_at: Some(1_700_000_122),

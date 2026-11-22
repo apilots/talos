@@ -34,7 +34,7 @@ struct RunnerChannels {
     wake: mpsc::Receiver<()>,
     commands: mpsc::Receiver<ControlCommand>,
     status: watch::Sender<SyncStatus>,
-    changes: broadcast::Sender<talos_sync_types::SyncResourceSummary>,
+    changes: broadcast::Sender<crate::SyncResourceSummary>,
 }
 
 /// Existing Services/Stores supply authorized facts; import has no execution or
@@ -67,18 +67,12 @@ pub trait SyncDataAdapter: Send + Sync {
     ) -> impl Future<Output = TalosResult<Vec<crate::SyncResourceKey>>> + Send {
         async { Ok(Vec::new()) }
     }
+    /// Publish prepared facts in the same transaction as the document checkpoint.
     fn apply(
         &self,
         tx: &mut dyn StorageTransaction,
         batch: &SyncImportBatch,
     ) -> impl Future<Output = TalosResult<()>> + Send;
-    fn apply_prepared(
-        &self,
-        tx: &mut dyn StorageTransaction,
-        batch: &SyncImportBatch,
-    ) -> impl Future<Output = TalosResult<()>> + Send {
-        self.apply(tx, batch)
-    }
 }
 
 /// Owns only synchronization transport. Dropping it never shuts down a Worker.
@@ -90,7 +84,7 @@ pub struct SyncHandle {
     wake: mpsc::Sender<()>,
     status: watch::Receiver<SyncStatus>,
     commands: mpsc::Sender<ControlCommand>,
-    changes: broadcast::Sender<talos_sync_types::SyncResourceSummary>,
+    changes: broadcast::Sender<crate::SyncResourceSummary>,
     task: Mutex<Option<JoinHandle<TalosResult<()>>>>,
 }
 
@@ -103,6 +97,11 @@ impl Drop for RunnerLifetime {
 }
 
 impl SyncHandle {
+    /// The Hub identity of this management host's installed replica association.
+    pub fn scope(&self) -> &crate::SyncScope {
+        &self.binding.scope
+    }
+
     /// Refresh only ephemeral observations after the host verifies local ownership.
     /// This never changes durable capture aliases or grants execution authority.
     pub fn set_presence_computers(&self, computers: Vec<String>) -> TalosResult<()> {
@@ -125,13 +124,17 @@ impl SyncHandle {
     pub fn status(&self) -> SyncStatus {
         self.status.borrow().clone()
     }
+    /// A retired handle retains its scope until a replacement is installed.
+    pub fn is_stopped(&self) -> bool {
+        self.stop.is_cancelled()
+    }
     pub fn subscribe(&self) -> watch::Receiver<SyncStatus> {
         self.status.clone()
     }
 
     /// Bounded discovery notifications. A lagged reader reloads original APIs;
     /// these summaries never replace the durable Timeline or product Stores.
-    pub fn subscribe_changes(&self) -> broadcast::Receiver<talos_sync_types::SyncResourceSummary> {
+    pub fn subscribe_changes(&self) -> broadcast::Receiver<crate::SyncResourceSummary> {
         self.changes.subscribe()
     }
 

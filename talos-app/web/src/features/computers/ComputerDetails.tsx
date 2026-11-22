@@ -17,20 +17,21 @@ export function ComputerDetails({ node, controlPlane }: { node: AppProtocol.Node
     ["owner", node.ownerUserId], ["controlPlane", controlPlane], ["nodeId", node.nodeId],
   ];
   return <div className="text-sm"><dl className="divide-y divide-border">
-    {rows.filter(([, value]) => value !== undefined && value !== null).map(([label, value]) =>
-      <div key={label} className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-3">
-        <dt className="shrink-0 text-muted">{t(label)}</dt>
-        <dd className={`min-w-0 max-w-full break-words text-right ${label === "nodeId" ? "font-mono text-xs" : ""}`}>{value}</dd>
+    {rows.map(([label, value]) =>
+      <div key={label} className="grid grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] items-start gap-x-4 gap-y-1 py-2.5 text-xs leading-5">
+        <dt className="min-w-0 text-muted">{t(label)}</dt>
+        <dd className={`min-w-0 [overflow-wrap:anywhere] text-right font-medium text-ink ${label === "nodeId" ? "font-mono text-xs" : ""}`}>{value === undefined || value === null || value === "" ? "N/A" : value}</dd>
       </div>)}
   </dl>
-    {Boolean(info?.networkInterfaces.length) && <details className="border-t border-border py-3">
-      <summary className="cursor-pointer text-muted">{t("networkCount", { count: info?.networkInterfaces.length })}</summary>
+    <details className="border-t border-border py-3">
+      <summary className="cursor-pointer text-muted">{info ? t("networkCount", { count: info.networkInterfaces.length }) : `${t("network")} · N/A`}</summary>
       <dl className="mt-2 space-y-2">
-        {info?.networkInterfaces.map((network) => <div key={network.name} className="flex justify-between gap-4">
+        {!info?.networkInterfaces.length ? <div><dt>{t("network")}</dt><dd>N/A</dd></div> : null}
+        {info?.networkInterfaces.map((network) => <div key={network.name} className="grid grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] gap-4 text-xs leading-5">
           <dt className="text-muted">{network.name}</dt>
-          <dd className="font-mono text-xs">{network.macAddress}</dd>
+          <dd className="min-w-0 [overflow-wrap:anywhere] text-right font-mono text-xs">{network.macAddress}</dd>
         </div>)}
       </dl>
-    </details>}
+    </details>
   </div>;
 }

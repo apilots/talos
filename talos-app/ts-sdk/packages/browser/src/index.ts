@@ -53,8 +53,11 @@ class BrowserServerSession {
     this.fetchServer = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
-  fetch(url: string, init: RequestInit) {
-    return this.withBootstrap(url, init.signal, () => this.fetchServer(url, { ...init, redirect: "error" }));
+  fetch(url: string, init: RequestInit, onUploadProgress?: HttpRequestOptions["onUploadProgress"]) {
+    return this.withBootstrap(url, init.signal, () => this.fetchServer(url, {
+      ...(init.body instanceof FormData && onUploadProgress ? uploadRequest(url, init, onUploadProgress) : init),
+      redirect: "error",
+    }));
   }
 
   async withBootstrap<T extends HttpResponse>(url: string, signal: AbortSignal | null | undefined, send: () => Promise<T>): Promise<T> {
@@ -96,9 +99,35 @@ class BrowserHttpAdapter implements HttpAdapter {
           ...(options?.headers ?? {}),
         },
         body: options?.body,
-      });
+      }, options?.onUploadProgress);
     return readJson<T>(response, url, method);
   }
+}
+
+/** Count encoded multipart bytes as the selected transport consumes them, without buffering the upload. */
+function uploadRequest(url: string, init: RequestInit, onProgress: NonNullable<HttpRequestOptions["onUploadProgress"]>) {
+  const request = new Request(url, init);
+  const reader = request.body!.getReader();
+  let loadedBytes = 0;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { value, done } = await reader.read();
+        if (done) {
+          controller.close();
+          onProgress({ loadedBytes, totalBytes: loadedBytes });
+        } else {
+          loadedBytes += value.byteLength;
+          controller.enqueue(value);
+          onProgress({ loadedBytes, totalBytes: null });
+        }
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel: reason => reader.cancel(reason),
+  }, { highWaterMark: 0 });
+  return { ...init, headers: request.headers, body, duplex: "half" as const };
 }
 
 function xhrRequest(
@@ -167,7 +196,13 @@ class BrowserStreamAdapter implements StreamAdapter {
     const session = new BrowserServerSession(this.options);
     try {
       await fetchEventSource(url, {
-        fetch: (_input, init) => session.fetch(url, init ?? {}),
+        fetch: (_input, init) => {
+          const requestUrl = new URL(url);
+          const lastEventId = new Headers(init?.headers).get("last-event-id");
+          // The gateway prefers the query cursor over Last-Event-ID on reconnect.
+          if (lastEventId) requestUrl.searchParams.set("after_event_id", lastEventId);
+          return session.fetch(requestUrl.toString(), init ?? {});
+        },
         method: options.method ?? "GET",
         body: options.body,
         signal: options.signal,
