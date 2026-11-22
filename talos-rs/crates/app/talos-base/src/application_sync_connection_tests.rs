@@ -14,6 +14,8 @@ struct Gateway {
     release: Arc<tokio::sync::Semaphore>,
     directory: Arc<std::sync::RwLock<Vec<talos_types::NodeInfo>>>,
     block_directory: Arc<std::sync::atomic::AtomicBool>,
+    block_rename: Arc<std::sync::atomic::AtomicBool>,
+    block_mutation: Arc<std::sync::atomic::AtomicBool>,
     fail_directory: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -52,6 +54,13 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
         request: Request<pb::CreateNodeRequest>,
     ) -> Result<Response<pb::CreateNodeResponse>, Status> {
         let request = request.into_inner();
+        if self
+            .block_mutation
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.entered.send("before-commit".into()).unwrap();
+            self.release.acquire().await.unwrap().forget();
+        }
         let mut node = directory_node("created");
         node.display_name = request.display_name;
         self.directory.write().unwrap().push(node.clone());
@@ -71,6 +80,28 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
         request: Request<pb::GetNodeRequest>,
     ) -> Result<Response<pb::GetNodeResponse>, Status> {
         let node_id = request.into_inner().node_id;
+        if ["fast", "slow", "resumed", "created"].contains(&node_id.as_str()) {
+            let node = self
+                .directory
+                .read()
+                .unwrap()
+                .iter()
+                .find(|node| node.node_id == node_id)
+                .cloned();
+            return Ok(Response::new(pb::GetNodeResponse {
+                result: Some(match node {
+                    Some(node) => pb::get_node_response::Result::Node(
+                        agent_protocol::node_pb::encode_info(node),
+                    ),
+                    None => pb::get_node_response::Result::Failure(
+                        agent_protocol::error_pb::encode_failure(&talos_error::TalosError::new(
+                            talos_error::ErrorCode::ResourceNotFound,
+                            "Computer does not exist.",
+                        )),
+                    ),
+                }),
+            }));
+        }
         if node_id.starts_with("status-") {
             self.entered.send(format!("status:{node_id}")).unwrap();
             self.release.acquire().await.unwrap().forget();
@@ -165,16 +196,33 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
         request: Request<pb::RenameComputerRequest>,
     ) -> Result<Response<pb::GetNodeResponse>, Status> {
         let request = request.into_inner();
-        let mut nodes = self.directory.write().unwrap();
-        let node = nodes
-            .iter_mut()
-            .find(|node| node.node_id == request.node_id)
-            .ok_or_else(|| Status::not_found("Computer"))?;
-        node.display_name = request.display_name;
-        node.updated_at += 1;
+        if self
+            .block_mutation
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.entered.send("before-commit".into()).unwrap();
+            self.release.acquire().await.unwrap().forget();
+        }
+        let node = {
+            let mut nodes = self.directory.write().unwrap();
+            let node = nodes
+                .iter_mut()
+                .find(|node| node.node_id == request.node_id)
+                .ok_or_else(|| Status::not_found("Computer"))?;
+            node.display_name = request.display_name;
+            node.updated_at += 1;
+            node.clone()
+        };
+        if self
+            .block_rename
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.entered.send("rename".into()).unwrap();
+            self.release.acquire().await.unwrap().forget();
+        }
         Ok(Response::new(pb::GetNodeResponse {
             result: Some(pb::get_node_response::Result::Node(
-                agent_protocol::node_pb::encode_info(node.clone()),
+                agent_protocol::node_pb::encode_info(node),
             )),
         }))
     }
@@ -246,6 +294,8 @@ struct Fixture {
     release: Arc<tokio::sync::Semaphore>,
     directory: Arc<std::sync::RwLock<Vec<talos_types::NodeInfo>>>,
     block_directory: Arc<std::sync::atomic::AtomicBool>,
+    block_rename: Arc<std::sync::atomic::AtomicBool>,
+    block_mutation: Arc<std::sync::atomic::AtomicBool>,
     fail_directory: Arc<std::sync::atomic::AtomicBool>,
     gateway: tokio::task::JoinHandle<()>,
     auth: tokio::task::JoinHandle<()>,
@@ -297,12 +347,16 @@ impl Fixture {
         ));
         let block_directory = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let fail_directory = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let block_rename = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let block_mutation = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let service = Gateway {
             entered,
             closed,
             release: release.clone(),
             directory: directory.clone(),
             block_directory: block_directory.clone(),
+            block_rename: block_rename.clone(),
+            block_mutation: block_mutation.clone(),
             fail_directory: fail_directory.clone(),
         };
         let gateway = tokio::spawn(async move {
@@ -365,6 +419,8 @@ impl Fixture {
             release,
             directory,
             block_directory,
+            block_rename,
+            block_mutation,
             fail_directory,
             gateway,
             auth,
@@ -372,12 +428,26 @@ impl Fixture {
         }
     }
 
-    async fn finish(self) {
+    async fn shutdown_runtime(&self) {
         self.runtime.shutdown_sync().await.unwrap();
         self.runtime.worker_rpc.shutdown().await.unwrap();
         self.runtime.resource_rpc.shutdown().await.unwrap();
         self.runtime.automation.shutdown().await.unwrap();
         self.runtime.worker.shutdown().await.unwrap();
+    }
+
+    async fn restart(&mut self) {
+        self.shutdown_runtime().await;
+        self.runtime = crate::build_application_runtime_with_migration_dir(
+            self.runtime.sync_host.config.clone(),
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite"),
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn finish(self) {
+        self.shutdown_runtime().await;
         self.gateway.abort();
         self.auth.abort();
     }

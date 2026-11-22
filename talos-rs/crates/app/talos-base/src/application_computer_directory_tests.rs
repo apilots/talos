@@ -487,3 +487,390 @@ async fn delayed_connection_cannot_resurrect_a_confirmed_deletion() {
 async fn delayed_connection_cannot_resurrect_an_entry_removed_by_a_complete_directory() {
     rejects_late_connection(Removal::DirectoryRefresh).await;
 }
+
+enum RenameResolution {
+    Deleted,
+    MissingFromDirectory,
+    NewerRename,
+    NewerDirectory,
+}
+
+async fn rejects_late_rename(resolution: RenameResolution) {
+    let mut fixture = Fixture::start().await;
+    let actor = actor();
+    fixture
+        .runtime
+        .sync
+        .set_enabled(&actor.user_id, false)
+        .await
+        .unwrap();
+    fixture
+        .runtime
+        .sync_host
+        .refresh_computer_directory(&actor)
+        .await
+        .unwrap();
+    fixture.block_rename.store(true, Ordering::SeqCst);
+    let nodes = fixture.runtime.service.nodes.clone();
+    let rename_actor = actor.clone();
+    let delayed = tokio::spawn(async move {
+        nodes
+            .rename_computer(
+                &rename_actor,
+                talos_types::RenameComputerRequest {
+                    node_id: "fast".into(),
+                    display_name: "Delayed old name".into(),
+                },
+            )
+            .await
+    });
+    assert_eq!(fixture.entered.recv().await.unwrap(), "rename");
+    let removed = matches!(
+        resolution,
+        RenameResolution::Deleted | RenameResolution::MissingFromDirectory
+    );
+    match resolution {
+        RenameResolution::Deleted => {
+            fixture
+                .runtime
+                .service
+                .nodes
+                .delete_computer(
+                    &actor,
+                    talos_types::DeleteComputerRequest {
+                        node_id: "fast".into(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        RenameResolution::MissingFromDirectory => {
+            fixture
+                .directory
+                .write()
+                .unwrap()
+                .retain(|node| node.node_id != "fast");
+            fixture
+                .runtime
+                .sync_host
+                .refresh_computer_directory(&actor)
+                .await
+                .unwrap();
+        }
+        RenameResolution::NewerRename => {
+            fixture
+                .runtime
+                .service
+                .nodes
+                .rename_computer(
+                    &actor,
+                    talos_types::RenameComputerRequest {
+                        node_id: "fast".into(),
+                        display_name: "Latest name".into(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        RenameResolution::NewerDirectory => {
+            fixture
+                .directory
+                .write()
+                .unwrap()
+                .iter_mut()
+                .find(|node| node.node_id == "fast")
+                .unwrap()
+                .display_name = "Latest name".into();
+            fixture
+                .runtime
+                .sync_host
+                .refresh_computer_directory(&actor)
+                .await
+                .unwrap();
+        }
+    }
+    fixture.release.add_permits(1);
+    let result = delayed.await.unwrap();
+    if removed {
+        assert!(result
+            .unwrap_err()
+            .is_code(talos_error::ErrorCode::ResourceExpired));
+    } else {
+        assert_eq!(result.unwrap().display_name, "Latest name");
+    }
+    let page = fixture
+        .runtime
+        .service
+        .list_computers(&actor, Default::default())
+        .await
+        .unwrap();
+    let cached = fixture
+        .runtime
+        .sync_host
+        .sync_stores
+        .nodes
+        .get("fast")
+        .await
+        .unwrap();
+    if removed {
+        assert!(page.data.iter().all(|node| node.node_id != "fast"));
+        assert!(cached.is_none());
+    } else {
+        assert_eq!(
+            page.data
+                .iter()
+                .find(|node| node.node_id == "fast")
+                .unwrap()
+                .display_name,
+            "Latest name"
+        );
+        assert_eq!(cached.unwrap().display_name, "Latest name");
+    }
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn delayed_rename_cannot_resurrect_a_confirmed_deletion() {
+    rejects_late_rename(RenameResolution::Deleted).await;
+}
+#[tokio::test]
+async fn delayed_rename_cannot_resurrect_an_entry_removed_by_a_complete_directory() {
+    rejects_late_rename(RenameResolution::MissingFromDirectory).await;
+}
+#[tokio::test]
+async fn delayed_rename_returns_the_newer_confirmed_name() {
+    rejects_late_rename(RenameResolution::NewerRename).await;
+}
+#[tokio::test]
+async fn delayed_rename_returns_the_newer_directory_name() {
+    rejects_late_rename(RenameResolution::NewerDirectory).await;
+}
+
+#[tokio::test]
+async fn cached_computers_remain_readable_after_an_outage_and_restart() {
+    let mut fixture = Fixture::start().await;
+    let actor = actor();
+    fixture
+        .runtime
+        .sync_host
+        .refresh_computer_directory(&actor)
+        .await
+        .unwrap();
+    let before = fixture
+        .runtime
+        .service
+        .list_computers(&actor, Default::default())
+        .await
+        .unwrap();
+    fixture.gateway.abort();
+    fixture.auth.abort();
+    assert!((&mut fixture.gateway).await.unwrap_err().is_cancelled());
+    assert!((&mut fixture.auth).await.unwrap_err().is_cancelled());
+    assert!(fixture
+        .runtime
+        .sync_host
+        .refresh_computer_directory(&actor)
+        .await
+        .is_err());
+    fixture.restart().await;
+    assert!(fixture
+        .runtime
+        .sync_host
+        .refresh_computer_directory(&actor)
+        .await
+        .is_err());
+    let after = tokio::time::timeout(
+        Duration::from_millis(500),
+        fixture
+            .runtime
+            .service
+            .list_computers(&actor, Default::default()),
+    )
+    .await
+    .expect("cached reads must not wait for the stopped Server or Auth")
+    .unwrap();
+    assert_eq!(
+        before
+            .data
+            .iter()
+            .map(|node| (&node.node_id, &node.display_name))
+            .collect::<Vec<_>>(),
+        after
+            .data
+            .iter()
+            .map(|node| (&node.node_id, &node.display_name))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(after.total, 3);
+    for node in &after.data {
+        assert_eq!(node.health, talos_types::NodeHealth::Unknown);
+        assert!(!node.available);
+        let detail = fixture
+            .runtime
+            .service
+            .nodes
+            .read_computer(
+                &actor,
+                talos_types::GetNodeRequest {
+                    node_id: node.node_id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(detail, *node);
+    }
+    let other = talos_service::Actor::regular("other-account").with_access_token("credential");
+    assert!(fixture
+        .runtime
+        .service
+        .list_computers(&other, Default::default())
+        .await
+        .unwrap()
+        .data
+        .is_empty());
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn delayed_rename_cannot_resurrect_a_removal_from_an_earlier_started_pull() {
+    let mut fixture = Fixture::start().await;
+    let actor = actor();
+    fixture
+        .runtime
+        .sync_host
+        .refresh_computer_directory(&actor)
+        .await
+        .unwrap();
+    fixture.block_directory.store(true, Ordering::SeqCst);
+    let host = fixture.runtime.sync_host.clone();
+    let refresh_actor = actor.clone();
+    let refresh =
+        tokio::spawn(async move { host.refresh_computer_directory(&refresh_actor).await });
+    assert_eq!(fixture.entered.recv().await.unwrap(), "directory");
+    fixture.block_rename.store(true, Ordering::SeqCst);
+    let nodes = fixture.runtime.service.nodes.clone();
+    let rename_actor = actor.clone();
+    let delayed = tokio::spawn(async move {
+        nodes
+            .rename_computer(
+                &rename_actor,
+                talos_types::RenameComputerRequest {
+                    node_id: "slow".into(),
+                    display_name: "Delayed old name".into(),
+                },
+            )
+            .await
+    });
+    assert_eq!(fixture.entered.recv().await.unwrap(), "rename");
+    // The first page was captured before rename. The final page observes deletion.
+    fixture
+        .directory
+        .write()
+        .unwrap()
+        .retain(|node| node.node_id != "slow");
+    fixture.release.add_permits(1);
+    refresh.await.unwrap().unwrap();
+    fixture.release.add_permits(1);
+    assert!(delayed
+        .await
+        .unwrap()
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::ResourceExpired));
+    assert!(fixture
+        .runtime
+        .sync_host
+        .sync_stores
+        .nodes
+        .get("slow")
+        .await
+        .unwrap()
+        .is_none());
+    fixture.finish().await;
+}
+
+enum PendingMutation {
+    Rename,
+    Create,
+}
+
+async fn accepts_mutation_committed_after_a_directory_snapshot(mutation: PendingMutation) {
+    let mut fixture = Fixture::start().await;
+    let actor = actor();
+    fixture
+        .runtime
+        .sync_host
+        .refresh_computer_directory(&actor)
+        .await
+        .unwrap();
+    fixture.block_mutation.store(true, Ordering::SeqCst);
+    let nodes = fixture.runtime.service.nodes.clone();
+    let mutation_actor = actor.clone();
+    let delayed = tokio::spawn(async move {
+        match mutation {
+            PendingMutation::Rename => {
+                let node = nodes
+                    .rename_computer(
+                        &mutation_actor,
+                        talos_types::RenameComputerRequest {
+                            node_id: "fast".into(),
+                            display_name: "Committed after snapshot".into(),
+                        },
+                    )
+                    .await?;
+                Ok::<_, talos_error::TalosError>((node, None))
+            }
+            PendingMutation::Create => {
+                let created = nodes
+                    .create_node(
+                        &mutation_actor,
+                        talos_types::CreateNodeRequest {
+                            display_name: "Committed after snapshot".into(),
+                            endpoint: None,
+                            owner_user_id: None,
+                            credential_expires_at: chrono::Utc::now().timestamp() + 3600,
+                        },
+                    )
+                    .await?;
+                Ok((created.node, Some(created.credential)))
+            }
+        }
+    });
+    assert_eq!(fixture.entered.recv().await.unwrap(), "before-commit");
+    fixture
+        .runtime
+        .sync_host
+        .refresh_computer_directory(&actor)
+        .await
+        .unwrap();
+    fixture.release.add_permits(1);
+    let (result, credential) = delayed.await.unwrap().unwrap();
+    assert_eq!(result.display_name, "Committed after snapshot");
+    if let Some(credential) = credential {
+        assert_eq!(credential.node_id, "created");
+        assert_eq!(credential.token, "fixture-credential");
+    }
+    let cached = fixture
+        .runtime
+        .service
+        .nodes
+        .read_computer(
+            &actor,
+            talos_types::GetNodeRequest {
+                node_id: result.node_id,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(cached.display_name, "Committed after snapshot");
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn a_directory_snapshot_cannot_suppress_a_later_committed_rename() {
+    accepts_mutation_committed_after_a_directory_snapshot(PendingMutation::Rename).await;
+}
+
+#[tokio::test]
+async fn a_directory_snapshot_cannot_discard_a_later_created_computer_credential() {
+    accepts_mutation_committed_after_a_directory_snapshot(PendingMutation::Create).await;
+}

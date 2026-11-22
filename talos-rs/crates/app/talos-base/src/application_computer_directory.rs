@@ -21,6 +21,7 @@ pub(crate) struct ComputerDirectory {
 struct AccountDirectory {
     complete: bool,
     started_at: Option<Instant>,
+    published_at: Option<Instant>,
     nodes: HashMap<String, Observation>,
 }
 struct Observation {
@@ -71,6 +72,32 @@ impl ComputerDirectory {
             info.last_heartbeat_at = None;
         }
         Ok(())
+    }
+    fn observation_after(
+        &self,
+        account: &str,
+        id: &str,
+        started: Instant,
+    ) -> TalosResult<Option<NodeInfo>> {
+        let accounts = self.accounts.read().expect("Computer directory cache lock");
+        if let Some(directory) = accounts.get(account) {
+            if let Some(observed) = directory.nodes.get(id) {
+                if observed.at > started {
+                    return observed.info.clone().map(Some).ok_or_else(|| {
+                        TalosError::new(
+                            ErrorCode::ResourceExpired,
+                            "Computer was deleted at the control plane.",
+                        )
+                    });
+                }
+            } else if directory.complete && directory.published_at.is_some_and(|at| at > started) {
+                return Err(TalosError::new(
+                    ErrorCode::ResourceExpired,
+                    "Computer is absent from the control-plane directory.",
+                ));
+            }
+        }
+        Ok(None)
     }
     fn record(&self, account: &str, info: NodeInfo) {
         self.accounts
@@ -144,13 +171,13 @@ pub(crate) async fn maintain(
 }
 
 impl ApplicationSyncHost {
-    /// Seed first access without allowing a delayed handshake to replace newer directory facts.
-    pub(crate) async fn cache_connected_computer(
+    /// Publish an authenticated Server result without replacing newer directory facts.
+    pub(crate) async fn cache_server_computer(
         &self,
         account: &str,
         info: &NodeInfo,
         started: Instant,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<NodeInfo> {
         let _publish = self.computer_directory.publish.lock().await;
         if !self.account_connections_allowed(account) {
             return Err(TalosError::new(
@@ -158,36 +185,20 @@ impl ApplicationSyncHost {
                 "The Computer account is no longer active.",
             ));
         }
+        if let Some(current) =
+            self.computer_directory
+                .observation_after(account, &info.node_id, started)?
         {
-            let accounts = self
-                .computer_directory
-                .accounts
-                .read()
-                .expect("Computer directory cache lock");
-            if let Some(directory) = accounts.get(account) {
-                if let Some(observed) = directory.nodes.get(&info.node_id) {
-                    if observed.at > started {
-                        return if observed.info.is_some() {
-                            Ok(())
-                        } else {
-                            Err(TalosError::new(
-                                ErrorCode::ResourceExpired,
-                                "Computer was deleted at the control plane.",
-                            ))
-                        };
-                    }
-                } else if directory.complete && directory.started_at.is_some_and(|at| at > started)
-                {
-                    return Err(TalosError::new(
-                        ErrorCode::ResourceExpired,
-                        "Computer is absent from the control-plane directory.",
-                    ));
-                }
-            }
+            return Ok(current);
         }
+        self.publish_computer(account, info).await
+    }
+
+    /// Caller holds the directory publication lock through persistence and observation.
+    async fn publish_computer(&self, account: &str, info: &NodeInfo) -> TalosResult<NodeInfo> {
         self.sync_stores.nodes.confirm_remote_computer(info).await?;
         self.computer_directory.record(account, info.clone());
-        Ok(())
+        Ok(info.clone())
     }
     /// Write confirmed management results through the same cache publication owner.
     pub(crate) async fn cache_confirmed_computer(
@@ -195,7 +206,8 @@ impl ApplicationSyncHost {
         actor: &Actor,
         id: &str,
         info: &NodeInfo,
-    ) -> TalosResult<()> {
+        started: Instant,
+    ) -> TalosResult<NodeInfo> {
         if info.node_id != id || info.owner_user_id.as_deref() != Some(&actor.user_id) {
             return Err(TalosError::authorization_denied());
         }
@@ -206,9 +218,54 @@ impl ApplicationSyncHost {
                 "The account Computer directory is no longer active.",
             ));
         }
-        self.sync_stores.nodes.confirm_remote_computer(info).await?;
-        self.computer_directory.record(&actor.user_id, info.clone());
-        Ok(())
+        let mut confirmed = info.clone();
+        if !matches!(
+            self.computer_directory
+                .observation_after(&actor.user_id, id, started),
+            Ok(None)
+        ) {
+            // Request start cannot order remote commits. Resolve overlap against
+            // Server while publication is serialized, including connection setup.
+            let current = tokio::time::timeout(RPC_TIMEOUT, async {
+                let token = actor.access_token.as_deref().ok_or_else(|| {
+                    TalosError::new(
+                        ErrorCode::Unauthenticated,
+                        "Computer management requires a signed-in account.",
+                    )
+                })?;
+                self.gateway_client().await?.get_node(token, id).await
+            })
+            .await
+            .map_err(|error| {
+                TalosError::from_source(
+                    ErrorCode::Timeout,
+                    "Confirm the current Computer after overlapping directory updates.",
+                    error,
+                )
+            })?;
+            if !self.account_connections_allowed(&actor.user_id) {
+                return Err(TalosError::new(
+                    ErrorCode::Unauthenticated,
+                    "The account Computer directory is no longer active.",
+                ));
+            }
+            confirmed = match current {
+                Ok(current) => current,
+                Err(error) if error.is_code(ErrorCode::ResourceNotFound) => {
+                    self.publish_computer_deletion(&actor.user_id, id).await?;
+                    return Err(TalosError::new(
+                        ErrorCode::ResourceExpired,
+                        "Computer was deleted at the control plane.",
+                    ));
+                }
+                Err(error) => return Err(error),
+            };
+            if confirmed.node_id != id || confirmed.owner_user_id.as_deref() != Some(&actor.user_id)
+            {
+                return Err(TalosError::authorization_denied());
+            }
+        }
+        self.publish_computer(&actor.user_id, &confirmed).await
     }
     pub(crate) async fn cache_deleted_computer(&self, actor: &Actor, id: &str) -> TalosResult<()> {
         let _publish = self.computer_directory.publish.lock().await;
@@ -218,15 +275,20 @@ impl ApplicationSyncHost {
                 "The account Computer directory is no longer active.",
             ));
         }
+        self.publish_computer_deletion(&actor.user_id, id).await
+    }
+
+    /// Caller holds the directory publication lock.
+    async fn publish_computer_deletion(&self, account: &str, id: &str) -> TalosResult<()> {
         self.sync_stores
             .nodes
-            .remove_cached_computer(&actor.user_id, id)
+            .remove_cached_computer(account, id)
             .await?;
         self.computer_directory
             .accounts
             .write()
             .expect("Computer directory cache lock")
-            .entry(actor.user_id.clone())
+            .entry(account.into())
             .or_default()
             .nodes
             .insert(
@@ -350,6 +412,7 @@ impl ApplicationSyncHost {
                 AccountDirectory {
                     complete: true,
                     started_at: Some(started),
+                    published_at: Some(Instant::now()),
                     nodes: merged,
                 },
             );

@@ -443,7 +443,7 @@ impl ApplicationSyncHost {
             return Ok(());
         }
         if let Some(node) = remote {
-            self.cache_connected_computer(&actor.user_id, &node, directory_started)
+            self.cache_server_computer(&actor.user_id, &node, directory_started)
                 .await?;
             self.coordinator
                 .replace_remote_node(

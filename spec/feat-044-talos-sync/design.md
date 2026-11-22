@@ -189,6 +189,23 @@ operations write through the same cache owner immediately. Confirmations,
 including deletions, override older in-flight pulls. A Server-authorized connection
 may seed first-access metadata through the same publication owner; a delayed
 handshake cannot replace newer observations or resurrect removed entries.
+Create/update/rename/status responses carry their local request-start instant through
+that same publication owner. If a newer observation or complete-directory absence
+was published during the request, local timestamps cannot order the remote commits.
+Re-read the current NodeInfo from Server under the publication lock, with a
+five-second deadline including connection setup, then validate and persist that
+result. A confirmed `ResourceNotFound` records deletion and returns `ResourceExpired`.
+An older directory snapshot cannot suppress a later successful create or rename;
+a create retains its original one-time credential. Normal uncontended mutations
+need no additional RPC. This conflict path can delay other cache publications for
+up to five seconds; list/detail remain local reads and do not take this lock.
+Publication time governs absence checks even when the paged pull started before
+the management request. The Store and caller must never receive the superseded
+response as current directory state.
+The durable cache survives restart without network access. Its last-known identities
+remain selectable for local history reads, but a restart has no fresh remote
+availability observations. Remote execution still requires a reachable Talos Server;
+cached metadata does not provide an offline command transport or queue.
 Account cancellation clears
 transient state; another account cannot consume its observations.
 
