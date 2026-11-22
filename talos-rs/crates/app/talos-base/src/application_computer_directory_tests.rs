@@ -1,8 +1,5 @@
 use super::*;
 use std::sync::atomic::Ordering;
-fn actor() -> talos_service::Actor {
-    talos_service::Actor::regular("account").with_access_token("credential")
-}
 #[tokio::test]
 async fn directory_reads_remain_local_while_control_plane_observations_are_blocked() {
     let mut fixture = Fixture::start().await;
@@ -510,7 +507,7 @@ async fn rejects_late_rename(resolution: RenameResolution) {
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
-    fixture.block_rename.store(true, Ordering::SeqCst);
+    fixture.block_response.store(true, Ordering::SeqCst);
     let nodes = fixture.runtime.service.nodes.clone();
     let rename_actor = actor.clone();
     let delayed = tokio::spawn(async move {
@@ -747,7 +744,7 @@ async fn delayed_rename_cannot_resurrect_a_removal_from_an_earlier_started_pull(
     let refresh =
         tokio::spawn(async move { host.refresh_computer_directory(&refresh_actor).await });
     assert_eq!(fixture.entered.recv().await.unwrap(), "directory");
-    fixture.block_rename.store(true, Ordering::SeqCst);
+    fixture.block_response.store(true, Ordering::SeqCst);
     let nodes = fixture.runtime.service.nodes.clone();
     let rename_actor = actor.clone();
     let delayed = tokio::spawn(async move {

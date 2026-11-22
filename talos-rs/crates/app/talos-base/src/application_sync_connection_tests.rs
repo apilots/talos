@@ -7,6 +7,10 @@ use talos_store::node::AgentNodeStore;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
+fn actor() -> talos_service::Actor {
+    talos_service::Actor::regular("account").with_access_token("credential")
+}
+
 #[derive(Clone)]
 struct Gateway {
     entered: tokio::sync::mpsc::UnboundedSender<String>,
@@ -14,9 +18,11 @@ struct Gateway {
     release: Arc<tokio::sync::Semaphore>,
     directory: Arc<std::sync::RwLock<Vec<talos_types::NodeInfo>>>,
     block_directory: Arc<std::sync::atomic::AtomicBool>,
-    block_rename: Arc<std::sync::atomic::AtomicBool>,
+    block_response: Arc<std::sync::atomic::AtomicBool>,
     block_mutation: Arc<std::sync::atomic::AtomicBool>,
     fail_directory: Arc<std::sync::atomic::AtomicBool>,
+    get_node_failure: Arc<std::sync::RwLock<Option<talos_error::TalosError>>>,
+    created_response: Arc<std::sync::RwLock<Option<talos_types::NodeInfo>>>,
 }
 
 #[tonic::async_trait]
@@ -63,7 +69,22 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
         }
         let mut node = directory_node("created");
         node.display_name = request.display_name;
+        node.endpoint = request.endpoint;
+        node.owner_user_id = Some(request.owner_user_id.unwrap_or_else(|| "account".into()));
         self.directory.write().unwrap().push(node.clone());
+        if self
+            .block_response
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.entered.send("create".into()).unwrap();
+            self.release.acquire().await.unwrap().forget();
+        }
+        let node = self
+            .created_response
+            .read()
+            .unwrap()
+            .clone()
+            .unwrap_or(node);
         Ok(Response::new(pb::CreateNodeResponse {
             result: Some(pb::create_node_response::Result::Created(pb::CreatedNode {
                 node: Some(agent_protocol::node_pb::encode_info(node)),
@@ -80,24 +101,32 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
         request: Request<pb::GetNodeRequest>,
     ) -> Result<Response<pb::GetNodeResponse>, Status> {
         let node_id = request.into_inner().node_id;
-        if ["fast", "slow", "resumed", "created"].contains(&node_id.as_str()) {
-            let node = self
-                .directory
-                .read()
-                .unwrap()
-                .iter()
-                .find(|node| node.node_id == node_id)
-                .cloned();
+        if let Some(error) = self.get_node_failure.read().unwrap().as_ref() {
+            return Ok(Response::new(pb::GetNodeResponse {
+                result: Some(pb::get_node_response::Result::Failure(
+                    agent_protocol::error_pb::encode_failure(error),
+                )),
+            }));
+        }
+        let node = self
+            .directory
+            .read()
+            .unwrap()
+            .iter()
+            .find(|node| node.node_id == node_id)
+            .cloned();
+        if node.is_some() || ["fast", "slow", "resumed", "created"].contains(&node_id.as_str()) {
             return Ok(Response::new(pb::GetNodeResponse {
                 result: Some(match node {
                     Some(node) => pb::get_node_response::Result::Node(
                         agent_protocol::node_pb::encode_info(node),
                     ),
                     None => pb::get_node_response::Result::Failure(
-                        agent_protocol::error_pb::encode_failure(&talos_error::TalosError::new(
-                            talos_error::ErrorCode::ResourceNotFound,
-                            "Computer does not exist.",
-                        )),
+                        agent_protocol::error_pb::encode_failure(
+                            &talos_error::TalosError::localized(
+                                talos_error::ErrorLocalization::ComputerRegistrationRemoved,
+                            ),
+                        ),
                     ),
                 }),
             }));
@@ -214,7 +243,7 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
             node.clone()
         };
         if self
-            .block_rename
+            .block_response
             .swap(false, std::sync::atomic::Ordering::SeqCst)
         {
             self.entered.send("rename".into()).unwrap();
@@ -294,9 +323,11 @@ struct Fixture {
     release: Arc<tokio::sync::Semaphore>,
     directory: Arc<std::sync::RwLock<Vec<talos_types::NodeInfo>>>,
     block_directory: Arc<std::sync::atomic::AtomicBool>,
-    block_rename: Arc<std::sync::atomic::AtomicBool>,
+    block_response: Arc<std::sync::atomic::AtomicBool>,
     block_mutation: Arc<std::sync::atomic::AtomicBool>,
     fail_directory: Arc<std::sync::atomic::AtomicBool>,
+    get_node_failure: Arc<std::sync::RwLock<Option<talos_error::TalosError>>>,
+    created_response: Arc<std::sync::RwLock<Option<talos_types::NodeInfo>>>,
     gateway: tokio::task::JoinHandle<()>,
     auth: tokio::task::JoinHandle<()>,
     _home: tempfile::TempDir,
@@ -310,6 +341,7 @@ impl Fixture {
         let home = tempfile::tempdir().unwrap();
         let auth_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let mut config = snapshot_config(home.path());
+        config.sync.hub_endpoint = "wss://127.0.0.1:9/v1/sync".into();
         config.cloud.api_base_url = format!("http://{}", auth_listener.local_addr().unwrap());
         let auth = tokio::spawn(async move {
             axum::serve(auth_listener, Router::new().route("/v1/auth/introspect", post(|| async {
@@ -347,17 +379,21 @@ impl Fixture {
         ));
         let block_directory = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let fail_directory = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let block_rename = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let block_response = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let block_mutation = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let get_node_failure = Arc::new(std::sync::RwLock::new(None));
+        let created_response = Arc::new(std::sync::RwLock::new(None));
         let service = Gateway {
             entered,
             closed,
             release: release.clone(),
             directory: directory.clone(),
             block_directory: block_directory.clone(),
-            block_rename: block_rename.clone(),
+            block_response: block_response.clone(),
             block_mutation: block_mutation.clone(),
             fail_directory: fail_directory.clone(),
+            get_node_failure: get_node_failure.clone(),
+            created_response: created_response.clone(),
         };
         let gateway = tokio::spawn(async move {
             tonic::transport::Server::builder()
@@ -419,9 +455,11 @@ impl Fixture {
             release,
             directory,
             block_directory,
-            block_rename,
+            block_response,
             block_mutation,
             fail_directory,
+            get_node_failure,
+            created_response,
             gateway,
             auth,
             _home: home,
@@ -666,3 +704,9 @@ fn directory_node(id: &str) -> talos_types::NodeInfo {
         system_info: None,
     }
 }
+
+#[path = "application_sync_enrollment_binding_tests.rs"]
+mod enrollment_binding;
+
+#[path = "application_computer_confirmation_tests.rs"]
+mod confirmation;

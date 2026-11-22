@@ -9,6 +9,7 @@ async fn fresh_enrollment_publishes_post_removal_local_history_without_rebinding
 pub(super) enum TopologyScenario {
     SharedSession,
     FreshEnrollment,
+    LateEnrollment,
 }
 
 pub(super) async fn verify(

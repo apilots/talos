@@ -251,12 +251,20 @@ impl ApplicationSyncHost {
             }
             confirmed = match current {
                 Ok(current) => current,
-                Err(error) if error.is_code(ErrorCode::ResourceNotFound) => {
+                Err(error)
+                    if matches!(
+                        error.error_code(),
+                        ErrorCode::ResourceNotFound | ErrorCode::ResourceExpired
+                    ) =>
+                {
                     self.publish_computer_deletion(&actor.user_id, id).await?;
-                    return Err(TalosError::new(
-                        ErrorCode::ResourceExpired,
-                        "Computer was deleted at the control plane.",
-                    ));
+                    return Err(if error.is_code(ErrorCode::ResourceExpired) {
+                        error
+                    } else {
+                        TalosError::localized(
+                            talos_error::ErrorLocalization::ComputerRegistrationRemoved,
+                        )
+                    });
                 }
                 Err(error) => return Err(error),
             };

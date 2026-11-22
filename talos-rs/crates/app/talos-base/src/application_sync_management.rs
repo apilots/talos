@@ -329,17 +329,6 @@ impl ApplicationSyncHost {
         Ok(enrollment_error)
     }
 
-    async fn restore_saved_document_sync(
-        &self,
-        actor: &RequestIdentity,
-    ) -> TalosResult<Option<Arc<talos_sync::SyncHandle>>> {
-        if !self.sync.enabled(&actor.user_id).await? {
-            return Ok(None);
-        }
-        self.publish_document_binding(actor, self.credentials(actor)?, None)
-            .await
-    }
-
     async fn bind_document_sync(
         &self,
         actor: &RequestIdentity,
@@ -528,26 +517,30 @@ impl ApplicationSyncHost {
             self.sync_stores.shutdown_handles().await?;
             *phase = RefreshPhase::ReconcileWorkerAndBinding;
             let (_, enrollment_error) = self.attach_signed_in(&verified).await?;
+            self.install_enrolled_capture(actor, &verified).await?;
             return enrollment_error.map_or(Ok(()), Err);
         }
         // Both operations can start from a verified account. Join their
         // outcomes so a failure on either side cannot cancel the other.
         let (documents, worker) = tokio::join!(
-            self.restore_saved_document_sync(&verified),
+            self.bind_document_sync(&verified, self.credentials(&verified)?),
             self.attach_signed_in(&verified),
         );
         let restore_failed = documents.is_err();
         let (documents, worker_error) = match (documents, worker) {
-            (Ok(handle), Ok((credentials, enrollment_error))) => {
-                // New bindings and presence can now reference the confirmed Worker.
-                let documents = match handle {
-                    Some(handle) => self.refresh_presence_computers(&verified, &handle).await,
-                    None => self.bind_document_sync(&verified, credentials).await,
-                };
+            (Ok(()), Ok((credentials, enrollment_error))) => {
+                let documents = async {
+                    // Hub discovery/restoration can precede Worker enrollment. Fill
+                    // only a missing local alias and bootstrap its previously local
+                    // facts before publishing presence through the current handle.
+                    self.install_enrolled_capture(actor, &verified).await?;
+                    self.bind_document_sync(&verified, credentials).await
+                }
+                .await;
                 (documents, enrollment_error)
             }
             (Err(error), Ok((_, enrollment_error))) => (Err(error), enrollment_error),
-            (documents, Err(error)) => (documents.map(drop), Some(error)),
+            (documents, Err(error)) => (documents, Some(error)),
         };
         *phase = match (restore_failed, worker_error.is_some()) {
             (true, true) => RefreshPhase::RestoreSyncAndWorker,

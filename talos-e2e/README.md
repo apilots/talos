@@ -343,6 +343,15 @@ snapshot and verify that the create credential survives. Cache restart acceptanc
 stops both local Server and Auth endpoints, then reads the retained owner directory
 and details through the native service using the already established account identity.
 It does not claim a fresh offline login or packaged Desktop cold-start acceptance.
+Automatic enrollment acceptance also starts with an empty local capture association,
+creates a Project before registration, then verifies its baseline and following
+rename are acknowledged by the real Hub. The focused local case is
+`automatic_enrollment_recovers_project_baseline_and_following_increment` with
+`--features e2e` and `TALOS_SYNC_BIN` configured. The hosted subset covers the
+same local baseline/increment capture for an existing handle and a retained binding
+without any Hub, preserves disabled Sync, and checks first discovery and saved
+transport can dial while the Worker Gateway is stalled.
+
 Run this hosted-compatible subset without a Hub:
 
 ```sh

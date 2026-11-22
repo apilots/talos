@@ -234,15 +234,45 @@ impl talos_service::ComputerManagement for GatewayPeerAccess {
         request: talos_types::CreateNodeRequest,
     ) -> AgentFuture<'a, TalosResult<talos_types::CreatedNode>> {
         Box::pin(async move {
+            let owner = request.owner_user_id.as_deref().unwrap_or(&actor.user_id);
+            if owner != actor.user_id && actor.role != talos_auth::UserRole::Admin {
+                return Err(TalosError::authorization_denied());
+            }
             let started = Instant::now();
             let mut created = self
                 .gateway()
                 .await?
-                .create_node(management_token(actor)?, request)
+                .create_node(management_token(actor)?, request.clone())
                 .await?;
-            created.node = self
+            // Validate the committed response before treating cache publication as
+            // an independent effect. Never deliver a mismatched owner's secret.
+            if created.node.node_id == "embedded"
+                || created.node.mode != talos_types::NodeMode::Remote
+                || created.node.owner_user_id.as_deref() != Some(owner)
+                || created.node.display_name != request.display_name
+                || created.node.endpoint != request.endpoint
+                || created.credential.expires_at != request.credential_expires_at
+            {
+                return Err(TalosError::authorization_denied());
+            }
+            match self
                 .confirmed_computer(actor, &created.node.node_id, created.node.clone(), started)
-                .await?;
+                .await
+            {
+                Ok(current) => created.node = current,
+                Err(error) => {
+                    // Server has committed and retains only the credential hash.
+                    // Report this secondary failure without losing its only delivery
+                    // or publishing the older response over newer directory facts.
+                    talos_logging::report_error(&error.context(
+                        "Publish the committed Computer creation to the local directory.",
+                    ));
+                    created.node.health = talos_types::NodeHealth::Unknown;
+                    created.node.available = false;
+                    created.node.lease_expires_at = None;
+                    created.node.last_heartbeat_at = None;
+                }
+            }
             Ok(created)
         })
     }

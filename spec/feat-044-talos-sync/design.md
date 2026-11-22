@@ -115,6 +115,18 @@ Cloud Auth classifies a remote HTTP500 as temporary service unavailability,
 like502--504, so first admission can recover with the same credential even before
 an Auth refresh task exists. Other internal errors remain terminal; the host does
 not inspect Cloud response text or manage a separate authentication retry loop.
+Document discovery/restoration and Worker enrollment run independently after the
+same verified account admission. Hub recovery does not wait for a Worker connection.
+A first document binding may temporarily have no local Computer alias. Once
+automatic enrollment confirms this host's owned UUID, the existing enrollment
+capture owner fills only a missing `embedded` association, replaces the account
+adapter/handle as needed, and bootstraps local Projects/Sessions created during
+that gap. Existing source UUID associations cannot be rebound. Retained bindings
+without a live handle follow the same reconciliation; disabled Sync retains its
+opt-out while installing the confirmed capture association without starting H.
+Presence then uses the current handle. Ordinary observations and G stream recovery
+reuse a handle whose capture association is already complete.
+
 The Sync server's independent shared-authorization fix is owned by talos-sync;
 updating the product alone cannot change a previously released service image.
 Full selected-session History and running-Turn Live remain the existing local
@@ -194,14 +206,27 @@ that same publication owner. If a newer observation or complete-directory absenc
 was published during the request, local timestamps cannot order the remote commits.
 Re-read the current NodeInfo from Server under the publication lock, with a
 five-second deadline including connection setup, then validate and persist that
-result. A confirmed `ResourceNotFound` records deletion and returns `ResourceExpired`.
-An older directory snapshot cannot suppress a later successful create or rename;
-a create retains its original one-time credential. Normal uncontended mutations
-need no additional RPC. This conflict path can delay other cache publications for
-up to five seconds; list/detail remain local reads and do not take this lock.
+result. A confirmed `ResourceNotFound` or `ResourceExpired` records deletion and
+returns `ResourceExpired`, preserving the Server's typed removal descriptor.
+Unavailable or denied confirmations preserve the cache and propagate their errors
+for update, rename and status changes.
+An older directory snapshot cannot suppress a later successful create or rename.
+Create validates the Server response against the requested owner, remote mode,
+metadata and credential identity before its cache effect. Once Server has committed,
+that effect cannot discard the one-time credential: the handling owner reports a
+confirmation or persistence failure separately and returns the committed creation
+with unknown/unavailable health, without publishing its older metadata. Credential
+delivery does not imply successful cache publication or continued registration;
+a concurrent deletion can already have invalidated it. The next normal directory
+refresh reconciles the cache. Administrator creation for another owner returns its
+credential without entering the administrator's account cache. No credential is
+persisted in the client directory. Normal uncontended mutations need no additional
+RPC. This conflict path can delay other cache publications for up to five seconds;
+list/detail remain local reads and do not take this lock.
 Publication time governs absence checks even when the paged pull started before
-the management request. The Store and caller must never receive the superseded
-response as current directory state.
+the management request. The Store must never receive the superseded response as
+current directory state; create's degraded response describes the committed
+creation rather than asserting current registration or availability.
 The durable cache survives restart without network access. Its last-known identities
 remain selectable for local history reads, but a restart has no fresh remote
 availability observations. Remote execution still requires a reachable Talos Server;
