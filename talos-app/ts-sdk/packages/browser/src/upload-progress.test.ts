@@ -40,15 +40,12 @@ describe("selected fetch upload progress", () => {
       }
       const request = new Request(input, init);
       expect(request.headers.get("authorization")).toBe("Bearer token");
+      const bytes = await request.arrayBuffer();
       if (attempts++ === 0) {
-        const reader = request.body!.getReader();
-        await reader.read();
-        await reader.cancel();
-        expect(onProgress.mock.calls.every(([value]) => value.totalBytes === null)).toBe(true);
+        expect(onProgress).toHaveBeenLastCalledWith({ loadedBytes: bytes.byteLength, totalBytes: bytes.byteLength });
         onProgress.mockClear();
         return new Response(null, { status: 401 });
       }
-      const bytes = await request.arrayBuffer();
       completedBytes = bytes.byteLength;
       const form = await new Response(bytes, { headers: request.headers }).formData();
       expect(await (form.get("file") as Blob).text()).toBe("content");
