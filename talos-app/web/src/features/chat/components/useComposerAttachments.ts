@@ -1,6 +1,6 @@
 import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { AppProtocol } from "@talos/sdk-browser";
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
   FileInfo,
@@ -16,6 +16,8 @@ import { useConnectionKey } from "../hooks/useChatQueries";
 export type ComposerAttachmentKind = "image" | "file";
 
 export type ComposerAttachmentItem =
+  | { id: string; fileId: string; status: "restoring" }
+  | { id: string; fileId: string; status: "restoreFailed"; error: AppProtocol.ApiError }
   | {
       id: string;
       status: "uploading";
@@ -71,8 +73,8 @@ export function useComposerAttachments({
   const connectionKey = useConnectionKey();
   const sessionId = useContext(AttachmentSessionContext);
   const draftNodeId = sessionId ? undefined : nodeId;
-  const [items, setItems] = useState<ComposerAttachmentItem[]>([]);
-  const [restoring, setRestoring] = useState(Boolean(initialFileIds?.length));
+  const [items, setItems] = useState<ComposerAttachmentItem[]>(() =>
+    (initialFileIds ?? []).map(fileId => ({ id: fileId, fileId, status: "restoring" })));
   const [availableFiles, setAvailableFiles] = useState<FileInfo[]>([]);
   const [availableNextCursor, setAvailableNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -80,21 +82,25 @@ export function useComposerAttachments({
   const [error, setError] = useState<AppProtocol.ApiError | null>(null);
   const controllers = useRef(new Map<string, AbortController>());
   const nextUploadId = useRef(1);
+  const restoreFile = useCallback(async (fileId: string) => {
+    controllers.current.get(fileId)?.abort();
+    const controller = new AbortController();
+    controllers.current.set(fileId, controller);
+    let restored: ComposerAttachmentItem;
+    try {
+      const client = await getTalosClient({ service: "files", sessionId, nodeId: draftNodeId });
+      restored = readyItem((await client.files.read({ fileId })).file, fileId);
+    } catch (failure) {
+      restored = { id: fileId, fileId, status: "restoreFailed", error: userVisibleError(failure, "Files could not be loaded.") };
+    } finally {
+      if (controllers.current.get(fileId) === controller) controllers.current.delete(fileId);
+    }
+    if (!controller.signal.aborted) setItems(current => current.map(item =>
+      item.id === fileId && item.status === "restoring" ? restored : item));
+  }, [draftNodeId, sessionId]);
   useEffect(() => {
-    if (!initialFileIds?.length) return;
-    let cancelled = false;
-    setRestoring(true);
-    void (async () => {
-      try {
-        const client = await getTalosClient({ service: "files", sessionId, nodeId: draftNodeId });
-        const files = await Promise.all(initialFileIds.map(async fileId => (await client.files.read({ fileId })).file));
-        if (!cancelled) setItems(current => [...new Map([...files.map(file => readyItem(file)), ...current].map(item => [item.id, item])).values()]);
-      } catch (failure) {
-        if (!cancelled) setError(userVisibleError(failure, "Files could not be loaded."));
-      } finally { if (!cancelled) setRestoring(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [initialFileIds, draftNodeId, sessionId]);
+    initialFileIds?.forEach(fileId => { void restoreFile(fileId); });
+  }, [initialFileIds, restoreFile]);
   useEffect(
     () => () => {
       for (const controller of controllers.current.values()) {
@@ -108,11 +114,19 @@ export function useComposerAttachments({
   const supported = useMemo(() => new Set(supportedKinds), [supportedKinds]);
   const attachments = useMemo(
     () =>
-      items.flatMap((item) =>
-        item.status === "ready" ? [item.file] : [],
+      items.flatMap<Pick<FileInfo, "fileId">>((item) =>
+        item.status === "ready" ? [item.file]
+          : item.status === "restoring" || item.status === "restoreFailed" ? [{ fileId: item.fileId }] : [],
       ),
     [items],
   );
+
+
+  function retryRestore(fileId: string) {
+    setItems(current => current.map(item => item.id === fileId && item.status === "restoreFailed"
+      ? { id: fileId, fileId, status: "restoring" } : item));
+    void restoreFile(fileId);
+  }
 
   function select(file: FileInfo) {
     if (items.some(item => item.status === "ready" && item.file.fileId === file.fileId)) return;
@@ -122,9 +136,13 @@ export function useComposerAttachments({
       return;
     }
     setError(null);
-    onChange?.();
+    const retained = items.some(item => (item.status === "restoring" || item.status === "restoreFailed") && item.fileId === file.fileId);
+    if (!retained) onChange?.();
+    controllers.current.get(file.fileId)?.abort();
     setItems((current) =>
-      current.some((item) => item.status === "ready" && item.file.fileId === file.fileId)
+      current.some(item => (item.status === "restoring" || item.status === "restoreFailed") && item.fileId === file.fileId)
+        ? current.map(item => item.id === file.fileId ? readyItem(file) : item)
+        : current.some((item) => item.status === "ready" && item.file.fileId === file.fileId)
         ? current
         : [...current, readyItem(file)],
     );
@@ -299,6 +317,7 @@ export function useComposerAttachments({
     loadAvailable,
     loadMoreAvailable,
     select,
+    retryRestore,
     remove,
     clear,
     error,
@@ -306,10 +325,10 @@ export function useComposerAttachments({
     isLoading,
     isLoadingMore,
     hasMoreAvailable: availableNextCursor !== null,
-    hasPendingUploads: restoring || hasPendingUploads,
+    hasPendingUploads,
     hasFailedUploads,
-    hasInvalidAttachments: attachments.some(
-      (file) => !fileMatchesScope(file, scope) || !supported.has(attachmentKind(file)),
+    hasInvalidAttachments: items.some(
+      item => item.status === "ready" && (!fileMatchesScope(item.file, scope) || !supported.has(attachmentKind(item.file))),
     ),
   };
 }

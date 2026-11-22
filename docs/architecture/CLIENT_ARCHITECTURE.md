@@ -97,7 +97,7 @@ keeps the current Composer text, attachments and Goal/Loop selection for manual 
 The unacknowledged session ID, serialized request and idempotency key stay
 with the existing account/Computer-scoped draft across Home remounts and reloads.
 Home restores the visible model, reasoning, permission, Project, Goal/Loop and
-attachment references from that submission; attachment metadata is read through the existing File Service.
+attachment references from that submission; attachment metadata is read through the existing File Service. Metadata resolves independently for each retained file ID. A failed read leaves a visible reference with retry/remove controls and preserves successful items. Metadata loading or failure does not remove an attachment or block replay of an uploaded reference; Server validates every submitted file ID. Retrying metadata or selecting the same reference is not an input edit. Caption edits preserve all references the user has not removed.
 An unchanged manual retry replays the exact submitted request and idempotency
 key; editing the input or options starts a new request identity. Editing or discarding
 the draft retires its pending identity. IDs use the existing HTTP-capable helper. After acknowledgement,

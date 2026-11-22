@@ -42,7 +42,7 @@ export interface ChatComposerProps {
   automationCommands?: import("@talos/sdk-browser").AppProtocol.AutomationCommandDescriptor[];
   onDraftChange: (value: string) => void;
   automation?: import("@/features/automation/useSessionAutomation").SessionAutomationController;
-  onSend: (attachments: FileInfo[], mode?: import("@talos/sdk-browser").AutomationMode) => Promise<void> | void;
+  onSend: (attachments: Pick<FileInfo, "fileId">[], mode?: import("@talos/sdk-browser").AutomationMode) => Promise<void> | void;
   onCommand?: (command: ComposerSessionCommandId) => Promise<void> | void;
   commandResponse?: ComposerCommandResponseState;
   commandStatus?: ComposerStatusSnapshot;

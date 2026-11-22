@@ -162,7 +162,7 @@ export function ChatComposer({
               : attachmentDraft.error
           }
           items={attachmentDraft.items}
-          onRemove={attachmentDraft.remove}
+          onRemove={attachmentDraft.remove} onRetry={attachmentDraft.retryRestore}
         />
         <div>
           <textarea

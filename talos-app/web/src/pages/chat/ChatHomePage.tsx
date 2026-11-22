@@ -121,7 +121,7 @@ function ChatHomeForm({ computers, scope, draftKey }: {
 
   async function handleStartSession(
     initialPrompt?: string,
-    attachments: FileInfo[] = [],
+    attachments: Pick<FileInfo, "fileId">[] = [],
     mode?: AutomationMode,
   ) {
     if (!canSend) return;

@@ -57,7 +57,7 @@ export function useChatComposerAttachmentDraft({
 
   async function submit(
     text: string,
-    onSend: (attachments: FileInfo[]) => Promise<void> | void,
+    onSend: (attachments: Pick<FileInfo, "fileId">[]) => Promise<void> | void,
   ): Promise<void> {
     if (!canSubmit(text)) {
       return;

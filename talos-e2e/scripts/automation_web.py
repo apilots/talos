@@ -78,8 +78,11 @@ def home_retry(page, origin, database, fixture, project):
     page.keyboard.press('Escape')
     document = fixture.parent / 'report.png'
     document.write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVS0AAAAASUVORK5CYII='))
-    page.locator('input[type=file]').set_input_files(str(document))
+    second_document = fixture.parent / 'chart.png'
+    second_document.write_bytes(document.read_bytes())
+    page.locator('input[type=file]').set_input_files([str(document), str(second_document)])
     expect(page.get_by_role('button', name='Remove report.png', exact=True)).to_be_visible()
+    expect(page.get_by_role('button', name='Remove chart.png', exact=True)).to_be_visible()
     page.get_by_role('button', name='Full access', exact=True).click()
     page.get_by_role('button', name=re.compile('^Ask for approval')).click()
     page.get_by_role('button', name='Add', exact=True).click()
@@ -97,6 +100,12 @@ def home_retry(page, origin, database, fixture, project):
         else:
             route.fulfill(response=response)
 
+    metadata_pattern = None
+    metadata_available = False
+
+    def metadata(route):
+        route.continue_() if metadata_available else route.abort('failed')
+
     page.route('**/v1/turns/start', admit)
     try:
         page.get_by_role('button', name='Send', exact=True).click()
@@ -105,7 +114,10 @@ def home_retry(page, origin, database, fixture, project):
         original = submissions[0][1]
         assert original['userPermissionMode'] == 'askForApproval'
         assert original['modelSelection']['modelRef']['provider'] == 'automation-fixture-alt'
-        assert original['projectId'] and [item['type'] for item in original['input']['content']] == ['skillSelection', 'text', 'file']
+        assert original['projectId'] and [item['type'] for item in original['input']['content']] == ['skillSelection', 'text', 'file', 'file']
+        unavailable_id = original['input']['content'][-1]['fileId']
+        metadata_pattern = '**/v1/files/' + unavailable_id + '*'
+        page.route(metadata_pattern, metadata)
         page.goto(origin + '/settings/general')
         page.get_by_role('link', name='New chat', exact=True).click()
         expect(composer).to_have_value(prompt)
@@ -113,6 +125,14 @@ def home_retry(page, origin, database, fixture, project):
         expect(page.get_by_role('button', name=f"{project['name']} · {project['directory']}", exact=True)).to_be_visible()
         expect(page.get_by_test_id('automation-mode-chip')).to_contain_text('Loop')
         expect(page.get_by_role('button', name='Remove report.png', exact=True)).to_be_visible()
+        retry_metadata = page.get_by_role('button', name='Retry now ' + unavailable_id, exact=True)
+        expect(retry_metadata).to_be_visible()
+        expect(page.get_by_role('button', name='Remove ' + unavailable_id, exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name='Send', exact=True)).to_be_enabled()
+        page.screenshot(path=str(REPORT / 'home-partial-file-metadata.png'), full_page=True)
+        metadata_available = True
+        retry_metadata.click()
+        expect(page.get_by_role('button', name='Remove chart.png', exact=True)).to_be_visible()
         picker.click()
         expect(page.get_by_role('button', name=re.compile('^Select model:.*, Provider: Alternate controlled$'))).to_be_visible()
         page.screenshot(path=str(REPORT / 'home-http-restored-options.png'), full_page=True)
@@ -124,11 +144,13 @@ def home_retry(page, origin, database, fixture, project):
         expect(page.get_by_text('Ordinary User Turn finished', exact=True)).to_be_visible(timeout=30000)
         assert len(user_inputs(database, submissions[0][1]['sessionId'])) == 1
         page.screenshot(path=str(REPORT / 'home-http-restored-retry.png'), full_page=True)
-        print('CASE home_http_restored_retry PASS origin=HTTP response=lost reload=settings retry=sameRequest admitted=once')
-        return {'sessionId': submissions[0][1]['sessionId'], 'submissions': 2, 'admitted': 1}
+        print('CASE home_http_restored_retry PASS origin=HTTP response=lost reload=settings metadata=partialFailure,retry retry=sameRequest admitted=once')
+        return {'sessionId': submissions[0][1]['sessionId'], 'submissions': 2, 'admitted': 1, 'restoredFiles': 2, 'partialMetadataRecovery': True}
     finally:
         (fixture / f'{marker}.release-busy').touch()
         page.unroute('**/v1/turns/start', admit)
+        if metadata_pattern:
+            page.unroute(metadata_pattern, metadata)
 
 
 def begin(page, mode, entry, prompt):
