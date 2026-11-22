@@ -38,6 +38,8 @@ interface UseComposerAttachmentsOptions {
   nodeId?: string;
   scope: FileScope;
   supportedKinds: ComposerAttachmentKind[];
+  initialFileIds?: string[];
+  onChange?: () => void;
 }
 
 function attachmentKind(file: Pick<FileInfo, "mimeType">): ComposerAttachmentKind {
@@ -63,12 +65,14 @@ export function useComposerAttachments({
   nodeId,
   scope,
   supportedKinds,
+  initialFileIds, onChange,
 }: UseComposerAttachmentsOptions) {
   const queryClient = useQueryClient();
   const connectionKey = useConnectionKey();
   const sessionId = useContext(AttachmentSessionContext);
   const draftNodeId = sessionId ? undefined : nodeId;
   const [items, setItems] = useState<ComposerAttachmentItem[]>([]);
+  const [restoring, setRestoring] = useState(Boolean(initialFileIds?.length));
   const [availableFiles, setAvailableFiles] = useState<FileInfo[]>([]);
   const [availableNextCursor, setAvailableNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -76,6 +80,21 @@ export function useComposerAttachments({
   const [error, setError] = useState<AppProtocol.ApiError | null>(null);
   const controllers = useRef(new Map<string, AbortController>());
   const nextUploadId = useRef(1);
+  useEffect(() => {
+    if (!initialFileIds?.length) return;
+    let cancelled = false;
+    setRestoring(true);
+    void (async () => {
+      try {
+        const client = await getTalosClient({ service: "files", sessionId, nodeId: draftNodeId });
+        const files = await Promise.all(initialFileIds.map(async fileId => (await client.files.read({ fileId })).file));
+        if (!cancelled) setItems(current => [...new Map([...files.map(file => readyItem(file)), ...current].map(item => [item.id, item])).values()]);
+      } catch (failure) {
+        if (!cancelled) setError(userVisibleError(failure, "Files could not be loaded."));
+      } finally { if (!cancelled) setRestoring(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [initialFileIds, draftNodeId, sessionId]);
   useEffect(
     () => () => {
       for (const controller of controllers.current.values()) {
@@ -96,12 +115,14 @@ export function useComposerAttachments({
   );
 
   function select(file: FileInfo) {
+    if (items.some(item => item.status === "ready" && item.file.fileId === file.fileId)) return;
     if (!fileMatchesScope(file, scope) || !supported.has(attachmentKind(file))) {
       setError({ code: AppProtocol.ErrorCode.UnsupportedAttachment, localization: null,
         message: "The selected file is not supported by the active project and model." });
       return;
     }
     setError(null);
+    onChange?.();
     setItems((current) =>
       current.some((item) => item.status === "ready" && item.file.fileId === file.fileId)
         ? current
@@ -114,6 +135,7 @@ export function useComposerAttachments({
       return;
     }
 
+    onChange?.();
     setError(null);
     const newItems = files.map((file): ComposerAttachmentItem => {
       const id = `upload-${nextUploadId.current}`;
@@ -250,6 +272,7 @@ export function useComposerAttachments({
   }
 
   function remove(id: string) {
+    onChange?.();
     controllers.current.get(id)?.abort();
     controllers.current.delete(id);
     setItems((current) => current.filter((item) => item.id !== id));
@@ -283,7 +306,7 @@ export function useComposerAttachments({
     isLoading,
     isLoadingMore,
     hasMoreAvailable: availableNextCursor !== null,
-    hasPendingUploads,
+    hasPendingUploads: restoring || hasPendingUploads,
     hasFailedUploads,
     hasInvalidAttachments: attachments.some(
       (file) => !fileMatchesScope(file, scope) || !supported.has(attachmentKind(file)),

@@ -11,12 +11,15 @@ interface ChatComposerAttachmentDraftOptions {
   nodeId?: string;
   activeProjectId: string;
   supportedKinds: ComposerAttachmentKind[];
+  initialFileIds?: string[];
+  onChange?: () => void;
 }
 
 export function useChatComposerAttachmentDraft({
   nodeId,
   activeProjectId,
   supportedKinds,
+  initialFileIds, onChange,
 }: ChatComposerAttachmentDraftOptions) {
   const scope = useMemo(
     () =>
@@ -29,6 +32,7 @@ export function useChatComposerAttachmentDraft({
     nodeId,
     scope,
     supportedKinds,
+    initialFileIds, onChange,
     });
 
   function canSubmit(text: string): boolean {

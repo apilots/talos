@@ -1,85 +1,15 @@
 // @vitest-environment jsdom
-
-import { act, cleanup, fireEvent, render as renderView, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { createJSONStorage } from "zustand/middleware";
-
 import "@/shared/i18n/setup";
+import "@testing-library/jest-dom/vitest";
 import { useAppStore } from "@/shared/store/app-store";
 import { createDefaultProjects } from "@/shared/types/domain";
-import "@testing-library/jest-dom/vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ComponentProps, ReactElement } from "react";
-import { ChatHomePage } from "./ChatHomePage";
 import { createBrowserTalosClient } from "@talos/sdk-browser";
-import { setTalosClientFactory, resetTalosClientFactory, type TalosWebClient } from "@/shared/api/client";
-
-function render(ui: ReactElement) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderView(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
-}
-
-let testProjects = createDefaultProjects();
-const composer = vi.hoisted(() => ({ real: false, nextSession: 0 }));
-const startTurn = vi.hoisted(() => vi.fn());
-const computer = vi.hoisted(() => ({ phase: undefined as "ready" | "sleeping" | undefined }));
-const createProjectMutateAsync = vi.fn();
-const setActiveProjectIdMock = vi.fn((projectId: string) => {
-  useAppStore.setState({ activeProjectId: projectId });
-});
-
-vi.mock("@/features/chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/features/chat")>();
-  return { ...actual,
-  ChatComposer: (props: ComponentProps<typeof actual.ChatComposer>) => {
-    if (composer.real) return <actual.ChatComposer {...props} />;
-    const { activeProjectId, automationCommands, onPermissionModeChange, onSend,
-      permissionMode, reasoningLevel, selectedModel } = props;
-    return (
-    <div>
-      <span data-testid="composer-project">{activeProjectId}</span>
-      <span data-testid="composer-automation">{automationCommands?.map((command) => command.mode).join(", ")}</span>
-      <span data-testid="composer-model">{selectedModel}</span>
-      <span data-testid="composer-reasoning">{reasoningLevel}</span>
-      <span data-testid="composer-permission">{permissionMode}</span>
-      <button onClick={() => onPermissionModeChange?.("approveForMe")}>Approve for me</button>
-      <button onClick={() => void onSend([])}>Send</button>
-      <button onClick={() => void onSend([], "goal")}>Send Goal</button>
-      <button onClick={() => void onSend([], "loop")}>Send Loop</button>
-    </div>
-    );
-  },
-  useCreateProjectMutation: () => ({
-    mutateAsync: createProjectMutateAsync,
-  }),
-  generateSessionId: () => `session-${++composer.nextSession}`,
-  useModelsQuery: () => ({
-    data: {
-      defaultModelSelection: {
-        modelRef: { provider: "openrouter", id: "tencent/hy3:free" },
-        reasoningEffort: "high",
-      },
-      models: [
-        { provider: "ollama", id: "llama-3.3", name: "Llama 3.3", reasoning: true, selection_capabilities: { reasoning: "toggle", default_reasoning_effort: "high", default_fast: false } },
-        {
-          provider: "openrouter",
-          id: "tencent/hy3:free",
-          name: "Tencent HY3 Free",
-          input: ["text", "image"],
-          reasoning: true,
-          selection_capabilities: { reasoning: "toggle", default_reasoning_effort: "high", default_fast: false },
-        },
-      ],
-    },
-  }),
-  useProjectsView: () => ({
-    activeProjectId: useAppStore.getState().activeProjectId,
-    projects: testProjects,
-    setActiveProjectId: setActiveProjectIdMock,
-  }),
-};
-});
+import { setTalosClientFactory, type TalosWebClient } from "@/shared/api/client";
+import { render, composer, startTurn, computer, setActiveProjectIdMock } from "./ChatHomePage.test-support";
+import { ChatHomePage } from "./ChatHomePage";
 
 function LocationStateProbe() {
   const location = useLocation();
@@ -87,50 +17,6 @@ function LocationStateProbe() {
 }
 
 describe("ChatHomePage", () => {
-  afterEach(() => {
-    cleanup(); resetTalosClientFactory(); vi.unstubAllGlobals();
-  });
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    startTurn.mockReset().mockResolvedValue({ turnId: "turn-1", messageId: "message-1" });
-    computer.phase = undefined;
-    composer.real = false; composer.nextSession = 0;
-    setTalosClientFactory(() => ({ turns: { start: startTurn }, automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) } }) as unknown as TalosWebClient);
-
-    const storage = new Map<string, string>();
-    useAppStore.persist.setOptions({
-      storage: createJSONStorage(() => ({
-        getItem: (key: string) => storage.get(key) ?? null,
-        setItem: (key: string, value: string) => {
-          storage.set(key, value);
-        },
-        removeItem: (key: string) => {
-          storage.delete(key);
-        },
-      })),
-    });
-
-    const [unboundProject] = createDefaultProjects();
-    testProjects = [
-        unboundProject,
-        {
-          id: "project-1",
-          name: "alpha",
-          directory: "/workspace/alpha",
-          createdAt: 1,
-          updatedAt: 2,
-          origin: "server",
-          sessionCount: 1,
-        },
-      ];
-    useAppStore.setState({
-      activeProjectId: "missing-project",
-      composerDrafts: {},
-      composerRequests: {},
-    });
-  });
-
   it("restores the active project when persisted selection is stale", async () => {
     render(
       <MemoryRouter>
@@ -267,7 +153,7 @@ describe("ChatHomePage", () => {
     expect(startTurn).toHaveBeenCalledTimes(2);
   });
 
-  it.each([false, true])("restores SDK retry identity after a lost ACK and Home remount (edited=%s)", async (edited) => {
+  it.each(["unchanged", "text", "permission"])("restores SDK retry identity after a lost ACK and Home remount (edited=%s)", async (edited) => {
     composer.real = true;
     const accepted = new Map<string, string>();
     const keys: string[] = [];
@@ -293,11 +179,78 @@ describe("ChatHomePage", () => {
     fireEvent.click(screen.getByRole("link", { name: "Leave Home" }));
     fireEvent.click(screen.getByRole("link", { name: "Return Home" }));
     expect(screen.getByRole("textbox")).toHaveValue("Original task");
-    if (edited) fireEvent.change(screen.getByRole("textbox"), { target: { value: "Edited task" } });
+    if (edited === "text") fireEvent.change(screen.getByRole("textbox"), { target: { value: "Edited task" } });
+    if (edited === "permission") {
+      fireEvent.click(screen.getByRole("button", { name: "Full access" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Ask for approval/ }));
+    }
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByTestId("location-state");
     expect(keys).toHaveLength(2);
-    expect(accepted.size).toBe(edited ? 2 : 1);
+    expect(accepted.size).toBe(edited === "unchanged" ? 1 : 2);
+  });
+
+  it.each([["remount", "goal"], ["remount", "loop"], ["reload", "goal"], ["reload", "loop"]] as const)("restores the complete unacknowledged submission after %s (%s)", async (recovery, mode) => {
+    composer.real = true;
+    const title = mode === "goal" ? "Goal" : "Loop";
+    const file = { fileId: "server-file", originalFilename: "report.png", mimeType: "image/png", sizeBytes: 8,
+      scope: { type: "personal" as const }, tags: [], metadata: {}, createdAt: 1, updatedAt: 1 };
+    const sent: Array<{ key: string | null; body: string }> = [];
+    const request = vi.fn<typeof fetch>(async (_url, init) => {
+      sent.push({ key: new Headers(init?.headers).get("idempotency-key"), body: String(init?.body) });
+      if (sent.length === 1) throw new TypeError("Server response lost after admission");
+      return Response.json({ status: "success", data: { turnId: "turn-1", messageId: "message-1" } });
+    });
+    setTalosClientFactory(() => ({ ...createBrowserTalosClient({ baseUrl: "https://server.example", fetch: request }),
+      files: { upload: vi.fn().mockResolvedValue({ file }), read: vi.fn().mockResolvedValue({ file }) },
+      skills: { list: vi.fn().mockResolvedValue({ data: [{ name: mode, scope: "system", path: `/worker/${mode}/SKILL.md`, enabled: true, read_only: true }] }) },
+      automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [{ mode, command: `/${mode}`, description: title }] }) },
+    }) as unknown as TalosWebClient);
+    useAppStore.getState().setActiveProjectId("project-1");
+    const home = <MemoryRouter><Routes>
+      <Route path="/" element={<><ChatHomePage /><Link to="/settings">Settings</Link></>} />
+      <Route path="/settings" element={<Link to="/">Return Home</Link>} />
+      <Route path="/sessions/:sessionId" element={<LocationStateProbe />} />
+    </Routes></MemoryRouter>;
+    const view = render(home);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Check the report" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Tencent HY3 Free ·/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Select model: Tencent HY3/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Change Provider/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Ollama$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Llama 3.3" }));
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Reasoning depth" }), { key: "Home" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [new File(["image"], "report.png", { type: "image/png" })] } });
+    await screen.findByRole("button", { name: "Remove report.png" });
+    fireEvent.click(screen.getByRole("button", { name: "Full access" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Ask for approval/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(await screen.findByRole("button", { name: title }));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByRole("alert");
+    if (recovery === "remount") {
+      fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+      fireEvent.click(screen.getByRole("link", { name: "Return Home" }));
+    } else {
+      view.unmount();
+      const storage = useAppStore.persist.getOptions().storage!;
+      const persisted = await storage.getItem("talos-web-ui");
+      useAppStore.setState(useAppStore.getInitialState());
+      await storage.setItem("talos-web-ui", persisted!);
+      await useAppStore.persist.rehydrate();
+      render(home);
+    }
+    expect(screen.getByRole("textbox")).toHaveValue("Check the report");
+    expect(screen.getByRole("button", { name: "Ask for approval" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Llama 3.3 · Off" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /alpha/ })).toBeVisible();
+    expect(screen.getByTestId("automation-mode-chip")).toHaveTextContent(title);
+    await screen.findByRole("button", { name: "Remove report.png" });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByTestId("location-state");
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual(sent[0]);
   });
 
   it("keeps pending input until acknowledgement and respects navigation away during admission", async () => {
@@ -320,7 +273,3 @@ describe("ChatHomePage", () => {
   });
 
 });
-
-vi.mock("@/features/computers", () => ({ useComputers: () => computer.phase
-  ? { selectedId: "talo", selected: { available: computer.phase === "ready", managedWorkerPhase: undefined } }
-  : { selectedId: "embedded", selected: { available: true } }, useManagedWorkerStatus: () => ({ status: { data: { instance: computer.phase ? { nodeId: "talo", phase: computer.phase } : null } } }), useProductScope: () => "test-scope", ComputerContext: () => null }));

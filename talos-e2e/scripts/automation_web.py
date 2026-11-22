@@ -1,5 +1,6 @@
 """Real Web slash/Add and prompt activation against the shared secretless model fixture."""
 import json
+import base64
 import os
 from pathlib import Path
 import re
@@ -60,12 +61,29 @@ def assert_input(contents, mode, entry, prompt):
         assert_selection(contents, mode, prompt)
 
 
-def home_retry(page, origin, database, fixture):
+def home_retry(page, origin, database, fixture, project):
     page.goto(origin)
     assert page.evaluate('!isSecureContext && typeof crypto.randomUUID === "undefined"')
-    prompt = 'AUTO_CASE=pending_' + uuid.uuid4().hex + ' Keep one admitted Home request'
+    prompt = 'AUTO_CASE=pending_' + uuid.uuid4().hex + ' Check report progress every 1 minute'
     marker = prompt.split()[0].removeprefix('AUTO_CASE=')
     composer = page.get_by_role('textbox', name='Ask anything. Press / for commands and skills.')
+    page.get_by_role('button', name='Work in a project', exact=True).click()
+    page.get_by_role('button', name=f"{project['name']} {project['directory']}", exact=True).click()
+    picker = page.get_by_role('button', name=re.compile('^automation-controlled ·'))
+    picker.click()
+    page.get_by_role('button', name=re.compile('^Select model:')).click()
+    page.get_by_role('button', name=re.compile('^Change Provider:')).click()
+    page.get_by_role('button', name='Alternate controlled', exact=True).click()
+    page.get_by_role('button', name='automation-controlled', exact=True).click()
+    page.keyboard.press('Escape')
+    document = fixture.parent / 'report.png'
+    document.write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVS0AAAAASUVORK5CYII='))
+    page.locator('input[type=file]').set_input_files(str(document))
+    expect(page.get_by_role('button', name='Remove report.png', exact=True)).to_be_visible()
+    page.get_by_role('button', name='Full access', exact=True).click()
+    page.get_by_role('button', name=re.compile('^Ask for approval')).click()
+    page.get_by_role('button', name='Add', exact=True).click()
+    page.get_by_role('button', name='Loop', exact=True).click()
     composer.fill(prompt)
     submissions = []
 
@@ -84,9 +102,21 @@ def home_retry(page, origin, database, fixture):
         page.get_by_role('button', name='Send', exact=True).click()
         expect(page.get_by_role('alert')).to_be_visible()
         assert len(submissions) == 1
+        original = submissions[0][1]
+        assert original['userPermissionMode'] == 'askForApproval'
+        assert original['modelSelection']['modelRef']['provider'] == 'automation-fixture-alt'
+        assert original['projectId'] and [item['type'] for item in original['input']['content']] == ['skillSelection', 'text', 'file']
         page.goto(origin + '/settings/general')
         page.get_by_role('link', name='New chat', exact=True).click()
         expect(composer).to_have_value(prompt)
+        expect(page.get_by_role('button', name='Ask for approval', exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name=f"{project['name']} · {project['directory']}", exact=True)).to_be_visible()
+        expect(page.get_by_test_id('automation-mode-chip')).to_contain_text('Loop')
+        expect(page.get_by_role('button', name='Remove report.png', exact=True)).to_be_visible()
+        picker.click()
+        expect(page.get_by_role('button', name=re.compile('^Select model:.*, Provider: Alternate controlled$'))).to_be_visible()
+        page.screenshot(path=str(REPORT / 'home-http-restored-options.png'), full_page=True)
+        page.keyboard.press('Escape')
         page.get_by_role('button', name='Send', exact=True).click()
         page.wait_for_url('**/sessions/' + submissions[0][1]['sessionId'])
         assert len(submissions) == 2 and submissions[0] == submissions[1], submissions
@@ -317,6 +347,9 @@ def run(home):
         config_path = home / 'talos.yaml'
         prepare(ROOT / 'conf/talos-dev.yaml', config_path, int((fixture / 'port').read_text()))
         config = yaml.safe_load(config_path.read_text())
+        provider = config['llm']['custom_providers']['automation-fixture']
+        provider['models'][0]['input'] = ['text', 'image']
+        config['llm']['custom_providers']['automation-fixture-alt'] = {**provider, 'name': 'Alternate controlled'}
         port = free_port()
         config['gateway'].update(host='127.0.0.1', port=port)
         config_path.write_text(yaml.safe_dump(config, sort_keys=False))
@@ -331,6 +364,13 @@ def run(home):
             except OSError:
                 return False
         wait_for(healthy, 'real Server', 90)
+        project_directory = home / 'admission-project'
+        project_directory.mkdir()
+        with urllib.request.urlopen(urllib.request.Request(origin + '/v1/projects',
+                data=json.dumps({'name': 'Admission project', 'directory': str(project_directory)}).encode(),
+                headers={'Content-Type': 'application/json'})) as response:
+            assert response.status == 200
+            project = json.load(response)['data']['project']
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(executable_path=os.environ.get('TALOS_E2E_CHROME_BIN',
                 '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), headless=True,
@@ -340,7 +380,7 @@ def run(home):
             page = context.new_page()
             page.goto(origin)
             try:
-                retry = home_retry(page, f'http://talos-http.test:{port}', home / 'data/talos.db', fixture)
+                retry = home_retry(page, f'http://talos-http.test:{port}', home / 'data/talos.db', fixture, project)
                 page.goto(origin)
                 results = [complete(page, home / 'data/talos.db', fixture, 'goal', 'add'),
                            complete(page, home / 'data/talos.db', fixture, 'loop', 'slash'),

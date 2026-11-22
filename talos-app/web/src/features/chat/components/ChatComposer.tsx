@@ -26,7 +26,7 @@ import { WaitingMessages } from "./WaitingMessages";
 import { ComposerCommandResponse } from "./command-response";
 
 export function ChatComposer({
-  draft,
+  draft, initialMode, initialFileIds, onInputChange,
   nodeId,
   automationCommands,
   onDraftChange,
@@ -65,7 +65,8 @@ export function ChatComposer({
   const reasoningLevel = configuredReasoningLevel ?? reasoningLevelForEffort(selectionCapabilities?.default_reasoning_effort ?? null);
   const commandRunning = commandResponse?.kind === "compact" && commandResponse.state === "running";
   const isBusy = Boolean(isStreaming || isCancelling || commandRunning);
-  const [pendingMode, setPendingMode] = useState<AutomationMode>();
+  const [pendingMode, setPendingMode] = useState<AutomationMode | undefined>(initialMode);
+  const editMode = (mode: AutomationMode | undefined) => { if (mode === pendingMode) return; onInputChange?.(); setPendingMode(mode); };
   const [sendError, setSendError] = useState<ReturnType<typeof userVisibleError>>();
   const [submitting, setSubmitting] = useState(false);
   const [cursorIndex, setCursorIndex] = useState(() => draft.length);
@@ -74,8 +75,7 @@ export function ChatComposer({
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const attachmentDraft = useChatComposerAttachmentDraft({
-    nodeId,
-    activeProjectId,
+    nodeId, activeProjectId, initialFileIds, onChange: onInputChange,
     supportedKinds: supportedAttachmentKinds,
     });
   const commandIds = useMemo(
@@ -118,7 +118,7 @@ export function ChatComposer({
     modelTriggerRef,
     moveCursorToPosition,
     onCommand,
-    onAutomationMode: setPendingMode,
+    onAutomationMode: editMode,
     onDraftChange,
     onResetHistory: inputHistoryNavigation.reset,
     session: composerSuggestions,
@@ -214,7 +214,7 @@ export function ChatComposer({
 
         <div className="flex flex-wrap items-center gap-1 px-3 pb-3 pt-1.5">
           <ComposerAttachments
-            onAutomationMode={!disabled && (automationCommands ?? automation?.commands)?.length ? (mode) => { setPendingMode(mode); editorRef.current?.focus(); } : undefined}
+            onAutomationMode={!disabled && (automationCommands ?? automation?.commands)?.length ? (mode) => { editMode(mode); editorRef.current?.focus(); } : undefined}
             availableFiles={attachmentDraft.availableFiles}
             disabled={Boolean(attachmentsDisabled || submitting)}
             hasMoreAvailable={attachmentDraft.hasMoreAvailable}
@@ -233,7 +233,7 @@ export function ChatComposer({
             value={permissionMode}
           />
 
-          {pendingMode ? <ComposerAutomationMode mode={pendingMode} onClear={() => setPendingMode(undefined)} /> : null}
+          {pendingMode ? <ComposerAutomationMode mode={pendingMode} onClear={() => editMode(undefined)} /> : null}
           <ComposerRunControls
             canSubmit={!submitting && attachmentDraft.canSubmit(draft)}
             compact={compact}

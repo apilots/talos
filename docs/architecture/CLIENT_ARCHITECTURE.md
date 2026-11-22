@@ -94,9 +94,11 @@ a Talo conversation restores its state from the Server.
 For a new chat, Home submits the first Turn through the selected Computer's existing SDK
 route and waits for admission before opening the session URL. A rejected submission
 keeps the current Composer text, attachments and Goal/Loop selection for manual retry.
-The unacknowledged session ID, request body fingerprint and idempotency key stay
+The unacknowledged session ID, serialized request and idempotency key stay
 with the existing account/Computer-scoped draft across Home remounts and reloads.
-An unchanged manual retry reuses the submitted request body and idempotency
+Home restores the visible model, reasoning, permission, Project, Goal/Loop and
+attachment references from that submission; attachment metadata is read through the existing File Service.
+An unchanged manual retry replays the exact submitted request and idempotency
 key; editing the input or options starts a new request identity. Editing or discarding
 the draft retires its pending identity. IDs use the existing HTTP-capable helper. After acknowledgement,
 Home clears the submitted text and opens the persisted session directly. If the user has

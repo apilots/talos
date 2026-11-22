@@ -36,6 +36,9 @@ export interface MessageQueueController {
 export interface ChatComposerProps {
   nodeId?: string;
   draft: string;
+  initialFileIds?: string[];
+  initialMode?: import("@talos/sdk-browser").AutomationMode;
+  onInputChange?: () => void;
   automationCommands?: import("@talos/sdk-browser").AppProtocol.AutomationCommandDescriptor[];
   onDraftChange: (value: string) => void;
   automation?: import("@/features/automation/useSessionAutomation").SessionAutomationController;
