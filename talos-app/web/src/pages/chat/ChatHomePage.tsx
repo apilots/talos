@@ -59,8 +59,7 @@ export function ChatHomePage() {
     : managedPhase === "ready" || managedPhase === "sleeping";
   const scope = useProductScope();
   const draftKey = JSON.stringify([scope, computers.selectedId, "home"]);
-  const admission = useMemo(() => ({ draftKey, sessionId: generateSessionId() }), [draftKey]);
-  const submission = useRef<{ body: string; requestId: string } | undefined>(undefined);
+  const admission = useMemo(() => ({ draftKey }), [draftKey]);
   const ownerRef = useRef<typeof admission | undefined>(admission);
   ownerRef.current = admission;
   useEffect(() => { ownerRef.current = admission; return () => { ownerRef.current = undefined; }; }, [admission]);
@@ -113,7 +112,9 @@ export function ChatHomePage() {
     if (ownerRef.current !== admission) return;
     if (prepared.kind === "management") throw automationRequestError("chatRequired");
     const trimmed = prepared.prompt.trim();
-    const request = createInitialTurnRequest(admission.sessionId, trimmed, {
+    const pending = useAppStore.getState().composerRequests[admission.draftKey];
+    const sessionId = pending?.sessionId ?? generateSessionId();
+    const request = createInitialTurnRequest(sessionId, trimmed, {
       nodeId: computers.selectedId,
       skillSelection: prepared.skillSelection,
       fileIds: attachments.map(file => file.fileId),
@@ -122,12 +123,17 @@ export function ChatHomePage() {
       project: activeProject,
     });
     const body = JSON.stringify(request);
-    if (submission.current?.body !== body) submission.current = { body, requestId: crypto.randomUUID() };
-    request.clientRequestId = submission.current.requestId;
+    const submission = pending?.body === body ? pending : { sessionId, body, requestId: generateSessionId() };
+    useAppStore.getState().saveComposerRequest(admission.draftKey, submission);
+    request.clientRequestId = submission.requestId;
     await startTimelineTurn(request);
     // Clear only the input acknowledged by the service.
-    if (useAppStore.getState().composerDrafts[admission.draftKey] === initialPrompt) saveDraft(admission.draftKey, "");
-    if (ownerRef.current === admission) navigate(`/sessions/${admission.sessionId}`);
+    const current = useAppStore.getState();
+    if (current.composerRequests[admission.draftKey]?.requestId === submission.requestId) {
+      current.saveComposerRequest(admission.draftKey);
+      if (current.composerDrafts[admission.draftKey] === initialPrompt) saveDraft(admission.draftKey, "");
+    }
+    if (ownerRef.current === admission) navigate(`/sessions/${sessionId}`);
   }
 
   async function handleCreateProject(input: string | { directory: string; name?: string }) {

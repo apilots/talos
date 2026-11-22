@@ -66,11 +66,13 @@ describe("Desktop session ownership", () => {
     expect(cloud.computers.read).not.toHaveBeenCalled();
   });
 
-  it("keeps an upgraded managed conversation on its owning Server", async () => {
+  it.each([false, true])("prefers confirmed canonical ownership over an old Desktop projection (cached=%s)", async (cached) => {
     const { owner, local, cloud, queries } = setup();
     const upgraded = session(instance.conversationSessionId, instance.nodeId, "talo");
     cloud.sessions.get.mockResolvedValue(upgraded);
-    local.sessions.get.mockResolvedValue(upgraded);
+    const oldProjection = session(instance.conversationSessionId, instance.nodeId);
+    local.sessions.get.mockResolvedValue(oldProjection);
+    if (cached) queries.setQueryData(sessionDetailKey("alice", instance.conversationSessionId), { ...oldProjection, owner: "desktop" });
     queries.setQueryData(managedWorkerKey("alice"), { instance });
     await expect(owner.readSession(instance.conversationSessionId)).resolves.toEqual({ ...upgraded, owner: "server" });
     await expect(owner.resolve({ sessionId: instance.conversationSessionId, nodeId: instance.nodeId })).resolves.toBe(cloud);

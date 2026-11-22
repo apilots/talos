@@ -80,7 +80,9 @@ account tier changes. Upgrade uses managed ownership known to that host; a Deskt
 projection accepts the Server's `talo` classification for the same Worker binding
 when Sync supplies it. The Talos Parser owns this application field; generic Sync
 transports its Header and opaque metadata. Upgrade publishes known managed
-ownership through the existing metadata collector. Desktop routes `talo` sessions to the owning Server. For a
+ownership through the existing metadata collector. Desktop routes `talo` sessions to the owning Server. A Server-confirmed canonical
+conversation ID takes precedence over an older local `standard` projection, including
+cached details, while its Sync classification is still in transit. For a
 `standard` session it uses its local record when available, or the Server that
 holds the session when it has not synced. Sidebar selection does not change this route. If its owner cannot be resolved, an attempted send preserves the draft
 and surfaces the error. Only an explicit new chat takes the selected Computer as
@@ -92,9 +94,11 @@ a Talo conversation restores its state from the Server.
 For a new chat, Home submits the first Turn through the selected Computer's existing SDK
 route and waits for admission before opening the session URL. A rejected submission
 keeps the current Composer text, attachments and Goal/Loop selection for manual retry.
-The session ID stays stable for the current account and Computer while Home remains
-mounted. An unchanged manual retry reuses the submitted request body and idempotency
-key; editing the input or options starts a new request identity. After acknowledgement,
+The unacknowledged session ID, request body fingerprint and idempotency key stay
+with the existing account/Computer-scoped draft across Home remounts and reloads.
+An unchanged manual retry reuses the submitted request body and idempotency
+key; editing the input or options starts a new request identity. Editing or discarding
+the draft retires its pending identity. IDs use the existing HTTP-capable helper. After acknowledgement,
 Home clears the submitted text and opens the persisted session directly. If the user has
 left Home, acknowledgement clears only the matching submitted text and preserves the
 current navigation. Unsubmitted attachment and mode selections belong to the current

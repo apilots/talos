@@ -21,7 +21,7 @@ function render(ui: ReactElement) {
 }
 
 let testProjects = createDefaultProjects();
-const composer = vi.hoisted(() => ({ real: false }));
+const composer = vi.hoisted(() => ({ real: false, nextSession: 0 }));
 const startTurn = vi.hoisted(() => vi.fn());
 const computer = vi.hoisted(() => ({ phase: undefined as "ready" | "sleeping" | undefined }));
 const createProjectMutateAsync = vi.fn();
@@ -53,7 +53,7 @@ vi.mock("@/features/chat", async (importOriginal) => {
   useCreateProjectMutation: () => ({
     mutateAsync: createProjectMutateAsync,
   }),
-  generateSessionId: () => "session-1",
+  generateSessionId: () => `session-${++composer.nextSession}`,
   useModelsQuery: () => ({
     data: {
       defaultModelSelection: {
@@ -88,14 +88,14 @@ function LocationStateProbe() {
 
 describe("ChatHomePage", () => {
   afterEach(() => {
-    cleanup(); resetTalosClientFactory();
+    cleanup(); resetTalosClientFactory(); vi.unstubAllGlobals();
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
     startTurn.mockReset().mockResolvedValue({ turnId: "turn-1", messageId: "message-1" });
     computer.phase = undefined;
-    composer.real = false;
+    composer.real = false; composer.nextSession = 0;
     setTalosClientFactory(() => ({ turns: { start: startTurn }, automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) } }) as unknown as TalosWebClient);
 
     const storage = new Map<string, string>();
@@ -127,6 +127,7 @@ describe("ChatHomePage", () => {
     useAppStore.setState({
       activeProjectId: "missing-project",
       composerDrafts: {},
+      composerRequests: {},
     });
   });
 
@@ -148,7 +149,8 @@ describe("ChatHomePage", () => {
     expect(screen.getByTestId("composer-reasoning").textContent).toBe("high");
   });
 
-  it("admits the first Turn with its selected permission mode before navigating", async () => {
+  it.each([false, true])("admits the first Turn before navigating, including HTTP UUID capabilities (http=%s)", async (http) => {
+    if (http) vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
     render(
       <MemoryRouter initialEntries={[{ pathname: "/", state: { initialDraft: "hello" } }]}>
         <Routes>
@@ -265,7 +267,7 @@ describe("ChatHomePage", () => {
     expect(startTurn).toHaveBeenCalledTimes(2);
   });
 
-  it.each([false, true])("keeps SDK retry identity after a lost ACK, and changes it only for edited input (edited=%s)", async (edited) => {
+  it.each([false, true])("restores SDK retry identity after a lost ACK and Home remount (edited=%s)", async (edited) => {
     composer.real = true;
     const accepted = new Map<string, string>();
     const keys: string[] = [];
@@ -281,12 +283,16 @@ describe("ChatHomePage", () => {
     });
     setTalosClientFactory(() => createBrowserTalosClient({ baseUrl: "https://server.example", fetch: request }));
     render(<MemoryRouter initialEntries={[{ pathname: "/", state: { initialDraft: "Original task" } }]}><Routes>
-      <Route path="/" element={<ChatHomePage />} />
+      <Route path="/" element={<><ChatHomePage /><Link to="/settings">Leave Home</Link></>} />
+      <Route path="/settings" element={<Link to="/">Return Home</Link>} />
       <Route path="/sessions/:sessionId" element={<LocationStateProbe />} />
     </Routes></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByRole("alert");
     expect(screen.queryByTestId("location-state")).toBeNull();
+    fireEvent.click(screen.getByRole("link", { name: "Leave Home" }));
+    fireEvent.click(screen.getByRole("link", { name: "Return Home" }));
+    expect(screen.getByRole("textbox")).toHaveValue("Original task");
     if (edited) fireEvent.change(screen.getByRole("textbox"), { target: { value: "Edited task" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByTestId("location-state");

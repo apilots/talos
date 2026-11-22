@@ -76,6 +76,7 @@ export function desktopProductOwner(
     client: TalosWebClient;
     detail?: AppProtocol.SessionGetResponse;
   }> {
+    if (knownManaged()?.conversationSessionId === sessionId) return { client: cloud };
     const cached = queries.getQueryData<SessionDetail>(sessionDetailKey(scope, sessionId));
     if (cached) return { client: sessionOwner(cached.session.sessionKind, cached.owner === "server" ? cloud : local) };
 

@@ -60,6 +60,47 @@ def assert_input(contents, mode, entry, prompt):
         assert_selection(contents, mode, prompt)
 
 
+def home_retry(page, origin, database, fixture):
+    page.goto(origin)
+    assert page.evaluate('!isSecureContext && typeof crypto.randomUUID === "undefined"')
+    prompt = 'AUTO_CASE=pending_' + uuid.uuid4().hex + ' Keep one admitted Home request'
+    marker = prompt.split()[0].removeprefix('AUTO_CASE=')
+    composer = page.get_by_role('textbox', name='Ask anything. Press / for commands and skills.')
+    composer.fill(prompt)
+    submissions = []
+
+    def admit(route):
+        # Playwright's request helper runs outside Chromium's hostname resolver.
+        response = route.fetch(url=route.request.url.replace('talos-http.test', '127.0.0.1', 1))
+        assert response.ok, response.text()
+        submissions.append((route.request.headers['idempotency-key'], route.request.post_data_json, response.json()))
+        if len(submissions) == 1:
+            route.abort('failed')
+        else:
+            route.fulfill(response=response)
+
+    page.route('**/v1/turns/start', admit)
+    try:
+        page.get_by_role('button', name='Send', exact=True).click()
+        expect(page.get_by_role('alert')).to_be_visible()
+        assert len(submissions) == 1
+        page.goto(origin + '/settings/general')
+        page.get_by_role('link', name='New chat', exact=True).click()
+        expect(composer).to_have_value(prompt)
+        page.get_by_role('button', name='Send', exact=True).click()
+        page.wait_for_url('**/sessions/' + submissions[0][1]['sessionId'])
+        assert len(submissions) == 2 and submissions[0] == submissions[1], submissions
+        (fixture / f'{marker}.release-busy').touch()
+        expect(page.get_by_text('Ordinary User Turn finished', exact=True)).to_be_visible(timeout=30000)
+        assert len(user_inputs(database, submissions[0][1]['sessionId'])) == 1
+        page.screenshot(path=str(REPORT / 'home-http-restored-retry.png'), full_page=True)
+        print('CASE home_http_restored_retry PASS origin=HTTP response=lost reload=settings retry=sameRequest admitted=once')
+        return {'sessionId': submissions[0][1]['sessionId'], 'submissions': 2, 'admitted': 1}
+    finally:
+        (fixture / f'{marker}.release-busy').touch()
+        page.unroute('**/v1/turns/start', admit)
+
+
 def begin(page, mode, entry, prompt):
     url = urlsplit(page.url)
     page.goto(f'{url.scheme}://{url.netloc}/')
@@ -292,19 +333,22 @@ def run(home):
         wait_for(healthy, 'real Server', 90)
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(executable_path=os.environ.get('TALOS_E2E_CHROME_BIN',
-                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), headless=True)
+                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), headless=True,
+                args=['--host-resolver-rules=MAP talos-http.test 127.0.0.1', '--no-proxy-server'])
             context = browser.new_context(viewport={'width': 1280, 'height': 900}, locale='en-US')
-            context.add_init_script('localStorage.setItem("talos-web-ui",JSON.stringify({state:{locale:"en",uiTheme:"light"},version:0}));')
+            context.add_init_script('if (!localStorage.getItem("talos-web-ui")) localStorage.setItem("talos-web-ui",JSON.stringify({state:{locale:"en",uiTheme:"light"},version:0}));')
             page = context.new_page()
             page.goto(origin)
             try:
+                retry = home_retry(page, f'http://talos-http.test:{port}', home / 'data/talos.db', fixture)
+                page.goto(origin)
                 results = [complete(page, home / 'data/talos.db', fixture, 'goal', 'add'),
                            complete(page, home / 'data/talos.db', fixture, 'loop', 'slash'),
                            cancel(page, home / 'data/talos.db', fixture),
                            complete(page, home / 'data/talos.db', fixture, 'goal', 'prompt')]
                 composer_send_policy(page, origin, config_path, fixture, results[-1]['sessionId'])
                 assert not (fixture / 'errors.jsonl').exists(), 'Controlled upstream contract failed'
-                (REPORT / 'result.json').write_text(json.dumps({'result': 'PASS', 'tasks': results}, indent=2))
+                (REPORT / 'result.json').write_text(json.dumps({'result': 'PASS', 'tasks': results, 'homeAdmission': retry}, indent=2))
                 print('CASE automation_web_entry PASS server=real tool=real entries=Add,slash,prompt selection=typed-or-none countdown=real terminalRows=removed cancel=beforeWork')
             except Exception:
                 page.screenshot(path=str(REPORT / 'failure.png'), full_page=True)
