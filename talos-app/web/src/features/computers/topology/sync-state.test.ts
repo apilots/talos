@@ -113,3 +113,18 @@ it.each(["disconnected", "unobserved"] as const)(
     expect(syncProgressSummary(metrics, peers, localStatus, now).pendingUploads).toBeNull();
   },
 );
+
+it("does not reuse a Hub catch-up sample after this exact local peer disconnects", () => {
+  const progress: AppProtocol.SyncPeerProgress = { state: "caughtUp", downloadLagMs: 0, pendingUploads: 1,
+    observedAt: now, lastAppliedAt: now, sourceDelays: [] };
+  const peer = { ...topologyMetrics.peers[0], progress };
+  const metrics = { ...topologyMetrics, peers: [peer] };
+  for (const connection of ["disconnected", "connecting", "disabled"] as const) {
+    const local = { ...status, connection, pendingChanges: 7 };
+    expect(syncProgressSummary(metrics, [peer], local, now)).toMatchObject({ state: "unknown", pendingUploads: 7 });
+    const remote = { ...peer, peerId: "other-peer" };
+    expect(syncProgressSummary(metrics, [remote], local, now)).toMatchObject({ state: "caughtUp", pendingUploads: 8 });
+  }
+  expect(syncProgressSummary(metrics, [peer], { ...status,
+    lastError: { code: AppProtocol.ErrorCode.Conflict, message: "Conflict", localization: null } }, now).state).toBe("caughtUp");
+});

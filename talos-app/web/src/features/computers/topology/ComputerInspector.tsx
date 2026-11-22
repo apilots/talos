@@ -104,12 +104,9 @@ export function ComputerInspector({
           )}
         </p>
       </div>
-      <Button className="w-full" onClick={() => onOpen(node.nodeId)}>
+      <Button className="w-full" title={!phase && !node.available ? t("computers:offlineHelp") : undefined} onClick={() => onOpen(node.nodeId)}>
         {t("computers:open")}
       </Button>
-      {!phase && !node.available ? (
-        <p className="cmp-footnote">{t("computers:offlineHelp")}</p>
-      ) : null}
       <ComputerDesktopButton nodeId={node.nodeId} online={node.available} />
       <SyncPeerDetails
         peers={peers}

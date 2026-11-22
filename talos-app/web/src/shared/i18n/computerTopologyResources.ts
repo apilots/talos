@@ -40,7 +40,8 @@ export const computerTopologyResources = {
     lastSyncHeartbeat: "Last sync heartbeat",
     replicationProgress: "Hub download",
     syncCaughtUp: "Caught up",
-    syncLagMs: "Behind by {{ms}} ms",
+    syncLagDuration: "Behind by {{duration}}",
+    syncHeartbeatAgo: "{{duration}} ago",
     syncRecovering: "Recovering",
     syncBehind: "Behind",
     observationsExpired: "Sync observations have expired. Current progress is unknown.",
@@ -48,7 +49,6 @@ export const computerTopologyResources = {
     progressConfirmedAt: "Progress confirmed",
     pendingUploads: "Pending uploads",
     fromPeer: "From {{peer}} (historical delay)",
-    noHeartbeat: "No heartbeat reply observed",
     unknown: "Unknown",
     metricsLoading: "Reading account sync observations…",
     metricsSignIn: "Sign in to view your account’s sync topology.",
@@ -78,7 +78,6 @@ export const computerTopologyResources = {
     peerIdentity: "Peer ID",
     selfReported:
       "Sync mappings are self-reported presence, not proof of execution authority or convergence.",
-    noPeerDetails: "No current Sync peer observation is mapped here. Sync support cannot be inferred.",
     unmappedPeers: "{{count}} peers have no Computer mapping.",
     unmappedPeers_one: "{{count}} peer has no Computer mapping.",
     flowHelp: "About these paths",
@@ -95,7 +94,6 @@ export const computerTopologyResources = {
     controlPlaneSyncUnknown:
       "This view has no confirmed Sync observation for the Control Plane.",
     directoryError: "Unable to load the Computer directory.",
-    noActivity: "No activity observed",
   },
   "zh-CN": {
     removeRegistration: "移除注册",
@@ -135,7 +133,8 @@ export const computerTopologyResources = {
     lastSyncHeartbeat: "最近同步心跳",
     replicationProgress: "Hub 下载",
     syncCaughtUp: "已追平",
-    syncLagMs: "落后 {{ms}} 毫秒",
+    syncLagDuration: "落后 {{duration}}",
+    syncHeartbeatAgo: "{{duration}}前",
     syncRecovering: "正在恢复",
     syncBehind: "下载落后",
     observationsExpired: "同步观测已过期，当前进度未知。",
@@ -143,7 +142,6 @@ export const computerTopologyResources = {
     progressConfirmedAt: "最近确认",
     pendingUploads: "待上传",
     fromPeer: "来自 {{peer}} 的历史观测延迟",
-    noHeartbeat: "尚未观测到心跳回复",
     unknown: "未知",
     metricsLoading: "正在读取账号同步观测…",
     metricsSignIn: "登录后查看个人账号的同步拓扑。",
@@ -169,7 +167,6 @@ export const computerTopologyResources = {
     peerIdentity: "同步端 ID",
     selfReported:
       "同步映射来自终端自行发布的 presence，不代表执行授权或数据已经完全一致。",
-    noPeerDetails: "当前没有映射到此处的有效同步端观测，无法据此判断是否支持同步。",
     unmappedPeers: "另有 {{count}} 个同步端没有 Computer 映射。",
     flowHelp: "如何理解链路",
     flowHelpText:
@@ -185,6 +182,5 @@ export const computerTopologyResources = {
     controlPlaneSyncUnknown:
       "当前视图没有 Control Plane 连接 Sync 的确认观测。",
     directoryError: "无法加载 Computer 列表。",
-    noActivity: "暂无活动观测",
   },
 };

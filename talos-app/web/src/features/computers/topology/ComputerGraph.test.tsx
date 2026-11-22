@@ -197,7 +197,6 @@ it("renders the same local conflict in the graph, list and details without attri
     .toEqual(["conflict"]);
 });
 
-
 it.each(["en", "zh-CN"])("shares current progress and expiry across graph, list and details (%s)", async (locale) => {
   const i18n = createInstance();
   const resources = computerResources[locale as keyof typeof computerResources];
@@ -217,12 +216,12 @@ it.each(["en", "zh-CN"])("shares current progress and expiry across graph, list 
   for (const id of ["graph", "list", "details"]) {
     const view = within(screen.getByTestId(id));
     expect(view.getByText(resources.syncIdle)).toBeVisible();
-    expect(view.getByText(`${resources.replicationProgress}: ${resources.syncCaughtUp}`)).toBeVisible();
+    expect(view.getByText(`${resources.replicationProgress}: ${resources.syncCaughtUp} · ${locale === "en" ? "0 ms" : "0毫秒"}`)).toBeVisible();
     expect(view.getByText(`${resources.pendingUploads}: 5`)).toBeVisible();
   }
   expect(container.querySelector('[data-flow="sync"]')).toHaveAttribute("data-sync-state", "idle");
   expect(screen.getByText(resources.sourceDelayHelp)).toBeVisible();
-  expect(screen.getByText("321 ms")).toBeVisible();
+  expect(screen.getByText(locale === "en" ? "321 ms" : "321毫秒")).toBeVisible();
   peer.progress!.state = "behind";
   peer.progress!.downloadLagMs = 1400;
   rerender(show());
@@ -237,12 +236,12 @@ it.each(["en", "zh-CN"])("shares current progress and expiry across graph, list 
   rerender(show());
   expect(container.querySelectorAll('[data-download-state="unknown"]')).toHaveLength(3);
   expect(container.querySelector('[data-flow="sync"]')).toHaveAttribute("data-sync-state", "unknown");
-  expect(screen.queryByText("321 ms")).toBeNull();
+  expect(screen.queryByText(locale === "en" ? "321 ms" : "321毫秒")).toBeNull();
   expect(screen.queryByText(resources.sourceDelayHelp)).toBeNull();
-  expect(screen.queryByText(resources.lastSyncHeartbeat)).toBeNull();
-  expect(screen.getByText(resources.observationsExpired)).toBeVisible();
+  expect(screen.getByText(resources.lastSyncHeartbeat)).toBeVisible();
+  expect(screen.getByRole("region", { name: resources.syncTitle })).toHaveAttribute("title", resources.observationsExpired);
   for (const id of ["graph", "list", "details"]) {
-    expect(within(screen.getByTestId(id)).getByText(`${resources.pendingUploads}: ${resources.unknown}`)).toBeVisible();
+    expect(within(screen.getByTestId(id)).getByText(`${resources.pendingUploads}: N/A`)).toBeVisible();
   }
 });
 
@@ -259,4 +258,52 @@ it.each(["en", "zh-CN"])("shows current stored resources independently from the 
   rerender(<I18nextProvider i18n={i18n}><ComputerServiceDetails service="sync"
     metrics={{ ...topologyMetrics, observedAt: topologyMetrics.observedAt - 16 }} controlPlane="https://control.example" /></I18nextProvider>);
   expect([...container.querySelectorAll(".cmp-facts dd")].slice(1).map((row) => row.textContent)).toEqual(["—", "—", "—"]);
+});
+
+it.each(["en", "zh-CN"])("keeps numeric download lag separate from relative heartbeat age (%s)", async (locale) => {
+  const i18n = createInstance();
+  await i18n.init({ lng: locale, resources: { [locale]: { computers: computerResources[locale as keyof typeof computerResources] } } });
+  const peer: AppProtocol.SyncPeerMetrics = { ...topologyMetrics.peers[0],
+    lastHeartbeatAt: topologyMetrics.observedAt - 8,
+    progress: { state: "behind", downloadLagMs: 7_200_000, pendingUploads: 0,
+      observedAt: topologyMetrics.observedAt, lastAppliedAt: null, sourceDelays: [] } };
+  render(<I18nextProvider i18n={i18n}><SyncPeerDetails peers={[peer]}
+    metrics={{ ...topologyMetrics, peers: [peer] }} /></I18nextProvider>);
+  expect(screen.getByText(locale === "en" ? "Hub download: Behind by 2 hr" : "Hub 下载: 落后 2小时")).toBeVisible();
+  const heartbeat = screen.getByText(locale === "en" ? "8 sec ago" : "8秒前");
+  expect(heartbeat.tagName).toBe("TIME");
+  expect(heartbeat).toHaveAttribute("datetime", new Date((topologyMetrics.observedAt - 8) * 1000).toISOString());
+});
+
+it.each(["en", "zh-CN"])("keeps the same sync detail fields across unavailable states (%s)", async (locale) => {
+  const i18n = createInstance();
+  const resources = computerResources[locale as keyof typeof computerResources];
+  await i18n.init({ lng: locale, resources: { [locale]: { computers: resources } } });
+  const peer = topologyMetrics.peers[0];
+  const status: AppProtocol.SyncStatusResponse = { configuredEnabled: true, connection: "connected", peerId: peer.peerId,
+    localComputerId: "manager-a", pendingChanges: 2, lastAcknowledgedAt: null, lastError: null, canClaimLocalHistory: false };
+  const show = (peers: AppProtocol.SyncPeerMetrics[], metrics?: AppProtocol.SyncMetricsResponse, syncStatus?: AppProtocol.SyncStatusResponse) =>
+    <I18nextProvider i18n={i18n}><SyncPeerDetails peers={peers} metrics={metrics} syncStatus={syncStatus} /></I18nextProvider>;
+  const { container, rerender } = render(show([peer], topologyMetrics));
+  const labels = () => [...container.querySelectorAll(".cmp-peer dt")].map((row) => row.textContent);
+  const originalLabels = labels();
+  const field = (label: string) => screen.getByText(label, { selector: "dt" }).nextElementSibling;
+  expect(originalLabels).toHaveLength(9);
+  const cases = [
+    { peers: [], metrics: undefined, status: undefined, state: "unknown" },
+    { peers: [peer], metrics: { ...topologyMetrics, observedAt: topologyMetrics.observedAt - 16 }, status: undefined, state: "unknown" },
+    { peers: [{ ...peer, connections: 0 }], metrics: topologyMetrics, status: { ...status, connection: "disconnected" as const }, state: "disconnected" },
+    { peers: [peer], metrics: topologyMetrics, status: { ...status, connection: "disconnected" as const }, state: "disconnected" },
+    { peers: [], metrics: undefined, status: { ...status, configuredEnabled: false, connection: "disabled" as const }, state: "disabled" },
+    { peers: [], metrics: undefined, status: { ...status, lastError: { code: "serviceUnavailable" as const, message: "Unavailable", localization: null } }, state: "error" },
+  ];
+  for (const scenario of cases) {
+    rerender(show(scenario.peers, scenario.metrics, scenario.status));
+    expect(labels()).toEqual(originalLabels);
+    expect(container.querySelector("[data-sync-state]")).toHaveAttribute("data-sync-state", scenario.state);
+    expect(field(resources.inboundRate)).toHaveTextContent("N/A");
+    expect(field(resources.updateRate)).toHaveTextContent("N/A");
+    expect(field(resources.peerIdentity)).toHaveTextContent(scenario.peers[0]?.peerId ?? scenario.status?.peerId ?? "N/A");
+    expect(field(resources.lastSyncHeartbeat)?.querySelector("time") !== null).toBe(scenario.peers.length > 0);
+  }
 });

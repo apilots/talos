@@ -1,6 +1,8 @@
+import { fileURLToPath, URL } from "node:url";
+
 export default {
   plugins: {
-    tailwindcss: {},
+    tailwindcss: { config: fileURLToPath(new URL("./tailwind.config.ts", import.meta.url)) },
     autoprefixer: {},
   },
 };

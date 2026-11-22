@@ -455,14 +455,10 @@
   font-size: 9px;
   overflow-wrap: anywhere;
 }
-.cmp-peer > p {
-  color: rgb(var(--color-muted));
-  margin-bottom: 10px;
-}
 .cmp-peer dl > div,
 .cmp-facts > div {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   align-items: start;
   gap: 16px;
   padding: 7px 0;
@@ -470,10 +466,14 @@
 }
 .cmp-peer dt,
 .cmp-facts dt {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: rgb(var(--color-muted));
 }
 .cmp-peer dd,
 .cmp-facts dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

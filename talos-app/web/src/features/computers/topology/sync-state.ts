@@ -56,6 +56,11 @@ export function observationsFresh(
   return metrics !== undefined && Math.abs(now - metrics.observedAt) <= 15;
 }
 
+/** A current local transport fact overrides an older Hub connection sample for that peer only. */
+export function syncPeerConnected(peer: AppProtocol.SyncPeerMetrics, localStatus?: AppProtocol.SyncStatusResponse) {
+  return peer.connections > 0 && (peer.peerId !== localStatus?.peerId || localStatus.connection === "connected");
+}
+
 /** Local errors apply only when the caller identified this host's peer/Computer. */
 export function syncObservationState(
   metrics: AppProtocol.SyncMetricsResponse | undefined,
@@ -66,7 +71,7 @@ export function syncObservationState(
   const local = localSyncState(localStatus);
   if (localStatus && local !== SyncTopologyState.Idle) return local;
   if (!observationsFresh(metrics, now)) return SyncTopologyState.Unknown;
-  const live = peers.filter((peer) => peer.connections > 0);
+  const live = peers.filter((peer) => syncPeerConnected(peer, localStatus));
   if (!live.length) return SyncTopologyState.Unknown;
   return live.some(
     (peer) =>
@@ -86,7 +91,7 @@ export function syncProgressSummary(
   now = Math.floor(Date.now() / 1000),
 ) {
   const live = observationsFresh(metrics, now)
-    ? [...new Map(peers.filter((peer) => peer.connections > 0).map((peer) => [peer.peerId, peer])).values()]
+    ? [...new Map(peers.filter((peer) => syncPeerConnected(peer, localStatus)).map((peer) => [peer.peerId, peer])).values()]
     : [];
   const reports = live.flatMap((peer) => peer.progress ? [peer.progress] : []);
   const state = reports.some((report) => report.state === "recovering")

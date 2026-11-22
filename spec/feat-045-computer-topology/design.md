@@ -54,7 +54,6 @@ On a failed metrics refetch, retain only the last verified endpoint from the exi
 
 The account Sync control owns one error notice for this page. A known Sync transport ServiceUnavailable/Timeout condition uses the contextual locale message; connection state remains a separate enum label. Other operation failures and conflicts preserve their specific structured error presentation. Telemetry and inspector views do not repeat the same failure. English source messages are not compared or parsed. This presentation rule does not alter the canonical ApiError, retry policy or synchronization protocol.
 
-
 ## Shared download progress presentation
 
 Graph cards, the list and the inspector reuse one compact presentation of three
@@ -117,3 +116,33 @@ Repeat in English and Chinese at narrow and wide widths, use keyboard inspection
 and enable reduced motion. A Server directory with more retained Hub Computer
 documents must still show only the Server directory machine total. Real multi-peer
 acceptance remains separate from hosted unit coverage.
+
+### Inspector layout and duration display
+
+Anchor PostCSS's Tailwind configuration and content scanning to their own config
+files so starting Vite from another working directory cannot silently omit the
+product utility styles. Metadata uses a compact two-column label/value grid;
+both columns can shrink and long hostnames, identifiers and endpoints wrap
+inside the inspector rather than forcing horizontal overflow.
+
+Show numeric zero duration alongside a confirmed caught-up download. Known
+backlog and historical delivery durations use localized milliseconds, seconds,
+minutes or hours through the existing shared duration formatter. Callers that
+omit its locale retain their current compact timing format. Missing or stale
+progress stays unknown and must never become a fabricated zero.
+
+Render the most recent valid Sync heartbeat as relative age, with an absolute
+machine-readable timestamp and full local timestamp available on hover.
+Heartbeat age measures freshness of the connection observation; it does not
+measure the age of unapplied Hub records. A fresh heartbeat can coexist with a
+large download backlog, and an idle peer can remain caught up without advancing
+the document sequence. Reuse the existing page refresh cadence; no per-peer timer
+or protocol change is required.
+
+Keep the same metadata rows and Sync metrics card when a Computer is offline,
+unknown, disabled or in error. Directory-owned hardware/identity information and
+last-known heartbeat timestamps remain readable; absent fields and unavailable
+live samples display `N/A`. A missing peer uses the same metric rows with unknown
+values, rather than replacing the card with an explanatory paragraph. Retained
+peer identity and heartbeat age are historical facts, not proof of a live link.
+Show offline execution advice on the existing Open action tooltip.
