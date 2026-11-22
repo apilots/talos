@@ -1,0 +1,42 @@
+{
+  "formatVersion": 1,
+  "sourceSchemaVersion": 1,
+  "targetSchemaVersion": 2,
+  "namespaces": {
+    "computer": {
+      "ownerAccount": true,
+      "relatedNamespace": "computer",
+      "relatedIdSource": "resourceId",
+      "immutableFields": [
+        "/data/ownerUserId"
+      ]
+    },
+    "file": {
+      "ownerAccount": false,
+      "relatedNamespace": null,
+      "relatedIdSource": "storedIndex",
+      "immutableFields": [
+        "/data/storagePeerId"
+      ]
+    },
+    "project": {
+      "ownerAccount": false,
+      "relatedNamespace": "computer",
+      "relatedIdSource": "storedIndex",
+      "immutableFields": [
+        "/data/nodeId",
+        "/data/directory"
+      ]
+    },
+    "session": {
+      "ownerAccount": false,
+      "relatedNamespace": "computer",
+      "relatedIdSource": "storedIndex",
+      "immutableFields": [
+        "/data/session/nodeId",
+        "/data/binding",
+        "/data/treeIdentity"
+      ]
+    }
+  }
+}

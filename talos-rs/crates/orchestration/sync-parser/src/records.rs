@@ -121,7 +121,9 @@ pub(super) fn decode(resource: &SyncResourceKey, change: WireChange) -> TalosRes
         }
         WireChange::Record(wire) => {
             let change = serde_json::from_value(wire.value.clone()).map_err(codec_error)?;
-            let expected = record(resource, &change)?;
+            let mut expected = record(resource, &change)?;
+            // Validate the protocol envelope without normalizing historical payload JSON.
+            expected.value = wire.value.clone();
             if wire != expected {
                 return Err(invalid_record());
             }

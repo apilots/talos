@@ -25,14 +25,16 @@ async fn startup_runs_versioned_product_tasks_in_real_migration_order() {
     .unwrap();
     let migrations =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite");
-    let pool = SqlitePool::connect("sqlite::memory:")
-        .await
-        .expect("connect sqlite");
+    let storage = Arc::new(
+        SqliteStorage::new("sqlite::memory:")
+            .await
+            .expect("connect sqlite"),
+    );
 
     let error = run_startup_upgrades_for_version(
         StartupUpgradeParams {
             config: &config,
-            database_pool: &pool,
+            storage: &storage,
             database_migration_dir: &migrations,
         },
         "0.1.7",
@@ -48,7 +50,7 @@ async fn startup_runs_versioned_product_tasks_in_real_migration_order() {
     let report = run_startup_upgrades_for_version(
         StartupUpgradeParams {
             config: &config,
-            database_pool: &pool,
+            storage: &storage,
             database_migration_dir: &migrations,
         },
         "0.1.8-SNAPSHOT",

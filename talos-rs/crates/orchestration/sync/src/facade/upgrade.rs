@@ -1,12 +1,82 @@
 //! Persist the released replica conversion once, outside foreground Store reads.
 use super::TalosSync;
-use crate::{store, SyncBinding, SyncChange, SyncResourceKey, SyncVersion};
+use crate::{store, SyncBinding, SyncChange, SyncResourceKey};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_sync_parser::{upgrade_v1_snapshot, SessionProjection};
 use talos_sync_sdk::{version_equal, SyncReplica};
 
 impl TalosSync {
-    pub(super) async fn upgrade_binding(&self, binding: &SyncBinding) -> TalosResult<()> {
+    /// Verify persisted replicas after the host's versioned startup task completes.
+    /// A database restored with an unrelated completed ledger fails explicitly.
+    pub async fn require_upgraded_replicas(
+        storage: &dyn talos_storage::Storage,
+    ) -> TalosResult<()> {
+        if !storage
+            .query(
+                "SELECT 1 FROM sync_documents WHERE replica_schema_version<>2 LIMIT 1",
+                &[],
+            )
+            .await?
+            .is_empty()
+        {
+            return Err(TalosError::new(
+                ErrorCode::Conflict,
+                "Retained synchronization replicas require the startup upgrade task.",
+            ));
+        }
+        let mut after = 0_i64;
+        loop {
+            let rows = storage.query(
+                "SELECT seq,changes_json FROM visible_sync_outbox WHERE seq>? ORDER BY seq LIMIT 16",
+                &[&after.to_string()],
+            ).await?;
+            if rows.is_empty() {
+                break;
+            }
+            for row in rows {
+                after = row.get_i64("seq").ok_or_else(changed)?;
+                serde_json::from_str::<Vec<talos_sync_types::SyncChange>>(&store::text(
+                    &row,
+                    "changes_json",
+                )?)
+                .map_err(|error| {
+                    TalosError::from_source(
+                        ErrorCode::Conflict,
+                        "Retained synchronization outbox requires the startup upgrade task.",
+                        error,
+                    )
+                })?;
+            }
+        }
+        Ok(())
+    }
+    /// Upgrade all persisted scopes before starting Services, capture workers or transports.
+    /// This trusted startup operation does not authenticate or connect any account.
+    pub async fn upgrade_local_replicas(&self) -> TalosResult<()> {
+        let bindings = self.saved_bindings().await?;
+        let scopes = self.storage.query(
+            "SELECT hub_id,account_id FROM sync_documents UNION SELECT hub_id,account_id FROM sync_outbox ORDER BY hub_id,account_id", &[],
+        ).await?;
+        for row in scopes {
+            let scope = crate::SyncScope {
+                hub_id: store::text(&row, "hub_id")?,
+                account_id: store::text(&row, "account_id")?,
+            };
+            let binding = bindings
+                .iter()
+                .find(|binding| binding.scope == scope)
+                .cloned()
+                .unwrap_or_else(|| SyncBinding {
+                    source_user_id: scope.account_id.clone(),
+                    scope,
+                    peer_id: self.peer_id().into(),
+                    computers: vec![],
+                });
+            self.upgrade_scope(&binding).await?;
+        }
+        Ok(())
+    }
+    async fn upgrade_scope(&self, binding: &SyncBinding) -> TalosResult<()> {
         let mut after = (String::new(), String::new());
         loop {
             let rows = self.storage.query(
@@ -38,16 +108,24 @@ impl TalosSync {
             let base = (record.version.clone(), record.acknowledged.clone());
             let owned_binding = binding.clone();
             let resource = key.clone();
-            let writer = self.writer_id;
             let candidate = tokio::task::spawn_blocking(move || {
                 let Some(snapshot) = upgrade_v1_snapshot(
                     &owned_binding,
                     &resource,
-                    writer,
                     &record.snapshot,
                     &record.version,
                 )?
                 else {
+                    let replica = SyncReplica::from_snapshot(resource.wire(), &record.snapshot)
+                        .map_err(super::sync_error)?;
+                    if !version_equal(
+                        &replica.version().map_err(super::sync_error)?,
+                        &record.version,
+                    )
+                    .map_err(super::sync_error)?
+                    {
+                        return Err(changed());
+                    }
                     return Ok(None);
                 };
                 let replica = SyncReplica::from_snapshot(resource.wire(), &snapshot)
@@ -107,7 +185,7 @@ impl TalosSync {
                     &binding.scope,
                     &summary,
                     &snapshot,
-                    &SyncVersion::default(),
+                    &base.1,
                     projection.as_deref(),
                 )
                 .await?;
@@ -119,6 +197,16 @@ impl TalosSync {
             } else {
                 tx.execute("UPDATE sync_documents SET replica_schema_version=2 WHERE hub_id=? AND account_id=? AND kind=? AND resource_id=?", &[&binding.scope.hub_id,&binding.scope.account_id,key.kind().as_str(),key.id()]).await?;
             }
+            // The old feed cannot describe the new protocol envelope. Catalog
+            // recovery downloads only the causal operations missing locally.
+            tx.execute(
+                "UPDATE sync_bindings SET download_cursor=NULL WHERE hub_id=? AND account_id=?",
+                &[&binding.scope.hub_id, &binding.scope.account_id],
+            )
+            .await?;
+            if prepared_header_marker(&mut *tx, binding, key).await? {
+                tracing::debug!(account_id=%binding.scope.account_id, resource_id=key.id(), "queued converted replica header");
+            }
             tx.commit().await?;
             return Ok(());
         }
@@ -129,7 +217,7 @@ impl TalosSync {
         let through = through[0].get_i64("seq").ok_or_else(changed)?;
         let mut after = 0_i64;
         loop {
-            let rows = self.storage.query("SELECT seq,kind,resource_id,changes_json FROM visible_sync_outbox WHERE hub_id=? AND account_id=? AND seq>? AND seq<=? ORDER BY seq LIMIT 128", &[&binding.scope.hub_id,&binding.scope.account_id,&after.to_string(),&through.to_string()]).await?;
+            let rows = self.storage.query("SELECT seq,source_user_id,kind,resource_id,changes_json FROM visible_sync_outbox WHERE hub_id=? AND account_id=? AND seq>? AND seq<=? ORDER BY seq LIMIT 128", &[&binding.scope.hub_id,&binding.scope.account_id,&after.to_string(),&through.to_string()]).await?;
             if rows.is_empty() {
                 return Ok(());
             }
@@ -147,9 +235,15 @@ impl TalosSync {
                     store::text(&row, "resource_id")?,
                 )
                 .try_into()?;
+                let source = store::text(&row, "source_user_id")?;
+                let mut read = self.storage.begin_read_transaction().await?;
+                let original = store::binding(&mut *read, &binding.scope, &source, self.peer_id())
+                    .await?
+                    .ok_or_else(changed)?;
+                read.commit().await?;
                 let wire = native
                     .into_iter()
-                    .map(|change| talos_sync_parser::encode_change(binding, &resource, change))
+                    .map(|change| talos_sync_parser::encode_change(&original, &resource, change))
                     .collect::<TalosResult<Vec<_>>>()?
                     .into_iter()
                     .flatten()
@@ -176,4 +270,17 @@ fn changed() -> TalosError {
         ErrorCode::Conflict,
         "Retained synchronization state changed during upgrade.",
     )
+}
+
+async fn prepared_header_marker(
+    tx: &mut dyn talos_storage::StorageTransaction,
+    binding: &SyncBinding,
+    key: &SyncResourceKey,
+) -> TalosResult<bool> {
+    let affected = tx.execute("INSERT INTO sync_outbox(hub_id,account_id,source_user_id,kind,resource_id,changes_json,created_at)
+        SELECT b.hub_id,b.account_id,b.source_user_id,?,?,'[]',? FROM sync_bindings b
+        WHERE b.hub_id=? AND b.account_id=? AND NOT EXISTS (
+            SELECT 1 FROM visible_sync_outbox o WHERE o.hub_id=b.hub_id AND o.account_id=b.account_id AND o.kind=? AND o.resource_id=?
+        ) ORDER BY b.source_user_id LIMIT 1", &[key.kind().as_str(),key.id(),&store::timestamp()?.to_string(),&binding.scope.hub_id,&binding.scope.account_id,key.kind().as_str(),key.id()]).await?;
+    Ok(affected > 0)
 }

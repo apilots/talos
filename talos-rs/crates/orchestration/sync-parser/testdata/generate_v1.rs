@@ -1,4 +1,5 @@
 //! Regenerate golden replicas with the immutable released SDK, never a local patch.
+use loro::ToJson;
 use serde_json::json;
 use std::path::Path;
 use talos_sync_sdk::*;
@@ -46,9 +47,45 @@ fn save(out: &Path, name: &str, doc: &SyncReplica) {
     std::fs::write(out.join(format!("{name}.bin")), doc.snapshot().unwrap()).unwrap();
     std::fs::write(out.join(format!("{name}.json")),serde_json::to_vec_pretty(&json!({"sdk":"0.1.7","version":doc.version().unwrap(),"changes":doc.changes().unwrap()})).unwrap()).unwrap();
 }
+fn envelopes(out: &Path) {
+    let key = session("released-session").resource();
+    let mut doc = SyncReplica::from_snapshot(
+        key.clone(),
+        &std::fs::read(out.join("survivor-b.bin")).unwrap(),
+    )
+    .unwrap();
+    doc.set_writer_id(505).unwrap();
+    let identity = json!({"sessionId":"released-session","turnId":"turn-4"});
+    let last = json!({"type":"agent","identity":identity,"sequence":6});
+    doc.apply(&[
+        SyncChange::ActiveTurnMetadata(serde_json::from_value(json!({"identity":identity,"state":"waitingForInput","updatedAt":99,"lastEvent":last})).unwrap()),
+        SyncChange::AcceptedCommand(serde_json::from_value(json!({"command":"turn_submission","idempotencyKey":"original-key","requestId":"original-request","requestHash":"original-hash","identity":identity,"messageId":"message-4","status":"accepted","committedEvent":last,"expiresAt":null})).unwrap()),
+        SyncChange::Event(serde_json::from_value(json!({"key":{"type":"notice","peerId":"original-notice-source","sourceEventId":"source-event-1"},"event":{"type":"systemNotice","data":{"identity":identity,"occurredAt":77,"notice":{"level":"info","content":{"type":"text","data":"Original released notice"}}}},"persistedAt":78})).unwrap()),
+    ]).unwrap();
+    // Missing optional fields are valid released data. Remove one through Loro
+    // and validate the resulting complete replica with the immutable SDK.
+    let raw = loro::LoroDoc::new();
+    raw.import(&doc.snapshot().unwrap()).unwrap();
+    raw.set_peer_id(606).unwrap();
+    let commands = raw.get_map("commands:0");
+    let deep = commands.get_deep_value().to_json_value();
+    let (key_name, encoded) = deep.as_object().unwrap().iter().next().unwrap();
+    let mut command: serde_json::Value = serde_json::from_str(encoded.as_str().unwrap()).unwrap();
+    command.as_object_mut().unwrap().remove("expiresAt");
+    commands
+        .insert(key_name, serde_json::to_string(&command).unwrap())
+        .unwrap();
+    let checked =
+        SyncReplica::from_snapshot(key, &raw.export(loro::ExportMode::Snapshot).unwrap()).unwrap();
+    save(out, "envelopes", &checked);
+}
 fn main() {
     let out = std::path::PathBuf::from(std::env::args_os().nth(1).expect("output directory"));
     std::fs::create_dir_all(&out).unwrap();
+    if std::env::args().nth(2).as_deref() == Some("envelopes") {
+        envelopes(&out);
+        return;
+    }
     let metadata = session("released-session");
     let mut a = SyncReplica::new(metadata.resource(), 101).unwrap();
     a.apply(&[SyncChange::Metadata {

@@ -188,3 +188,22 @@ checkpoints remain relayable history, but import/delete cannot mutate registrati
 selectors or execution credentials. The Parser's released-v1 upgrade preserves
 causal operations and source/time mappings; the common checkpoint owner atomically
 persists the conversion and keeps materialized and pending outbox cuts distinct.
+
+
+## Startup replica upgrade contract
+
+`TalosSync::upgrade_local_replicas()` is a trusted offline startup operation. The
+existing `talos-upgrade` task receives the same writer-gated Storage owner as the
+future runtime and scans every retained scope, not only the signed-in user.
+`bind_account` and replacement binding no longer execute schema conversion.
+`require_upgraded_replicas` rejects an inconsistent database/upgrade-ledger pair
+before runtime assembly. The task runs with Sync disabled and preserves pending
+outbox changes, materialized-prefix proofs, original ACK cuts and local facts.
+
+`talos-sync-parser::v1_upgrade_mapping_json()` produces the application-owned Hub
+profile from the same immutable field definitions used by normal Header
+construction. The generated file is versioned and validated against the Sync
+service's mapping schema. `relatedIdSource: resourceId` handles Computer
+self-association even if an old stored index was null; other associated
+resources use `storedIndex`. Record bodies remain opaque; typed Parser decoding
+checks protocol identity without reserializing optional defaults into old ops.

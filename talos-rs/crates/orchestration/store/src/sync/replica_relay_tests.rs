@@ -1,7 +1,7 @@
 use super::*;
 use talos_sync_sdk::{SyncChange as WireChange, SyncReplica};
 
-async fn checkpoint(peer: &Peer, id: &str) -> Vec<u8> {
+pub(super) async fn checkpoint(peer: &Peer, id: &str) -> Vec<u8> {
     let (inline, chunks): (Vec<u8>, Option<String>) = sqlx::query_as(
         "SELECT snapshot_blob, snapshot_id FROM sync_documents
          WHERE hub_id=? AND account_id=? AND kind='session' AND resource_id=?",

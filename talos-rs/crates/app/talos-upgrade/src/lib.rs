@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use sqlx::SqlitePool;
+use std::sync::Arc;
 use talos_config::{Config, DatabaseType};
 use talos_error::{ErrorCode, TalosError, TalosResult};
+use talos_storage::SqliteStorage;
 
 use runner::UpgradeRunner;
 
@@ -13,6 +14,7 @@ mod execution_metrics;
 mod history_repair_0_1_8;
 mod preparation;
 mod runner;
+mod sync_replicas;
 mod workspace_layout;
 
 pub use database_migration::DatabaseMigrationReport;
@@ -22,7 +24,7 @@ pub use runner::UpgradeRunReport;
 /// Inputs for the serial upgrade boundary executed before runtime assembly.
 pub struct StartupUpgradeParams<'a> {
     pub config: &'a Config,
-    pub database_pool: &'a SqlitePool,
+    pub storage: &'a Arc<SqliteStorage>,
     pub database_migration_dir: &'a Path,
 }
 
@@ -62,10 +64,10 @@ async fn run_startup_upgrades_for_version(
         migration_dir = %params.database_migration_dir.display(),
         "startup upgrade sequence started"
     );
-    history_repair_0_1_8::backup_database(params.config, params.database_pool).await?;
+    history_repair_0_1_8::backup_database(params.config, params.storage.pool()).await?;
     let database_started_at = Instant::now();
     let database = database_migration::DatabaseMigrationRunner::new(
-        params.database_pool,
+        params.storage.pool(),
         params.database_migration_dir,
     )
     .run()
@@ -101,32 +103,42 @@ async fn run_startup_upgrades_for_version(
         workspace_layout::upgrade_task(),
         history_repair_0_1_8::upgrade_task(),
         execution_metrics::upgrade_task(),
+        sync_replicas::upgrade_task(params.storage.clone()),
     ];
     let paths = params.config.talos_paths();
     let context = runner::UpgradeContext {
         config: params.config,
-        database_pool: params.database_pool,
+        database_pool: params.storage.pool(),
         paths: &paths,
     };
     let existing_installation = workspace_layout::legacy_installation_exists(&context)?
         || sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM sessions)")
-            .fetch_one(params.database_pool)
+            .fetch_one(params.storage.pool())
             .await
             .map_err(|error| {
                 TalosError::internal_with_source(
                     "Inspect upgrade installation state failed.",
                     error,
                 )
-            })?;
+            })?
+        || sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM sync_documents) OR EXISTS(SELECT 1 FROM sync_outbox)",
+        )
+        .fetch_one(params.storage.pool())
+        .await
+        .map_err(|error| {
+            TalosError::internal_with_source("Inspect retained synchronization replicas.", error)
+        })?;
     let product = runner::ProductUpgradeRunner::for_version(
         params.config,
-        params.database_pool,
+        params.storage.pool(),
         &tasks,
         existing_installation,
         current_version,
     )?
     .run()
     .await?;
+    talos_sync::TalosSync::require_upgraded_replicas(params.storage.as_ref()).await?;
     tracing::info!(report = ?product, "product upgrade task phase completed");
     let workspace_task_deferred = product
         .deferred
@@ -136,7 +148,7 @@ async fn run_startup_upgrades_for_version(
         let paths = params.config.talos_paths();
         let context = runner::UpgradeContext {
             config: params.config,
-            database_pool: params.database_pool,
+            database_pool: params.storage.pool(),
             paths: &paths,
         };
         if workspace_layout::legacy_installation_exists(&context)? {

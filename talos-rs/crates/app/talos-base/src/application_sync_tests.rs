@@ -1202,8 +1202,7 @@ async fn run_topology(scenario: TopologyScenario) {
         .await
         .unwrap()
         .is_some());
-    recovery::verify(&b, &actor, &hub_config, &binary, &mut hub).await;
-    close(b).await;
+    recovery::verify(b, &actor, &hub_config, &binary, &mut hub).await;
     server_handle.shutdown().await.unwrap();
     gateway_task.await.unwrap().unwrap();
     http.abort();

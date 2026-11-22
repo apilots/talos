@@ -1,8 +1,7 @@
 //! One-time conversion of the released SDK 0.1.7 replica format.
 //! Remap map operations without replacing their IDs, dependencies or Lamport clocks.
 use crate::{
-    codec_error, header::snapshot_header, metadata::decode_snapshot, records, SyncBinding,
-    SyncChange, SyncResourceKey, SyncTimelineEntry, SyncTurnMetadata,
+    codec_error, header::snapshot_header, metadata::decode_snapshot, SyncBinding, SyncResourceKey,
 };
 use loro::{
     ContainerID, ContainerType, ExportMode, JsonMapOp, JsonOpContent, LoroDoc, LoroValue, ToJson,
@@ -10,13 +9,13 @@ use loro::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_sync_types::SyncChange as WireChange;
+use talos_sync_types::{SyncRecord, SyncStream};
 
 pub fn upgrade_v1_snapshot(
     binding: &SyncBinding,
     resource: &SyncResourceKey,
-    writer: u64,
     snapshot: &[u8],
     expected: &talos_sync_types::SyncVersion,
 ) -> TalosResult<Option<Vec<u8>>> {
@@ -110,20 +109,57 @@ pub fn upgrade_v1_snapshot(
     {
         return Err(conflict());
     }
-    next.set_peer_id(writer).map_err(invalid)?;
-    next.get_map("identity")
+    let writer = header_writer(binding, resource);
+    if old.oplog_vv().iter().any(|(peer, _)| *peer == writer) {
+        return Err(conflict());
+    }
+    // An independent operation has identical ID, dependencies and Lamport clock
+    // on Hub and local replicas even when their unacknowledged histories differ.
+    let header_doc = LoroDoc::new();
+    header_doc.set_record_timestamp(false);
+    header_doc.set_peer_id(writer).map_err(invalid)?;
+    header_doc
+        .get_map("identity")
         .insert(
             "header",
             serde_json::to_string(&header).map_err(codec_error)?,
         )
         .map_err(invalid)?;
+    let status = next
+        .import(&header_doc.export(ExportMode::Snapshot).map_err(invalid)?)
+        .map_err(invalid)?;
+    if status.pending.is_some() {
+        return Err(conflict());
+    }
     next.export(ExportMode::Snapshot).map(Some).map_err(invalid)
+}
+fn header_writer(binding: &SyncBinding, resource: &SyncResourceKey) -> u64 {
+    let mut hash = Sha256::new();
+    hash.update(b"talos-sync:replica-upgrade:v1-to-v2:header");
+    let key = resource.wire();
+    for value in [
+        &binding.scope.hub_id,
+        &binding.scope.account_id,
+        &key.namespace,
+        &key.id,
+    ] {
+        hash.update((value.len() as u64).to_be_bytes());
+        hash.update(value.as_bytes());
+    }
+    u64::from_be_bytes(
+        hash.finalize()[..8]
+            .try_into()
+            .expect("eight-byte hash prefix"),
+    )
 }
 fn remap_records(
     resource: &SyncResourceKey,
     name: &str,
     content: &mut JsonMapOp,
 ) -> TalosResult<String> {
+    if !matches!(resource, SyncResourceKey::Session { .. }) {
+        return Err(conflict());
+    }
     let (kind, generation) = name.split_once(':').ok_or_else(conflict)?;
     let parsed: u64 = generation.parse().map_err(invalid)?;
     if generation != parsed.to_string() {
@@ -132,58 +168,124 @@ fn remap_records(
     let JsonMapOp::Insert { key, value } = content else {
         return Err(conflict());
     };
-    let native = match kind {
-        "turns" => {
-            let turn: SyncTurnMetadata = decode(value)?;
-            if key != &turn.identity.turn_id {
-                return Err(conflict());
-            }
-            SyncChange::Turn(turn)
+    let raw: Value = decode(value)?;
+    let identity = |value: &Value| -> TalosResult<String> {
+        if value.get("sessionId").and_then(Value::as_str) != Some(resource.id()) {
+            return Err(conflict());
         }
+        text(value, "turnId")
+    };
+    if kind == "turns" {
+        let id = identity(&raw["identity"])?;
+        if key != &id {
+            return Err(conflict());
+        }
+        let stream = SyncStream {
+            id,
+            owner: text(&raw, "coordinatorId")?,
+            previous: raw
+                .get("previousTurnId")
+                .filter(|value| !value.is_null())
+                .map(|value| value.as_str().map(str::to_owned).ok_or_else(conflict))
+                .transpose()?,
+        };
+        *value = encoded(&stream)?;
+        return Ok(format!("streams:{generation}"));
+    }
+    let (label, stream, publisher, sequence, reference, replaceable) = match kind {
         "timeline" => {
-            let entry: SyncTimelineEntry = decode(value)?;
-            if key != &serde_json::to_string(&entry.key).map_err(codec_error)? {
+            let event_key = &raw["key"];
+            let stable: crate::SyncEventKey =
+                serde_json::from_value(event_key.clone()).map_err(codec_error)?;
+            if key != &serde_json::to_string(&stable).map_err(codec_error)? {
                 return Err(conflict());
             }
-            SyncChange::Event(entry)
+            let event = &raw["event"];
+            let stream = identity(&event["data"]["identity"])?;
+            let (publisher, sequence) = match event_key["type"].as_str() {
+                Some("agent") if event["type"] == "agent" => {
+                    if identity(&event_key["identity"])? != stream
+                        || event_key["sequence"] != event["data"]["sequence"]
+                    {
+                        return Err(conflict());
+                    }
+                    (
+                        None,
+                        Some(event_key["sequence"].as_u64().ok_or_else(conflict)?),
+                    )
+                }
+                Some("notice") if event["type"] == "systemNotice" => {
+                    if text(event_key, "sourceEventId")?.is_empty() {
+                        return Err(conflict());
+                    }
+                    (Some(text(event_key, "peerId")?), None)
+                }
+                _ => return Err(conflict()),
+            };
+            *key = protocol_key("event", &stable)?;
+            ("event", stream, publisher, sequence, None, false)
         }
         "active" => {
-            let active: crate::SyncActiveTurnMetadata = decode(value)?;
-            if key != &active.identity.turn_id {
+            let stream = identity(&raw["identity"])?;
+            if key != &stream {
                 return Err(conflict());
             }
-            SyncChange::ActiveTurnMetadata(active)
+            *key = protocol_key("active", &stream)?;
+            (
+                "activeTurnMetadata",
+                stream,
+                None,
+                None,
+                Some(event_reference(&raw["lastEvent"])?),
+                true,
+            )
         }
         "commands" => {
-            let command: crate::SyncAcceptedCommand = decode(value)?;
-            if key
-                != &serde_json::to_string(&(
-                    &command.command,
-                    &command.idempotency_key,
-                    &command.request_id,
-                ))
-                .map_err(codec_error)?
-            {
+            let tuple =
+                serde_json::json!([raw["command"], raw["idempotencyKey"], raw["requestId"]]);
+            if key != &serde_json::to_string(&tuple).map_err(codec_error)? {
                 return Err(conflict());
             }
-            SyncChange::AcceptedCommand(command)
+            *key = protocol_key("command", &tuple)?;
+            (
+                "acceptedCommand",
+                identity(&raw["identity"])?,
+                None,
+                None,
+                Some(event_reference(&raw["committedEvent"])?),
+                false,
+            )
         }
         _ => return Err(conflict()),
     };
-    match records::encode(resource, &native)? {
-        WireChange::Stream(stream) => {
-            *key = stream.id.clone();
-            *value = encoded(&stream)?;
-            Ok(format!("streams:{generation}"))
-        }
-        WireChange::Record(record) => {
-            *key = record.key.clone();
-            *value = encoded(&record)?;
-            Ok(format!("records:{generation}"))
-        }
-        _ => Err(conflict()),
-    }
+    *value = encoded(&SyncRecord {
+        key: key.clone(),
+        stream,
+        publisher,
+        sequence,
+        reference,
+        replaceable,
+        // Preserve opaque historical JSON; current DTOs can add defaults when decoded.
+        value: serde_json::json!({"type":label,"data":raw}),
+    })?;
+    Ok(format!("records:{generation}"))
 }
+fn protocol_key(kind: &str, value: &impl Serialize) -> TalosResult<String> {
+    serde_json::to_string(&(kind, value)).map_err(codec_error)
+}
+fn event_reference(value: &Value) -> TalosResult<String> {
+    let key: crate::SyncEventKey = serde_json::from_value(value.clone()).map_err(codec_error)?;
+    protocol_key("event", &key)
+}
+fn text(value: &Value, key: &str) -> TalosResult<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(conflict)
+}
+
 fn value<T: DeserializeOwned>(doc: &LoroDoc, map: &str, key: &str) -> TalosResult<T> {
     let values = doc.get_map(map).get_deep_value().to_json_value();
     serde_json::from_str(

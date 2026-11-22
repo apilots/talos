@@ -3,9 +3,11 @@ use super::*;
 use talos_store::session::{AgentExecutionStore, SessionStore};
 #[path = "application_sync_legacy_tests.rs"]
 mod legacy;
+#[path = "application_sync_startup_upgrade_tests.rs"]
+mod startup_upgrade;
 
 pub(super) async fn verify(
-    survivor: &TalosApplicationRuntime,
+    survivor: TalosApplicationRuntime,
     actor: &talos_service::Actor,
     hub_config: &Path,
     binary: &Path,
@@ -22,7 +24,7 @@ pub(super) async fn verify(
         .await
         .unwrap()
         .unwrap();
-    let released_history = legacy::seed(survivor, &old).await;
+    let (survivor, released_history) = legacy::restart_with_v1(survivor, actor, &old).await;
     let session = "paused-sharing";
     let expected = survivor
         .sync_host
@@ -148,7 +150,7 @@ pub(super) async fn verify(
         async || {
             if !diagnosed && recovery_started.elapsed() > Duration::from_secs(25) {
                 diagnosed = true;
-                for (label, runtime) in [("survivor", survivor), ("reader", &reader)] {
+                for (label, runtime) in [("survivor", &survivor), ("reader", &reader)] {
                     eprintln!("Recovery diagnostic {label}: {:?}", runtime.service.sync_status(actor).await);
                     for sql in [
                         "SELECT hub_id,kind,resource_id,deleted,generation,length(version_vector) AS version_bytes FROM sync_documents",
@@ -174,7 +176,7 @@ pub(super) async fn verify(
         },
     )
     .await;
-    legacy::verify(survivor, &reader, actor, &released_history).await;
+    legacy::verify(&survivor, &reader, actor, &released_history).await;
     let restored = reader
         .service
         .get_session_history(actor, request.clone())
@@ -290,4 +292,5 @@ pub(super) async fn verify(
         local_read_started.elapsed()
     );
     close(reader).await;
+    close(survivor).await;
 }

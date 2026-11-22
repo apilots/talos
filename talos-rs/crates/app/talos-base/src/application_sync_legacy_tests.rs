@@ -3,12 +3,63 @@ use super::*;
 use talos_store::session::AgentExecutionStore;
 use talos_sync::SyncDataAdapter;
 const SESSION: &str = "released-session";
-fn fixture_root() -> std::path::PathBuf {
+pub(super) fn fixture_root() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../orchestration/sync-parser/testdata/released-v1")
 }
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|value| format!("{value:02x}")).collect()
+}
+pub(super) async fn restart_with_v1(
+    runtime: TalosApplicationRuntime,
+    actor: &talos_service::Actor,
+    binding: &talos_sync::SyncBinding,
+) -> (
+    TalosApplicationRuntime,
+    Vec<talos_agent_api::TimelineEventPayload>,
+) {
+    runtime.service.suspend_account_sync(actor).await.unwrap();
+    let expected = seed(&runtime, binding).await;
+    let runtime = restart_seeded(runtime).await;
+    runtime
+        .auth_service
+        .verify_access_token(TOKEN)
+        .await
+        .unwrap();
+    runtime.service.resume_account_sync(actor);
+    (runtime, expected)
+}
+pub(super) async fn restart_seeded(runtime: TalosApplicationRuntime) -> TalosApplicationRuntime {
+    let config = runtime.config.clone();
+    let state_path = config.talos_paths().talos_home.join("upgrades/state.json");
+    close(runtime).await;
+    // A released installation has never registered the new task. Keep its other
+    // completed tasks while restoring that real pre-upgrade ledger condition.
+    let mut state: Value = serde_json::from_slice(&std::fs::read(&state_path).unwrap()).unwrap();
+    state["tasks"]
+        .as_object_mut()
+        .unwrap()
+        .remove("202611220001_sync_replicas_v2");
+    std::fs::write(&state_path, serde_json::to_vec_pretty(&state).unwrap()).unwrap();
+    let migration =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite");
+    let runtime = build_application_runtime_with_migration_dir(config, &migration)
+        .await
+        .unwrap();
+    let rows = runtime
+        .sync_host
+        .sync_stores
+        .storage
+        .query(
+            "SELECT replica_schema_version FROM sync_documents WHERE resource_id=?",
+            &[SESSION],
+        )
+        .await
+        .unwrap();
+    assert!(rows
+        .iter()
+        .all(|row| row.get_i64("replica_schema_version") == Some(2)));
+    runtime
 }
 pub(super) async fn seed(
     runtime: &TalosApplicationRuntime,

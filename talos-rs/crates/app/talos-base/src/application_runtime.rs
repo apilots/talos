@@ -48,7 +48,7 @@ pub(crate) async fn build_application_runtime_with_policy(
     let storage_connection = application_storage::connect_application_storage(&config).await?;
     let upgrade_report = talos_upgrade::run_startup_upgrades(talos_upgrade::StartupUpgradeParams {
         config: &config,
-        database_pool: storage_connection.pool(),
+        storage: &storage_connection,
         database_migration_dir: migration_dir,
     })
     .await?;

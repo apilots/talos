@@ -212,7 +212,6 @@ impl TalosSync {
             source_user_id: params.source_user_id,
             computers: params.computers,
         };
-        self.upgrade_binding(&binding).await?;
         if self
             .binding(&binding.scope, &binding.source_user_id)
             .await?

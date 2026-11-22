@@ -1,5 +1,5 @@
 //! One header contract for native identity, association and immutable bindings.
-use crate::types::*;
+use crate::{types::*, upgrade_mapping::*};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_sync_types::{SyncFields, SyncHeader};
 
@@ -22,7 +22,7 @@ pub(super) fn snapshot_header(
             }
             header.owner_account = Some(account.to_owned());
             header.related = Some(resource.wire());
-            &["/data/ownerUserId"]
+            COMPUTER_IMMUTABLE
         }
         (SyncResourceKey::Project { project_id }, SyncResourceSnapshot::Project(project))
             if project_id == &project.project_id =>
@@ -33,7 +33,7 @@ pub(super) fn snapshot_header(
                 }
                 .wire(),
             );
-            &["/data/nodeId", "/data/directory"]
+            PROJECT_IMMUTABLE
         }
         (SyncResourceKey::Session { session_id }, SyncResourceSnapshot::Session(session))
             if session_id == &session.session.id
@@ -45,16 +45,12 @@ pub(super) fn snapshot_header(
                 }
                 .wire(),
             );
-            &[
-                "/data/session/nodeId",
-                "/data/binding",
-                "/data/treeIdentity",
-            ]
+            SESSION_IMMUTABLE
         }
         (SyncResourceKey::File { file_id }, SyncResourceSnapshot::File(file))
             if file_id == &file.file.file_id =>
         {
-            &["/data/storagePeerId"]
+            FILE_IMMUTABLE
         }
         _ => return Err(invalid_binding()),
     };

@@ -95,6 +95,7 @@ async fn verify(pending: bool) {
         source_user_id: actor.user_id.clone(),
         computers: vec![],
     };
+    b.sync.upgrade_local_replicas().await.unwrap();
     let binding = b.sync.bind_account(&actor, params.clone()).await.unwrap();
     c.adapter = Arc::new(StoreSyncAdapter::new(
         c.storage.clone(),
@@ -279,7 +280,13 @@ async fn verify_materialized_metadata(with_tail: bool) {
         sqlx::query("INSERT INTO sync_resource_capture(hub_id,account_id,kind,resource_id,revision,outbox_sequence) VALUES ('hub-1','account-1','session',?,?,?)")
             .bind(key.id()).bind(tail).bind(tail).execute(b.storage.pool()).await.unwrap();
     }
+    b.sync.upgrade_local_replicas().await.unwrap();
     let old = b.adapter.binding();
+    let mut hub = SyncReplica::from_snapshot(
+        key.wire(),
+        &super::replica_relay_tests::checkpoint(&b, key.id()).await,
+    )
+    .unwrap();
     let binding = b
         .sync
         .bind_account(
@@ -310,7 +317,6 @@ async fn verify_materialized_metadata(with_tail: bool) {
         !with_tail,
         "only the genuine unapplied tail may add operations"
     );
-    let mut hub = SyncReplica::new(key.wire(), 999).unwrap();
     hub.import_from_account(&[upload.update], "account-1")
         .unwrap();
     let title = hub
@@ -363,7 +369,13 @@ async fn materialized_v1_reset_and_delete_are_uploaded_without_reapplying_them()
     )
     .await;
     exported(&b, &key, &[SyncChange::Delete], &version).await;
+    b.sync.upgrade_local_replicas().await.unwrap();
     let old = b.adapter.binding();
+    let mut hub = SyncReplica::from_snapshot(
+        key.wire(),
+        &super::replica_relay_tests::checkpoint(&b, key.id()).await,
+    )
+    .unwrap();
     let binding = b
         .sync
         .bind_account(
@@ -382,7 +394,6 @@ async fn materialized_v1_reset_and_delete_are_uploaded_without_reapplying_them()
         .await
         .unwrap()
         .unwrap();
-    let mut hub = SyncReplica::new(key.wire(), 999).unwrap();
     hub.import_from_account(&[upload.update], "account-1")
         .unwrap();
     assert_eq!(hub.version().unwrap().history_generation, 1);

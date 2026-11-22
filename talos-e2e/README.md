@@ -510,3 +510,33 @@ The represented duration is fixture data; this test does not wait three hours or
 claim model/runtime endurance. Service/HTTP tests separately verify that a real
 canonical Turn read and the offset subscription agree. The WebUI hosted gate
 selects this case for chat, rendering and Timeline ownership changes.
+
+
+### Existing-Hub and local startup migration
+
+A separate local-only acceptance consumes a prepared released-v1 Hub database
+and the current independent Sync executable. The case is explicitly ignored in
+the hosted set because it requires these cross-project artifacts; invoking it
+without either input fails rather than reporting a simulated pass.
+
+```sh
+TALOS_SYNC_V1_DATABASE=/absolute/path/to/source-a-v1.db \
+TALOS_SYNC_BIN=/absolute/path/to/talos-sync \
+  just test -p talos-base --features e2e --run-ignored only \
+  -E 'test(upgraded_hub_and_local_replica_continue_from_the_original_cut)' \
+  --success-output final
+```
+
+The fixture database contains SDK0.1.7 source A's two complete Turns, its Hub
+identity and original SQLx migration ledger. The test copies it to an isolated
+home, starts the upgraded Hub with the Parser-owned mapping profile, and lets
+cold native C restore those two Turns while B is absent. It then starts a local
+B installation containing the original four-Turn v1 checkpoint with only A's
+cut acknowledged. Talos startup upgrades B before authentication; its causal
+suffix extends C to four complete Turns and the next notice. The independent
+Hub service owns the prepared database generator and its migration checks;
+Talos does not replicate the Hub's private DDL.
+
+The existing new-Hub disaster-recovery case remains separate. Its released-v1
+local checkpoint now goes through a real native runtime restart with a released
+installation's task ledger, not conversion inside `bind_account`.

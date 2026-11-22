@@ -107,8 +107,8 @@ Worker listener配置独立于runner transport，管理API与Worker RPC两个end
 
 `202611220001_sync_replica_schema.sql` adds the persisted replica schema marker
 and removes obsolete Computer resource revisions. Existing rows begin at v1;
-newly saved SDK 0.1.8 checkpoints are v2. The Parser remaps official Loro operation
-history once; checkpoint publication uses the existing background transaction,
+newly saved SDK 0.1.8 checkpoints are v2. The registered startup task remaps official Loro operation history once for all
+local account scopes before runtime assembly; checkpoint publication uses the existing background transaction,
 version/ACK CAS and staged snapshot lifecycle. Materialized non-null outbox and
 capture proofs move to the full converted version in that transaction. Null
 proofs stay pending. Outbox JSON normalization does not reset those proofs.
@@ -132,3 +132,13 @@ raw legacy outbox entries can be upgraded and relayed, but their imported fields
 and terminal deletes never alter `agent_nodes`, `computer_deletions`, alias
 retirement or the local registration lifecycle. Session and Project materialization
 preserve their original Node ID without waiting for a Computer Sync document.
+
+
+The startup task and schema flags are independent of authentication and account
+Sync preferences. It retains old ACK version vectors for an unchanged Hub,
+clears old download cursors and queues a Header-only upload marker where needed.
+A new Hub binding still resets ACK/feed state through the existing rebind path.
+The deterministic Header operation has no dependency on the old document head,
+so separately upgraded Hub/local replicas can merge even when local offline
+history extends beyond the Hub. Raw JSON values and old operation IDs remain
+unchanged; protocol map names and record envelopes change once.

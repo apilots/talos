@@ -6,7 +6,9 @@ mod projection;
 mod records;
 mod types;
 mod upgrade;
+mod upgrade_mapping;
 pub use upgrade::upgrade_v1_snapshot;
+pub use upgrade_mapping::v1_upgrade_mapping_json;
 
 pub use codec::{codec_error, sync_error};
 pub use metadata::{decode_changes, encode_change, resource};
