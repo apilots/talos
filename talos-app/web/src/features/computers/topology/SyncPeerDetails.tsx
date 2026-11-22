@@ -26,7 +26,7 @@ export function SyncPeerDetails({
       {rows.map((peer) => {
         const live = fresh && peer !== undefined && syncPeerConnected(peer, syncStatus);
         const heartbeatAt = peer?.lastHeartbeatAt;
-        const activityAt = peer?.lastActivityAt;
+        const activityAt = fresh ? peer?.lastActivityAt : undefined;
         return <div className="cmp-peer" key={peer?.peerId ?? "unobserved"}>
           {peers.length > 1 ? <SyncProgressSummary metrics={metrics} peers={peer ? [peer] : []}
             syncStatus={peer?.peerId === syncStatus?.peerId ? syncStatus : undefined} showConfirmation /> : null}
