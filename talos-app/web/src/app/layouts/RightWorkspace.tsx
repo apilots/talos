@@ -32,16 +32,16 @@ function ComputerTab({ nodeId, ...props }: TabProps & { nodeId: string }) {
   const computer = useComputer(nodeId);
   return <WindowTab {...props} kind="computer" name={computer.data?.displayName || `Computer · ${nodeId.slice(0, 8)}`} />;
 }
-function FileTab({ fileId, scope, ...props }: TabProps & { fileId: string; scope: string }) {
-  const file = useFileMetadata(scope, fileId);
+function FileTab({ fileId, scope, sessionId, nodeId, ...props }: TabProps & { fileId: string; scope: string; sessionId?: string; nodeId?: string }) {
+  const file = useFileMetadata(scope, fileId, { sessionId, nodeId });
   return <WindowTab {...props} kind="file" name={file.data?.originalFilename || `File · ${fileId.slice(0, 8)}`} />;
 }
-function WorkspaceTab({ window, scope, ...props }: TabProps & { window: WorkspaceWindow; scope: string }) {
+function WorkspaceTab({ window, scope, sessionId, ...props }: TabProps & { window: WorkspaceWindow; scope: string; sessionId?: string }) {
   const { t } = useTranslation("webPreview");
   switch (window.kind) {
     case "browser": return <WindowTab {...props} kind="browser" name={window.title} />;
     case "computer": return <ComputerTab {...props} nodeId={window.nodeId} />;
-    case "file": return <FileTab {...props} fileId={window.fileId} scope={scope} />;
+    case "file": return <FileTab {...props} fileId={window.fileId} nodeId={window.nodeId} scope={scope} sessionId={sessionId} />;
     case "sessionFile": return <WindowTab {...props} kind="sessionFile" name={window.path.split(/[\\/]/).pop() || window.path} />;
     case "webpage": return <WindowTab {...props} kind="webpage" name={window.title || (window.url ? new URL(window.url).host : t("newTab"))} />;
   }
@@ -59,15 +59,19 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   const owner = useAppStore(state => state.workspaceOwner);
   const snapshots = useAppStore(state => state.workspaceSnapshots);
   const ownerKey = owner ? workspaceOwnerKey(owner) : "unbound";
-  const [visited, setVisited] = useState<string[]>([ownerKey]);
-  useEffect(() => { setVisited(keys => keys.includes(ownerKey) ? keys : [...keys, ownerKey]); }, [ownerKey]);
+  const sessionId = owner?.context.kind === "session" ? owner.context.sessionId : undefined;
+  const [visited, setVisited] = useState(() => new Map([[ownerKey, sessionId]]));
+  useEffect(() => {
+    setVisited(contexts => contexts.has(ownerKey) ? contexts : new Map(contexts).set(ownerKey, sessionId));
+  }, [ownerKey, sessionId]);
   const panels = useMemo(() => {
     // Keep first-visit DOM order: moving an existing iframe resets its browsing
     // context even when React preserves the element's key and DOM identity.
-    const keys = visited.includes(ownerKey) ? visited : [...visited, ownerKey];
-    return keys.filter(key => key === ownerKey || workspaceBelongsToScope(key, scope))
-      .map(key => ({ key, windows: key === ownerKey ? windows : snapshots[key]?.workspaceWindows ?? [] }));
-  }, [snapshots, scope, ownerKey, windows, visited]);
+    const contexts = Array.from(visited);
+    if (!visited.has(ownerKey)) contexts.push([ownerKey, sessionId]);
+    return contexts.filter(([key]) => key === ownerKey || workspaceBelongsToScope(key, scope))
+      .map(([key, sessionId]) => ({ key, sessionId, windows: key === ownerKey ? windows : snapshots[key]?.workspaceWindows ?? [] }));
+  }, [snapshots, scope, ownerKey, sessionId, windows, visited]);
   const active = useAppStore(state => state.workspaceActiveKey);
   const expanded = useAppStore(state => state.workspaceExpanded);
   const select = useAppStore(state => state.selectWorkspaceWindow);
@@ -168,7 +172,7 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
       <div role="tablist" aria-label={t("workspace.windows")} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
       {windows.map(window => {
         const key = workspaceWindowKey(window);
-        return <WorkspaceTab key={key} window={window} scope={scope} selected={active === key} selectedRef={selectedTab} id={tabId(key)} onSelect={() => select(key)} onKeyDown={event => {
+        return <WorkspaceTab key={key} window={window} scope={scope} sessionId={sessionId} selected={active === key} selectedRef={selectedTab} id={tabId(key)} onSelect={() => select(key)} onKeyDown={event => {
           const index = windows.findIndex(entry => workspaceWindowKey(entry) === key);
           const next = event.key === "ArrowRight" ? (index + 1) % windows.length
             : event.key === "ArrowLeft" ? (index + windows.length - 1) % windows.length
@@ -197,7 +201,7 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
           {window.kind === "browser" ? activeWindow ? <DesktopBrowserPage tab={window} selected={selected} /> : null
             : window.kind === "webpage" ? <WebPagePreview url={window.url} onNavigate={(url, title) => navigateWebpage(context.key,key,url,title)} />
             : selected && window.kind === "computer" ? <ComputerDesktop nodeId={window.nodeId} expanded={expanded} onExitInput={() => toggleRef.current?.focus()} />
-            : window.kind === "file" ? <FilePreview source={{ kind: "file", fileId: window.fileId }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : window.kind === "sessionFile" ? <FilePreview source={{ kind: "sessionPath", sessionId: window.sessionId, path: window.path }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : null}
+            : window.kind === "file" ? <FilePreview source={{ kind: "file", fileId: window.fileId }} owner={{ sessionId: context.sessionId, nodeId: window.nodeId }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : window.kind === "sessionFile" ? <FilePreview source={{ kind: "sessionPath", sessionId: window.sessionId, path: window.path }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : null}
         </div>;
       }))}
     </div>

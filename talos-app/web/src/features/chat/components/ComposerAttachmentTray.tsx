@@ -3,10 +3,12 @@ import {
   FileSpreadsheet,
   FileText,
   Image,
+  LoaderCircle, RotateCcw,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AppProtocol } from "@talos/sdk-browser";
+import { formatFileSize } from "@/features/files";
 import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
 import type { ComposerAttachmentItem } from "./useComposerAttachments";
@@ -16,14 +18,17 @@ interface ComposerAttachmentTrayProps {
   error: AppProtocol.ApiError | string | null;
   items: ComposerAttachmentItem[];
   onRemove: (id: string) => void;
+  onRetry?: (id: string) => void;
 }
 
 function itemFilename(item: ComposerAttachmentItem) {
-  return item.status === "ready" ? item.file.originalFilename : item.file.name;
+  return item.status === "restoring" || item.status === "restoreFailed" ? item.fileId
+    : item.status === "ready" ? item.file.originalFilename : item.file.name;
 }
 
 function itemMimeType(item: ComposerAttachmentItem) {
-  return item.status === "ready" ? item.file.mimeType : item.file.type;
+  return item.status === "restoring" || item.status === "restoreFailed" ? ""
+    : item.status === "ready" ? item.file.mimeType : item.file.type;
 }
 
 function fileTypeLabel(filename: string) {
@@ -95,6 +100,7 @@ export function ComposerAttachmentTray({
   error,
   items,
   onRemove,
+  onRetry,
 }: ComposerAttachmentTrayProps) {
   const { t } = useTranslation("chat");
 
@@ -109,16 +115,16 @@ export function ComposerAttachmentTray({
           {items.map((item) => {
             const filename = itemFilename(item);
             const mimeType = itemMimeType(item);
-            const failure = item.status === "failed" ? apiErrorMessage(item.error) : undefined;
+            const failure = item.status === "failed" || item.status === "restoreFailed" ? apiErrorMessage(item.error) : undefined;
             return (
               <div
                 className="flex min-w-0 max-w-full basis-[220px] items-center gap-2.5 rounded-xl border border-border/75 bg-background/55 p-2 pr-2.5"
                 key={item.id}
               >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface text-brand">
-                  {item.status === "failed" ? (
+                  {failure ? (
                     <CircleAlert className="text-danger" size={17} />
-                  ) : (
+                  ) : item.status === "restoring" ? <LoaderCircle className="animate-spin" size={17} /> : (
                     <AttachmentIcon filename={filename} mimeType={mimeType} />
                   )}
                 </span>
@@ -128,15 +134,24 @@ export function ComposerAttachmentTray({
                   </span>
                   <span
                     className={`block truncate text-[10px] uppercase tracking-[0.08em] ${
-                      item.status === "failed" ? "text-danger" : "text-muted"
+                      failure ? "text-danger" : "text-muted"
                     }`}
                     title={failure}
                   >
                     {item.status === "failed"
                       ? `${t("attachmentUploadFailed")}: ${failure}`
-                      : fileTypeLabel(filename)}
+                      : item.status === "restoreFailed" ? failure : item.status === "restoring" ? t("common:loading")
+                      : <>
+                        {fileTypeLabel(filename)}
+                        {item.status === "uploading" && item.progress ? (
+                          <span className="normal-case"> · {formatFileSize(item.progress.loadedBytes)}</span>
+                        ) : null}
+                      </>}
                   </span>
                 </span>
+                {item.status === "restoreFailed" && onRetry ? (
+                  <button aria-label={`${t("common:retryNow")} ${filename}`} disabled={disabled} onClick={() => onRetry(item.fileId)} type="button" className="rounded p-1 text-muted hover:text-ink disabled:opacity-50"><RotateCcw size={14} /></button>
+                ) : null}
                 {item.status === "uploading" ? (
                   <span className="relative flex h-7 w-7 shrink-0 items-center justify-center">
                     <UploadProgress

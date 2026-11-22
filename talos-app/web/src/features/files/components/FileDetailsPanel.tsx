@@ -10,6 +10,7 @@ import { openResource } from "@/shared/lib/open-resource";
 
 interface FileDetailsPanelProps {
   file: FileInfo;
+  nodeId?: string;
   isDeleting: boolean;
   isUpdating: boolean;
   onClose: () => void;
@@ -40,6 +41,7 @@ export function parseFileMetadataInput(value: string): Record<string, string> | 
 
 export function FileDetailsPanel({
   file,
+  nodeId,
   isDeleting,
   isUpdating,
   onClose,
@@ -88,7 +90,7 @@ export function FileDetailsPanel({
 
       <button
         className="mt-4 inline-flex items-center gap-2 rounded-xl border border-border bg-background/60 px-3 py-2 text-sm text-ink outline-none transition hover:border-brand/30 hover:bg-hover focus-visible:ring-2 focus-visible:ring-brand/40"
-        onClick={() => void openResource({ kind: "file", fileId: file.fileId })}
+        onClick={() => void openResource({ kind: "file", fileId: file.fileId, nodeId })}
         type="button"
       >
         <PanelRightOpen aria-hidden="true" size={15} />

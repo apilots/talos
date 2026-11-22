@@ -8,10 +8,10 @@ import type { DesktopAppServerController } from "./app-server-controller";
 const electron = vi.hoisted(() => ({ handle: vi.fn(), registerSchemesAsPrivileged: vi.fn(), open: vi.fn() }));
 vi.mock("electron", () => ({ protocol: electron, app: { getPath: () => tmpdir() } }));
 vi.mock("./preview-applications", () => ({ previewApplications: async () => [{ id: "system", label: "System default", kind: "system" }], openPreviewApplication: electron.open }));
-import { FilePreviewProtocol, registerFilePreviewScheme } from "./file-preview-protocol";
+import { FilePreviewProtocol, registerDesktopSchemes } from "./file-preview-protocol";
 const descriptor: AppProtocol.FilePreviewDescriptor = { previewId: "preview-id", entryPath: "report.html", resourceBaseUrl: null, document: null,
   metadata: { name: "report.html", mimeType: "text/html", sizeBytes: 6 }, expiresAt: Math.floor(Date.now() / 1000) + 3600 };
-function setup(source = Buffer.from("report")) {
+function setup(source = Buffer.from("report"), cloudClose?: () => Promise<AppProtocol.FilePreviewCloseResponse>) {
   const current = { ...descriptor, metadata: { ...descriptor.metadata, sizeBytes: source.byteLength } };
   const invoke = vi.fn(async (_method, request) => ({ metadata: current.metadata, offset: request.offset,
     dataBase64: source.subarray(request.offset, request.offset + request.limit).toString("base64") }));
@@ -19,13 +19,15 @@ function setup(source = Buffer.from("report")) {
   protocol.install();
   const owner = Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false }) as unknown as WebContents;
   const credentials: AppProtocol.ActorCredentials = { credential: { type: "existing_session_token", token: "actor-token" } };
-  protocol.remember(current, credentials, owner, protocol.epoch);
+  protocol.remember(current, credentials, owner, protocol.epoch, cloudClose && {
+    read: part => invoke("file/preview/read", part), close: cloudClose,
+  });
   const respond = electron.handle.mock.calls.at(-1)![1] as (request: Request) => Promise<Response>;
   return { protocol, owner, respond, invoke, credentials };
 }
 beforeEach(() => vi.clearAllMocks());
 it("streams native resources through the authenticated canonical range API", async () => {
-  registerFilePreviewScheme();
+  registerDesktopSchemes();
   expect(electron.registerSchemesAsPrivileged.mock.calls[0][0][0].privileges.standard).toBe(true);
   const { respond, invoke, credentials } = setup();
   const response = await respond(new Request("talos-preview://preview-id/report.html", { headers: { range: "bytes=1-3" } }));
@@ -59,4 +61,22 @@ it("opens a service-owned copy and removes it with its preview lifecycle", async
   expect(invoke.mock.calls.filter(([method]) => method === "file/preview/read").map(([, request]) => request.limit)).toEqual([0, 1024 * 1024, 17]);
   await protocol.clear();
   await expect(stat(copy.directory)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("clears the native Open-in copy on sign-out while the Server release is pending", async () => {
+  let acknowledge!: () => void;
+  const pending = new Promise<AppProtocol.FilePreviewCloseResponse>(resolve => {
+    acknowledge = () => resolve({ closed: true });
+  });
+  const close = vi.fn(() => pending);
+  const { protocol, owner } = setup(Buffer.from("report"), close);
+  await protocol.open({ resource: { kind: "file", previewId: descriptor.previewId, resourcePath: descriptor.entryPath }, targetId: "system" }, owner);
+  const copy = electron.open.mock.calls[0][2];
+  try {
+    await protocol.clear();
+    expect(close).toHaveBeenCalledOnce();
+    await expect(stat(copy.directory)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    acknowledge();
+  }
 });

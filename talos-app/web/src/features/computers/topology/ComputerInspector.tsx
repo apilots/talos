@@ -55,12 +55,12 @@ export function ComputerInspector({
             nodeId: localId ?? node.nodeId,
           });
       } else if (action === "rename") {
-        await getTalosClient().computers.rename({
+        await (await getTalosClient({ nodeId: node.nodeId })).computers.rename({
           nodeId: node.nodeId,
           displayName: name.trim(),
         });
       } else {
-        await getTalosClient().computers.setStatus({
+        await (await getTalosClient({ nodeId: node.nodeId })).computers.setStatus({
           nodeId: node.nodeId,
           status: node.status === "enabled" ? "disabled" : "enabled",
         });

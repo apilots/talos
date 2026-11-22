@@ -247,6 +247,13 @@ async fn managed_background_wake_requires_a_current_cloud_proof_before_changing_
     assert_eq!(unchanged.generation, record.generation);
     assert!(unchanged.desired == Desired::IdleSleep);
     auth.0.store(true, Ordering::SeqCst);
+    assert_eq!(
+        service
+            .authorize_session_dispatch("owner", &record.node_id)
+            .await
+            .unwrap(),
+        talos_types::SessionKind::Talo
+    );
     assert!(
         service
             .wake_for_managed_dispatch("owner", &record.node_id)
@@ -262,7 +269,7 @@ async fn managed_background_wake_requires_a_current_cloud_proof_before_changing_
         .unwrap();
     assert!(error.is_code(ErrorCode::PermissionDenied));
     assert!(service
-        .ensure_managed_dispatch_access("owner", &record.node_id)
+        .authorize_session_dispatch("owner", &record.node_id)
         .await
         .unwrap_err()
         .is_code(ErrorCode::PermissionDenied));

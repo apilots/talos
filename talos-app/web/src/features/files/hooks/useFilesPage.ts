@@ -2,10 +2,11 @@ import { useCallback, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { FileInfo } from "@talos/sdk-browser";
 
+import { useSelectedComputerId } from "@/features/computers";
 import { useConnectionKey } from "@/features/chat/hooks/useChatQueries";
 import { getTalosClient } from "@/shared/api/client";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
-import { fileListQueryKey, uploadFile } from "../api";
+import { fileListQueryKey, fileMetadataKey, uploadFile } from "../api";
 
 export type FileView = "grid" | "list";
 export type FileCategory = "all" | "document" | "code" | "image" | "data";
@@ -50,7 +51,8 @@ export function formatFileSize(sizeBytes: number) {
 export function useFilesPage() {
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
-  const listKey = fileListQueryKey(connectionKey);
+  const nodeId = useSelectedComputerId();
+  const listKey = [...fileListQueryKey(connectionKey), nodeId];
   const [query, setQuery] = useState("");
   const [view, setView] = useState<FileView>("grid");
   const [category, setCategory] = useState<FileCategory>("all");
@@ -59,8 +61,8 @@ export function useFilesPage() {
   const listQuery = useInfiniteQuery({
     queryKey: listKey,
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) =>
-      getTalosClient().files.list({ cursor: pageParam, limit: FILES_PAGE_SIZE }),
+    queryFn: async ({ pageParam }) =>
+      (await getTalosClient({ service: "files", nodeId })).files.list({ cursor: pageParam, limit: FILES_PAGE_SIZE }),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchOnWindowFocus: false,
   });
@@ -70,8 +72,8 @@ export function useFilesPage() {
   );
 
   const detailQuery = useQuery({
-    queryKey: ["talos", connectionKey, "file", selectedFileId],
-    queryFn: () => getTalosClient().files.read({ fileId: selectedFileId! }),
+    queryKey: fileMetadataKey(connectionKey, selectedFileId, { nodeId }),
+    queryFn: async () => (await getTalosClient({ service: "files", nodeId })).files.read({ fileId: selectedFileId! }),
     enabled: Boolean(selectedFileId),
     refetchOnWindowFocus: false,
   });
@@ -80,17 +82,18 @@ export function useFilesPage() {
     mutationFn: (file: File) =>
       uploadFile({
         file,
+        nodeId,
         scope: { type: "personal" },
       }),
     onSuccess: async (file) => {
       setSelectedFileId(file.fileId);
-      queryClient.setQueryData(["talos", connectionKey, "file", file.fileId], { file });
+      queryClient.setQueryData(fileMetadataKey(connectionKey, file.fileId, { nodeId }), { file });
       await queryClient.invalidateQueries({ queryKey: listKey });
     },
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       fileId,
       tags,
       metadata,
@@ -98,20 +101,20 @@ export function useFilesPage() {
       fileId: string;
       tags: string[];
       metadata: Record<string, string>;
-    }) => getTalosClient().files.update({ fileId, tags, metadata }),
+    }) => (await getTalosClient({ service: "files", nodeId })).files.update({ fileId, tags, metadata }),
     onSuccess: async ({ file }) => {
-      queryClient.setQueryData(["talos", connectionKey, "file", file.fileId], { file });
+      queryClient.setQueryData(fileMetadataKey(connectionKey, file.fileId, { nodeId }), { file });
       await queryClient.invalidateQueries({ queryKey: listKey });
     },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (fileId: string) => getTalosClient().files.delete({ fileId }),
+    mutationFn: async (fileId: string) => (await getTalosClient({ service: "files", nodeId })).files.delete({ fileId }),
     onSuccess: async (_, fileId) => {
       if (selectedFileId === fileId) {
         setSelectedFileId(null);
       }
-      queryClient.removeQueries({ queryKey: ["talos", connectionKey, "file", fileId] });
+      queryClient.removeQueries({ queryKey: fileMetadataKey(connectionKey, fileId, { nodeId }) });
       await queryClient.invalidateQueries({ queryKey: listKey });
     },
   });
@@ -152,6 +155,7 @@ export function useFilesPage() {
   }, []);
 
   return {
+    nodeId,
     query,
     setQuery,
     view,

@@ -674,6 +674,7 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
 
 fn session_record() -> SessionRecord {
     SessionRecord {
+        session_kind: talos_types::SessionKind::Standard,
         id: "session-1".into(),
         agent_id: "talos".into(),
         execution_node_id: "laptop-1".into(),

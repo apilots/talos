@@ -71,12 +71,15 @@ docker compose -f compose.production.yml -f compose.managed-worker.yml config --
 docker compose -f compose.production.yml -f compose.managed-worker.yml up -d --no-build
 ~~~
 
-To open this Server's Talo in native Electron, launch Talos Desktop with
-`TALOS_DESKTOP_SERVER_URL=https://your-talos-server.example`. Sign in with the
-same account used in Web. This mode opens the Server-hosted product in an
-isolated Electron view. The existing desktop WebSocket uses the same Server
-origin and the Worker connects out to the Server. Standalone Desktop continues
-to use its local App Server.
+Standalone Talos Desktop connects to this Server using `cloud.agent_base_url` in
+the Desktop configuration. Set it to the Server's HTTPS product ingress and set
+`cloud.agent_trusted_ca_file` if the ingress uses a private CA. Sign in with the
+same account as Web. Both clients use the Server SDK for Talo. The Server sends
+work to the Worker and relays its remote desktop frames and input.
+
+To display the Server-hosted Web UI inside Electron instead, launch Desktop with
+`TALOS_DESKTOP_SERVER_URL=https://your-talos-server.example`. This optional
+mode uses the hosted page's origin for API and desktop WebSocket requests.
 
 The Docker socket grants host administration privileges. Apply the overlay to
 a trusted Server deployment. Managed Workers use one Docker bridge with

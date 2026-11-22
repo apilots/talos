@@ -77,6 +77,26 @@ describe("Browser files client", () => {
     expect(onProgress).toHaveBeenCalledWith({ loadedBytes: 2, totalBytes: 4 });
   });
 
+  it("preserves multipart data and upload progress after Browser XHR admission", async () => {
+    const baseUrl = "http://localhost:8080";
+    const xhr = installPendingXhr();
+    const bootstrap = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ status: "success", data: { user: { user_id: "account-a" } } }));
+    vi.stubGlobal("fetch", bootstrap);
+    const client = createBrowserTalosClient({ baseUrl, getToken: () => "session-token", getUserId: () => "account-a" });
+    const onProgress = vi.fn();
+    const upload = client.files.upload({ filename: "file.txt", scope: { type: "personal" }, tags: [], metadata: {} },
+      new Uint8Array([1]), { onProgress });
+    const original = xhr.body;
+    xhr.finishWith(401, "");
+    await vi.waitFor(() => expect(xhr.open).toHaveBeenCalledTimes(2));
+    expect(xhr.body).toBe(original);
+    expect(bootstrap.mock.calls[0][0]).toBe(baseUrl + "/v1/user");
+    xhr.emitProgress(1, 1);
+    xhr.finish();
+    await expect(upload).resolves.toBeDefined();
+    expect(onProgress).toHaveBeenCalledWith({ loadedBytes: 1, totalBytes: 1 });
+  });
+
   it("rejects progress uploads when HTTP 204 omits the ApiResponse body", async () => {
     const xhr = installPendingXhr();
     const client = createBrowserTalosClient({ baseUrl: "http://localhost:8080" });

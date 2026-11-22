@@ -6,7 +6,6 @@ import { useUpdateSessionPermissionModeMutation } from "@/features/chat";
 
 interface UseSessionPermissionModeParams {
   blocked: boolean;
-  initialMode?: UserPermissionMode;
   persistedMode?: UserPermissionMode;
   sessionExists: boolean;
   sessionId: string;
@@ -14,13 +13,12 @@ interface UseSessionPermissionModeParams {
 
 export function useSessionPermissionMode({
   blocked,
-  initialMode = "fullAccess",
   persistedMode,
   sessionExists,
   sessionId,
 }: UseSessionPermissionModeParams) {
   const { t } = useTranslation("chat");
-  const [draftMode, setDraftMode] = useState<UserPermissionMode>(initialMode);
+  const [draftMode, setDraftMode] = useState<UserPermissionMode>("fullAccess");
   const mutation = useUpdateSessionPermissionModeMutation(sessionId);
   const value = persistedMode ?? draftMode;
 

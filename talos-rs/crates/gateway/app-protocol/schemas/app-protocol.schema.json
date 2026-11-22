@@ -6944,6 +6944,13 @@
             "null"
           ]
         },
+        "controlPlaneTrustedCaPem": {
+          "description": "Public PEM roots for this control plane, when custom trust is configured.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "nodeId": {
           "type": [
             "string",
@@ -12950,6 +12957,9 @@
             "null"
           ]
         },
+        "sessionKind": {
+          "$ref": "#/definitions/SessionKind"
+        },
         "sourceProvider": {
           "$ref": "#/definitions/SessionSourceProvider"
         },
@@ -12990,12 +13000,21 @@
         "messageCount",
         "modelSelection",
         "nodeId",
+        "sessionKind",
         "sourceProvider",
         "sourceType",
         "title",
         "userId"
       ],
       "type": "object"
+    },
+    "SessionKind": {
+      "description": "Product purpose assigned when a Session is created.",
+      "enum": [
+        "standard",
+        "talo"
+      ],
+      "type": "string"
     },
     "SessionListEntry": {
       "description": "A live Session list row. Activity is derived from existing Turn facts; immutable SessionInfo and synchronized metadata remain unchanged.",
@@ -13048,6 +13067,9 @@
             "null"
           ]
         },
+        "sessionKind": {
+          "$ref": "#/definitions/SessionKind"
+        },
         "sourceProvider": {
           "$ref": "#/definitions/SessionSourceProvider"
         },
@@ -13089,6 +13111,7 @@
         "messageCount",
         "modelSelection",
         "nodeId",
+        "sessionKind",
         "sourceProvider",
         "sourceType",
         "title",

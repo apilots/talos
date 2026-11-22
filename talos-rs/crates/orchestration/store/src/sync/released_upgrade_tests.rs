@@ -399,3 +399,41 @@ async fn materialized_v1_reset_and_delete_are_uploaded_without_reapplying_them()
     assert_eq!(hub.version().unwrap().history_generation, 1);
     assert!(hub.summary().unwrap().deleted);
 }
+
+#[tokio::test]
+async fn upgraded_managed_ownership_reaches_another_desktop_without_rewriting_history() {
+    let b = peer(false).await;
+    let c = peer(false).await;
+    let (key, expected) = seed(&b, "survivor-b", false).await;
+    seed(&c, "survivor-b", false).await;
+    c.sync.upgrade_local_replicas().await.unwrap();
+    registered_computer(&b).await;
+    sqlx::query("INSERT INTO managed_workers(instance_id,owner_user_id,node_id,short_id,image,revision,generation,desired,step,home_ready,last_activity_at,operation_at,conversation_session_id) VALUES ('managed','account-1',?,'12345678','worker',1,1,'running','stable',1,1,1,?)")
+        .bind(COMPUTER).bind(key.id()).execute(b.storage.pool()).await.unwrap();
+    sqlx::raw_sql("ALTER TABLE sessions DROP COLUMN session_kind; DELETE FROM _sqlx_migrations WHERE version=202611210001;")
+        .execute(b.storage.pool()).await.unwrap();
+    crate::migration::run_migrations(b.storage.pool(), &crate::migration::test_migrations_dir())
+        .await
+        .unwrap();
+    b.sync.upgrade_local_replicas().await.unwrap();
+    exchange(&b, &c, key.clone()).await;
+    assert_eq!(
+        c.sessions
+            .get_session_record(key.id())
+            .await
+            .unwrap()
+            .unwrap()
+            .session_kind,
+        SessionKind::Talo
+    );
+    assert_eq!(
+        c.sessions
+            .list_timeline_events_after(key.id(), 0, 100)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.event)
+            .collect::<Vec<_>>(),
+        expected
+    );
+}

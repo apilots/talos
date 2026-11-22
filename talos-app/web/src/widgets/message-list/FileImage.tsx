@@ -1,16 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useAppStore } from "@/shared/store/app-store";
+import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { getTalosClient } from "@/shared/api/client";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
 export function FileImage({ fileId, label, size = "full" }: { fileId: string; label: string; size?: "thumbnail" | "full" }) {
   const { t } = useTranslation("chat");
   const dialog = useRef<HTMLDialogElement>(null);
+  const sessionId = useContext(AttachmentSessionContext);
   const connection = useAppStore((state) => state.connection);
   const [source, setSource] = useState<string>();
   const [error, setError] = useState<unknown>();
@@ -19,7 +21,7 @@ export function FileImage({ fileId, label, size = "full" }: { fileId: string; la
     let objectUrl: string | undefined;
     setSource(undefined);
     setError(undefined);
-    void getTalosClient().files.content({ fileId }).then(({ file, data }) => {
+    void Promise.resolve(getTalosClient({ service: "files", sessionId })).then(client => client.files.content({ fileId })).then(({ file, data }) => {
       if (!active) return;
       objectUrl = URL.createObjectURL(new Blob([new Uint8Array(data).buffer], { type: file.mimeType }));
       setSource(objectUrl);
@@ -30,7 +32,7 @@ export function FileImage({ fileId, label, size = "full" }: { fileId: string; la
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [connection, fileId]);
+  }, [connection, fileId, sessionId]);
   if (error) return <span className="block text-xs text-muted" role="alert">{userVisibleErrorMessage(error, t("attachmentLoadFailed"))}</span>;
   if (!source) return <span aria-label={t("imageLoading")} className="block h-24 w-36 animate-pulse rounded-lg bg-muted/10" role="status" />;
   return <>

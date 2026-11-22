@@ -9,6 +9,11 @@ use ts_rs::TS;
 pub struct DesktopWorkerIdentityResponse {
     pub node_id: Option<String>,
     pub control_plane_endpoint: Option<String>,
+    #[schemars(
+        description = "Public PEM roots for this control plane, when custom trust is configured."
+    )]
+    #[ts(optional = nullable)]
+    pub control_plane_trusted_ca_pem: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

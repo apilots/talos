@@ -42,12 +42,13 @@ Configuration remains snake_case; host DTOs and their generated schema/TypeScrip
 
 | Method | Params | Response / caller expectations |
 | --- | --- | --- |
-| desktop/workerIdentity | null / omitted | DesktopWorkerIdentityResponse { nodeId: string or null, controlPlaneEndpoint: string or null }; nodeId is the saved UUID or embedded; controlPlaneEndpoint is the configured Server address |
+| desktop/workerIdentity | null / omitted | DesktopWorkerIdentityResponse returns the saved node UUID or embedded in `nodeId`, the configured Server address in `controlPlaneEndpoint`, and optional public PEM roots in `controlPlaneTrustedCaPem`. |
 | desktop/workerEnroll | DesktopWorkerEnrollParams { nodeId?: string or null } | DesktopWorkerIdentityResponse; null creates/reuses, an explicit existing UUID recovers by rotating its credential |
 
 These bootstrap methods require the local host connection; enrollment additionally verifies its cached Cloud Auth login,
 checks any supplied Actor credentials match that login, and confirms immutable owner/UUID through GetNode.
 The UUID cannot be rebound by account change or hostname matching. Recovery cannot replace a saved UUID or control plane.
+Electron uses the public CA bundle for connections to that control plane. An absent or null bundle selects platform trust. The host extracts certificates from the configured trust file before returning them.
 CreateNode/RotateCredential results stay inside the Rust host. Neither identity IPC nor runtime state contains node secrets.
 `desktop/workerIdentity` is also exposed as a dedicated preload IPC method.
 

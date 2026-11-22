@@ -76,7 +76,7 @@ export type ActorCredential = { "type": "existing_session_token", token: string,
 
 export type FileUploadParams = { request: FileUploadRequest, dataBase64: string, };
 
-export type DesktopWorkerIdentityResponse = { nodeId: string | null, controlPlaneEndpoint: string | null, };
+export type DesktopWorkerIdentityResponse = { nodeId: string | null, controlPlaneEndpoint: string | null, controlPlaneTrustedCaPem?: string | null, };
 
 export type DesktopWorkerEnrollParams = {
 /**
@@ -103,7 +103,7 @@ export type SessionListEntry = {
  * Includes running, waiting-for-input and cancelling Turns.
  * False does not assert a successful terminal outcome.
  */
-hasActiveTurn: boolean, nodeId: string, id: string, title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, };
+hasActiveTurn: boolean, nodeId: string, id: string, sessionKind: "standard" | "talo", title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, };
 
 export type SessionListResponse = { sessions: Array<SessionListEntry>, };
 
@@ -131,7 +131,7 @@ export type SessionClearRequest = { sessionId: string, };
 
 export type SessionClearResponse = { session: SessionInfo, };
 
-export type SessionInfo = { nodeId: string, id: string, title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, };
+export type SessionInfo = { nodeId: string, id: string, sessionKind: "standard" | "talo", title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, };
 
 export type SessionUsage = { tokens: TokenUsage, context: ContextUsage | null, };
 

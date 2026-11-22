@@ -235,6 +235,7 @@ async fn owner_registration_restart_and_credential_rotation() {
 
 fn session_record(execution_node_id: &str, user_id: &str) -> SessionRecord {
     SessionRecord {
+        session_kind: talos_types::SessionKind::Standard,
         id: "session-1".into(),
         agent_id: "talos".into(),
         execution_node_id: execution_node_id.into(),

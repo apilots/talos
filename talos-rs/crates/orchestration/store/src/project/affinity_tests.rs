@@ -33,21 +33,9 @@ async fn storage_before_affinity() -> Arc<SqliteStorage> {
     storage
 }
 async fn history(storage: &Arc<SqliteStorage>, id: &str, node: &str) {
-    let mut record = MockSessionStore::new()
-        .get_session_record("session-1")
-        .await
-        .unwrap()
-        .unwrap();
-    record.id = id.into();
-    record.user_id = "user-1".into();
-    record.project_id = Some("project-1".into());
-    record.execution_node_id = node.into();
-    DatabaseSessionStore::new(storage.clone())
-        .await
-        .unwrap()
-        .insert_session_record(&record)
-        .await
-        .unwrap();
+    sqlx::query("INSERT INTO sessions(session_key,agent_id,workspace_id,project_id,user_id,source_type,source_provider,environment_json,conf_json,usage_json,created_at,last_activity,execution_node_id) VALUES (?,'default','workspace-1','project-1','user-1','desktop','sdk','null','{}',?,1,1,?)")
+        .bind(id).bind(serde_json::to_string(&talos_types::SessionUsage::default()).unwrap())
+        .bind(node).execute(storage.pool()).await.unwrap();
 }
 async fn projects(storage: &SqliteStorage) {
     for (id, path) in [("project-1", "/project"), ("unused", "/unused")] {

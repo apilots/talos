@@ -27,6 +27,7 @@ async fn fixture() -> Fixture {
     let session = DatabaseSessionStore::new(storage.clone()).await.unwrap();
     session
         .insert_session_record(&SessionRecord {
+            session_kind: talos_types::SessionKind::Standard,
             id: "s".into(),
             agent_id: "default".into(),
             execution_node_id: "embedded".into(),

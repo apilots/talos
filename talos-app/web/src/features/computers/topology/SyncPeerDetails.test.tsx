@@ -42,4 +42,3 @@ it.each(["en", "zh-CN"])("expires document activity in list and details while re
     .toHaveAttribute("datetime", new Date(peer.lastHeartbeatAt! * 1000).toISOString());
   expect(container.querySelectorAll(".cmp-peer dt")).toHaveLength(9);
 });
-

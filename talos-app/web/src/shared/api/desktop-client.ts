@@ -398,7 +398,7 @@ function createClientRequestId(): string {
   return `desktop_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
-function actorCredentialsFromToken(token: string | null | undefined): AppProtocol.ActorCredentials | null {
+export function actorCredentialsFromToken(token: string | null | undefined): AppProtocol.ActorCredentials | null {
   const trimmed = token?.trim();
   if (!trimmed) {
     return null;

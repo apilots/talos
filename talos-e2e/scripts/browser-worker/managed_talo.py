@@ -1,5 +1,6 @@
 """Secretless Talo acceptance against a disposable Server, registry and Worker."""
 import argparse
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ import uuid
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fixture import MODEL_PROVIDER, ACCOUNTS, REPORT, ROOT, TOKEN, configure, data, free_port, http, wait
+from fixture import MODEL_PROVIDER, ACCOUNTS, REPORT, ROOT, TOKEN, config, configure, data, free_port, http, http_response, start_ingress, wait
 from lifecycle import container_args
 from media import media
 from managed_talo_access import configure_accounts, exercise_access
@@ -27,12 +28,22 @@ SOCKET = os.environ.get("TALOS_E2E_DOCKER_SOCKET", "/var/run/docker.sock")
 REGISTRY_IMAGE = "registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
 ASSISTANT = "/v1/computers/managed-worker"
 LABEL = "io.talos.managed-worker.instance"
+AUTOMATION_MARKERS = {"goal": "goal_aa", "loop": "dynamicstop_bb"}
+
+
+def native_automation_prompt(stage):
+    prompt = f"AUTO_CASE={AUTOMATION_MARKERS[stage]} controlled automation work"
+    if stage == "loop":
+        prompt += "; check progress; model decides the next check time"
+    return prompt
+
+
 FIXTURE_PROGRAM = r"""
 from http.server import ThreadingHTTPServer
 from threading import Event, Thread
 import os, select, socket, socketserver, subprocess
 import json
-from fixture import Fixture, USER, auxiliary_response
+from fixture import Fixture, USER, auxiliary_response, wait
 from managed_talo_access import configure_accounts
 
 configure_accounts()
@@ -81,13 +92,25 @@ class ManagedFixture(Fixture):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Connection", "close")
         self.end_headers()
-        for delta, finish in [({"role": "assistant", "content": "TALO_WAKE_OK"}, None), ({}, "stop")]:
+        chat = "native chat verification" in json.dumps(request["messages"])
+        parts = ["TALO_CHAT", "_OK\n\n[Worker report](talo-preview.txt)"] if chat else ["TALO_WAKE_OK"]
+        for part in [*parts, None]:
+            delta = {"role": "assistant", "content": part} if part else {}
+            finish = None if part else "stop"
             chunk = {"id": "talo-fixture", "object": "chat.completion.chunk", "created": 1,
                      "model": "browser-fixture", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
             self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
+            if delta.get("content") == "TALO_CHAT":
+                self.wfile.flush()
+                wait(lambda: os.path.exists("/fixture/native-chat-visible"), "Electron rendered the first chunk", seconds=40)
         self.wfile.write(b"data: [DONE]\n\n")
         self.close_connection = True
 
+if os.environ.get("TALOS_E2E_NATIVE_AUTOMATION") == "1":
+    from pathlib import Path
+    from automation_model_fixture import serve
+    Thread(target=serve, args=(Path("/tmp/talo-e2e/automation"), ("0.0.0.0", 18081),
+                               "browser-fixture", "fixture"), daemon=True).start()
 server = ThreadingHTTPServer(("0.0.0.0", 18080), ManagedFixture)
 Thread(target=server.serve_forever, daemon=True).start()
 if os.environ.get("TALOS_E2E_TALO_RECOVERY") == "1":
@@ -185,7 +208,7 @@ def phase(base, expected):
     return snapshot if snapshot and snapshot["phase"] == expected else None
 
 
-def exercise(base, instances, worker_model, faults, observed, before_delete=None):
+def exercise(base, instances, worker_model, faults, observed, before_delete=None, native_stage=None):
     for token, user in ACCOUNTS.items():
         current = data(http(base + "/v1/user", token=token))["user"]
         assert (current["user_id"], current["role"], current["type"]) == (
@@ -195,9 +218,17 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
     exercise_access(base)
     assert data(http(base + ASSISTANT)) == {"enabled": True, "instance": None}
     assert http(base + ASSISTANT, {}, token="no-such-fixture-user")["status"] != "success"
+    if native_stage:
+        try:
+            native_stage("initialize")
+        finally:
+            instance = data(http(base + ASSISTANT))["instance"]
+            if instance:
+                instances.append(instance["instanceId"])
     created = data(http(base + ASSISTANT, {}))["instance"]
     instance = created["instanceId"]
-    instances.append(instance)
+    if instance not in instances:
+        instances.append(instance)
     assert data(http(base + ASSISTANT, {}))["instance"]["instanceId"] == instance
     node = created["nodeId"]
     assert data(http(base + ASSISTANT, token=bob))["instance"] is None
@@ -309,9 +340,15 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
             raise AssertionError("Talo Turn did not publish a terminal event")
     ready = wait(lambda: phase(base, "ready"), "ready after first Turn")
     saved = data(http(base + f"/v1/sessions/{session}"))["session"]
+    assert saved["sessionKind"] == "talo", saved
     assert saved["id"] == session and saved["nodeId"] == node and saved["projectId"] is None
     print("PASS first Turn materializes the bound non-Project Talo Session and resolves the Goal Skill after Wake", flush=True)
 
+    if native_stage:
+        workspace = data(http(base + f"/v1/workspace/info?nodeId={node}"))["userWorkspaceDir"]
+        observed.execute(awake, "sh", "-ec", 'mkdir -p "$1"; echo "Report from the Talo Worker" > "$1/talo-preview.txt"', "sh", workspace)
+        native_stage("chat")
+        native_stage("automation")
     exercise_access(base, ready, session)
     media(base, node, observed.compute(instance), http, data, wait, REPORT, observed.execute)
     if RECOVERY:
@@ -459,7 +496,69 @@ def server_healthy(container, base):
     return http(base + "/health")
 
 
-def run(files, parity=False):
+def run_native_stage(files, base, rpc_port, issuer_port, stage):
+    with ExitStack() as stack:
+        home = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="talo-desktop-")))
+        ingress = f"https://127.0.0.1:{free_port()}"
+        cert = files / "server.crt"
+        start_ingress(stack, home, ingress, base, rpc_port, cert, files / "server.key")
+        profile = config(home, 8080, issuer_port)
+        profile["cloud"].update(agent_base_url=ingress, agent_trusted_ca_file=str(cert))
+        (home / "conf").mkdir()
+        cfg = home / "conf/talos.yaml"
+        cfg.write_text(yaml.safe_dump(profile))
+        auth = home / "auth"
+        auth.mkdir(mode=0o700)
+        session = auth / "cloud-session.json"
+        session.write_text(json.dumps({"schema_version": 2, "cloud_api_base_url": profile["cloud"]["api_base_url"],
+            "access_token": TOKEN, "token_type": "Bearer", "expires_at_ms": int(time.time() * 1000)+3600000,
+            "last_used_at_ms": int(time.time() * 1000), "user": ACCOUNTS[TOKEN]}))
+        session.chmod(0o600)
+        subprocess.run([sys.executable, str(ROOT / "talos-e2e/scripts/managed-talo/native_desktop.py"),
+                        base, "", str(REPORT), stage], check=True, timeout=200,
+                       env=dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(cfg), TALOS_E2E_CHAT_VISIBLE=str(files / "native-chat-visible"),
+                                TALOS_APP_SERVER_BIN=os.environ["TALOS_E2E_APP_SERVER_BIN"]))
+
+
+def run_native_automation(files, base, rpc_port, issuer_port, server, model_url, worker_model):
+    from automation_model_fixture import assert_selection
+
+    instance = data(http(base + ASSISTANT))["instance"]
+    node, session = instance["nodeId"], instance["conversationSessionId"]
+    data(http(base + f"/v1/fs/directory?nodeId={node}&wakeIfSleeping=true"))
+    # Keep the selected model identity while directing this Worker's calls to the controlled automation model.
+    provider = worker_model["custom_providers"][MODEL_PROVIDER]
+    provider["base_url"] = model_url
+    data(http_response(base + f"/v1/llm?nodeId={node}", worker_model, method="PUT")[1])
+    for stage, marker in AUTOMATION_MARKERS.items():
+        run_native_stage(files, base, rpc_port, issuer_port, stage)
+        snapshot = data(http(base + "/v1/automation/read", {"sessionId": session}))
+        registered = snapshot["goal"] if stage == "goal" else next(iter(snapshot["loops"]))
+        assert registered["status"] == "active", registered
+        # Release the model only after the submitting Electron process exits.
+        for gate in (("work-1",) if stage == "goal" else ("work-1", "declared")):
+            docker("exec", server, "touch", f"/tmp/talo-e2e/automation/{marker}.release-{gate}")
+        def settled():
+            entries = data(http(base + "/v1/automation/list", {"sessionId": session, "scope": "ended"}))["data"]
+            tasks = (entry["goal" if stage == "goal" else "loopTask"] for entry in entries if entry["type"] == stage)
+            return next((task for task in tasks if task["id"] == registered["id"]), None)
+
+        task = wait(settled, f"Server settled native {stage} after Electron closed")
+        assert task["latestTurnId"] and task["sessionId"] == session, task
+        if stage == "goal":
+            assert task["status"] == "complete" and task["completionEvidence"] == "Controlled Goal work finished", task
+        else:
+            assert task["status"] == "stopped" and task["stopReason"] == "modelStopped", task
+        prompt = native_automation_prompt(stage)
+        history = data(http(base + f"/v1/sessions/{session}/history"))["data"]
+        user_inputs = ([block["content"]["data"] for block in message["blocks"] if block["content"]["type"] == "userContent"]
+                       for turn in history for message in turn["result"]["result"]["messages"] if message["role"] == "user")
+        original, = [content for content in user_inputs if {"type": "text", "text": prompt} in content]
+        assert_selection(original, stage, prompt)
+        print(f"PASS native {stage} {task['id']} settled on Server after Electron closed: {task['status']}", flush=True)
+
+
+def run(files, parity=False, native=False):
     files.chmod(0o755)
     run_id = uuid.uuid4().hex[:10]
     registry, server = f"talo-e2e-registry-{run_id}", f"talo-e2e-server-{run_id}"
@@ -468,6 +567,11 @@ def run(files, parity=False):
     try:
         docker("run", "-d", *container_args(registry), "--publish", "127.0.0.1::5000", REGISTRY_IMAGE)
         registry_address = docker("port", registry, "5000/tcp")
+        def registry_ready():
+            with urllib.request.urlopen(f"http://{registry_address}/v2/", timeout=2) as response:
+                return response.status == 200
+
+        wait(registry_ready, "disposable registry")
         # The Engine trusts loopback registries. The API requires an actual immutable manifest digest.
         tag = f"{registry_address}/talo-e2e-worker:fixture"
         docker("tag", WORKER_IMAGE, tag)
@@ -480,6 +584,11 @@ def run(files, parity=False):
         fault_port = free_port()
         recovery_args = ["--publish", f"127.0.0.1:{fault_port}:18080",
                          "--env", "TALOS_E2E_TALO_RECOVERY=1"] if RECOVERY else []
+        if native:
+            automation_port = free_port()
+            recovery_args += ["--publish", f"{gateway}:{automation_port}:18081", "--env", "TALOS_E2E_NATIVE_AUTOMATION=1"]
+            recovery_args += ["--publish", f"127.0.0.1:{rpc_port}:9443",
+                              "--publish", f"127.0.0.1:{fault_port}:18080"]
         ingress_port = 9444 if RECOVERY else 9443
         worker_model = server_files(files, gateway, rpc_port, model_port, pinned_worker)
         socket_mount = f"type=bind,src={SOCKET},dst=/var/run/docker.sock"
@@ -520,7 +629,16 @@ def run(files, parity=False):
                 docker("restart", server)
                 wait(lambda: server_healthy(server, base), "Server restart")
 
-        exercise(base, instances, worker_model, f"http://127.0.0.1:{fault_port}", DockerObservations(), restart)
+        def desktop_stage(stage):
+            if stage == "automation":
+                run_native_automation(files, base, rpc_port, fault_port, server,
+                                      f"http://{gateway}:{automation_port}/v1", worker_model)
+            else:
+                run_native_stage(files, base, rpc_port, fault_port, stage)
+
+        exercise(base, instances, worker_model, f"http://127.0.0.1:{fault_port}", DockerObservations(), restart,
+                 native_stage=desktop_stage if native else None)
+
     finally:
         (REPORT / "managed-talo-server.log").write_text(docker("logs", server, check=False))
         docker("rm", "-fv", server, check=False)
@@ -538,8 +656,12 @@ def run(files, parity=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parity", action="store_true", help="Include personal registration and Server restart")
+    parser.add_argument("--native", action="store_true", help="Initialize and view Talo in native Electron")
     args = parser.parse_args()
+    if args.native:
+        from fixture import MODEL
+        MODEL["input"] = ["text", "image", "file"]
     tmp_root = Path(os.environ["TALOS_E2E_TMP_ROOT"])
     tmp_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="talo-e2e-", dir=tmp_root) as directory:
-        run(Path(directory), args.parity)
+        run(Path(directory), args.parity, args.native)

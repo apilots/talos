@@ -252,6 +252,22 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .is_code(ErrorCode::Unauthenticated));
     fixture.login("user-1");
     let identity = host.enroll_worker(None, None).await.unwrap();
+    let trust = fixture
+        .config
+        .cloud
+        .agent_trusted_ca_file
+        .as_deref()
+        .unwrap();
+    let pem = talos_service::read_worker_trusted_ca(Some(trust))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        identity
+            .control_plane_trusted_ca_pem
+            .as_deref()
+            .map(str::as_bytes),
+        Some(pem.as_slice())
+    );
     let node_id = identity.node_id.clone().unwrap();
     use talos_app_server::AppServerApplication;
     let reply = host
@@ -358,50 +374,6 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
     let secret = std::fs::read_to_string(&saved.credential_file).unwrap();
     assert!(!yaml.contains(&secret));
     assert!(!serde_json::to_string(&identity).unwrap().contains(&secret));
-    // Exercise the actual bootstrap JSONL path, including omitted and explicit-null params.
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let (mut client, server_io) = tokio::io::duplex(16 * 1024);
-    let (reader, writer) = tokio::io::split(server_io);
-    let server_task = tokio::spawn(talos_app_server::run_jsonl(
-        reader,
-        writer,
-        host.clone(),
-        Arc::new(talos_app_server::AuthServiceCredentialValidator::new(
-            Arc::new(TestAuth),
-            host.account.clone(),
-        )),
-        talos_app_server::AppServerConfig {
-            auth_enabled: true,
-            ..Default::default()
-        },
-    ));
-    let initialize = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-        "client_info": { "name": "desktop", "version": "test", "kind": "desktop" },
-        "capabilities": { "protocol_version": talos_app_protocol::version::ProtocolVersion::CURRENT, "supports_server_requests": false, "supports_event_replay": true }
-    }});
-    let frames = format!(
-        "{initialize}\n{}\n{}\n",
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "desktop/workerIdentity"}),
-        serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "desktop/workerIdentity", "params": null})
-    );
-    client.write_all(frames.as_bytes()).await.unwrap();
-    client.shutdown().await.unwrap();
-    let mut output = String::new();
-    client.read_to_string(&mut output).await.unwrap();
-    server_task.await.unwrap().unwrap();
-    let responses: Vec<serde_json::Value> = output
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    let response = responses
-        .iter()
-        .find(|response| response["id"] == 3)
-        .unwrap();
-    assert_eq!(
-        response["result"]["data"],
-        serde_json::to_value(&identity).unwrap()
-    );
-    assert!(!output.contains(&secret));
 
     fixture
         .nodes
@@ -480,6 +452,50 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .await
         .unwrap();
     assert_eq!(nodes.data.len(), 1);
+    // Exercise the actual bootstrap JSONL path, including omitted and explicit-null params.
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (mut client, server_io) = tokio::io::duplex(16 * 1024);
+    let (reader, writer) = tokio::io::split(server_io);
+    let server_task = tokio::spawn(talos_app_server::run_jsonl(
+        reader,
+        writer,
+        host.clone(),
+        Arc::new(talos_app_server::AuthServiceCredentialValidator::new(
+            Arc::new(TestAuth),
+            host.account.clone(),
+        )),
+        talos_app_server::AppServerConfig {
+            auth_enabled: true,
+            ..Default::default()
+        },
+    ));
+    let initialize = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "client_info": { "name": "desktop", "version": "test", "kind": "desktop" },
+        "capabilities": { "protocol_version": talos_app_protocol::version::ProtocolVersion::CURRENT, "supports_server_requests": false, "supports_event_replay": true }
+    }});
+    let frames = format!(
+        "{initialize}\n{}\n{}\n",
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "desktop/workerIdentity"}),
+        serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "desktop/workerIdentity", "params": null})
+    );
+    client.write_all(frames.as_bytes()).await.unwrap();
+    client.shutdown().await.unwrap();
+    let mut output = String::new();
+    client.read_to_string(&mut output).await.unwrap();
+    server_task.await.unwrap().unwrap();
+    let responses: Vec<serde_json::Value> = output
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let response = responses
+        .iter()
+        .find(|response| response["id"] == 3)
+        .unwrap();
+    assert_eq!(
+        response["result"]["data"],
+        serde_json::to_value(&identity).unwrap()
+    );
+    assert!(!output.contains(&secret));
     fixture.runtime.shutdown().await.unwrap();
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();

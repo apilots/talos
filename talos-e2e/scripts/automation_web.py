@@ -1,5 +1,6 @@
 """Real Web slash/Add and prompt activation against the shared secretless model fixture."""
 import json
+import base64
 import os
 from pathlib import Path
 import re
@@ -16,7 +17,7 @@ from urllib.parse import urlsplit
 import yaml
 from playwright.sync_api import expect, sync_playwright
 
-from automation_model_fixture import prepare
+from automation_model_fixture import assert_selection, prepare
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.environ['TALOS_SCENARIO_REPORT_DIR'])
@@ -53,18 +54,103 @@ def user_inputs(database, session):
             (session,)) if json.loads(row[0])['data']['role'] == 'user']
 
 
-def assert_selection(contents, mode, prompt):
-    assert any(item == {'type': 'text', 'text': prompt} for item in contents), contents
-    selected = [item for item in contents if item['type'] == 'skillSelection']
-    assert len(selected) == 1 and selected[0]['name'] == mode, contents
-    assert '/.system/' + mode + '/' in selected[0]['path'], selected
-
-
 def assert_input(contents, mode, entry, prompt):
     if entry == 'prompt':
         assert contents == [{'type': 'text', 'text': prompt}], contents
     else:
         assert_selection(contents, mode, prompt)
+
+
+def home_retry(page, origin, database, fixture, project):
+    page.goto(origin)
+    assert page.evaluate('!isSecureContext && typeof crypto.randomUUID === "undefined"')
+    prompt = 'AUTO_CASE=pending_' + uuid.uuid4().hex + ' Check report progress every 1 minute'
+    marker = prompt.split()[0].removeprefix('AUTO_CASE=')
+    composer = page.get_by_role('textbox', name='Ask anything. Press / for commands and skills.')
+    page.get_by_role('button', name='Work in a project', exact=True).click()
+    page.get_by_role('button', name=f"{project['name']} {project['directory']}", exact=True).click()
+    picker = page.get_by_role('button', name=re.compile('^automation-controlled ·'))
+    picker.click()
+    page.get_by_role('button', name=re.compile('^Select model:')).click()
+    page.get_by_role('button', name=re.compile('^Change Provider:')).click()
+    page.get_by_role('button', name='Alternate controlled', exact=True).click()
+    page.get_by_role('button', name='automation-controlled', exact=True).click()
+    page.keyboard.press('Escape')
+    document = fixture.parent / 'report.png'
+    document.write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVS0AAAAASUVORK5CYII='))
+    second_document = fixture.parent / 'chart.png'
+    second_document.write_bytes(document.read_bytes())
+    page.locator('input[type=file]').set_input_files([str(document), str(second_document)])
+    expect(page.get_by_role('button', name='Remove report.png', exact=True)).to_be_visible()
+    expect(page.get_by_role('button', name='Remove chart.png', exact=True)).to_be_visible()
+    page.get_by_role('button', name='Full access', exact=True).click()
+    page.get_by_role('button', name=re.compile('^Ask for approval')).click()
+    page.get_by_role('button', name='Add', exact=True).click()
+    page.get_by_role('button', name='Loop', exact=True).click()
+    composer.fill(prompt)
+    submissions = []
+
+    def admit(route):
+        # Playwright's request helper runs outside Chromium's hostname resolver.
+        response = route.fetch(url=route.request.url.replace('talos-http.test', '127.0.0.1', 1))
+        assert response.ok, response.text()
+        submissions.append((route.request.headers['idempotency-key'], route.request.post_data_json, response.json()))
+        if len(submissions) == 1:
+            route.abort('failed')
+        else:
+            route.fulfill(response=response)
+
+    metadata_pattern = None
+    metadata_available = False
+
+    def metadata(route):
+        route.continue_() if metadata_available else route.abort('failed')
+
+    page.route('**/v1/turns/start', admit)
+    try:
+        page.get_by_role('button', name='Send', exact=True).click()
+        expect(page.get_by_role('alert')).to_be_visible()
+        assert len(submissions) == 1
+        original = submissions[0][1]
+        assert original['userPermissionMode'] == 'askForApproval'
+        assert original['modelSelection']['modelRef']['provider'] == 'automation-fixture-alt'
+        assert original['projectId'] and [item['type'] for item in original['input']['content']] == ['skillSelection', 'text', 'file', 'file']
+        unavailable_id = original['input']['content'][-1]['fileId']
+        metadata_pattern = '**/v1/files/' + unavailable_id + '*'
+        page.route(metadata_pattern, metadata)
+        page.goto(origin + '/settings/general')
+        page.get_by_role('link', name='New chat', exact=True).click()
+        expect(composer).to_have_value(prompt)
+        expect(page.get_by_role('button', name='Ask for approval', exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name=f"{project['name']} · {project['directory']}", exact=True)).to_be_visible()
+        expect(page.get_by_test_id('automation-mode-chip')).to_contain_text('Loop')
+        expect(page.get_by_role('button', name='Remove report.png', exact=True)).to_be_visible()
+        retry_metadata = page.get_by_role('button', name='Retry now ' + unavailable_id, exact=True)
+        expect(retry_metadata).to_be_visible()
+        expect(page.get_by_role('button', name='Remove ' + unavailable_id, exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name='Send', exact=True)).to_be_enabled()
+        page.screenshot(path=str(REPORT / 'home-partial-file-metadata.png'), full_page=True)
+        metadata_available = True
+        retry_metadata.click()
+        expect(page.get_by_role('button', name='Remove chart.png', exact=True)).to_be_visible()
+        picker.click()
+        expect(page.get_by_role('button', name=re.compile('^Select model:.*, Provider: Alternate controlled$'))).to_be_visible()
+        page.screenshot(path=str(REPORT / 'home-http-restored-options.png'), full_page=True)
+        page.keyboard.press('Escape')
+        page.get_by_role('button', name='Send', exact=True).click()
+        page.wait_for_url('**/sessions/' + submissions[0][1]['sessionId'])
+        assert len(submissions) == 2 and submissions[0] == submissions[1], submissions
+        (fixture / f'{marker}.release-busy').touch()
+        expect(page.get_by_text('Ordinary User Turn finished', exact=True)).to_be_visible(timeout=30000)
+        assert len(user_inputs(database, submissions[0][1]['sessionId'])) == 1
+        page.screenshot(path=str(REPORT / 'home-http-restored-retry.png'), full_page=True)
+        print('CASE home_http_restored_retry PASS origin=HTTP response=lost reload=settings metadata=partialFailure,retry retry=sameRequest admitted=once')
+        return {'sessionId': submissions[0][1]['sessionId'], 'submissions': 2, 'admitted': 1, 'restoredFiles': 2, 'partialMetadataRecovery': True}
+    finally:
+        (fixture / f'{marker}.release-busy').touch()
+        page.unroute('**/v1/turns/start', admit)
+        if metadata_pattern:
+            page.unroute(metadata_pattern, metadata)
 
 
 def begin(page, mode, entry, prompt):
@@ -283,6 +369,9 @@ def run(home):
         config_path = home / 'talos.yaml'
         prepare(ROOT / 'conf/talos-dev.yaml', config_path, int((fixture / 'port').read_text()))
         config = yaml.safe_load(config_path.read_text())
+        provider = config['llm']['custom_providers']['automation-fixture']
+        provider['models'][0]['input'] = ['text', 'image']
+        config['llm']['custom_providers']['automation-fixture-alt'] = {**provider, 'name': 'Alternate controlled'}
         port = free_port()
         config['gateway'].update(host='127.0.0.1', port=port)
         config_path.write_text(yaml.safe_dump(config, sort_keys=False))
@@ -297,21 +386,31 @@ def run(home):
             except OSError:
                 return False
         wait_for(healthy, 'real Server', 90)
+        project_directory = home / 'admission-project'
+        project_directory.mkdir()
+        with urllib.request.urlopen(urllib.request.Request(origin + '/v1/projects',
+                data=json.dumps({'name': 'Admission project', 'directory': str(project_directory)}).encode(),
+                headers={'Content-Type': 'application/json'})) as response:
+            assert response.status == 200
+            project = json.load(response)['data']['project']
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(executable_path=os.environ.get('TALOS_E2E_CHROME_BIN',
-                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), headless=True)
+                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), headless=True,
+                args=['--host-resolver-rules=MAP talos-http.test 127.0.0.1', '--no-proxy-server'])
             context = browser.new_context(viewport={'width': 1280, 'height': 900}, locale='en-US')
-            context.add_init_script('localStorage.setItem("talos-web-ui",JSON.stringify({state:{locale:"en",uiTheme:"light"},version:0}));')
+            context.add_init_script('if (!localStorage.getItem("talos-web-ui")) localStorage.setItem("talos-web-ui",JSON.stringify({state:{locale:"en",uiTheme:"light"},version:0}));')
             page = context.new_page()
             page.goto(origin)
             try:
+                retry = home_retry(page, f'http://talos-http.test:{port}', home / 'data/talos.db', fixture, project)
+                page.goto(origin)
                 results = [complete(page, home / 'data/talos.db', fixture, 'goal', 'add'),
                            complete(page, home / 'data/talos.db', fixture, 'loop', 'slash'),
                            cancel(page, home / 'data/talos.db', fixture),
                            complete(page, home / 'data/talos.db', fixture, 'goal', 'prompt')]
                 composer_send_policy(page, origin, config_path, fixture, results[-1]['sessionId'])
                 assert not (fixture / 'errors.jsonl').exists(), 'Controlled upstream contract failed'
-                (REPORT / 'result.json').write_text(json.dumps({'result': 'PASS', 'tasks': results}, indent=2))
+                (REPORT / 'result.json').write_text(json.dumps({'result': 'PASS', 'tasks': results, 'homeAdmission': retry}, indent=2))
                 print('CASE automation_web_entry PASS server=real tool=real entries=Add,slash,prompt selection=typed-or-none countdown=real terminalRows=removed cancel=beforeWork')
             except Exception:
                 page.screenshot(path=str(REPORT / 'failure.png'), full_page=True)

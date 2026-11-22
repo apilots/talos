@@ -8,6 +8,8 @@ import { getTalosClient } from "@/shared/api/client";
 
 export interface UploadFileRequest {
   file: File;
+  sessionId?: string;
+  nodeId?: string;
   scope: FileScope;
   signal?: AbortSignal;
   onProgress?: (progress: FileUploadProgress) => void;
@@ -15,6 +17,10 @@ export interface UploadFileRequest {
 
 export function fileListQueryKey(connectionKey: string) {
   return ["talos", connectionKey, "files"] as const;
+}
+
+export function fileMetadataKey(connectionKey: string, fileId: string | null, owner: { sessionId?: string; nodeId?: string }) {
+  return ["talos", connectionKey, "file", fileId, owner] as const;
 }
 
 export function isMarkdownFile(file: Pick<FileInfo, "originalFilename" | "mimeType">) {
@@ -25,11 +31,15 @@ export function isMarkdownFile(file: Pick<FileInfo, "originalFilename" | "mimeTy
 
 export async function uploadFile({
   file,
+  sessionId,
+  nodeId,
   scope,
   signal,
   onProgress,
 }: UploadFileRequest): Promise<FileInfo> {
-  const response = await getTalosClient().files.upload(
+  const client = await getTalosClient({ service: "files", sessionId, nodeId });
+  signal?.throwIfAborted();
+  const response = await client.files.upload(
     {
       filename: file.name,
       scope,

@@ -16,6 +16,7 @@ pub(super) fn session_and_events(
     };
     let session = SyncSessionSnapshot {
         session: SessionInfo {
+            session_kind: talos_types::SessionKind::Standard,
             node_id: computer_id.into(),
             id: identity.session_id.clone(),
             title: "Tool result history".into(),

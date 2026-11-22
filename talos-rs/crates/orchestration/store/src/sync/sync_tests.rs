@@ -35,6 +35,7 @@ struct Peer {
 }
 fn projection(record: &SessionRecord) -> TalosResult<SessionInfo> {
     Ok(SessionInfo {
+        session_kind: record.session_kind,
         node_id: record.execution_node_id.clone(),
         id: record.id.clone(),
         title: record.title.clone(),
@@ -150,6 +151,7 @@ async fn registered_computer(peer: &Peer) {
 }
 fn record(id: &str) -> SessionRecord {
     SessionRecord {
+        session_kind: talos_types::SessionKind::Standard,
         id: id.into(),
         agent_id: "default".into(),
         execution_node_id: "embedded".into(),
@@ -383,10 +385,18 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
         .unwrap();
     assert_eq!(imported_project.execution_node_id, COMPUTER);
     assert_eq!(imported_project.session_count, 0);
-    a.sessions
-        .insert_session_record(&record("session-1"))
+    let mut talo = record("session-1");
+    talo.session_kind = SessionKind::Talo;
+    // A pre-feature Desktop projection has no local managed Worker registration.
+    let mut projection = record("session-1");
+    projection.execution_node_id = COMPUTER.into();
+    DatabaseSessionStore::new(b.storage.clone())
+        .await
+        .unwrap()
+        .insert_session_record(&projection)
         .await
         .unwrap();
+    a.sessions.insert_session_record(&talo).await.unwrap();
     run(&a, "session-1", "z-first").await;
     run(&a, "session-1", "a-second").await;
     let resource = SyncResourceKey::Session {
@@ -399,6 +409,7 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(imported.session_kind, SessionKind::Talo);
     assert_eq!(imported.conf, record("session-1").conf);
     assert_eq!(
         imported.current_directory,

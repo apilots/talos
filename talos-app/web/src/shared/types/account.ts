@@ -21,3 +21,7 @@ export type AuthStatus =
   | "unauthenticated"
   | "logged_out"
   | "open";
+
+export function canUseTalo(account: { authStatus: AuthStatus; authRole: "admin" | "user"; accountType: AccountType }) {
+  return account.authStatus === "authenticated" && (account.authRole === "admin" || account.accountType === "Max");
+}

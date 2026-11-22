@@ -48,7 +48,8 @@ interface CreateProjectInput {
 }
 
 export async function listModels(nodeId?: string) {
-  return getTalosClient(nodeId).models.list();
+  const client = nodeId ? await getTalosClient({ nodeId, service: "models" }) : getTalosClient();
+  return client.models.list();
 }
 
 export async function listProjects(nodeId?: string) {
@@ -56,14 +57,13 @@ export async function listProjects(nodeId?: string) {
   return response.projects.map(mapProjectView);
 }
 
-export async function listSessions() {
-  const response = await getTalosClient().sessions.list();
+export async function listSessions(nodeId?: string) {
+  const response = await getTalosClient(nodeId).sessions.list();
   return response.sessions;
 }
 
 export async function getSession(sessionId: string) {
-  const response = await getTalosClient().sessions.get({ sessionId });
-  return response.session;
+  return getTalosClient().sessions.get({ sessionId });
 }
 
 export function generateSessionId() {
@@ -160,7 +160,7 @@ export async function updateSessionModel(sessionId: string, modelSelection: Mode
     },
     currentDirectory: null,
   };
-  await getTalosClient().sessions.patch(request);
+  await (await getTalosClient({ sessionId })).sessions.patch(request);
 }
 
 export async function updateSessionPermissionMode(
@@ -175,46 +175,46 @@ export async function updateSessionPermissionMode(
     },
     currentDirectory: null,
   };
-  const response = await getTalosClient().sessions.patch(request);
+  const response = await (await getTalosClient({ sessionId })).sessions.patch(request);
   return response.session;
 }
 
 export async function submitTurnInput(
   request: SubmitTurnInputRequest,
 ): Promise<SubmitTurnInputResponse> {
-  return getTalosClient().turns.input(request);
+  return (await getTalosClient({ sessionId: request.identity.sessionId })).turns.input(request);
 }
 
 export async function closeSession(sessionId: string) {
-  await getTalosClient().sessions.close({ sessionId });
+  await (await getTalosClient({ sessionId })).sessions.close({ sessionId });
 }
 
 export async function deleteSession(sessionId: string) {
-  await getTalosClient().sessions.delete({ sessionId });
+  await (await getTalosClient({ sessionId })).sessions.delete({ sessionId });
 }
 
 export async function cancelActiveTurn(sessionId: string, turnId: string) {
-  await getTalosClient().sessions.cancel({
+  await (await getTalosClient({ sessionId })).sessions.cancel({
     identity: { sessionId, turnId },
   });
 }
 
 export async function compactSession(sessionId: string) {
-  const response = await getTalosClient().sessions.compact({ sessionId });
+  const response = await (await getTalosClient({ sessionId })).sessions.compact({ sessionId });
   return response.session;
 }
 
 export async function clearSession(sessionId: string) {
-  const response = await getTalosClient().sessions.clear({ sessionId });
+  const response = await (await getTalosClient({ sessionId })).sessions.clear({ sessionId });
   return response.session;
 }
 
 export async function getActiveTurn(sessionId: string) {
-  return getTalosClient().sessions.activeTurn({ sessionId });
+  return (await getTalosClient({ sessionId, readOnly: true })).sessions.activeTurn({ sessionId });
 }
 
 export async function getSessionHistory(sessionId: string) {
-  const client = getTalosClient();
+  const client = await getTalosClient({ sessionId, readOnly: true });
   const history = await client.sessions.history({ sessionId, cursor: null, limit: null });
   while (history.nextCursor) {
     const page = await client.sessions.history({ sessionId, cursor: history.nextCursor, limit: null });
@@ -229,7 +229,8 @@ export async function startTimelineTurn(
   request: StartTurnRequest,
   onAcceptedMessageId?: (messageId: string) => void,
 ): Promise<string> {
-  const client = getTalosClient();
+  // The Composer supplies a Computer only for the initial Turn of a new chat.
+  const client = await getTalosClient(request.nodeId ? { nodeId: request.nodeId } : { sessionId: request.sessionId });
   const ack = await client.turns.start(request);
   if (!ack.messageId) {
     throw new Error(`Message ack did not include messageId: ${ack.turnId}`);
@@ -242,7 +243,7 @@ export async function retryTimelineTurn(
   request: RetryTurnRequest,
   onAcceptedMessageId?: (messageId: string) => void,
 ): Promise<string> {
-  const client = getTalosClient();
+  const client = await getTalosClient({ sessionId: request.sessionId });
   const ack = await client.turns.retry(request);
   if (!ack.messageId) {
     throw new Error(`Retry ack did not include messageId: ${ack.turnId}`);
@@ -258,7 +259,7 @@ export async function subscribeTimelineEvents(
   afterEventId?: string,
   options?: SessionEventStreamOptions,
 ) {
-  return getTalosClient().turns.events(
+  return (await getTalosClient({ sessionId, readOnly: true })).turns.events(
     sessionId,
     afterEventId,
     onEvent,

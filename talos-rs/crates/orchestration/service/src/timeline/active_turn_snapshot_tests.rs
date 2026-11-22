@@ -59,6 +59,7 @@ impl Fixture {
     async fn bind_metadata_goal(&self) {
         self.store
             .insert_session_record(&talos_store::session::SessionRecord {
+                session_kind: talos_types::SessionKind::Standard,
                 id: "session-1".into(),
                 agent_id: "default".into(),
                 execution_node_id: "embedded".into(),

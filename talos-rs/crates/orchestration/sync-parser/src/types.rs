@@ -169,6 +169,7 @@ pub enum SyncEventKey {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncSessionSnapshot {
+    #[serde(deserialize_with = "deserialize_session")]
     pub session: SessionInfo,
     pub conf: SessionConf,
     pub environment: Option<TalosSessionEnvironment>,
@@ -177,6 +178,17 @@ pub struct SyncSessionSnapshot {
     pub binding: SessionExecutionBinding,
     pub tree_identity: SessionTreeIdentity,
     pub memory_processed_through: Option<SyncEventKey>,
+}
+
+// Retained replicas keep their original fields and operation identities.
+fn deserialize_session<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<SessionInfo, D::Error> {
+    let mut fields = serde_json::Map::<String, serde_json::Value>::deserialize(deserializer)?;
+    fields.entry("sessionKind").or_insert_with(|| {
+        serde_json::Value::String(talos_types::SessionKind::Standard.as_str().into())
+    });
+    serde_json::from_value(serde_json::Value::Object(fields)).map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

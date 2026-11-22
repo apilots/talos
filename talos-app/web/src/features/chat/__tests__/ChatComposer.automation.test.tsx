@@ -117,13 +117,3 @@ it.each(["Enter", "Send"])("retains a one-shot mode until admission and consumes
   await act(async () => { accept(); });
   expect(screen.queryByTestId("automation-mode-chip")).not.toBeInTheDocument();
 });
-
-it("restores a rejected initial-navigation mode as a retry draft without resubmitting it", async () => {
-  const onSend = vi.fn().mockResolvedValue(undefined);
-  renderControlledComposer({ initialDraft: "Original task", initialAutomationMode: "loop", automationCommands: [{ mode: "loop", command: "/loop", description: "Shared command" }], onSend });
-  expect(screen.getByTestId("automation-mode-chip")).toHaveTextContent("Loop");
-  expect(onSend).not.toHaveBeenCalled();
-  fireEvent.keyDown(getComposerInput(), { key: "Enter" });
-  await waitFor(() => expect(onSend).toHaveBeenCalledExactlyOnceWith([], "loop"));
-  await waitFor(() => expect(screen.queryByTestId("automation-mode-chip")).not.toBeInTheDocument());
-});

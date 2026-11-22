@@ -2,11 +2,12 @@
 
 import { act, cleanup, fireEvent, render as renderView, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import "@/shared/i18n/setup";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
+import { TalosApiError } from "@talos/sdk-browser";
 import { ChatSessionPage } from "./ChatSessionPage";
 import { getChatSessionPageMocks, resetChatSessionPageMocks } from "./ChatSessionPage.test-support";
 
@@ -24,29 +25,23 @@ vi.mock("@/shared/store/app-store", async () => {
 });
 
 const mocks = getChatSessionPageMocks();
-const apiMocks = vi.hoisted(() => ({ node: "embedded", list: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ node: "embedded", reserved: false, list: vi.fn(), files: vi.fn(), draftFiles: vi.fn() }));
 function render(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderView(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
 }
 
-vi.mock("@/shared/api/client", () => ({ getTalosClient: () => ({
+vi.mock("@/shared/api/client", () => ({ getTalosClient: (owner?: { sessionId?: string }) => ({
   automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) },
   skills: { list: apiMocks.list },
+  files: { list: owner?.sessionId === "sess-1" ? apiMocks.files : apiMocks.draftFiles },
 }) }));
 
-function NavigateAwayButton() {
-  const navigate = useNavigate();
-  return (
-    <button onClick={() => navigate("/settings")} type="button">
-      Settings
-    </button>
-  );
-}
-
-function renderSessionPage() {
+function renderSessionPage(reserved = false) {
+  apiMocks.reserved = reserved;
+  if (reserved) mocks.sessionError = new TalosApiError({ code: "resourceNotFound", message: "Not materialized.", localization: null });
   return render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
+      <MemoryRouter initialEntries={["/sessions/sess-1"]}>
         <Routes>
           <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
         </Routes>
@@ -55,21 +50,13 @@ function renderSessionPage() {
 }
 
 describe("ChatSessionPage", () => {
-  let resolveSend: () => void;
-  let rejectSend: (error: Error) => void;
 
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn();
     resetChatSessionPageMocks();
     apiMocks.node = "embedded";
+    apiMocks.reserved = false;
     apiMocks.list.mockReset().mockResolvedValue({ data: ["goal", "loop"].map((name) => ({ name, scope: "system", enabled: true, read_only: true, path: `/actual-worker/${name}/SKILL.md` })) });
-    mocks.sendText.mockImplementation(
-      () =>
-        new Promise<void>((resolve, reject) => {
-          resolveSend = resolve;
-          rejectSend = reject;
-        }),
-    );
     mocks.setDraft.mockReset();
   });
 
@@ -78,10 +65,23 @@ describe("ChatSessionPage", () => {
     vi.restoreAllMocks();
   });
 
+  it.each(["saved", "unsaved"] as const)("selects attachments for a %s session reached via its Server conversation URL", async (kind) => {
+    if (kind === "unsaved") mocks.session = undefined;
+    mocks.realComposer = true;
+    apiMocks.files.mockReset().mockResolvedValue({ data: [], nextCursor: null });
+    apiMocks.draftFiles.mockReset().mockResolvedValue({ data: [], nextCursor: null });
+    renderSessionPage(kind === "unsaved");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose an existing file" }));
+
+    await waitFor(() => expect(apiMocks.files).toHaveBeenCalledWith({ limit: 100 }));
+  });
+
   it("keeps model and project changes local before the session exists", () => {
     mocks.session = undefined;
 
-    renderSessionPage();
+    renderSessionPage(true);
 
     expect(screen.getByTestId("chat-composer").getAttribute("data-disabled")).toBe("false");
     fireEvent.click(screen.getByRole("button", { name: "Model" }));
@@ -93,13 +93,12 @@ describe("ChatSessionPage", () => {
   it("keeps permission changes local before the session exists", async () => {
     mocks.session = undefined;
     mocks.sendTurn.mockResolvedValue(undefined);
+    apiMocks.reserved = true;
+    mocks.sessionError = new TalosApiError({ code: "resourceNotFound", message: "Not materialized.", localization: null });
 
     render(
       <MemoryRouter
-        initialEntries={[{
-          pathname: "/sessions/sess-1",
-          state: { initialPermissionMode: "askForApproval" },
-        }]}
+        initialEntries={["/sessions/sess-1"]}
       >
         <Routes>
           <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
@@ -111,7 +110,7 @@ describe("ChatSessionPage", () => {
       permissionMode?: string;
       permissionModeDisabled?: boolean;
     })).toMatchObject({
-      permissionMode: "askForApproval",
+      permissionMode: "fullAccess",
       permissionModeDisabled: false,
     });
 
@@ -154,10 +153,7 @@ describe("ChatSessionPage", () => {
     mocks.session = undefined;
     const view = render(
       <MemoryRouter
-        initialEntries={[{
-          pathname: "/sessions/sess-1",
-          state: { initialPermissionMode: "askForApproval" },
-        }]}
+        initialEntries={["/sessions/sess-1"]}
       >
         <Routes>
           <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
@@ -166,7 +162,7 @@ describe("ChatSessionPage", () => {
     );
 
     expect((mocks.composerProps as { permissionMode?: string }).permissionMode).toBe(
-      "askForApproval",
+      "fullAccess",
     );
 
     mocks.session = {
@@ -181,10 +177,7 @@ describe("ChatSessionPage", () => {
     };
     view.rerender(
       <MemoryRouter
-        initialEntries={[{
-          pathname: "/sessions/sess-1",
-          state: { initialPermissionMode: "askForApproval" },
-        }]}
+        initialEntries={["/sessions/sess-1"]}
       >
         <Routes>
           <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
@@ -211,89 +204,6 @@ describe("ChatSessionPage", () => {
     );
   });
 
-  it("keeps draft sessions sendable after the initial prompt fails", async () => {
-    mocks.session = undefined;
-    mocks.sessionHistoryError = new Error("session not found");
-    mocks.sessionHistoryIsSuccess = false;
-    mocks.sendTurn.mockResolvedValue(undefined);
-
-    render(
-      <MemoryRouter initialEntries={[{
-        pathname: "/sessions/sess-1",
-        state: { initialPrompt: "hello", initialPermissionMode: "approveForMe" },
-      }]}>
-        <Routes>
-          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    await waitFor(() => {
-      expect(mocks.sendText).toHaveBeenCalledWith("hello", {
-        modelSelection: undefined,
-        userPermissionMode: "approveForMe",
-        project: undefined,
-      });
-    });
-    expect(screen.queryByText("Session history failed to load.")).toBeNull();
-
-    await act(async () => {
-      rejectSend(new Error("first turn failed"));
-      await Promise.resolve();
-    });
-
-    await waitFor(() => expect(mocks.setDraft).toHaveBeenCalledWith("hello"));
-    expect(screen.getByTestId("chat-composer").getAttribute("data-disabled")).toBe("false");
-    expect(mocks.sendText).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-
-    await waitFor(() => expect(mocks.sendTurn).toHaveBeenCalledWith({
-      nodeId: "embedded",
-      modelSelection: {
-        modelRef: { provider: "mock", id: "model-1" },
-        reasoningEffort: "medium",
-      },
-      project: undefined,
-      userPermissionMode: "approveForMe",
-    }));
-  });
-
-  it("does not navigate back to the session after leaving while the initial prompt is running", async () => {
-    render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1", state: { initialPrompt: "hello" } }]}>
-        <Routes>
-          <Route
-            element={
-              <>
-                <NavigateAwayButton />
-                <ChatSessionPage />
-              </>
-            }
-            path="/sessions/:sessionId"
-          />
-          <Route element={<div>Settings page</div>} path="/settings" />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    await waitFor(() => {
-      expect(mocks.sendText).toHaveBeenCalledWith("hello", {
-        modelSelection: undefined,
-        project: undefined,
-      });
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    expect(screen.getByText("Settings page")).toBeTruthy();
-
-    await act(async () => {
-      resolveSend();
-      await Promise.resolve();
-    });
-
-    expect(screen.getByText("Settings page")).toBeTruthy();
-  });
-
   it("shows history errors instead of the empty ready state", () => {
     mocks.sessionHistoryError = new Error("history parse failed");
     mocks.sessionHistoryIsSuccess = false;
@@ -313,4 +223,4 @@ describe("ChatSessionPage", () => {
   });
 });
 
-vi.mock("@/features/computers", () => ({ useComputers: () => ({ selectedId: apiMocks.node, select: vi.fn() }), useProductScope: () => "test-scope", useComputer: () => ({ data: { available: true } }) }));
+vi.mock("@/features/computers", () => ({ useManagedWorkerStatus: () => ({ status: { data: { instance: apiMocks.reserved ? { nodeId: "embedded", conversationSessionId: "sess-1", phase: "ready" } : undefined } } }), useComputers: () => ({ selectedId: apiMocks.node, select: vi.fn() }), useProductScope: () => "test-scope", useComputer: () => ({ data: { available: true } }) }));

@@ -8,15 +8,18 @@ import {
 } from "./useComposerAttachments";
 
 interface ChatComposerAttachmentDraftOptions {
+  nodeId?: string;
   activeProjectId: string;
-  initialAttachments: FileInfo[];
   supportedKinds: ComposerAttachmentKind[];
+  initialFileIds?: string[];
+  onChange?: () => void;
 }
 
 export function useChatComposerAttachmentDraft({
+  nodeId,
   activeProjectId,
-  initialAttachments,
   supportedKinds,
+  initialFileIds, onChange,
 }: ChatComposerAttachmentDraftOptions) {
   const scope = useMemo(
     () =>
@@ -26,10 +29,11 @@ export function useChatComposerAttachmentDraft({
     [activeProjectId],
   );
   const draft = useComposerAttachments({
+    nodeId,
     scope,
     supportedKinds,
-    initialAttachments,
-  });
+    initialFileIds, onChange,
+    });
 
   function canSubmit(text: string): boolean {
     return (
@@ -53,7 +57,7 @@ export function useChatComposerAttachmentDraft({
 
   async function submit(
     text: string,
-    onSend: (attachments: FileInfo[]) => Promise<void> | void,
+    onSend: (attachments: Pick<FileInfo, "fileId">[]) => Promise<void> | void,
   ): Promise<void> {
     if (!canSubmit(text)) {
       return;

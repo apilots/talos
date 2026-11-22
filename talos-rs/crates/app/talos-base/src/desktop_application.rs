@@ -1,4 +1,5 @@
 //! Desktop identity and enrollment over the existing management runtime.
+use super::desktop_cloud::{CloudCall, DesktopCloud, SERVER_TICKET};
 use async_trait::async_trait;
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
@@ -26,7 +27,7 @@ pub(crate) struct DesktopApplication {
     pub(crate) device_name: String,
     pub(crate) worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     local: Arc<dyn AppServerApplication>,
-    cloud: tokio::sync::OnceCell<super::desktop_cloud::DesktopCloud>,
+    cloud: tokio::sync::OnceCell<DesktopCloud>,
     pub(crate) sync_host: Arc<crate::application_sync::ApplicationSyncHost>,
 }
 
@@ -56,6 +57,28 @@ impl DesktopApplication {
         }
     }
 
+    async fn cloud(&self) -> TalosResult<&DesktopCloud> {
+        self.cloud
+            .get_or_try_init(|| async { DesktopCloud::new(&self.config.cloud) })
+            .await
+    }
+
+    async fn open_viewer(
+        &self,
+        actor: &Actor,
+        ticket: String,
+        viewer: crate::desktop_media::Viewer,
+    ) -> TalosResult<()> {
+        let cloud = if ticket.starts_with(SERVER_TICKET) {
+            Some(self.cloud().await?)
+        } else {
+            None
+        };
+        self.media
+            .open(&self.service, cloud, actor, ticket, viewer)
+            .await
+    }
+
     pub(crate) async fn stop_registration(&self) -> TalosResult<()> {
         if let Some(worker) = self.worker.lock().await.take() {
             worker.shutdown().await?;
@@ -71,9 +94,7 @@ impl DesktopApplication {
         match request.params {
             ClientRequestParams::DesktopStreamOpen(params) => {
                 let viewer = self.media.reserve(actor, params.stream_id)?;
-                self.media
-                    .open(&self.service, actor, params.ticket, viewer)
-                    .await?;
+                self.open_viewer(actor, params.ticket, viewer).await?;
                 value(())
             }
             ClientRequestParams::DesktopStreamSend(params) => {
@@ -100,6 +121,9 @@ impl DesktopApplication {
         Ok(DesktopWorkerIdentityResponse {
             node_id: Some(self.sync_host.local_computer_id().await?),
             control_plane_endpoint: Some(self.config.cloud.agent_base_url.clone()),
+            control_plane_trusted_ca_pem: crate::desktop_worker::control_plane_trusted_ca_pem(
+                &self.config.cloud,
+            )?,
         })
     }
 }
@@ -118,8 +142,7 @@ impl AppServerApplication for DesktopApplication {
                     .reserve(&actor, params.stream_id)
                     .map_err(project_error);
                 Box::pin(async move {
-                    self.media
-                        .open(&self.service, &actor, params.ticket, viewer?)
+                    self.open_viewer(&actor, params.ticket, viewer?)
                         .await
                         .map_err(project_error)?;
                     Ok(ApplicationResponse {
@@ -153,18 +176,11 @@ impl AppServerApplication for DesktopApplication {
         actor: &Actor,
         request: ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
-        if let Some(call) =
-            super::desktop_cloud::CloudCall::for_request(actor, &request.params, &self.sync_host)
-                .await
-                .map_err(project_error)?
+        if let Some(call) = CloudCall::for_request(actor, &request.params, &self.sync_host)
+            .await
+            .map_err(project_error)?
         {
-            let cloud = self
-                .cloud
-                .get_or_try_init(|| async {
-                    super::desktop_cloud::DesktopCloud::new(&self.config.cloud)
-                })
-                .await
-                .map_err(project_error)?;
+            let cloud = self.cloud().await.map_err(project_error)?;
             return Ok(ApplicationResponse {
                 body: cloud.send(actor, call).await.map_err(project_error)?,
                 started_turn: None,
@@ -172,8 +188,12 @@ impl AppServerApplication for DesktopApplication {
         }
         if let ClientRequestParams::Browser(params) = &request.params {
             if matches!(params.operation, talos_types::BrowserOperation::OpenLocal) {
-                let identity = self.worker_identity().await.map_err(project_error)?;
-                if params.node_id.as_deref() != identity.node_id.as_deref() {
+                let local_node = self
+                    .sync_host
+                    .local_computer_id()
+                    .await
+                    .map_err(project_error)?;
+                if params.node_id.as_deref() != Some(local_node.as_str()) {
                     return Err(project_error(TalosError::localized(
                         talos_error::ErrorLocalization::BrowserCapabilityUnavailable {
                             operation: talos_error::BrowserCapabilityOperation::OpenLocal,

@@ -207,3 +207,18 @@ service's mapping schema. `relatedIdSource: resourceId` handles Computer
 self-association even if an old stored index was null; other associated
 resources use `storedIndex`. Record bodies remain opaque; typed Parser decoding
 checks protocol identity without reserializing optional defaults into old ops.
+
+### Session classification
+
+The public `SessionInfo` requires `sessionKind`. The Talos Parser assigns
+`standard` when retained native metadata predates that field. This application
+projection preserves the original replica operations, record bodies and Header
+mapping. Store import retains an already established `talo` classification while
+applying subsequent metadata and history for the same Worker/tree binding.
+
+Startup SQL Upgrade identifies managed ownership from registrations and deletion
+receipts. A known managed session with a canonical checkpoint receives one
+metadata-only source revision through the existing Store collector. The resulting
+increment publishes its `talo` classification to retained peers with unchanged
+history cursors. Classification is application metadata; Header continues to
+carry the existing identity and immutable Worker/tree bindings.

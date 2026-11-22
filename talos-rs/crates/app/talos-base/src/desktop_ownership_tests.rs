@@ -65,14 +65,27 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
     let fixture = DesktopFixture::with_auth(gateway_auth.clone(), Some(api)).await;
     let host = fixture.host("Saved Computer");
     fixture.login("user-1");
+    let owner = Actor::regular("user-1").with_access_token("user-1");
+    fixture
+        .runtime
+        .sync_host
+        .refresh_computer_directory(&owner)
+        .await
+        .unwrap();
     let registered = host
         .enroll_worker(None, None)
         .await
         .unwrap()
         .node_id
         .unwrap();
+    let view = fixture
+        .runtime
+        .sync_host
+        .computer_view(&owner, fixture.registered(&registered).await)
+        .await
+        .expect("first enrollment must be visible before the next directory refresh");
+    assert_eq!(view.node_id, registered);
     host.stop_registration().await.unwrap();
-    let owner = Actor::regular("user-1").with_access_token("user-1");
     let identity = fixture
         .runtime
         .sync_host
@@ -283,4 +296,103 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
     cloud.abort();
+}
+
+#[tokio::test]
+async fn offline_desktop_reads_an_ordinary_workers_stored_session() {
+    use serde_json::json;
+    use talos_app_protocol::requests::ClientRequest;
+    use talos_app_server::AppServerApplication;
+
+    let fixture = DesktopFixture::new().await;
+    let mut record = session_record();
+    record.conf.model_selection =
+        Some(talos_types::resolve_default_model_selection(&fixture.config.llm).unwrap());
+    fixture
+        .runtime
+        .session_store
+        .insert_session_record(&record)
+        .await
+        .unwrap();
+    let actor = Actor::regular(&record.user_id)
+        .with_user_type(UserType::Max)
+        .with_access_token("offline");
+    let mut host = fixture.host("Offline Desktop");
+    host.config.cloud.agent_base_url = "file:///unavailable-control-plane".into();
+
+    let request =
+        ClientRequest::decode("session/get", Some(json!({"sessionId":record.id}))).unwrap();
+    let response = host.dispatch(&actor, request).await.unwrap();
+    assert_eq!(response.body["session"]["nodeId"], record.execution_node_id);
+    let history =
+        ClientRequest::decode("session/history", Some(json!({"sessionId":record.id}))).unwrap();
+    assert_eq!(
+        host.dispatch(&actor, history).await.unwrap().body["data"],
+        json!([])
+    );
+
+    let recovery =
+        ClientRequest::decode("timeline/recover", Some(json!({"sessionId":record.id}))).unwrap();
+    let replay = host.dispatch(&actor, recovery).await.unwrap().body;
+    assert_eq!(replay["replay"]["events"], json!([]));
+
+    let mut subscription = host
+        .subscribe_timeline_events(
+            &actor,
+            serde_json::from_value(json!({
+                "sessionId":record.id, "closeWhenIdle":true
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(subscription.events.recv().await, Some(talos_service::TimelineSubscriptionMessage::Closed(closed)) if closed.reason == talos_service::TimelineSubscriptionCloseReason::Completed)
+    );
+
+    let upload = ClientRequest::decode("file/upload", Some(json!({
+        "request":{"filename":"offline.png","scope":{"type":"personal"},"tags":[],"metadata":{}},
+        "dataBase64":"iVBORw0KGgo="
+    }))).unwrap();
+    let file = &host.dispatch(&actor, upload).await.unwrap().body["file"];
+    let list = ClientRequest::decode("file/list", Some(json!({}))).unwrap();
+    assert_eq!(
+        host.dispatch(&actor, list).await.unwrap().body["data"],
+        json!([file])
+    );
+    let params = json!({"fileId":file["fileId"]});
+    let read = ClientRequest::decode("file/read", Some(params.clone())).unwrap();
+    assert_eq!(
+        host.dispatch(&actor, read).await.unwrap().body["file"],
+        *file
+    );
+    let content = ClientRequest::decode("file/content", Some(params)).unwrap();
+    assert_eq!(
+        host.dispatch(&actor, content).await.unwrap().body["dataBase64"],
+        "iVBORw0KGgo="
+    );
+
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn stdio_reports_the_attached_runtime_managed_worker_capability() {
+    use serde_json::json;
+    use talos_app_protocol::requests::ClientRequest;
+    use talos_app_server::AppServerApplication;
+
+    let fixture = DesktopFixture::new().await;
+    let mut host = fixture.host("Desktop");
+    host.config.cloud.agent_base_url = "file:///unavailable-control-plane".into();
+    let actor = Actor::regular("owner")
+        .with_user_type(UserType::Max)
+        .with_access_token("owner");
+    let status = ClientRequest::decode("computer/readManagedWorker", None).unwrap();
+    assert_eq!(
+        host.dispatch(&actor, status).await.unwrap().body,
+        json!({"enabled": false, "instance": null})
+    );
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
 }

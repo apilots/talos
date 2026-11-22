@@ -22,6 +22,7 @@ uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
+reqwest-websocket = "0.5.1"
 talos-app-protocol = { workspace = true }
 futures-util = { workspace = true }
 async-trait = { workspace = true }

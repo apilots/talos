@@ -383,3 +383,5 @@ export type {
   WorkerRuntimeProfile,
   WorkerRuntimeSettingsResponse,
 } from "./generated/app-protocol";
+
+export type SessionKind = import("./generated/app-protocol").SessionInfo["sessionKind"];

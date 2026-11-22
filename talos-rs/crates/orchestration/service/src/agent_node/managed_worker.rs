@@ -5,7 +5,7 @@ mod reconcile;
 
 #[path = "managed_worker/access.rs"]
 mod access;
-use access::{ensure_managed_worker_actor, ManagedCaller};
+use access::ManagedCaller;
 
 #[cfg(test)]
 #[path = "managed_worker/access_tests.rs"]
@@ -124,7 +124,7 @@ impl AgentNodeService {
 
     /// Reads the single lifecycle record scoped to the signed-in account.
     pub async fn read_managed_worker(&self, actor: &Actor) -> TalosResult<ManagedWorkerResponse> {
-        ensure_managed_worker_actor(actor)?;
+        actor.ensure_managed_worker_access()?;
         let instance = match self.store.managed_worker(&actor.user_id).await? {
             Some(record) => Some(self.managed_worker_info(&record).await?),
             None => None,
@@ -137,7 +137,7 @@ impl AgentNodeService {
 
     /// Reserves the original node and Home identity atomically before any host action.
     pub async fn create_managed_worker(&self, actor: &Actor) -> TalosResult<ManagedWorkerInfo> {
-        ensure_managed_worker_actor(actor)?;
+        actor.ensure_managed_worker_access()?;
         let managed = self.managed_runtime()?;
         let _intent = self.lock_managed_intent(&actor.user_id).await;
         let pending = self.managed_runtime_update.lock().await;
@@ -207,7 +207,7 @@ impl AgentNodeService {
         actor: &Actor,
         request: DeleteManagedWorkerRequest,
     ) -> TalosResult<ManagedWorkerInfo> {
-        ensure_managed_worker_actor(actor)?;
+        actor.ensure_managed_worker_access()?;
         if !request.confirm_data_loss {
             return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
@@ -231,7 +231,7 @@ impl AgentNodeService {
         request: ManagedWorkerActionRequest,
         action: Action,
     ) -> TalosResult<ManagedWorkerInfo> {
-        ensure_managed_worker_actor(actor)?;
+        actor.ensure_managed_worker_access()?;
         let service = self.clone();
         let actor = actor.clone();
         // Once remote admission is changed, the commit or rollback must survive
@@ -490,7 +490,7 @@ impl AgentNodeService {
         let Some(record) = self.store.managed_worker_by_node(node_id).await? else {
             return Ok(None);
         };
-        ensure_managed_worker_actor(actor)?;
+        actor.ensure_managed_worker_access()?;
         ensure_owner(&record, &actor.user_id)?;
         let generation = self
             .wait_managed_worker(

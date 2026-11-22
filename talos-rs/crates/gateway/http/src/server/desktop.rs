@@ -7,7 +7,7 @@ use super::{
 use axum::{
     extract::{
         ws::{Message, WebSocketUpgrade},
-        State,
+        Query, State,
     },
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -41,8 +41,15 @@ pub(super) async fn open(
     )
         .into_response())
 }
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ViewerQuery {
+    stream_id: Option<String>,
+}
+
 pub(super) async fn stream(
     State(state): State<Arc<HttpApiState>>,
+    Query(query): Query<ViewerQuery>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<Response, StatusCode> {
@@ -58,7 +65,7 @@ pub(super) async fn stream(
                 if text.len()>8192 {return Err(denied());}
                 let ticket:Ticket=serde_json::from_str(&text).map_err(|_|denied())?;
                 let identity=stream_identity(&state,ticket.access_token.as_deref())?;
-                let mut media=state.app.consume_desktop_ticket(&shared_actor(&identity),ticket.ticket,None).await?;
+                let mut media=state.app.consume_desktop_ticket(&shared_actor(&identity),ticket.ticket,query.stream_id.as_deref()).await?;
                 loop {
                     tokio::select! {
                         _=media.stopped.cancelled()=>break,

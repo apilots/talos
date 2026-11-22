@@ -22,6 +22,7 @@ async fn reset_fixture() -> (
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     store
         .insert_session_record(&SessionRecord {
+            session_kind: talos_types::SessionKind::Standard,
             id: "session-1".into(),
             agent_id: "default".into(),
             execution_node_id: "embedded".into(),

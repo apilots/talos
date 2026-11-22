@@ -5,6 +5,7 @@ import { Bot, Check, Circle, Ellipsis, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useCanUseTalo } from "@/features/auth";
+import { managedWorkerKey } from "@/shared/api/product-queries";
 import { getTalosClient } from "@/shared/api/client";
 import { apiErrorMessage, userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useAppStore } from "@/shared/store/app-store";
@@ -30,12 +31,12 @@ type Confirmation = { kind: "reset" | "delete"; instance: AppProtocol.ManagedWor
 export function useManagedWorkerStatus(enabled = true) {
   const scope = useProductScope();
   const canUseTalo = useCanUseTalo();
-  const queryKey = ["talos", scope, "managed-worker"];
+  const queryKey = managedWorkerKey(scope);
   const poll = useRef<{ instanceId: string; generation: number; until: number } | null>(null);
   const status = useQuery({
     enabled: enabled && canUseTalo,
     queryKey,
-    queryFn: () => getTalosClient().computers.readManagedWorker(),
+    queryFn: async () => (await getTalosClient({ service: "server" })).computers.readManagedWorker(),
     retry: false,
     refetchInterval: (query) => {
       const instance = query.state.data?.instance;
@@ -89,7 +90,7 @@ function AuthorizedTaloPanel({ desktopNodeId, desktopButton = false }: TaloPanel
   const action = useMutation({
     mutationFn: async ({ kind, current }: { kind: Action; current: typeof instance }) => {
       if (scope !== connectionScope(useAppStore.getState().connection)) throw new Error(t("computers:talo.actionError"));
-      const client = getTalosClient().computers;
+      const client = (await getTalosClient({ service: "server" })).computers;
       if (kind === "create") return client.createManagedWorker();
       if (!current) throw new Error(t("computers:talo.actionError"));
       const params = { instanceId: current.instanceId, expectedGeneration: current.generation };

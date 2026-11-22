@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useProductScope } from "@/features/computers";
 import { getTalosClient } from "@/shared/api/client";
-import type { AutomationMode, ModelListResponse, ModelRef, SessionInfo } from "@talos/sdk-browser";
+import type { ModelListResponse, ModelRef, SessionInfo } from "@talos/sdk-browser";
 
 import {
   modelInfoForRef,
@@ -23,46 +23,39 @@ import {
 } from "@/features/chat";
 import { UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import type { ReasoningLevel } from "@/shared/types/ui";
-import type { SessionLocationState } from "./chatSessionLocation";
 import { useSessionCommands } from "./useSessionCommands";
 import { useSessionPermissionMode } from "./useSessionPermissionMode";
 import { useSelectedSessionProject } from "./useSelectedSessionProject";
 
 interface UseChatSessionComposerOptions {
   chat: ReturnType<typeof useChatSession>;
-  locationState: SessionLocationState | null;
   modelCatalog?: ModelListResponse;
   projectsView: ReturnType<typeof useProjectsView>;
   session?: SessionInfo;
   sessionId: string;
   nodeId?: string;
-  sleepingTalo: boolean;
+  managedTalo: boolean;
+  canSend: boolean;
+  stageOfflineAttachments: boolean;
   taloConversation?: boolean;
-  restoredAutomationMode?: AutomationMode;
-  onRestoredAutomationModeConsumed?: () => void;
 }
 
 /** Owns session-specific model, project, permission, and command wiring for the Composer. */
 export function useChatSessionComposer({
   chat,
-  locationState,
   modelCatalog,
   projectsView,
   session,
   sessionId,
   nodeId,
-  sleepingTalo,
+  managedTalo,
+  canSend,
+  stageOfflineAttachments,
   taloConversation = false,
-  restoredAutomationMode,
-  onRestoredAutomationModeConsumed,
 }: UseChatSessionComposerOptions) {
-  const [draftModel, setDraftModel] = useState<ModelRef | undefined>(locationState?.initialModel);
-  const [draftReasoningLevel, setDraftReasoningLevel] = useState<ReasoningLevel | undefined>(
-    locationState?.initialReasoningLevel,
-  );
-  const [draftProjectId, setDraftProjectId] = useState<string | undefined>(
-    locationState?.initialProjectId,
-  );
+  const [draftModel, setDraftModel] = useState<ModelRef>();
+  const [draftReasoningLevel, setDraftReasoningLevel] = useState<ReasoningLevel>();
+  const [draftProjectId, setDraftProjectId] = useState<string>();
   const { mutate: updateSessionModel } = useUpdateSessionModelMutation(sessionId);
   const activeSessionModelSelection = useConfiguredSessionModelSelection({
     catalog: modelCatalog,
@@ -83,7 +76,6 @@ export function useChatSessionComposer({
         : reasoningLevelForEffort(modelCatalog?.defaultModelSelection.reasoningEffort ?? null));
   const permissionMode = useSessionPermissionMode({
     blocked: Boolean(chat.isStreaming || chat.pendingUserAction),
-    initialMode: locationState?.initialPermissionMode,
     persistedMode: session?.effectiveMode,
     sessionExists: Boolean(session),
     sessionId,
@@ -109,17 +101,21 @@ export function useChatSessionComposer({
   const scope = useProductScope();
   const owner = JSON.stringify([scope, sessionId, session?.nodeId ?? nodeId]);
   const ownerRef = useRef<string | undefined>(owner);
-  ownerRef.current = owner;
-  useEffect(() => { ownerRef.current = owner; return () => { ownerRef.current = undefined; }; }, [owner]);
+  ownerRef.current = canSend ? owner : undefined;
+  useEffect(() => {
+    ownerRef.current = canSend ? owner : undefined;
+    return () => { ownerRef.current = undefined; };
+  }, [canSend, owner]);
   const initialCommands = useQuery({ queryKey: ["talos", scope, "automation-commands"],
-    queryFn: () => getTalosClient().automation.commandCatalog({}),
+    queryFn: async () => (await getTalosClient({ nodeId })).automation.commandCatalog({}),
     enabled: !session && Boolean(nodeId), staleTime: Infinity });
 
   const props: ChatComposerProps = {
+    nodeId,
+    disabled: !canSend,
+    attachmentsDisabled: !canSend && !stageOfflineAttachments,
     automation: session ? automation : undefined,
-    initialAutomationMode: restoredAutomationMode,
-    onRestoredAutomationModeConsumed,
-    automationCommands: session ? automation.commands : initialCommands.data?.data,
+      automationCommands: session ? automation.commands : initialCommands.data?.data,
     activeProjectId: selectedProjectId,
     commandResponse: sessionCommands.response,
     commandStatus: {
@@ -131,7 +127,6 @@ export function useChatSessionComposer({
     },
     contextUsage: session?.usage?.context,
     draft: chat.draft,
-    initialAttachments: locationState?.initialAttachments,
     inputHistory: chat.inputHistory,
     isCancelling: chat.isCancelling,
     isStreaming: chat.isStreaming,
@@ -201,8 +196,9 @@ export function useChatSessionComposer({
       }
     },
     onSend: async (attachments, mode) => {
+      if (ownerRef.current !== owner) throw new DOMException("The message could not be sent.", "AbortError");
       const text = chat.draft;
-      const prepared = await prepareAutomationMessage(text, mode, session?.nodeId ?? nodeId, sleepingTalo);
+      const prepared = await prepareAutomationMessage(text, mode, nodeId, managedTalo);
       if (ownerRef.current !== owner) throw new DOMException("The message could not be sent.", "AbortError");
       if (prepared.kind === "management") {
         if (!session) throw automationRequestError("chatRequired");
@@ -224,7 +220,9 @@ export function useChatSessionComposer({
           userPermissionMode: permissionMode.value,
           ...fileOptions,
         };
-        return prepared.prompt !== text ? chat.sendTurn(options, prepared.prompt) : chat.sendTurn(options);
+        if (prepared.prompt !== text) await chat.sendTurn(options, prepared.prompt);
+        else await chat.sendTurn(options);
+        return;
       }
       return prepared.prompt !== text
         ? chat.sendTurn(fileOptions, prepared.prompt)
@@ -237,7 +235,8 @@ export function useChatSessionComposer({
     selectedModel: currentModel,
     sessionTotalTokens: session?.usage?.tokens.total_tokens,
     showProjectSelector: false,
-    supportedAttachmentKinds: supportedAttachmentKinds(currentModelInfo),
+    // Staged files are checked against the selected model again before sending.
+    supportedAttachmentKinds: stageOfflineAttachments && !modelCatalog ? ["image", "file"] : supportedAttachmentKinds(currentModelInfo),
   };
 
   return {

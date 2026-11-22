@@ -34,13 +34,15 @@ export interface MessageQueueController {
 }
 
 export interface ChatComposerProps {
+  nodeId?: string;
   draft: string;
-  initialAutomationMode?: import("@talos/sdk-browser").AutomationMode;
-  onRestoredAutomationModeConsumed?: () => void;
+  initialFileIds?: string[];
+  initialMode?: import("@talos/sdk-browser").AutomationMode;
+  onInputChange?: () => void;
   automationCommands?: import("@talos/sdk-browser").AppProtocol.AutomationCommandDescriptor[];
   onDraftChange: (value: string) => void;
   automation?: import("@/features/automation/useSessionAutomation").SessionAutomationController;
-  onSend: (attachments: FileInfo[], mode?: import("@talos/sdk-browser").AutomationMode) => Promise<void> | void;
+  onSend: (attachments: Pick<FileInfo, "fileId">[], mode?: import("@talos/sdk-browser").AutomationMode) => Promise<void> | void;
   onCommand?: (command: ComposerSessionCommandId) => Promise<void> | void;
   commandResponse?: ComposerCommandResponseState;
   commandStatus?: ComposerStatusSnapshot;
@@ -48,6 +50,7 @@ export interface ChatComposerProps {
   onCancel?: () => void;
   inputHistory?: SessionInputHistory;
   disabled?: boolean;
+  attachmentsDisabled?: boolean;
   permissionMode?: UserPermissionMode;
   permissionModeDisabled?: boolean;
   onPermissionModeChange?: (mode: UserPermissionMode) => void;
@@ -66,7 +69,6 @@ export interface ChatComposerProps {
   onReasoningLevelChange?: (level: ReasoningLevel) => void;
   showProjectSelector?: boolean;
   compact?: boolean;
-  initialAttachments?: FileInfo[];
   supportedAttachmentKinds?: ComposerAttachmentKind[];
   messageQueue?: MessageQueueController;
 }

@@ -193,6 +193,7 @@ impl ApplicationSyncHost {
             binding,
             Arc::new(move |record| {
                 Ok(talos_types::SessionInfo {
+                    session_kind: record.session_kind,
                     node_id: record.execution_node_id.clone(),
                     id: record.id.clone(),
                     title: record.title.clone(),

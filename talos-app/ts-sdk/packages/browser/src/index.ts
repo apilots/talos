@@ -3,6 +3,7 @@ import {
   fetchEventSource,
 } from "@microsoft/fetch-event-source";
 import {
+  AppProtocol,
   TalosClient,
   TalosApiError,
   type HttpAdapter,
@@ -22,48 +23,118 @@ export * from "@talos/sdk-core";
 export interface BrowserClientOptions {
   baseUrl: string;
   getToken?: () => string | null | undefined;
+  /** Signed-in actor to verify when a restarted Server requires admission. */
+  getUserId?: () => string | null | undefined;
+  /** Use the same host transport for JSON, multipart uploads and event streams. */
+  fetch?: typeof globalThis.fetch;
 }
 
-class BrowserHttpAdapter implements HttpAdapter {
-  constructor(private readonly getToken?: () => string | null | undefined) {}
+type HttpResponse = Pick<Response, "ok" | "status" | "statusText" | "text">;
 
-  async request<T>(url: string, options?: HttpRequestOptions): Promise<T> {
-    const token = this.getToken?.();
-    const isMultipart = options?.body instanceof FormData;
-    if (isMultipart && options?.onUploadProgress) {
-      return xhrRequest(url, options, token);
-    }
-    const response = await fetch(url, {
-      method: options?.method ?? "GET",
-      signal: options?.signal,
-      headers: {
-        ...(!isMultipart ? { "Content-Type": "application/json" } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(options?.headers ?? {}),
-      },
-      body: options?.body,
+async function readJson<T>(response: HttpResponse, url: string, method: string): Promise<T> {
+  const body = await response.text();
+  if (!response.ok) {
+    throw httpFailure({ method, status: response.status, statusText: response.statusText, body, url });
+  }
+  return unwrapTalosApiResponse<T>(parseTalosJson(body));
+}
+
+/** Bind one operation, including visibility reconnects, to its original credentials. */
+class BrowserServerSession {
+  readonly token: string | null | undefined;
+  private readonly userId: string | null | undefined;
+  private readonly userUrl: string;
+  private readonly fetchServer: typeof globalThis.fetch;
+
+  constructor(private readonly options: BrowserClientOptions) {
+    this.token = options.getToken?.();
+    this.userId = options.getUserId?.();
+    this.userUrl = options.baseUrl.replace(/\/$/, "") + "/v1/user";
+    this.fetchServer = options.fetch ?? globalThis.fetch.bind(globalThis);
+  }
+
+  fetch(url: string, init: RequestInit, onUploadProgress?: HttpRequestOptions["onUploadProgress"]) {
+    return this.withBootstrap(url, init.signal, () => this.fetchServer(url, {
+      ...(init.body instanceof FormData && onUploadProgress ? uploadRequest(url, init, onUploadProgress) : init),
+      redirect: "error",
+    }));
+  }
+
+  async withBootstrap<T extends HttpResponse>(url: string, signal: AbortSignal | null | undefined, send: () => Promise<T>): Promise<T> {
+    this.assertSameActor();
+    const response = await send();
+    if (response.status !== 401 || !this.token || !this.userId || url === this.userUrl) return response;
+
+    await response.text();
+    this.assertSameActor();
+    const bootstrap = await this.fetchServer(this.userUrl, {
+      method: "GET", headers: { Authorization: `Bearer ${this.token}` }, signal, redirect: "error",
     });
+    const identity = await readJson<AppProtocol.UserCurrentResponse>(bootstrap, this.userUrl, "GET");
+    this.assertSameActor(identity?.user?.user_id === this.userId);
+    return send();
+  }
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw httpFailure({
-        method: options?.method ?? "GET",
-        status: response.status,
-        statusText: response.statusText,
-        body,
-        url,
-      });
+  private assertSameActor(matches = true) {
+    if (!matches || this.options.getToken?.() !== this.token || this.options.getUserId?.() !== this.userId) {
+      throw new TalosApiError({ code: AppProtocol.ErrorCode.PermissionDenied, message: "The signed-in account has changed.", localization: null });
     }
-
-    return unwrapTalosApiResponse<T>(parseTalosJson(await response.text()));
   }
 }
 
-function xhrRequest<T>(
+class BrowserHttpAdapter implements HttpAdapter {
+  constructor(private readonly options: BrowserClientOptions) {}
+
+  async request<T>(url: string, options?: HttpRequestOptions): Promise<T> {
+    const session = new BrowserServerSession(this.options);
+    const isMultipart = options?.body instanceof FormData;
+    const method = options?.method ?? "GET";
+    const response = isMultipart && options?.onUploadProgress && !this.options.fetch
+      ? await session.withBootstrap(url, options.signal, () => xhrRequest(url, options, session.token))
+      : await session.fetch(url, {
+        method, signal: options?.signal,
+        headers: {
+          ...(!isMultipart ? { "Content-Type": "application/json" } : {}),
+          ...(session.token ? { Authorization: `Bearer ${session.token}` } : {}),
+          ...(options?.headers ?? {}),
+        },
+        body: options?.body,
+      }, options?.onUploadProgress);
+    return readJson<T>(response, url, method);
+  }
+}
+
+/** Count encoded multipart bytes as the selected transport consumes them, without buffering the upload. */
+function uploadRequest(url: string, init: RequestInit, onProgress: NonNullable<HttpRequestOptions["onUploadProgress"]>) {
+  const request = new Request(url, init);
+  const reader = request.body!.getReader();
+  let loadedBytes = 0;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { value, done } = await reader.read();
+        if (done) {
+          controller.close();
+          onProgress({ loadedBytes, totalBytes: loadedBytes });
+        } else {
+          loadedBytes += value.byteLength;
+          controller.enqueue(value);
+          onProgress({ loadedBytes, totalBytes: null });
+        }
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel: reason => reader.cancel(reason),
+  }, { highWaterMark: 0 });
+  return { ...init, headers: request.headers, body, duplex: "half" as const };
+}
+
+function xhrRequest(
   url: string,
   options: HttpRequestOptions,
   token: string | null | undefined,
-): Promise<T> {
+): Promise<HttpResponse> {
   return new Promise((resolve, reject) => {
     const method = options.method ?? "GET";
     const xhr = new XMLHttpRequest();
@@ -88,23 +159,12 @@ function xhrRequest<T>(
       });
     };
     xhr.onload = () => {
-      finish(() => {
-        if (xhr.status < 200 || xhr.status >= 300) {
-          reject(httpFailure({
-            method,
-            status: xhr.status,
-            statusText: xhr.statusText,
-            body: xhr.responseText,
-            url,
-          }));
-          return;
-        }
-        try {
-          resolve(unwrapTalosApiResponse<T>(parseTalosJson(xhr.responseText)));
-        } catch (error) {
-          reject(error);
-        }
-      });
+      finish(() => resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        statusText: xhr.statusText,
+        text: async () => xhr.responseText,
+      }));
     };
     xhr.onerror = () => finish(() => reject(new TypeError("Network request failed.")));
     xhr.onabort = () =>
@@ -125,7 +185,7 @@ function abortError(signal: AbortSignal): Error {
 }
 
 class BrowserStreamAdapter implements StreamAdapter {
-  constructor(private readonly getToken?: () => string | null | undefined) {}
+  constructor(private readonly options: BrowserClientOptions) {}
 
   async stream(
     url: string,
@@ -133,15 +193,22 @@ class BrowserStreamAdapter implements StreamAdapter {
     onMessage: (data: string, event?: string) => void,
     onError?: (error: Error) => void,
   ): Promise<void> {
-    const token = this.getToken?.();
+    const session = new BrowserServerSession(this.options);
     try {
       await fetchEventSource(url, {
+        fetch: (_input, init) => {
+          const requestUrl = new URL(url);
+          const lastEventId = new Headers(init?.headers).get("last-event-id");
+          // The gateway prefers the query cursor over Last-Event-ID on reconnect.
+          if (lastEventId) requestUrl.searchParams.set("after_event_id", lastEventId);
+          return session.fetch(requestUrl.toString(), init ?? {});
+        },
         method: options.method ?? "GET",
         body: options.body,
         signal: options.signal,
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(session.token ? { Authorization: `Bearer ${session.token}` } : {}),
           ...(options.headers ?? {}),
         },
         async onopen(response) {
@@ -178,8 +245,8 @@ class BrowserStreamAdapter implements StreamAdapter {
 
 export function createBrowserTalosClient(options: BrowserClientOptions) {
   return new TalosClient(
-    new BrowserHttpAdapter(options.getToken),
-    new BrowserStreamAdapter(options.getToken),
+    new BrowserHttpAdapter(options),
+    new BrowserStreamAdapter(options),
     options.baseUrl,
     new BrowserDesktopStreamAdapter(options),
   );

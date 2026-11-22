@@ -24,6 +24,17 @@ pub(crate) struct WorkerEnrollment<'a> {
     pub worker_failures: &'a tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
 }
 
+pub(super) fn control_plane_trusted_ca_pem(
+    config: &talos_config::CloudConfig,
+) -> TalosResult<Option<String>> {
+    talos_service::read_worker_trusted_ca(config.agent_trusted_ca_file.as_deref())?
+        .map(String::from_utf8)
+        .transpose()
+        .map_err(|error| {
+            TalosError::internal_with_source("Encode control-plane CA certificates.", error)
+        })
+}
+
 impl DesktopApplication {
     pub(crate) async fn enroll_worker(
         &self,
@@ -169,6 +180,7 @@ impl WorkerEnrollment<'_> {
         Ok(DesktopWorkerIdentityResponse {
             node_id: Some(runner.node_id),
             control_plane_endpoint: Some(runner.control_plane_endpoint),
+            control_plane_trusted_ca_pem: control_plane_trusted_ca_pem(&config.cloud)?,
         })
     }
 
@@ -279,6 +291,7 @@ impl WorkerEnrollment<'_> {
         let central = config.agent_node.control_plane.is_some();
         let direct_endpoint = central.then(|| endpoint.clone());
         let mut transport_changed = false;
+        let directory_started = std::time::Instant::now();
         let client = enrollment_gateway(&config, existing.as_ref()).await?;
         let expires_at = CloudSessionCache::now_ms() / 1000 + CREDENTIAL_LIFETIME_SECONDS;
         let node_id = recover_node_id
@@ -419,6 +432,19 @@ impl WorkerEnrollment<'_> {
                 )
             })?;
             self.store.save_node_identity(&runner, token.trim())?;
+        }
+        if !central {
+            self.sync_host
+                .cache_confirmed_computer(
+                    &talos_service::Actor::regular(&actor.user_id)
+                        .with_role(actor.role)
+                        .with_user_type(actor.user_type)
+                        .with_access_token(token),
+                    &node.node_id,
+                    &node,
+                    directory_started,
+                )
+                .await?;
         }
         config.agent_node.runner = Some(runner);
         Ok(config)
