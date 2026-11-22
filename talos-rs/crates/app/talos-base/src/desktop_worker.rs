@@ -291,6 +291,7 @@ impl WorkerEnrollment<'_> {
         let central = config.agent_node.control_plane.is_some();
         let direct_endpoint = central.then(|| endpoint.clone());
         let mut transport_changed = false;
+        let directory_started = std::time::Instant::now();
         let client = enrollment_gateway(&config, existing.as_ref()).await?;
         let expires_at = CloudSessionCache::now_ms() / 1000 + CREDENTIAL_LIFETIME_SECONDS;
         let node_id = recover_node_id
@@ -431,6 +432,19 @@ impl WorkerEnrollment<'_> {
                 )
             })?;
             self.store.save_node_identity(&runner, token.trim())?;
+        }
+        if !central {
+            self.sync_host
+                .cache_confirmed_computer(
+                    &talos_service::Actor::regular(&actor.user_id)
+                        .with_role(actor.role)
+                        .with_user_type(actor.user_type)
+                        .with_access_token(token),
+                    &node.node_id,
+                    &node,
+                    directory_started,
+                )
+                .await?;
         }
         config.agent_node.runner = Some(runner);
         Ok(config)

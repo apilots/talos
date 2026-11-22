@@ -65,14 +65,27 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
     let fixture = DesktopFixture::with_auth(gateway_auth.clone(), Some(api)).await;
     let host = fixture.host("Saved Computer");
     fixture.login("user-1");
+    let owner = Actor::regular("user-1").with_access_token("user-1");
+    fixture
+        .runtime
+        .sync_host
+        .refresh_computer_directory(&owner)
+        .await
+        .unwrap();
     let registered = host
         .enroll_worker(None, None)
         .await
         .unwrap()
         .node_id
         .unwrap();
+    let view = fixture
+        .runtime
+        .sync_host
+        .computer_view(&owner, fixture.registered(&registered).await)
+        .await
+        .expect("first enrollment must be visible before the next directory refresh");
+    assert_eq!(view.node_id, registered);
     host.stop_registration().await.unwrap();
-    let owner = Actor::regular("user-1").with_access_token("user-1");
     let identity = fixture
         .runtime
         .sync_host

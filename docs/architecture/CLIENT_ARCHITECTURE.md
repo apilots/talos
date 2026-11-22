@@ -60,6 +60,8 @@ JSON-RPC stdio. Its bundled
 app-server retains Service, Store, Coordinator and one `TalosWorker`. Verified
 login enrolls or restores this same Worker's personal UUID through the central
 Server. Registration does not replace the management runtime or its data.
+After persisting the Worker credential, Desktop publishes the Server-confirmed
+registration through the existing Computer directory before exposing its UUID.
 Rust stdio and embedded clients initialize the existing host registration lifecycle
 after verified login or cached-session restoration, including when Sync is disabled.
 Remote dispatch stays inside `agent-client`; credentials never reach the renderer.
