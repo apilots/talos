@@ -346,6 +346,8 @@
 .cmp-device {
   left: 56%;
   width: 39%;
+  height: 140px;
+  padding-bottom: 80px;
 }
 .cmp-device.is-selected,
 .cmp-service.is-selected {
@@ -355,9 +357,6 @@
 .cmp-device:not(.is-selected):hover,
 .cmp-service:not(.is-selected):hover {
   border-color: rgb(var(--color-muted) / 0.6);
-}
-.cmp-device.is-dimmed {
-  opacity: 0.45;
 }
 .cmp-dot {
   display: inline-block;
@@ -651,4 +650,33 @@
 .cmp-flow-buttons button:not([aria-pressed="true"]):hover {
   color: rgb(var(--color-ink));
   background: rgb(var(--color-hover) / var(--hover-opacity));
+}
+
+/* Shared durable download and upload facts stay separate from activity. */
+.cmp-sync-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.cmp-sync-progress {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 12px;
+  row-gap: 2px;
+  color: rgb(var(--color-muted));
+}
+.cmp-peer-details > .cmp-sync-summary {
+  margin-bottom: 12px;
+}
+.cmp-device footer {
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+}
+.cmp-device .cmp-sync-progress {
+  flex-direction: column;
+  gap: 1px;
 }

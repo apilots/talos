@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { AppProtocol } from "@talos/sdk-core";
 import { controlPlanePeer, controlPlaneSyncState, type ComputerService } from "./observations";
-import { SyncTopologyState } from "./sync-state";
+import { observationsFresh, SyncTopologyState } from "./sync-state";
 import { SyncPeerDetails } from "./SyncPeerDetails";
 
 export function ComputerServiceDetails({
@@ -19,6 +19,7 @@ export function ComputerServiceDetails({
 }) {
   const { t, i18n } = useTranslation("computers");
   const peer = controlPlanePeer(metrics);
+  const currentMetrics = observationsFresh(metrics) ? metrics : undefined;
   const syncDisabled = controlPlaneSyncState(metrics, syncStatus) === SyncTopologyState.Disabled;
   return (
     <>
@@ -68,27 +69,27 @@ export function ComputerServiceDetails({
             {t("resourceCounts")}
           </h3>
           <dl className="cmp-facts">
-            {(["computers", "projects", "sessions", "files"] as const).map(
+            {(["projects", "sessions", "files"] as const).map(
               (key) => (
                 <div key={key}>
                   <dt>{t(`sync${key[0].toUpperCase()}${key.slice(1)}`)}</dt>
                   <dd>
-                    {metrics?.metadata[key].toLocaleString(i18n.language) ??
+                    {currentMetrics?.metadata[key].toLocaleString(i18n.language) ??
                       "—"}
                   </dd>
                 </div>
               ),
             )}
           </dl>
-          {metrics ? (
+          {currentMetrics ? (
             <p className="cmp-footnote">
-              {t("peersWithCount", { count: metrics.peers.length })}
+              {t("peersWithCount", { count: currentMetrics.peers.length })}
             </p>
           ) : null}
-          {metrics ? (
+          {currentMetrics ? (
             <p className="cmp-footnote">
               {t("unmappedPeers", {
-                count: metrics.peers.filter(
+                count: currentMetrics.peers.filter(
                   (value) => value.computerIds.length === 0,
                 ).length,
               })}
@@ -96,6 +97,7 @@ export function ComputerServiceDetails({
           ) : null}
         </>
       ) : null}
+      {service === "sync" && metrics && !currentMetrics ? <p className="cmp-footnote">{t("observationsExpired")}</p> : null}
       <p className="cmp-footnote">{t("flowHelpText")}</p>
     </>
   );

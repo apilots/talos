@@ -13,7 +13,7 @@ import { ComputerDetails } from "../ComputerDetails";
 import { ComputerDesktopButton } from "../ComputerDesktop";
 import { SyncPeerDetails } from "./SyncPeerDetails";
 import { ComputerRegistrationActions } from "./ComputerRegistrationActions";
-import { computerPeers } from "./observations";
+import { computerPeers, computerLocalSyncStatus } from "./observations";
 
 interface Props {
   nodeId: string;
@@ -114,12 +114,7 @@ export function ComputerInspector({
       <SyncPeerDetails
         peers={peers}
         metrics={metrics}
-        syncStatus={
-          syncStatus?.localComputerId === node.nodeId ||
-          peers.some((peer) => peer.peerId === syncStatus?.peerId)
-            ? syncStatus
-            : undefined
-        }
+        syncStatus={computerLocalSyncStatus(metrics, node.nodeId, syncStatus)}
       />
       <ComputerDetails node={node} controlPlane={controlPlane} />
       {personal ? (

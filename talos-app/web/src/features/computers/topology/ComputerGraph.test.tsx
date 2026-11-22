@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AppProtocol } from "@talos/sdk-core";
 import { computerResources } from "@/shared/i18n/computerResources";
 import { ComputerGraph } from "./ComputerGraph";
@@ -15,7 +15,8 @@ import {
   topologyNodes,
 } from "@/shared/test/computer-topology.fixture";
 
-afterEach(cleanup);
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(topologyMetrics.observedAt * 1000); });
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 it.each(["en", "zh-CN"])("shows disabled Sync instead of unknown without metrics (%s)", async (locale) => {
   const i18n = createInstance();
@@ -188,10 +189,74 @@ it("renders the same local conflict in the graph, list and details without attri
     <SyncPeerDetails peers={topologyMetrics.peers} metrics={topologyMetrics} syncStatus={status} />
   </I18nextProvider>);
   expect(screen.getAllByText("同步冲突")).toHaveLength(3);
-  expect(screen.getByText("2 项待同步")).toBeVisible();
+  expect(screen.getAllByText("待上传: 2")).toHaveLength(3);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.getByText("最近同步心跳")).toBeVisible();
   expect(container.querySelector('[data-computer-id="worker-b"][data-flow="sync"]')).toBeNull();
   expect([...container.querySelectorAll('[data-flow="sync"]')].map((wire) => wire.getAttribute("data-sync-state")))
     .toEqual(["conflict"]);
+});
+
+
+it.each(["en", "zh-CN"])("shares current progress and expiry across graph, list and details (%s)", async (locale) => {
+  const i18n = createInstance();
+  const resources = computerResources[locale as keyof typeof computerResources];
+  await i18n.init({ lng: locale, resources: { [locale]: { computers: resources } } });
+  const peer: AppProtocol.SyncPeerMetrics = { ...topologyMetrics.peers[0], lastActivityAt: null,
+    progress: { state: "caughtUp", downloadLagMs: 0, pendingUploads: 5, observedAt: topologyMetrics.observedAt - 20,
+      lastAppliedAt: topologyMetrics.observedAt - 60,
+      sourceDelays: [{ sourcePeerId: "source-b", observedDelayMs: 321 }] } };
+  let metrics = { ...topologyMetrics, peers: [peer] };
+  const show = () => <I18nextProvider i18n={i18n}>
+    <section data-testid="graph"><ComputerGraph nodes={topologyNodes.slice(0, 1)} metrics={metrics}
+      controlPlane="https://control.example" layer="all" onInspect={vi.fn()} onService={vi.fn()} /></section>
+    <section data-testid="list"><ComputerTopologyList nodes={topologyNodes.slice(0, 1)} metrics={metrics} onInspect={vi.fn()} /></section>
+    <section data-testid="details"><SyncPeerDetails peers={[peer]} metrics={metrics} /></section>
+  </I18nextProvider>;
+  const { container, rerender } = render(show());
+  for (const id of ["graph", "list", "details"]) {
+    const view = within(screen.getByTestId(id));
+    expect(view.getByText(resources.syncIdle)).toBeVisible();
+    expect(view.getByText(`${resources.replicationProgress}: ${resources.syncCaughtUp}`)).toBeVisible();
+    expect(view.getByText(`${resources.pendingUploads}: 5`)).toBeVisible();
+  }
+  expect(container.querySelector('[data-flow="sync"]')).toHaveAttribute("data-sync-state", "idle");
+  expect(screen.getByText(resources.sourceDelayHelp)).toBeVisible();
+  expect(screen.getByText("321 ms")).toBeVisible();
+  peer.progress!.state = "behind";
+  peer.progress!.downloadLagMs = 1400;
+  rerender(show());
+  expect(container.querySelectorAll('[data-download-state="behind"]')).toHaveLength(3);
+  expect(container.querySelector('[data-flow="sync"]')).toHaveAttribute("data-sync-state", "idle");
+  peer.progress!.state = "recovering";
+  rerender(show());
+  expect(container.querySelectorAll('[data-download-state="recovering"]')).toHaveLength(3);
+  expect(container.querySelector('[data-flow="sync"]')).toHaveAttribute("data-sync-state", "idle");
+  peer.progress!.state = "caughtUp";
+  metrics = { ...metrics, observedAt: topologyMetrics.observedAt - 16 };
+  rerender(show());
+  expect(container.querySelectorAll('[data-download-state="unknown"]')).toHaveLength(3);
+  expect(container.querySelector('[data-flow="sync"]')).toHaveAttribute("data-sync-state", "unknown");
+  expect(screen.queryByText("321 ms")).toBeNull();
+  expect(screen.queryByText(resources.sourceDelayHelp)).toBeNull();
+  expect(screen.queryByText(resources.lastSyncHeartbeat)).toBeNull();
+  expect(screen.getByText(resources.observationsExpired)).toBeVisible();
+  for (const id of ["graph", "list", "details"]) {
+    expect(within(screen.getByTestId(id)).getByText(`${resources.pendingUploads}: ${resources.unknown}`)).toBeVisible();
+  }
+});
+
+it.each(["en", "zh-CN"])("shows current stored resources independently from the machine directory (%s)", async (locale) => {
+  const i18n = createInstance();
+  const resources = computerResources[locale as keyof typeof computerResources];
+  await i18n.init({ lng: locale, resources: { [locale]: { computers: resources } } });
+  const { container, rerender } = render(<I18nextProvider i18n={i18n}><ComputerServiceDetails service="sync"
+    metrics={topologyMetrics} controlPlane="https://control.example" /></I18nextProvider>);
+  expect(container.querySelectorAll(".cmp-facts dt")).toHaveLength(4);
+  expect(screen.getByText(resources.syncProjects)).toBeVisible();
+  expect(screen.getByText(resources.syncSessions)).toBeVisible();
+  expect(screen.getByText(resources.syncFiles)).toBeVisible();
+  rerender(<I18nextProvider i18n={i18n}><ComputerServiceDetails service="sync"
+    metrics={{ ...topologyMetrics, observedAt: topologyMetrics.observedAt - 16 }} controlPlane="https://control.example" /></I18nextProvider>);
+  expect([...container.querySelectorAll(".cmp-facts dd")].slice(1).map((row) => row.textContent)).toEqual(["—", "—", "—"]);
 });

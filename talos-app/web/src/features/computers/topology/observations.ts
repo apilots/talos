@@ -43,11 +43,7 @@ export function computerSyncState(
   computerId: string,
   status?: AppProtocol.SyncStatusResponse,
 ) {
-  const peers = computerPeers(metrics, computerId);
-  const local =
-    status?.localComputerId === computerId ||
-    peers.some((peer) => peer.peerId === status?.peerId);
-  return syncObservationState(metrics, peers, local ? status : undefined);
+  return syncObservationState(metrics, computerPeers(metrics, computerId), computerLocalSyncStatus(metrics, computerId, status));
 }
 
 export function controlPlaneSyncState(
@@ -64,4 +60,15 @@ export function controlPlaneSyncState(
       ? status
       : undefined,
   );
+}
+
+/** Keep local transport/outbox evidence scoped to its exact Computer or peer. */
+export function computerLocalSyncStatus(
+  metrics: AppProtocol.SyncMetricsResponse | undefined,
+  computerId: string,
+  status?: AppProtocol.SyncStatusResponse,
+) {
+  return status?.localComputerId === computerId ||
+    computerPeers(metrics, computerId).some((peer) => peer.peerId === status?.peerId)
+    ? status : undefined;
 }

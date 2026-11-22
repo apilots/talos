@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { syncObservationState, syncStateLabel } from "./sync-state";
+import { observationsFresh } from "./sync-state";
+import { SyncProgressSummary } from "./SyncProgressSummary";
 import type { AppProtocol } from "@talos/sdk-core";
 
 export function SyncPeerDetails({
@@ -14,20 +15,23 @@ export function SyncPeerDetails({
   const { t, i18n } = useTranslation("computers");
   const number = (value: number) =>
     value.toLocaleString(i18n.language, { maximumFractionDigits: 1 });
-  const state = syncObservationState(metrics, peers, syncStatus);
+  const fresh = observationsFresh(metrics);
+  const currentPeers = fresh ? peers : [];
   return (
     <section className="cmp-peer-details" aria-label={t("syncTitle")}>
       <h3>{t("syncTitle")}</h3>
-      <p data-sync-state={state} className={`cmp-sync-status is-${state}`}>{t(syncStateLabel[state])}</p>
-      {syncStatus?.pendingChanges ? <p>{t("syncPending", { count: syncStatus.pendingChanges })}</p> : null}
-      {peers.length === 0 ? (
+      <SyncProgressSummary metrics={metrics} peers={peers} syncStatus={syncStatus} showConfirmation />
+      {!fresh && metrics ? <p className="cmp-footnote">{t("observationsExpired")}</p> : null}
+      {currentPeers.length === 0 ? (
         <p className="cmp-muted">{t("noPeerDetails")}</p>
       ) : (
-        peers.map((peer) => (
+        currentPeers.map((peer) => (
           <div className="cmp-peer" key={peer.peerId}>
             <p className="cmp-mono" title={peer.peerId}>
               {peer.peerId}
             </p>
+            {currentPeers.length > 1 ? <SyncProgressSummary metrics={metrics} peers={[peer]}
+              syncStatus={peer.peerId === syncStatus?.peerId ? syncStatus : undefined} showConfirmation /> : null}
             <dl>
               <div>
                 <dt>{t("connectionCount")}</dt>
@@ -64,28 +68,6 @@ export function SyncPeerDetails({
                 <dd>{peer.lastHeartbeatAt === null ? t("noHeartbeat") :
                   new Date(peer.lastHeartbeatAt * 1000).toLocaleTimeString(i18n.language)}</dd>
               </div>
-              <div>
-                <dt>{t("replicationProgress")}</dt>
-                <dd>{peer.progress?.state === "caughtUp"
-                  ? t("syncCaughtUp")
-                  : peer.progress?.state === "behind" && peer.progress.downloadLagMs !== null
-                    ? t("syncLagMs", { ms: number(peer.progress.downloadLagMs) })
-                    : peer.progress?.state === "recovering"
-                      ? t("syncRecovering")
-                      : t("syncUnknown")}</dd>
-              </div>
-              {peer.progress ? (
-                <div>
-                  <dt>{t("progressConfirmedAt")}</dt>
-                  <dd>{new Date(peer.progress.observedAt * 1000).toLocaleTimeString(i18n.language)}</dd>
-                </div>
-              ) : null}
-              {peer.progress && peer.progress.pendingUploads > 0 ? (
-                <div>
-                  <dt>{t("pendingUploads")}</dt>
-                  <dd>{number(peer.progress.pendingUploads)}</dd>
-                </div>
-              ) : null}
               {peer.progress?.sourceDelays.map((sample) => (
                 <div key={sample.sourcePeerId}>
                   <dt title={sample.sourcePeerId}>{t("fromPeer", { peer: sample.sourcePeerId.slice(0, 8) })}</dt>
@@ -106,6 +88,8 @@ export function SyncPeerDetails({
           </div>
         ))
       )}
+      {currentPeers.some((peer) => peer.progress?.sourceDelays.length) ?
+        <p className="cmp-footnote">{t("sourceDelayHelp")}</p> : null}
       <p className="cmp-footnote">{t("selfReported")}</p>
     </section>
   );

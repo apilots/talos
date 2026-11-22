@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
 import type { AppProtocol } from "@talos/sdk-core";
-import { syncStateLabel } from "./sync-state";
-import { computerPeers, computerPlatform, computerSyncState } from "./observations";
+import { observationsFresh } from "./sync-state";
+import { SyncProgressSummary } from "./SyncProgressSummary";
+import { computerPeers, computerPlatform, computerLocalSyncStatus } from "./observations";
 
 interface Props {
   nodes: AppProtocol.NodeInfo[];
@@ -34,8 +35,7 @@ export function ComputerTopologyList({
         <tbody>
           {nodes.map((node) => {
             const peers = computerPeers(metrics, node.nodeId);
-            const state = computerSyncState(metrics, node.nodeId, syncStatus);
-            const activity = peers.flatMap((peer) =>
+            const activity = (observationsFresh(metrics) ? peers : []).flatMap((peer) =>
               peer.lastActivityAt === null ? [] : [peer.lastActivityAt],
             );
             const last = activity.length ? Math.max(...activity) : null;
@@ -72,9 +72,8 @@ export function ComputerTopologyList({
                     )}
                   </span>
                 </td>
-                <td data-sync-state={state} className={`cmp-sync-status is-${state}`}>
-                  {t(syncStateLabel[state])}
-                </td>
+                <td><SyncProgressSummary metrics={metrics} peers={peers}
+                  syncStatus={computerLocalSyncStatus(metrics, node.nodeId, syncStatus)} /></td>
                 <td>
                   {last === null
                     ? "—"

@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AppProtocol } from "@talos/sdk-core";
 import { topologyMetrics } from "@/shared/test/computer-topology.fixture";
 import { computerSyncState, controlPlaneSyncState } from "./observations";
-import { localSyncState, syncObservationState, SyncTopologyState } from "./sync-state";
+import { localSyncState, syncObservationState, syncProgressSummary, SyncTopologyState } from "./sync-state";
 
 const now = topologyMetrics.observedAt;
 const status: AppProtocol.SyncStatusResponse = {
@@ -63,3 +63,53 @@ it("uses the same state for the exact Control Plane peer, including disconnect a
   expect(controlPlaneSyncState(metrics, status)).toBe(SyncTopologyState.Syncing);
   expect(controlPlaneSyncState({ ...metrics, controlPlanePeerId: "another-peer" }, status)).toBe(SyncTopologyState.Unknown);
 });
+
+
+it("keeps idle download backlog and pending uploads separate from document activity", () => {
+  const peer: AppProtocol.SyncPeerMetrics = { ...topologyMetrics.peers[0], lastActivityAt: null,
+    progress: { observedAt: now - 20, lastAppliedAt: now - 60, state: "behind", downloadLagMs: 1200, pendingUploads: 4, sourceDelays: [] } };
+  const metrics = { ...topologyMetrics, peers: [peer] };
+  expect(syncObservationState(metrics, [peer], undefined, now)).toBe(SyncTopologyState.Idle);
+  expect(syncProgressSummary(metrics, [peer], undefined, now)).toEqual({ state: "behind", downloadLagMs: 1200, pendingUploads: 4, observedAt: now - 20 });
+  peer.progress!.state = "recovering";
+  expect(syncObservationState(metrics, [peer], undefined, now)).toBe(SyncTopologyState.Idle);
+  expect(syncProgressSummary(metrics, [peer], undefined, now).state).toBe("recovering");
+  expect(syncProgressSummary(metrics, [peer], undefined, now + 16)).toEqual({ state: "unknown", downloadLagMs: null, pendingUploads: null, observedAt: null });
+  expect(syncProgressSummary(metrics, [peer], { ...status, pendingChanges: 7 }, now + 16).pendingUploads).toBe(7);
+});
+
+it("aggregates multiple peers conservatively without double counting local pending work", () => {
+  const first: AppProtocol.SyncPeerMetrics = { ...topologyMetrics.peers[0],
+    progress: { observedAt: now - 20, lastAppliedAt: now - 60, state: "caughtUp", downloadLagMs: 0, pendingUploads: 3, sourceDelays: [] } };
+  const second: AppProtocol.SyncPeerMetrics = { ...first, peerId: "peer-b",
+    progress: { ...first.progress!, state: "behind", downloadLagMs: 1500, pendingUploads: 4, observedAt: now - 5 } };
+  const third: AppProtocol.SyncPeerMetrics = { ...first, peerId: "peer-c",
+    progress: { ...first.progress!, state: "recovering", downloadLagMs: null, pendingUploads: 2 } };
+  const metrics = { ...topologyMetrics, peers: [first, second, third] };
+  expect(syncProgressSummary(metrics, [first, first, second], { ...status, pendingChanges: 8 }, now))
+    .toEqual({ state: "behind", downloadLagMs: 1500, pendingUploads: 12, observedAt: now - 20 });
+  expect(syncProgressSummary(metrics, metrics.peers, undefined, now))
+    .toEqual({ state: "recovering", downloadLagMs: 1500, pendingUploads: 9, observedAt: now - 20 });
+  second.progress = null;
+  expect(syncProgressSummary(metrics, [first, second], undefined, now))
+    .toEqual({ state: "unknown", downloadLagMs: null, pendingUploads: null, observedAt: now - 20 });
+  second.progress = { ...first.progress!, state: "behind", downloadLagMs: null };
+  expect(syncProgressSummary(metrics, [second], undefined, now).state).toBe("behind");
+  expect(syncProgressSummary(metrics, [{ ...first, connections: 0 }], undefined, now).state).toBe("unknown");
+});
+
+
+it.each(["disconnected", "unobserved"] as const)(
+  "retains the exact local outbox beside another live peer when the local peer is %s",
+  (localObservation) => {
+    const local: AppProtocol.SyncPeerMetrics = { ...topologyMetrics.peers[0], connections: 0 };
+    const remote: AppProtocol.SyncPeerMetrics = { ...topologyMetrics.peers[0], peerId: "peer-b",
+      progress: { observedAt: now, lastAppliedAt: now, state: "caughtUp", downloadLagMs: 0, pendingUploads: 0, sourceDelays: [] } };
+    const peers = localObservation === "disconnected" ? [local, remote] : [remote];
+    const metrics = { ...topologyMetrics, peers };
+    const localStatus = { ...status, pendingChanges: 7 };
+    expect(syncProgressSummary(metrics, peers, localStatus, now).pendingUploads).toBe(7);
+    remote.progress = null;
+    expect(syncProgressSummary(metrics, peers, localStatus, now).pendingUploads).toBeNull();
+  },
+);

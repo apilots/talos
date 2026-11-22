@@ -69,12 +69,45 @@ export function syncObservationState(
   const live = peers.filter((peer) => peer.connections > 0);
   if (!live.length) return SyncTopologyState.Unknown;
   return live.some(
-    (peer) => peer.progress?.state === "behind" || peer.progress?.state === "recovering" || (
+    (peer) =>
       peer.lastActivityAt !== null &&
       metrics.observedAt - peer.lastActivityAt >= 0 &&
-      metrics.observedAt - peer.lastActivityAt < 60
-    ),
+      metrics.observedAt - peer.lastActivityAt < 60,
   )
     ? SyncTopologyState.Syncing
     : SyncTopologyState.Idle;
+}
+
+/** Aggregate only current live observations; a missing report never means caught up. */
+export function syncProgressSummary(
+  metrics: AppProtocol.SyncMetricsResponse | undefined,
+  peers: AppProtocol.SyncPeerMetrics[],
+  localStatus?: AppProtocol.SyncStatusResponse,
+  now = Math.floor(Date.now() / 1000),
+) {
+  const live = observationsFresh(metrics, now)
+    ? [...new Map(peers.filter((peer) => peer.connections > 0).map((peer) => [peer.peerId, peer])).values()]
+    : [];
+  const reports = live.flatMap((peer) => peer.progress ? [peer.progress] : []);
+  const state = reports.some((report) => report.state === "recovering")
+    ? "recovering"
+    : reports.some((report) => report.state === "behind")
+      ? "behind"
+      : live.length > 0 && reports.length === live.length
+        ? "caughtUp"
+        : "unknown";
+  const lags = reports.flatMap((report) =>
+    report.state === "behind" && report.downloadLagMs !== null ? [report.downloadLagMs] : [],
+  );
+  const remotePending = live.filter((peer) => peer.peerId !== localStatus?.peerId);
+  const pendingKnown = remotePending.every((peer) => peer.progress);
+  const pendingUploads = pendingKnown && (live.length > 0 || localStatus)
+    ? remotePending.reduce((total, peer) => total + (peer.progress?.pendingUploads ?? 0), localStatus?.pendingChanges ?? 0)
+    : null;
+  return {
+    state,
+    downloadLagMs: lags.length ? Math.max(...lags) : null,
+    pendingUploads,
+    observedAt: reports.length ? Math.min(...reports.map((report) => report.observedAt)) : null,
+  };
 }
