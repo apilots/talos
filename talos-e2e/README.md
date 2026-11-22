@@ -519,9 +519,18 @@ and the current independent Sync executable. The case is explicitly ignored in
 the hosted set because it requires these cross-project artifacts; invoking it
 without either input fails rather than reporting a simulated pass.
 
+The Sync checkout provides the reproducible old-database producer. Run there:
+
 ```sh
-TALOS_SYNC_V1_DATABASE=/absolute/path/to/source-a-v1.db \
-TALOS_SYNC_BIN=/absolute/path/to/talos-sync \
+python3 e2e/scripts/prepare_v1_database.py .tmp/source-a-v1.db
+just build -p talos-sync-server
+```
+
+Then run from the Talos root with absolute paths to those outputs:
+
+```sh
+TALOS_SYNC_V1_DATABASE=/absolute/path/to/sync/.tmp/source-a-v1.db \
+TALOS_SYNC_BIN=/absolute/path/to/sync/target/debug/talos-sync \
   just test -p talos-base --features e2e --run-ignored only \
   -E 'test(upgraded_hub_and_local_replica_continue_from_the_original_cut)' \
   --success-output final
