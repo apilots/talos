@@ -235,13 +235,8 @@ impl SyncDataAdapter for StoreSyncAdapter {
             let mut required = Vec::new();
             match after.as_ref() {
                 SyncResourceSnapshot::Computer(_) => {}
-                SyncResourceSnapshot::Project(p) => required.push(SyncResourceKey::Computer {
-                    computer_id: p.node_id.clone(),
-                }),
+                SyncResourceSnapshot::Project(_) => {}
                 SyncResourceSnapshot::Session(s) => {
-                    required.push(SyncResourceKey::Computer {
-                        computer_id: s.binding.computer_id.clone(),
-                    });
                     if let Some(id) = &s.session.project_id {
                         required.push(SyncResourceKey::Project {
                             project_id: id.clone(),
@@ -270,11 +265,6 @@ impl SyncDataAdapter for StoreSyncAdapter {
                 }
             }
             for key in required {
-                if let SyncResourceKey::Computer { computer_id } = &key {
-                    if !tx.query("SELECT 1 FROM computer_deletions WHERE node_id = ? AND owner_user_id = ?", &[computer_id, &batch.scope.account_id]).await?.is_empty() {
-                        continue;
-                    }
-                }
                 let (table, column, id) = match &key {
                     SyncResourceKey::Computer { computer_id } => {
                         ("agent_nodes", "node_id", self.local_node(computer_id))

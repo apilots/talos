@@ -14,7 +14,7 @@ commits the account feed cursor after its prefix of document commits.
 | `sync_identity` | singleton PK；peer_id UUID；loro_writer_id | DB重启保持管理身份；克隆为独立节点必须新writer，不充当Session owner。 |
 | `sync_bindings` | PK hub/account/source_user；typed ComputerAlias[]；download_cursor | 已验证账号与本地用户/节点别名关联、下载水位；不另存登录Token。 |
 | `sync_account_preferences` | account_id PK；enabled 0/1 | 当前管理宿主的已验证账号选择，独立于hub/binding；未保存默认沿登录启用；不作为同步事实上传。 |
-| `sync_documents` | PK hub/account/kind/resource_id；computer_id?；generation；deleted；snapshot_blob；VV；ack_VV | 唯一Loro持久文档与本地/共享版本；查询业务目录仍复用原Store，不建第二套列表索引。 |
+| `sync_documents` | PK hub/account/kind/resource_id；computer_id?；generation；deleted；snapshot_blob；VV；ack_VV；replica_schema_version | 唯一Loro持久文档与本地/共享版本；查询业务目录仍复用原Store，不建第二套列表索引。 |
 | `sync_outbox` | seq PK, binding/resource key, typed SyncChange[], exported_version?, created_at | 后台从已提交的本地事实补采，重启后可以继续发送。 |
 | `sync_event_map` | PK hub/account/session/generation/stable_event_key/import_id/capture_id; UNIQUE local_event_id/capture_id | Published capture/import batches provide atomic visibility. Stable keys retain original event identity while local event sequence numbers serve native paging and watermark conversion. |
 
@@ -27,7 +27,7 @@ clear 的 generation 在实际排他提交时递增，不能依据尚未导出�
 
 1. 管理runtime构建同一个Worker并启Worker RPC；本机通过agent-client注册Harness，不登录/不运行sync也能独立工作；云注册和同步在管理API ready之后独立启停。
 2. 用户真实登录；可信宿主认领sourceUser，保存已注册Computer UUID/embedded别名。共享时同一Worker主动注册agent入口，不再构建一个Worker。
-3. 账号内新数据正常启用capture/同步；旧匿名数据先明确认领，再用原Store keyset扫描Computer、所有Project（含空项目）、Session/子树、ready File及完整历史。固定导出cut，期间变更留outbox。
+3. 账号内新数据正常启用capture/同步；旧匿名数据先明确认领，then scan all Projects (including empty projects), Sessions/subtrees, ready File metadata and complete History with the existing Store keysets. Computer discovery is an independent Server directory pull.固定导出cut，期间变更留outbox。
 4. 管理节点连接独立sync服务，account/peer鉴权；catalog返回资源键、tombstone和feed cut；room按VV补齐。
 5. Commit each document checkpoint, its Store facts and its event map together before publishing notifications. Resolve dependencies before publication. The runner saves the catalog feed cut after it has applied all documents at that cut.
 6. 持续按committed batch导出，不等Turn结束；实时/离线重连都使用同一持久路径。
@@ -90,7 +90,7 @@ clear/delete阻止旧代数据复活；删除parent tree捕获每个实际child�
 ## 7. 配置与部署
 
 配置owner派生运行策略：sync.enabled未配置时，未登录false、已验证登录/binding后true；显式false优先。DEV模板显式false，PROD可省略沿登录默认；旧匿名历史仍需认领，不因登录自动上传。
-`sync.hub_endpoint` 为完整`wss://sync.talos.love/v1/sync`，状态与enable/disable复用同一配置owner，不另造模式开关。目录/feed/全量增量复用同一连接，见[WSS协议](https://github.com/apilots/talos-sync/blob/8e60e2b612ba895c8f4bcb4e0d78c9ae86227502/spec/feat-001-talos-sync/wss-protocol.md)。
+`sync.hub_endpoint` 为完整`wss://sync.talos.love/v1/sync`，状态与enable/disable复用同一配置owner，不另造模式开关。Sync resource catalog/feed/baseline/increments share the same connection; the Computer directory uses the independent Node SDK，见[WSS协议](https://github.com/apilots/talos-sync/blob/8e60e2b612ba895c8f4bcb4e0d78c9ae86227502/spec/feat-001-talos-sync/wss-protocol.md)。
 Worker listener配置独立于runner transport，管理API与Worker RPC两个endpoint可明确自测；Desktop的stdio保留同一管理业务入口。
 共享的个人Worker默认注册 `agent.talos.love`，保留本机loopback listener；pure local不开公网注册/同步。
 不提供sync任务pull或RPC relay配置；agent连接与sync连接不能共用一个生命周期故障开关。
@@ -102,3 +102,33 @@ Worker listener配置独立于runner transport，管理API与Worker RPC两个end
 原API鉴权后先将选择写入sync_account_preferences。关闭随后只停止该账号H handle；没有binding不进行hub discovery。登录/status/重启读取同一选择，只有显式enable才能重新启用。YAML false是整个管理服务限制，不能被任何账号覆盖；当前端选择不改其他端。已有binding在部署/账号禁用期间保留capture/outbox，Worker执行、G注册/RPC/源FileService独立可用。
 
 202610130001_sync_account_preferences.sql按原migration runner事务创建账号选择表、保留旧binding.enabled选择并移除旧列；没有运行时双写、旧结构兼容分支或伪造hub ID。
+
+## Released-replica conversion and directory cache
+
+`202611220001_sync_replica_schema.sql` adds the persisted replica schema marker
+and removes obsolete Computer resource revisions. Existing rows begin at v1;
+newly saved SDK 0.1.8 checkpoints are v2. The Parser remaps official Loro operation
+history once; checkpoint publication uses the existing background transaction,
+version/ACK CAS and staged snapshot lifecycle. Materialized non-null outbox and
+capture proofs move to the full converted version in that transaction. Null
+proofs stay pending. Outbox JSON normalization does not reset those proofs.
+
+New-Hub rebinding materializes the pending tail before retaining checkpoints and
+source maps. Fresh baseline markers replace the old pending queue atomically.
+The new scope starts without the old Hub's ACK/feed positions. A's absence does
+not prevent B forwarding original A/B facts or C recovering them and following
+subsequent increments.
+
+The Server directory task uses the existing `agent_nodes` table as a public cache
+on noncentral managers. A complete validated owner pull upserts and prunes in one
+transaction. Pruning applies only to remote cache rows without credentials,
+leases or managed Worker records; it creates no Sync capture or permanent
+registration tombstone. Confirmed management mutations use the same publication
+lock. Missing entries are pruned before local list pagination, and a newer
+confirmed deletion prevents an old response from resurrecting an entry.
+
+Fresh captures exclude Computer revisions. Retained Computer checkpoints and
+raw legacy outbox entries can be upgraded and relayed, but their imported fields
+and terminal deletes never alter `agent_nodes`, `computer_deletions`, alias
+retirement or the local registration lifecycle. Session and Project materialization
+preserve their original Node ID without waiting for a Computer Sync document.

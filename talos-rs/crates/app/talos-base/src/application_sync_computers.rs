@@ -236,11 +236,12 @@ impl ApplicationSyncHost {
         if info.node_id == "embedded" || actor.auth_disabled {
             return Ok(info);
         }
+        if self.config.agent_node.control_plane.is_none() {
+            self.computer_directory.apply(&actor.user_id, &mut info)?;
+        }
         if own && info.node_id == local {
             info.available = true;
             info.system_info = Some(self.worker.system_info().clone());
-        } else if self.config.agent_node.control_plane.is_none() {
-            self.computer_observations.apply(&actor.user_id, &mut info);
         }
         Ok(info)
     }

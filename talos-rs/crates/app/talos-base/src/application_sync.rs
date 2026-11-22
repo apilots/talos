@@ -31,7 +31,7 @@ pub(crate) struct ApplicationSyncStores {
 
 pub(crate) struct ApplicationSyncHost {
     pub self_weak: std::sync::Weak<Self>,
-    pub computer_observations: super::application_computer_observations::ComputerObservations,
+    pub computer_directory: super::application_computer_directory::ComputerDirectory,
     pub registration_retirement: tokio::sync::Mutex<()>,
     pub config: talos_config::Config,
     pub sync: Arc<talos_sync::TalosSync>,
@@ -218,7 +218,6 @@ impl ApplicationSyncHost {
         ));
         self.sync_stores.sessions.install_sync(adapter.clone())?;
         self.sync_stores.projects.install_sync(adapter.clone())?;
-        self.sync_stores.nodes.install_sync(adapter.clone())?;
         self.sync_stores.files.install_sync(adapter.clone())?;
         adapter.start_capture();
         Ok(adapter)
@@ -383,6 +382,7 @@ impl ApplicationSyncHost {
             }
         };
         let gateway = self.gateway_client().await?;
+        let directory_started = std::time::Instant::now();
         let remote = if local {
             None
         } else {
@@ -443,9 +443,7 @@ impl ApplicationSyncHost {
             return Ok(());
         }
         if let Some(node) = remote {
-            self.sync_stores
-                .nodes
-                .remember_remote_computer(&node)
+            self.cache_connected_computer(&actor.user_id, &node, directory_started)
                 .await?;
             self.coordinator
                 .replace_remote_node(

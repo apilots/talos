@@ -16,6 +16,33 @@ impl GatewayPeerAccess {
     async fn gateway(&self) -> TalosResult<agent_client::AgentNodeClient> {
         super::application_sync_computers::gateway_client(&self.config).await
     }
+    async fn confirmed_computer(
+        &self,
+        actor: &talos_service::Actor,
+        id: &str,
+        info: talos_types::NodeInfo,
+    ) -> TalosResult<talos_types::NodeInfo> {
+        if info.node_id != id {
+            return Err(TalosError::authorization_denied());
+        }
+        // Authorized administrator mutations may target another owner. Their
+        // results must not enter this signed-in account's selector cache.
+        if info.owner_user_id.as_deref() != Some(&actor.user_id) {
+            return if actor.role == talos_auth::UserRole::Admin {
+                Ok(info)
+            } else {
+                Err(TalosError::authorization_denied())
+            };
+        }
+        let host = self.host.upgrade().ok_or_else(|| {
+            TalosError::new(
+                ErrorCode::ServiceUnavailable,
+                "Computer directory host has stopped.",
+            )
+        })?;
+        host.cache_confirmed_computer(actor, id, &info).await?;
+        Ok(info)
+    }
     async fn token(&self, owner: &str) -> TalosResult<String> {
         let callback = self
             .stores
@@ -184,10 +211,18 @@ impl talos_service::ComputerManagement for GatewayPeerAccess {
                 .await?
                 .delete_computer(management_token(actor)?, request)
                 .await?;
-            if let (Some(host), Some(local_actor)) = (host, local_actor) {
+            if let (Some(host), Some(local_actor)) = (&host, local_actor) {
                 host.observe_registration_removal(&local_actor, &response.node_id)
                     .await?;
             }
+            let host = host.ok_or_else(|| {
+                TalosError::new(
+                    ErrorCode::ServiceUnavailable,
+                    "Computer directory host has stopped.",
+                )
+            })?;
+            host.cache_deleted_computer(actor, &response.node_id)
+                .await?;
             Ok(response)
         })
     }
@@ -198,10 +233,14 @@ impl talos_service::ComputerManagement for GatewayPeerAccess {
         request: talos_types::CreateNodeRequest,
     ) -> AgentFuture<'a, TalosResult<talos_types::CreatedNode>> {
         Box::pin(async move {
-            self.gateway()
+            let created = self
+                .gateway()
                 .await?
                 .create_node(management_token(actor)?, request)
-                .await
+                .await?;
+            self.confirmed_computer(actor, &created.node.node_id, created.node.clone())
+                .await?;
+            Ok(created)
         })
     }
     fn update<'a>(
@@ -210,7 +249,9 @@ impl talos_service::ComputerManagement for GatewayPeerAccess {
         request: talos_types::UpdateNodeRequest,
     ) -> AgentFuture<'a, TalosResult<talos_types::NodeInfo>> {
         Box::pin(async move {
-            self.gateway()
+            let id = request.node_id.clone();
+            let info = self
+                .gateway()
                 .await?
                 .update_node(
                     actor.access_token.as_deref().ok_or_else(|| {
@@ -221,7 +262,8 @@ impl talos_service::ComputerManagement for GatewayPeerAccess {
                     })?,
                     request,
                 )
-                .await
+                .await?;
+            self.confirmed_computer(actor, &id, info).await
         })
     }
     fn rename<'a>(
@@ -230,10 +272,13 @@ impl talos_service::ComputerManagement for GatewayPeerAccess {
         request: talos_types::RenameComputerRequest,
     ) -> AgentFuture<'a, TalosResult<talos_types::NodeInfo>> {
         Box::pin(async move {
-            self.gateway()
+            let id = request.node_id.clone();
+            let info = self
+                .gateway()
                 .await?
                 .rename_computer(management_token(actor)?, request)
-                .await
+                .await?;
+            self.confirmed_computer(actor, &id, info).await
         })
     }
     fn set_status<'a>(
@@ -242,10 +287,13 @@ impl talos_service::ComputerManagement for GatewayPeerAccess {
         request: talos_types::SetComputerStatusRequest,
     ) -> AgentFuture<'a, TalosResult<talos_types::NodeInfo>> {
         Box::pin(async move {
-            self.gateway()
+            let id = request.node_id.clone();
+            let info = self
+                .gateway()
                 .await?
                 .set_computer_status(management_token(actor)?, request)
-                .await
+                .await?;
+            self.confirmed_computer(actor, &id, info).await
         })
     }
     fn rotate_credential<'a>(

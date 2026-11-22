@@ -17,6 +17,7 @@ pub(crate) mod staged_write;
 
 pub(crate) struct DocumentRecord {
     pub snapshot: Vec<u8>,
+    pub schema_version: i64,
     pub version: SyncVersion,
     pub acknowledged: SyncVersion,
     pub has_session_projection: bool,

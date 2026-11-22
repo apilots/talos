@@ -208,58 +208,9 @@ pub(super) async fn apply(
             continue;
         };
         match after.as_ref() {
-            SyncResourceSnapshot::Computer(node) => {
-                if node.owner_user_id.as_deref() != Some(&batch.scope.account_id) {
-                    return Err(TalosError::new(
-                        ErrorCode::PermissionDenied,
-                        "Computer belongs to a different account.",
-                    ));
-                }
-                let local = node.node_id.clone();
-                if !tx
-                    .query(
-                        "SELECT 1 FROM computer_deletions WHERE node_id = ? AND owner_user_id = ?",
-                        &[&local, &batch.scope.account_id],
-                    )
-                    .await?
-                    .is_empty()
-                {
-                    continue;
-                }
-                let mode = "remote";
-                let status = &node.status;
-                let status = match status {
-                    NodeStatus::Enabled => "enabled",
-                    NodeStatus::Disabled => "disabled",
-                };
-                let existing = tx
-                    .query(
-                        "SELECT owner_user_id FROM agent_nodes WHERE node_id = ?",
-                        &[&local],
-                    )
-                    .await?;
-                if existing.first().is_some_and(|r| {
-                    r.get_string("owner_user_id")
-                        .is_some_and(|owner| owner != batch.scope.account_id)
-                }) {
-                    return Err(TalosError::new(
-                        ErrorCode::Conflict,
-                        "Computer identity belongs to another account.",
-                    ));
-                }
-                let system_info = node
-                    .system_info
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()
-                    .map_err(|error| {
-                        TalosError::internal_with_source(
-                            "Encode imported Worker system report.",
-                            error,
-                        )
-                    })?;
-                tx.execute("INSERT INTO agent_nodes(node_id, owner_user_id, display_name, mode, endpoint, status, created_at, updated_at, system_info) VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, '')) ON CONFLICT(node_id) DO UPDATE SET display_name = excluded.display_name, endpoint = excluded.endpoint, status = excluded.status, updated_at = excluded.updated_at, system_info = excluded.system_info", &[&local, &batch.scope.account_id, &node.display_name, mode, node.endpoint.as_deref().unwrap_or_default(), status, &node.created_at.to_string(), &node.updated_at.to_string(), system_info.as_deref().unwrap_or_default()]).await?;
-            }
+            // Historical Computer payloads remain relayable checkpoints, but only
+            // the authenticated Server directory may change selectable Computers.
+            SyncResourceSnapshot::Computer(_) => {}
             SyncResourceSnapshot::Project(project) => {
                 let directory = project.directory.to_str().ok_or_else(|| {
                     TalosError::internal("Synchronized Project directory must be UTF-8.")
@@ -295,22 +246,6 @@ pub(super) async fn delete(
     tx: &mut dyn StorageTransaction,
     resource: &SyncResourceKey,
 ) -> TalosResult<()> {
-    if let SyncResourceKey::Computer { computer_id } = resource {
-        if adapter
-            .binding
-            .computers
-            .iter()
-            .any(|alias| alias.source_node_id == "embedded" && alias.computer_id == *computer_id)
-        {
-            crate::session::capture_removal_boundary(
-                tx,
-                &adapter.binding.scope.account_id,
-                computer_id,
-            )
-            .await?;
-        }
-        tx.execute("INSERT INTO computer_deletions(node_id, owner_user_id, deleted_at) VALUES (?, ?, ?) ON CONFLICT(node_id) DO NOTHING", &[computer_id, &adapter.binding.scope.account_id, &chrono::Utc::now().timestamp().to_string()]).await?;
-    }
     if let SyncResourceKey::Session { session_id } = resource {
         let owned = tx
             .query(
@@ -327,7 +262,7 @@ pub(super) async fn delete(
         }
     }
     let (table, key, owner) = match resource {
-        SyncResourceKey::Computer { .. } => ("agent_nodes", "node_id", "owner_user_id"),
+        SyncResourceKey::Computer { .. } => return Ok(()),
         SyncResourceKey::Project { .. } => ("projects", "project_id", "user_id"),
         SyncResourceKey::Session { .. } => ("sessions", "session_key", "user_id"),
         SyncResourceKey::File { .. } => ("files", "file_id", "owner_user_id"),

@@ -12,6 +12,9 @@ struct Gateway {
     entered: tokio::sync::mpsc::UnboundedSender<String>,
     closed: tokio::sync::mpsc::UnboundedSender<String>,
     release: Arc<tokio::sync::Semaphore>,
+    directory: Arc<std::sync::RwLock<Vec<talos_types::NodeInfo>>>,
+    block_directory: Arc<std::sync::atomic::AtomicBool>,
+    fail_directory: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[tonic::async_trait]
@@ -33,15 +36,35 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
 
     async fn delete_computer(
         &self,
-        _: Request<pb::GetNodeRequest>,
+        request: Request<pb::GetNodeRequest>,
     ) -> Result<Response<pb::DeleteComputerResponse>, Status> {
-        Err(Status::unimplemented("unused fixture RPC"))
+        let id = request.into_inner().node_id;
+        self.directory
+            .write()
+            .unwrap()
+            .retain(|node| node.node_id != id);
+        Ok(Response::new(pb::DeleteComputerResponse {
+            result: Some(pb::delete_computer_response::Result::NodeId(id)),
+        }))
     }
     async fn create_node(
         &self,
-        _: Request<pb::CreateNodeRequest>,
+        request: Request<pb::CreateNodeRequest>,
     ) -> Result<Response<pb::CreateNodeResponse>, Status> {
-        Err(Status::unimplemented("unused fixture RPC"))
+        let request = request.into_inner();
+        let mut node = directory_node("created");
+        node.display_name = request.display_name;
+        self.directory.write().unwrap().push(node.clone());
+        Ok(Response::new(pb::CreateNodeResponse {
+            result: Some(pb::create_node_response::Result::Created(pb::CreatedNode {
+                node: Some(agent_protocol::node_pb::encode_info(node)),
+                credential: Some(pb::NodeCredential {
+                    node_id: "created".into(),
+                    token: "fixture-credential".into(),
+                    expires_at: request.credential_expires_at,
+                }),
+            })),
+        }))
     }
     async fn get_node(
         &self,
@@ -89,10 +112,48 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
     }
     async fn list_nodes(
         &self,
-        _: Request<pb::ListNodesRequest>,
+        request: Request<pb::ListNodesRequest>,
     ) -> Result<Response<pb::ListNodesResponse>, Status> {
-        Err(Status::unimplemented("unused fixture RPC"))
+        let request = request.into_inner();
+        assert!(request.owner_only);
+        if self
+            .fail_directory
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(Status::unavailable("controlled directory outage"));
+        }
+        let mut nodes = self.directory.read().unwrap().clone();
+        nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+        if self
+            .block_directory
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.entered.send("directory".into()).unwrap();
+            self.release.acquire().await.unwrap().forget();
+        }
+        let nodes: Vec<_> = nodes
+            .into_iter()
+            .filter(|node| {
+                request
+                    .cursor
+                    .as_ref()
+                    .is_none_or(|cursor| node.node_id > *cursor)
+            })
+            .collect();
+        let end = 2.min(nodes.len());
+        let next_cursor = (end < nodes.len()).then(|| nodes[end - 1].node_id.clone());
+        Ok(Response::new(pb::ListNodesResponse {
+            result: Some(pb::list_nodes_response::Result::Page(pb::NodePage {
+                data: nodes[..end]
+                    .iter()
+                    .cloned()
+                    .map(agent_protocol::node_pb::encode_info)
+                    .collect(),
+                next_cursor,
+            })),
+        }))
     }
+
     async fn update_node(
         &self,
         _: Request<pb::UpdateNodeRequest>,
@@ -101,9 +162,21 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
     }
     async fn rename_computer(
         &self,
-        _: Request<pb::RenameComputerRequest>,
+        request: Request<pb::RenameComputerRequest>,
     ) -> Result<Response<pb::GetNodeResponse>, Status> {
-        Err(Status::unimplemented("unused fixture RPC"))
+        let request = request.into_inner();
+        let mut nodes = self.directory.write().unwrap();
+        let node = nodes
+            .iter_mut()
+            .find(|node| node.node_id == request.node_id)
+            .ok_or_else(|| Status::not_found("Computer"))?;
+        node.display_name = request.display_name;
+        node.updated_at += 1;
+        Ok(Response::new(pb::GetNodeResponse {
+            result: Some(pb::get_node_response::Result::Node(
+                agent_protocol::node_pb::encode_info(node.clone()),
+            )),
+        }))
     }
     async fn set_computer_status(
         &self,
@@ -171,6 +244,9 @@ struct Fixture {
     entered: tokio::sync::mpsc::UnboundedReceiver<String>,
     closed: tokio::sync::mpsc::UnboundedReceiver<String>,
     release: Arc<tokio::sync::Semaphore>,
+    directory: Arc<std::sync::RwLock<Vec<talos_types::NodeInfo>>>,
+    block_directory: Arc<std::sync::atomic::AtomicBool>,
+    fail_directory: Arc<std::sync::atomic::AtomicBool>,
     gateway: tokio::task::JoinHandle<()>,
     auth: tokio::task::JoinHandle<()>,
     _home: tempfile::TempDir,
@@ -213,10 +289,21 @@ impl Fixture {
         let (entered, observed) = tokio::sync::mpsc::unbounded_channel();
         let (closed, observed_closed) = tokio::sync::mpsc::unbounded_channel();
         let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let directory = Arc::new(std::sync::RwLock::new(
+            ["slow", "resumed", "fast"]
+                .into_iter()
+                .map(directory_node)
+                .collect(),
+        ));
+        let block_directory = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let fail_directory = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let service = Gateway {
             entered,
             closed,
             release: release.clone(),
+            directory: directory.clone(),
+            block_directory: block_directory.clone(),
+            fail_directory: fail_directory.clone(),
         };
         let gateway = tokio::spawn(async move {
             tonic::transport::Server::builder()
@@ -276,6 +363,9 @@ impl Fixture {
             entered: observed,
             closed: observed_closed,
             release,
+            directory,
+            block_directory,
+            fail_directory,
             gateway,
             auth,
             _home: home,
@@ -294,7 +384,7 @@ impl Fixture {
 }
 
 #[tokio::test]
-async fn connection_admission_does_not_cache_foreign_or_removed_computers() {
+async fn connection_admission_uses_server_authority_and_rejects_foreign_computers() {
     let mut fixture = Fixture::start().await;
     let nodes = &fixture.runtime.sync_host.sync_stores.nodes;
     let error = fixture
@@ -310,14 +400,22 @@ async fn connection_admission_does_not_cache_foreign_or_removed_computers() {
         .reconcile_deleted_registration("deleted", "account")
         .await
         .unwrap();
-    let error = fixture
+    fixture
         .runtime
         .connect_computer(&fixture.identity, "deleted")
         .await
-        .unwrap_err();
-    assert!(error.is_code(talos_error::ErrorCode::ResourceExpired));
-    assert!(nodes.get("deleted").await.unwrap().is_none());
-    assert_eq!(fixture.closed.recv().await.unwrap(), "deleted");
+        .unwrap();
+    assert_eq!(
+        nodes
+            .get("deleted")
+            .await
+            .unwrap()
+            .unwrap()
+            .owner_user_id
+            .as_deref(),
+        Some("account")
+    );
+    assert_eq!(fixture.entered.recv().await.unwrap(), "deleted");
     fixture.finish().await;
 }
 
@@ -476,5 +574,25 @@ async fn shutdown_rejects_a_late_computer_connection() {
     fixture.finish().await;
 }
 
-#[path = "application_computer_observation_tests.rs"]
-mod observations;
+#[path = "application_computer_directory_tests.rs"]
+mod directory;
+
+fn directory_node(id: &str) -> talos_types::NodeInfo {
+    talos_types::NodeInfo {
+        node_id: id.into(),
+        display_name: format!("Server {id}"),
+        owner_user_id: Some("account".into()),
+        mode: talos_types::NodeMode::Remote,
+        endpoint: None,
+        status: talos_types::NodeStatus::Enabled,
+        health: talos_types::NodeHealth::Healthy,
+        available: true,
+        lease_expires_at: Some(chrono::Utc::now().timestamp() + 60),
+        last_heartbeat_at: Some(chrono::Utc::now().timestamp()),
+        credential_expires_at: None,
+        created_at: 3,
+        updated_at: 4,
+        managed_worker_phase: None,
+        system_info: None,
+    }
+}

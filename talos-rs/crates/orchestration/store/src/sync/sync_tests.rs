@@ -20,6 +20,8 @@ mod durable_capture_tests;
 #[path = "import_stage_tests.rs"]
 mod import_stage_tests;
 
+#[path = "released_upgrade_tests.rs"]
+mod released_upgrade_tests;
 #[path = "replica_relay_tests.rs"]
 mod replica_relay_tests;
 
@@ -132,7 +134,6 @@ async fn peer_with_sync_storage(
 }
 async fn registered_computer(peer: &Peer) {
     DatabaseAgentNodeStore::new(&peer.storage)
-        .with_sync(peer.adapter.clone())
         .create(crate::node::CreateNodeParams {
             node_id: COMPUTER.into(),
             owner_user_id: Some("account-1".into()),
@@ -145,6 +146,7 @@ async fn registered_computer(peer: &Peer) {
         })
         .await
         .unwrap();
+    capture_historical_computer(peer).await;
 }
 fn record(id: &str) -> SessionRecord {
     SessionRecord {
@@ -250,6 +252,17 @@ async fn run(peer: &Peer, session: &str, turn: &str) {
         .unwrap();
 }
 async fn exchange(source: &Peer, destination: &Peer, resource: SyncResourceKey) {
+    if matches!(resource, SyncResourceKey::Computer { .. }) {
+        let removed: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM computer_deletions WHERE node_id=?)")
+                .bind(COMPUTER)
+                .fetch_one(source.storage.pool())
+                .await
+                .unwrap();
+        if removed {
+            capture_historical_computer(source).await;
+        }
+    }
     collect(&source.adapter, &resource).await;
     while let Some(batch) = source
         .sync
@@ -278,6 +291,44 @@ async fn exchange(source: &Peer, destination: &Peer, resource: SyncResourceKey) 
     }
 }
 
+// Retained Computer checkpoints are legacy input; production registration never captures them.
+async fn capture_historical_computer(peer: &Peer) {
+    let key = SyncResourceKey::Computer {
+        computer_id: COMPUTER.into(),
+    };
+    let deleted:Option<i64>=sqlx::query_scalar("SELECT deleted FROM sync_documents WHERE hub_id=? AND account_id=? AND kind='computer' AND resource_id=?")
+        .bind(&peer.adapter.binding.scope.hub_id).bind(&peer.adapter.binding.scope.account_id).bind(COMPUTER).fetch_optional(peer.storage.pool()).await.unwrap();
+    if deleted == Some(1) {
+        return;
+    }
+    let mut tx = peer.storage.begin_transaction().await.unwrap();
+    let facts = peer
+        .adapter
+        .export(
+            &mut *tx,
+            SyncExportParams {
+                binding: peer.adapter.binding.clone(),
+                resource: key.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    if !facts.changes.is_empty() {
+        peer.sync
+            .capture(
+                &mut *tx,
+                talos_sync::SyncCaptureParams {
+                    binding: peer.adapter.binding.clone(),
+                    resource: key,
+                    changes: facts.changes,
+                    created_at: 1,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    tx.commit().await.unwrap();
+}
 async fn collect(adapter: &StoreSyncAdapter, resource: &SyncResourceKey) {
     while adapter.collect_revision(resource).await.unwrap() {}
 }
@@ -315,13 +366,14 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
         },
     )
     .await;
-    let remote = DatabaseAgentNodeStore::new(&b.storage)
-        .get(COMPUTER)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(remote.mode, NodeMode::Remote);
-    assert_eq!(remote.lease_token_hash, None);
+    assert!(
+        DatabaseAgentNodeStore::new(&b.storage)
+            .get(COMPUTER)
+            .await
+            .unwrap()
+            .is_none(),
+        "Sync metadata must not populate the authoritative Computer directory"
+    );
     let imported_project = StorageProjectStore::new(b.storage.clone())
         .await
         .unwrap()

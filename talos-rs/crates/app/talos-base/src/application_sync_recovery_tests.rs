@@ -1,6 +1,8 @@
 //! Real surviving-host recovery against a replacement Hub with an empty database.
 use super::*;
 use talos_store::session::{AgentExecutionStore, SessionStore};
+#[path = "application_sync_legacy_tests.rs"]
+mod legacy;
 
 pub(super) async fn verify(
     survivor: &TalosApplicationRuntime,
@@ -20,6 +22,7 @@ pub(super) async fn verify(
         .await
         .unwrap()
         .unwrap();
+    let released_history = legacy::seed(survivor, &old).await;
     let session = "paused-sharing";
     let expected = survivor
         .sync_host
@@ -138,9 +141,24 @@ pub(super) async fn verify(
         .await
         .unwrap();
     reader.service.resume_account_sync(actor);
+    let recovery_started = std::time::Instant::now();
+    let mut diagnosed = false;
     wait_for(
         "cold reader recovered complete native history from replacement Hub",
         async || {
+            if !diagnosed && recovery_started.elapsed() > Duration::from_secs(25) {
+                diagnosed = true;
+                for (label, runtime) in [("survivor", survivor), ("reader", &reader)] {
+                    eprintln!("Recovery diagnostic {label}: {:?}", runtime.service.sync_status(actor).await);
+                    for sql in [
+                        "SELECT hub_id,kind,resource_id,deleted,generation,length(version_vector) AS version_bytes FROM sync_documents",
+                        "SELECT hub_id,kind,resource_id,exported_version_json FROM visible_sync_outbox",
+                        "SELECT session_id,COUNT(*) AS count FROM committed_agent_events GROUP BY session_id",
+                    ] {
+                        eprintln!("Recovery diagnostic {label} {sql}: {:?}", runtime.sync_host.sync_stores.storage.query(sql, &[]).await);
+                    }
+                }
+            }
             reader
                 .sync_host
                 .sync_stores
@@ -156,6 +174,7 @@ pub(super) async fn verify(
         },
     )
     .await;
+    legacy::verify(survivor, &reader, actor, &released_history).await;
     let restored = reader
         .service
         .get_session_history(actor, request.clone())

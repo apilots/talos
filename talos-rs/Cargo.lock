@@ -7377,10 +7377,12 @@ dependencies = [
 name = "talos-sync-parser"
 version = "0.1.18-SNAPSHOT"
 dependencies = [
+ "loro",
  "serde",
  "serde_json",
  "talos-agent-api",
  "talos-error",
+ "talos-sync-sdk",
  "talos-sync-types",
  "talos-types",
 ]

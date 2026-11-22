@@ -189,6 +189,7 @@ talos-store = { path = "crates/orchestration/store" }
 talos-sync = { path = "crates/orchestration/sync" }
 talos-sync-parser = { path = "crates/orchestration/sync-parser" }
 talos-sync-types = "=0.1.8"
+loro = { version = "=1.16.2", default-features = false }
 talos-sync-sdk = "=0.1.8"
 talos-service = { path = "crates/orchestration/service" }
 talos-llm-provider = { path = "crates/common/llm/provider" }

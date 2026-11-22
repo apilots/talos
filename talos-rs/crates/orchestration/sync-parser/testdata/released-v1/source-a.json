@@ -1,0 +1,572 @@
+{
+  "changes": [
+    {
+      "data": {
+        "after": {
+          "data": {
+            "binding": {
+              "agentId": "talos",
+              "computerId": "d4383755-33d1-43fd-a6ef-cf14dc2a823d",
+              "workspaceId": "released-session",
+              "workspaceUserId": "workspace-owner"
+            },
+            "channelId": null,
+            "conf": {
+              "modelSelection": null,
+              "userPermissionMode": null
+            },
+            "environment": null,
+            "memoryProcessedThrough": null,
+            "session": {
+              "configuredDefaultMode": "askForApproval",
+              "createdAt": 1,
+              "currentDirectory": "/worker/project",
+              "effectiveMode": "askForApproval",
+              "id": "released-session",
+              "lastActivity": 11,
+              "messageCount": 4,
+              "modelSelection": {
+                "modelRef": {
+                  "id": "configured",
+                  "provider": "original"
+                },
+                "reasoningEffort": null
+              },
+              "nodeId": "d4383755-33d1-43fd-a6ef-cf14dc2a823d",
+              "projectId": null,
+              "sourceProvider": "sdk",
+              "sourceType": "desktop",
+              "title": "Released history",
+              "usage": {
+                "context": null,
+                "tokens": {
+                  "cache_creation_input_tokens": null,
+                  "cache_read_input_tokens": null,
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": null,
+                  "total_tokens": 0
+                }
+              },
+              "userId": "workspace-owner"
+            },
+            "threadId": null,
+            "treeIdentity": {
+              "type": "primary"
+            }
+          },
+          "kind": "session"
+        },
+        "before": null
+      },
+      "type": "metadata"
+    },
+    {
+      "data": {
+        "coordinatorId": "original-A",
+        "identity": {
+          "sessionId": "released-session",
+          "turnId": "turn-1"
+        },
+        "previousTurnId": null
+      },
+      "type": "turn"
+    },
+    {
+      "data": {
+        "coordinatorId": "original-A",
+        "identity": {
+          "sessionId": "released-session",
+          "turnId": "turn-2"
+        },
+        "previousTurnId": "turn-1"
+      },
+      "type": "turn"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-1"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {},
+              "type": "turnStarted"
+            },
+            "sequence": 1
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-1"
+          },
+          "sequence": 1,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-1"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {
+                "message": {
+                  "blocks": [],
+                  "completedAt": null,
+                  "createdAt": 10,
+                  "messageId": "message-1",
+                  "role": "user",
+                  "status": "inProgress",
+                  "turnId": "turn-1"
+                }
+              },
+              "type": "messageStarted"
+            },
+            "sequence": 2
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-1"
+          },
+          "sequence": 2,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-1"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {
+                "block": {
+                  "blockId": "block-1",
+                  "completedAt": null,
+                  "content": {
+                    "data": {
+                      "text": "Released history Turn 1",
+                      "type": "text"
+                    },
+                    "type": "userContent"
+                  },
+                  "startedAt": 10,
+                  "status": "running"
+                },
+                "messageId": "message-1"
+              },
+              "type": "messageBlockStarted"
+            },
+            "sequence": 3
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-1"
+          },
+          "sequence": 3,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-1"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {
+                "block": {
+                  "blockId": "block-1",
+                  "completedAt": 10,
+                  "content": {
+                    "data": {
+                      "text": "Released history Turn 1",
+                      "type": "text"
+                    },
+                    "type": "userContent"
+                  },
+                  "startedAt": 10,
+                  "status": "completed"
+                },
+                "messageId": "message-1"
+              },
+              "type": "messageBlockCompleted"
+            },
+            "sequence": 4
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-1"
+          },
+          "sequence": 4,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-1"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {
+                "blocks": [
+                  {
+                    "blockId": "block-1",
+                    "completedAt": 10,
+                    "content": {
+                      "data": {
+                        "text": "Released history Turn 1",
+                        "type": "text"
+                      },
+                      "type": "userContent"
+                    },
+                    "startedAt": 10,
+                    "status": "completed"
+                  }
+                ],
+                "completedAt": 10,
+                "createdAt": 10,
+                "messageId": "message-1",
+                "role": "user",
+                "status": "completed",
+                "turnId": "turn-1"
+              },
+              "type": "messageCompleted"
+            },
+            "sequence": 5
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-1"
+          },
+          "sequence": 5,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-1"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {
+                "stopReason": "endTurn"
+              },
+              "type": "turnCompleted"
+            },
+            "sequence": 6
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-1"
+          },
+          "sequence": 6,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-2"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {},
+              "type": "turnStarted"
+            },
+            "sequence": 1
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-2"
+          },
+          "sequence": 1,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-2"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {
+                "message": {
+                  "blocks": [],
+                  "completedAt": null,
+                  "createdAt": 10,
+                  "messageId": "message-2",
+                  "role": "user",
+                  "status": "inProgress",
+                  "turnId": "turn-2"
+                }
+              },
+              "type": "messageStarted"
+            },
+            "sequence": 2
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-2"
+          },
+          "sequence": 2,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-2"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {
+                "block": {
+                  "blockId": "block-2",
+                  "completedAt": null,
+                  "content": {
+                    "data": {
+                      "text": "Released history Turn 2",
+                      "type": "text"
+                    },
+                    "type": "userContent"
+                  },
+                  "startedAt": 10,
+                  "status": "running"
+                },
+                "messageId": "message-2"
+              },
+              "type": "messageBlockStarted"
+            },
+            "sequence": 3
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-2"
+          },
+          "sequence": 3,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-2"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {
+                "block": {
+                  "blockId": "block-2",
+                  "completedAt": 10,
+                  "content": {
+                    "data": {
+                      "text": "Released history Turn 2",
+                      "type": "text"
+                    },
+                    "type": "userContent"
+                  },
+                  "startedAt": 10,
+                  "status": "completed"
+                },
+                "messageId": "message-2"
+              },
+              "type": "messageBlockCompleted"
+            },
+            "sequence": 4
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-2"
+          },
+          "sequence": 4,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-2"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {
+                "blocks": [
+                  {
+                    "blockId": "block-2",
+                    "completedAt": 10,
+                    "content": {
+                      "data": {
+                        "text": "Released history Turn 2",
+                        "type": "text"
+                      },
+                      "type": "userContent"
+                    },
+                    "startedAt": 10,
+                    "status": "completed"
+                  }
+                ],
+                "completedAt": 10,
+                "createdAt": 10,
+                "messageId": "message-2",
+                "role": "user",
+                "status": "completed",
+                "turnId": "turn-2"
+              },
+              "type": "messageCompleted"
+            },
+            "sequence": 5
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-2"
+          },
+          "sequence": 5,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "event": {
+          "data": {
+            "identity": {
+              "sessionId": "released-session",
+              "turnId": "turn-2"
+            },
+            "occurredAt": 10,
+            "payload": {
+              "data": {
+                "stopReason": "endTurn"
+              },
+              "type": "turnCompleted"
+            },
+            "sequence": 6
+          },
+          "type": "agent"
+        },
+        "key": {
+          "identity": {
+            "sessionId": "released-session",
+            "turnId": "turn-2"
+          },
+          "sequence": 6,
+          "type": "agent"
+        },
+        "persistedAt": 11
+      },
+      "type": "event"
+    }
+  ],
+  "sdk": "0.1.7",
+  "version": {
+    "historyGeneration": 0,
+    "versionVector": [
+      1,
+      101,
+      92
+    ]
+  }
+}

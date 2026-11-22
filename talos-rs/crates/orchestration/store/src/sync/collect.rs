@@ -85,7 +85,7 @@ impl StoreSyncAdapter {
             .storage
             .query(
                 "SELECT DISTINCT r.kind, r.resource_id FROM resource_revisions r
-             WHERE r.owner_user_id IN (?2, ?3) AND r.kind || ':' || r.resource_id>?4 AND r.revision>COALESCE((
+             WHERE r.kind <> 'computer' AND r.owner_user_id IN (?2, ?3) AND r.kind || ':' || r.resource_id>?4 AND r.revision>COALESCE((
                  SELECT MAX(c.revision) FROM sync_resource_capture c
                  WHERE c.hub_id=?1 AND c.account_id=?2 AND c.kind=r.kind AND c.resource_id=r.resource_id
              ),0)

@@ -7,12 +7,16 @@ license.workspace = true
 description = "Talos payload projection and parsing above the Sync protocol"
 
 [dependencies]
+loro.workspace = true
 talos-sync-types.workspace = true
 talos-types.workspace = true
 talos-agent-api.workspace = true
 talos-error.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+talos-sync-sdk.workspace = true
 
 [lints]
 workspace = true

@@ -5,6 +5,8 @@ mod metadata;
 mod projection;
 mod records;
 mod types;
+mod upgrade;
+pub use upgrade::upgrade_v1_snapshot;
 
 pub use codec::{codec_error, sync_error};
 pub use metadata::{decode_changes, encode_change, resource};

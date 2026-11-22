@@ -2,7 +2,7 @@
 
 Status: Implemented. Talos owns product integration; the [independent Sync contract](https://github.com/apilots/talos-sync/blob/8e60e2b612ba895c8f4bcb4e0d78c9ae86227502/spec/feat-001-talos-sync/design.md) owns the service protocol. Current acceptance evidence belongs in the integration PR and ignored output reports.
 
-同一账号在多个Desktop app-server/talos-server管理宿主拥有独立业务DB，双向同步Computer、Project、Session、完整Timeline及必要执行metadata。Session永久绑定一个Computer/Worker/Workspace，空闲可由任意授权管理端协调同Worker的下一Turn；执行中的Turn只有当前协调者。同步不迁移Worker、不触发执行。
+Management hosts keep independent product databases. Sync replicates account-owned Project, Session, complete Timeline and required execution metadata. Talos Server owns the Computer directory and registration state; clients refresh that directory independently of Sync. Sessions retain their original Computer/Worker/Workspace binding. An authorized manager may coordinate the next idle Turn on the same Worker; a running Turn has one coordinator. Replication never migrates Workers or starts execution.
 
 ```mermaid
 flowchart TB
@@ -57,8 +57,7 @@ and feed cursor. The SDK validates a full snapshot before it reaches the same
 materialization path used for incremental updates.
 
 The protocol v2 cutover pairs the Talos parser with published
-`talos-sync-types` and `talos-sync-sdk` 0.1.8. The product test suite can
-exercise these package archives before the registry release.
+`talos-sync-types` and `talos-sync-sdk` 0.1.8. The lockfile consumes these published registry packages without local source patches.
 
 导入不计费、不重发工具或反思。稳定事件键与原 reducer 重建展示，原活动锁、claim 和内存 queue 留在执行端。跨端 Input、Interrupt 和 queue 仅路由当前执行协调者。
 
@@ -163,32 +162,70 @@ operations are materialized; the new baseline requires its own durable Hub ACK.
 The old canonical checkpoints remain available for the archived scope. Missing dependencies and incomplete
 checkpoints do not become complete by changing a Hub identity.
 
-### Computer metadata and control-plane observations
+### Server-owned Computer directory
 
-Persistent Computer list/detail fields return from the current management
-host's local Store. Desktop and TUI refresh nonlocal observations in an
-account-owned background task using the Talos Server control plane. At most
-four observation RPCs run per host; reads never join those RPCs. Refreshes run
-every five seconds, and observations older than fifteen seconds become
-unavailable/unknown. Identity, name, endpoint and persistent metadata are not
-replaced by a remote NodeInfo response. Server-provided health, availability,
-lease/heartbeat and enabled status remain authoritative observations for
-nonlocal Computers. The central Server reads its own registration/connection
-state. The local embedded Worker uses its actual local availability.
+Talos Server is authoritative for Computer registration, identity, name,
+endpoint, enabled state, managed lifecycle phase, system information and live
+availability. Desktop and TUI periodically fetch the signed-in account's full
+paged directory through the existing Node SDK, even with Sync disabled or an
+empty/unavailable Hub. Administrative clients also request owner-only pages.
+The central Server reads its own registry. A trusted local embedded Worker
+retains its actual local availability.
 
-Registration expiry reconciliation remains owned by background management.
-Observation tasks are canceled with account maintenance and clear their
-account cache. They do not authorize execution: commands continue through the
-existing verified control-plane path. An authenticated replacement Hub is
-rediscovered after an identity conflict, with the account's retained state
-moved before starting its replacement runner.
+One account-owned task refreshes every five seconds. Pages contain at most 100
+entries, each RPC has a five-second deadline, and a host-wide semaphore permits
+four concurrent directory RPCs. All pages must validate before publication;
+duplicate identities, foreign owners and repeated cursors fail the pull. The
+existing local Store publishes the complete cache in one transaction: upsert
+confirmed entries and remove absent cache-only rows before SQL filtering,
+pagination or counting. Credentials, leases and managed Worker records are not
+copied or pruned. Fresh Server results supersede legacy Sync-only deletion
+markers for the same owner.
 
-Hub recovery and Computer observations have independent account-owned tasks.
-Slow discovery or a retained-snapshot migration must not delay control-plane
-availability refresh. A stopped old transport retains its scope until the new
-handle is fully installed; migration/install failures are retried automatically,
-including when the last network error changed during discovery. Same-scope
-reuse applies only to a running handle.
+List/detail remain local reads and never await a directory or Sync request.
+Failed pulls preserve the last complete directory; status older than fifteen
+seconds becomes unavailable/unknown. Confirmed create/update/rename/status/delete
+operations write through the same cache owner immediately. Confirmations,
+including deletions, override older in-flight pulls. A Server-authorized connection
+may seed first-access metadata through the same publication owner; a delayed
+handshake cannot replace newer observations or resurrect removed entries.
+Account cancellation clears
+transient state; another account cannot consume its observations.
+
+Fresh Sync capture does not scan or capture Computers. Retained Computer
+checkpoints can still be converted and relayed to preserve historical causality,
+but their imports and tombstones cannot change the directory or retire a
+registration. Session/Project import has no Computer-document dependency;
+original Node IDs remain native history bindings. Actual command/file access
+still passes existing Server/Worker authorization and reachability checks.
+
+Hub recovery and directory maintenance have independent account-owned tasks.
+Slow discovery or snapshot conversion must not delay directory refresh. An
+authenticated replacement Hub is rediscovered after an identity conflict; the
+old retained state moves before the replacement runner starts. Migration/install
+failures retry automatically. Same-scope reuse requires a running handle.
+
+### Released replica upgrade
+
+Published SDK 0.1.7 replicas use document schema v1; generic SDK 0.1.8 uses v2.
+The Talos Parser performs a one-time persisted conversion before opening retained
+checkpoints or rebinding to a replacement Hub. It imports the official Loro JSON
+operation history, maps Talos containers/fields to generic headers and records,
+and preserves operation IDs, dependencies, counters, Lamport clocks, source IDs,
+native timestamps, generations and tombstones. A new generic header is appended
+by the local writer. Re-encoding native values as new historical operations would
+lose causality and is prohibited. The production dependency remains SDK 0.1.8;
+the released SDK is used only to regenerate committed test fixtures.
+
+Conversion builds and stages snapshots outside the publication writer. A bounded
+compare-and-swap checks the original document and ACK version using official
+VersionVector semantics, then persists the checkpoint, projection and schema
+marker atomically. Existing non-null materialization proofs are conservatively
+promoted to the complete converted checkpoint; null proofs remain unmaterialized.
+This prevents reset/delete or old metadata replay while preserving a pending
+native tail. Raw v1 outbox payloads use the shared Parser encoder. A new Hub gets
+fresh ACK/feed state and a complete baseline; conversion is not a Hub ACK.
+Malformed or racing retained data fails without retiring the old binding.
 
 Sync settings serialize with current account initialization without aborting
 in-flight Worker enrollment. Explicit logout retains its cancellation boundary.

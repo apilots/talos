@@ -69,7 +69,7 @@ impl TalosSync {
                     (SELECT COUNT(*) FROM visible_sync_outbox o
                      WHERE o.hub_id = scope.hub_id AND o.account_id = scope.account_id)
                   + (SELECT COUNT(*) FROM resource_revisions resource
-                     WHERE resource.owner_user_id IN (scope.account_id, scope.source_user_id)
+                     WHERE resource.kind <> 'computer' AND resource.owner_user_id IN (scope.account_id, scope.source_user_id)
                        AND NOT EXISTS (
                            SELECT 1 FROM sync_resource_capture c
                            WHERE c.hub_id = scope.hub_id AND c.account_id = scope.account_id

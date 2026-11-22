@@ -36,7 +36,7 @@ Talos可使用官方Loro Rust基础库，但首版不搬入通用文档repo、E2
 | 已完成TurnSubmission/TurnInput幂等结果 | 原IdempotencyRecord/TurnCommandStatus | 同时保留idempotency_key及独立request_id，event映射并恢复完整原响应；reserved/lease/claim不复制，不建RPC账本。 |
 | clear/delete/parent tree删除 | 原业务事务 | reset generation/逐resource tombstone同事务capture；迟到旧代事件不能复活资源。 |
 | FileInfo、tags/scope/MIME/大小/变更及file_id引用 | FileService/AgentUserContent::File | 安全metadata+正文peer；只由源FileService读/改/删，当前FileService经G连接访问NAT源，不伪造本端存储路径。源离线不可用。 |
-| Computer名称/owner/启停、稳定UUID/embedded别名 | Node Store/NodeInfo | 复用目录事实，不复制token/hash/lease；当前在线仍来自真实RPC连接。 |
+| Computer名称/owner/启停、稳定UUID/embedded别名 | Node Store/NodeInfo | Server-owned directory/status; clients asynchronously cache full owner pages without Sync or credentials. Historical Sync imports cannot change this directory. |
 | 空Project、目录、Computer归属、计数及删除 | Project Store/ProjectInfo | 所有CRUD与Session影响的计数capture；目录读写/校验只到Worker。 |
 | 尚未准入queue与通知 | SessionMessageQueueService | 当前owner的实时API，process-local；不同步持久队列，不静默迁移。 |
 | 当前执行/恢复任务、continuation claim、租约、凭据 | 原Service/Store/Worker | 仅实际当前协调者与Worker；数据import不创建这些对象。 |

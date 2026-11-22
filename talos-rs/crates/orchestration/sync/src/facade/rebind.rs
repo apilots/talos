@@ -32,6 +32,7 @@ impl TalosSync {
                 "A new Hub must retain the original Computer associations.",
             ));
         }
+        self.upgrade_binding(previous).await?;
         for _ in 0..3 {
             let resources = self.storage.query(
                 "SELECT kind, resource_id FROM sync_documents WHERE hub_id=?1 AND account_id=?2

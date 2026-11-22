@@ -495,6 +495,7 @@ impl ApplicationSyncHost {
         for (computer, _) in removed {
             self.coordinator.unregister_remote_node(&computer).await;
         }
+        self.computer_directory.clear_account(account_id).await;
         Ok(())
     }
 

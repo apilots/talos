@@ -14,6 +14,7 @@ mod capture;
 mod materialize;
 mod rebind;
 mod state;
+mod upgrade;
 
 /// Persistent management-side integration. It owns no Agent execution or token.
 ///
@@ -211,6 +212,7 @@ impl TalosSync {
             source_user_id: params.source_user_id,
             computers: params.computers,
         };
+        self.upgrade_binding(&binding).await?;
         if self
             .binding(&binding.scope, &binding.source_user_id)
             .await?

@@ -47,7 +47,7 @@ pub(crate) async fn document(
     scope: &SyncScope,
     resource: &SyncResourceKey,
 ) -> TalosResult<Option<DocumentRecord>> {
-    let rows = tx.query("SELECT snapshot_id, hex(snapshot_blob) AS snapshot, hex(version_vector) AS vector, generation, hex(acknowledged_vector) AS acknowledged, acknowledged_generation, session_projection_json IS NOT NULL AS has_session_projection FROM sync_documents WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
+    let rows = tx.query("SELECT replica_schema_version, snapshot_id, hex(snapshot_blob) AS snapshot, hex(version_vector) AS vector, generation, hex(acknowledged_vector) AS acknowledged, acknowledged_generation, session_projection_json IS NOT NULL AS has_session_projection FROM sync_documents WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
     let Some(row) = rows.first() else {
         return Ok(None);
     };
@@ -57,6 +57,9 @@ pub(crate) async fn document(
     };
     Ok(Some(DocumentRecord {
         snapshot,
+        schema_version: row
+            .get_i64("replica_schema_version")
+            .ok_or_else(corrupt_record)?,
         version: version(row)?,
         acknowledged: acknowledged_version(row)?,
         has_session_projection: row.get_i64("has_session_projection") == Some(1),
@@ -84,10 +87,10 @@ pub(crate) async fn save_document(
         INSERT INTO sync_documents(
             hub_id, account_id, kind, resource_id, computer_id, generation, deleted,
             snapshot_blob, snapshot_id, version_vector, acknowledged_vector,
-            acknowledged_generation, session_projection_json
-        ) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, unhex(?), NULLIF(?, ''), unhex(?), unhex(?), ?, NULLIF(?, ''))
+            acknowledged_generation, session_projection_json, replica_schema_version
+        ) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, unhex(?), NULLIF(?, ''), unhex(?), unhex(?), ?, NULLIF(?, ''), 2)
         ON CONFLICT(hub_id, account_id, kind, resource_id) DO UPDATE SET
-            computer_id = excluded.computer_id, generation = excluded.generation,
+            replica_schema_version = 2, computer_id = excluded.computer_id, generation = excluded.generation,
             deleted = excluded.deleted, snapshot_blob = excluded.snapshot_blob,
             snapshot_id = excluded.snapshot_id, version_vector = excluded.version_vector,
             acknowledged_vector = excluded.acknowledged_vector,
@@ -169,9 +172,9 @@ pub(crate) async fn copy_checkpoint_scope(
 ) -> TalosResult<()> {
     tx.execute(
         "INSERT INTO sync_documents(hub_id,account_id,kind,resource_id,computer_id,generation,deleted,
-            snapshot_blob,snapshot_id,version_vector,acknowledged_vector,acknowledged_generation,session_projection_json)
+            snapshot_blob,snapshot_id,version_vector,acknowledged_vector,acknowledged_generation,session_projection_json,replica_schema_version)
          SELECT ?1,account_id,kind,resource_id,computer_id,generation,deleted,
-            snapshot_blob,snapshot_id,version_vector,unhex(''),0,session_projection_json
+            snapshot_blob,snapshot_id,version_vector,unhex(''),0,session_projection_json,replica_schema_version
          FROM sync_documents WHERE hub_id=?2 AND account_id=?3",
         &[&next.hub_id, &previous.hub_id, &next.account_id],
     ).await?;

@@ -633,8 +633,26 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
     ) -> Result<Response<pb::ListNodesResponse>, Status> {
         let result = async {
             let actor = self.actor(&request).await?;
+            let request = request.into_inner();
+            if request.owner_only {
+                let page = self
+                    .nodes
+                    .list_computers(
+                        &actor,
+                        talos_types::ComputerListRequest {
+                            cursor: request.cursor,
+                            limit: Some(request.limit),
+                            query: None,
+                        },
+                    )
+                    .await?;
+                return Ok(talos_types::NodePage {
+                    data: page.data,
+                    next_cursor: page.next_cursor,
+                });
+            }
             self.nodes
-                .list_nodes(&actor, node_pb::decode_list(request.into_inner()))
+                .list_nodes(&actor, node_pb::decode_list(request))
                 .await
         }
         .await;
