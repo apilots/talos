@@ -7,6 +7,11 @@ settings:
 overrides:
   react-pdf>pdfjs-dist: 6.4.299
 
+patchedDependencies:
+  '@novnc/novnc@1.5.0':
+    hash: cmu3vvfkfrr24o2gmi7mndf3vy
+    path: patches/@novnc__novnc@1.5.0.patch
+
 importers:
 
   .:
@@ -152,7 +157,7 @@ importers:
         version: 6.43.15
       '@novnc/novnc':
         specifier: 1.5.0
-        version: 1.5.0
+        version: 1.5.0(patch_hash=cmu3vvfkfrr24o2gmi7mndf3vy)
       '@radix-ui/react-alert-dialog':
         specifier: 1.2.1
         version: 1.2.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
@@ -4469,7 +4474,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
-  '@novnc/novnc@1.5.0': {}
+  '@novnc/novnc@1.5.0(patch_hash=cmu3vvfkfrr24o2gmi7mndf3vy)': {}
 
   '@radix-ui/number@1.1.3': {}
 

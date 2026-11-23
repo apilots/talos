@@ -50,7 +50,13 @@ installation may appear in the client home. The same case's production Desktop
 IPC/preload/SDK and noVNC viewer must also take control, apply a key to the real
 X11 display, clear held input on release and disconnect, then resume with actual
 pixels and another Agent Browser task. It shares the HTTP viewer's X11 probe;
-connection status alone is not rendered-frame evidence. After online repair, a replacement
+connection status alone is not rendered-frame evidence. The native fixture records
+host send, ACK acceptance, request completion and stream release in
+`native-media-frames.jsonl`, correlated with renderer handler entry/duration and
+synchronous canvas operations in `native-docker-viewer-diagnostics.json` (or the
+failure diagnostics). Compare send and handler timestamps for IPC delivery, the
+handler/canvas durations for consumption, and ACK/completion/release timestamps
+for response and cleanup; wall-clock gaps include process scheduling. After online repair, a replacement
 container removes its packaged environment metadata before Worker startup and
 disables external package DNS while retaining the control-plane hosts entry. It
 must reuse the same home environment and complete another real Browser task.
