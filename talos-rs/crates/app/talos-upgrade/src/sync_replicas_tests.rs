@@ -257,3 +257,79 @@ async fn restored_native_outbox_without_a_checkpoint_cannot_bypass_the_startup_g
         1
     );
 }
+
+#[tokio::test]
+async fn startup_retires_computer_uploads_after_completed_replica_upgrade() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = config(directory.path());
+    let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
+    let old_migrations = tempfile::tempdir().unwrap();
+    for entry in std::fs::read_dir(migrations()).unwrap() {
+        let entry = entry.unwrap();
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("202611230001")
+        {
+            std::fs::copy(entry.path(), old_migrations.path().join(entry.file_name())).unwrap();
+        }
+    }
+    crate::database_migration::DatabaseMigrationRunner::new(storage.pool(), old_migrations.path())
+        .run()
+        .await
+        .unwrap();
+    for account in ["dormant-a", "dormant-b"] {
+        seed(&storage, account).await;
+    }
+    run_startup_upgrades(StartupUpgradeParams {
+        config: &config,
+        storage: &storage,
+        database_migration_dir: old_migrations.path(),
+    })
+    .await
+    .unwrap();
+    let before = checkpoint(&storage, "dormant-a").await;
+    let preserved: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sync_outbox WHERE kind='session'")
+            .fetch_one(storage.pool())
+            .await
+            .unwrap();
+    for account in ["dormant-a", "dormant-b"] {
+        sqlx::query("INSERT INTO sync_outbox(hub_id,account_id,source_user_id,kind,resource_id,changes_json,created_at) VALUES ('retained-hub',?,?,'computer','old-computer','[]',1)")
+            .bind(account).bind(account).execute(storage.pool()).await.unwrap();
+        sqlx::query("INSERT INTO sync_resource_capture(hub_id,account_id,kind,resource_id,revision,outbox_sequence) VALUES ('retained-hub',?,'computer','old-computer',1,1)")
+            .bind(account).execute(storage.pool()).await.unwrap();
+    }
+    let report = run_startup_upgrades(StartupUpgradeParams {
+        config: &config,
+        storage: &storage,
+        database_migration_dir: &migrations(),
+    })
+    .await
+    .unwrap();
+    assert!(report.product.skipped.iter().any(|id| id == UPGRADE_ID));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_outbox WHERE kind='computer'")
+            .fetch_one(storage.pool())
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sync_resource_capture WHERE kind='computer'"
+        )
+        .fetch_one(storage.pool())
+        .await
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_outbox WHERE kind='session'")
+            .fetch_one(storage.pool())
+            .await
+            .unwrap(),
+        preserved
+    );
+    assert_eq!(checkpoint(&storage, "dormant-a").await, before);
+}

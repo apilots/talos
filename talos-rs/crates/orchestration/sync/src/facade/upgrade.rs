@@ -277,6 +277,10 @@ async fn prepared_header_marker(
     binding: &SyncBinding,
     key: &SyncResourceKey,
 ) -> TalosResult<bool> {
+    // Retained Computer checkpoints are historical evidence, not directory writes.
+    if matches!(key, SyncResourceKey::Computer { .. }) {
+        return Ok(false);
+    }
     let affected = tx.execute("INSERT INTO sync_outbox(hub_id,account_id,source_user_id,kind,resource_id,changes_json,created_at)
         SELECT b.hub_id,b.account_id,b.source_user_id,?,?,'[]',? FROM sync_bindings b
         WHERE b.hub_id=? AND b.account_id=? AND NOT EXISTS (
