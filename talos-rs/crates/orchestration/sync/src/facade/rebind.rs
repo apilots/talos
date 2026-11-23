@@ -84,7 +84,7 @@ impl TalosSync {
             ).await?;
             let resources = tx
                 .query(
-                    "SELECT kind,resource_id FROM sync_documents WHERE hub_id=? AND account_id=?",
+                    "SELECT kind,resource_id FROM sync_documents WHERE hub_id=? AND account_id=? AND kind<>'computer'",
                     &[&next.scope.hub_id, &next.scope.account_id],
                 )
                 .await?;

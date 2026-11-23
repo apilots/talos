@@ -194,21 +194,27 @@ pub(super) async fn verify(
             .node_id,
         expected_node
     );
-    let source_computers = survivor
-        .service
-        .list_computers(actor, Default::default())
-        .await
-        .unwrap();
+    // The new reader enrolls asynchronously, adding itself to the Server directory.
+    // Compare both refreshed views after enrollment, never a pre-enrollment snapshot.
     wait_for(
         "cold reader recovered the complete Computer directory",
         async || {
+            let Some(local) = reader.sync_host.local_computer(actor).await.unwrap() else {
+                return false;
+            };
+            let source = survivor
+                .service
+                .list_computers(actor, Default::default())
+                .await
+                .unwrap();
             let computers = reader
                 .service
                 .list_computers(actor, Default::default())
                 .await
                 .unwrap();
-            computers.data.len() == source_computers.data.len()
-                && source_computers.data.iter().all(|source| {
+            source.data.iter().any(|node| node.node_id == local)
+                && computers.data.len() == source.data.len()
+                && source.data.iter().all(|source| {
                     computers.data.iter().any(|node| {
                         node.node_id == source.node_id
                             && node.display_name == source.display_name
