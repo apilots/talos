@@ -274,14 +274,12 @@ impl TalosApplicationAdapter {
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
-            ClientRequestParams::ProjectList(_) => {
-                let response = self
-                    .gateway
-                    .list_projects(actor, talos_types::ProjectListRequest::default())
+            ClientRequestParams::ProjectList(params) => to_value(
+                self.gateway
+                    .list_projects(actor, params)
                     .await
-                    .map_err(talos_error_to_api_error)?;
-                to_value(response)
-            }
+                    .map_err(talos_error_to_api_error)?,
+            ),
             ClientRequestParams::ProjectRead(params) => to_value(
                 self.gateway
                     .get_project(actor, params)

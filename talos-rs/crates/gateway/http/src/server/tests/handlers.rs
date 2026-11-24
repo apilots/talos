@@ -921,6 +921,119 @@ async fn test_http_server_listen_addr_uses_configured_host() {
 }
 
 #[tokio::test]
+async fn project_list_http_and_rpc_filter_retained_projects_by_actor_and_computer() {
+    use talos_app_protocol::requests::ClientRequest;
+    use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
+    use talos_store::project::ProjectRecord;
+    use talos_types::ProjectListResponse;
+
+    let owner = test_auth();
+    let other = RequestIdentity {
+        user_id: "other-user".into(),
+        ..test_auth()
+    };
+    let directory = tempfile::tempdir().unwrap().path().join("retained-project");
+    let mut projects = MockProjectStore::new();
+    // The remote computer has no registered worker, and neither binding needs a live directory.
+    for (actor, node_id, project_id) in [
+        (&owner, "embedded", "local-project"),
+        (&owner, "offline-worker", "remote-project"),
+        (&other, "offline-worker", "other-project"),
+    ] {
+        projects = projects.with_project(ProjectRecord {
+            execution_node_id: node_id.into(),
+            project_id: project_id.into(),
+            name: project_id.into(),
+            user_id: actor.user_id.clone(),
+            directory: directory.clone(),
+            status: Default::default(),
+            created_at: 0,
+            updated_at: 0,
+            session_count: 0,
+        });
+    }
+    let store = test_agent_execution_store().await;
+    let state = build_test_state_with_stores(
+        TestStateConfig {
+            event_store: store.clone(),
+            base_config: test_config(),
+            auth_disabled: false,
+            lifecycle: Arc::new(ServerLifecycle::new()),
+            config_store: None,
+        },
+        store,
+        Arc::new(projects),
+    )
+    .await;
+    let app = Router::new()
+        .route("/v1/projects", get(list_projects_handler))
+        .with_state(state.clone());
+    let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
+
+    let local_project = ("local-project", "embedded");
+    let remote_project = ("remote-project", "offline-worker");
+    let other_project = ("other-project", "offline-worker");
+    let cases: &[(_, _, &[_])] = &[
+        (&owner, Some("offline-worker"), &[remote_project]),
+        (&owner, Some("embedded"), &[local_project]),
+        (&owner, None, &[local_project, remote_project]),
+        (&other, Some("offline-worker"), &[other_project]),
+        (&other, Some("embedded"), &[]),
+        (&other, None, &[other_project]),
+    ];
+    for &(actor, node_id, expected) in cases {
+        let uri = match node_id {
+            Some(node_id) => format!("/v1/projects?nodeId={node_id}"),
+            None => "/v1/projects".into(),
+        };
+        let http = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .extension(actor.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(http.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(http.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let http: ProjectListResponse = expect_success(serde_json::from_slice(&body).unwrap());
+        let bindings: Vec<_> = http
+            .projects
+            .iter()
+            .map(|project| (project.project_id.as_str(), project.node_id.as_str()))
+            .collect();
+        assert_eq!(
+            bindings, expected,
+            "HTTP list for {}, {node_id:?}",
+            actor.user_id
+        );
+        assert!(http
+            .projects
+            .iter()
+            .all(|project| project.directory == directory));
+
+        let rpc = adapter
+            .dispatch(
+                &talos_service::Actor::regular(actor.user_id.clone()),
+                ClientRequest::decode(
+                    "project/list",
+                    node_id.map(|node_id| serde_json::json!({ "nodeId": node_id })),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let rpc: ProjectListResponse = serde_json::from_value(rpc.body).unwrap();
+        assert_eq!(rpc, http, "RPC list for {}, {node_id:?}", actor.user_id);
+    }
+}
+
+#[tokio::test]
 async fn workspace_info_http_and_rpc_share_actor_scoped_storage_locations() {
     use talos_app_protocol::requests::{ClientMethod, ClientRequest, ClientRequestParams};
     use talos_app_server::{AppServerApplication, TalosApplicationAdapter};

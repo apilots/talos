@@ -271,6 +271,19 @@ async fn build_test_state_with_agent_execution_store(
     config: TestStateConfig,
     agent_execution_store: Arc<dyn AgentExecutionStore>,
 ) -> Arc<HttpApiState> {
+    build_test_state_with_stores(
+        config,
+        agent_execution_store,
+        Arc::new(MockProjectStore::new()),
+    )
+    .await
+}
+
+async fn build_test_state_with_stores(
+    config: TestStateConfig,
+    agent_execution_store: Arc<dyn AgentExecutionStore>,
+    project_store: Arc<dyn talos_store::project::ProjectStore>,
+) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
     let event_service = event_service_from_store(config.event_store.clone());
     let config_store = config
@@ -282,7 +295,6 @@ async fn build_test_state_with_agent_execution_store(
     )
     .unwrap();
     memory.rebuild_known_scopes().await.unwrap();
-    let project_store = Arc::new(MockProjectStore::new());
     let files = test_file_service(
         project_store.clone(),
         config.base_config.storage.files.clone(),

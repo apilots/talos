@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 import urllib.error
@@ -30,7 +31,21 @@ def run(cluster):
     records = []
     for name in ('开发笔记本', '旧测试工作站'):
         records.append(data(public(cluster, '/v1/computers', 'POST', {'displayName': name, 'credentialExpiresAt': 2_000_000_000})))
-    old = records[1]['node']['nodeId']
+    nodes = [record['node']['nodeId'] for record in records]
+    project_names = ('Laptop Project', 'Workstation Project')
+    directory = cluster.root / 'shared-project'
+    directory.mkdir()
+    # Project creation validates the directory on an online Worker. Seed only
+    # the disposable Store so the browser can exercise the real HTTP list
+    # path on two registered Computers without starting Workers or a model.
+    with sqlite3.connect(cluster.server_home / 'data/talos.db') as database:
+        database.executemany(
+            'INSERT INTO projects (project_id, name, user_id, execution_node_id, directory, created_at, updated_at) '
+            'VALUES (?, ?, ?, ?, ?, 1, 1)',
+            [(f'computer-project-{index}', name, cluster.users['alice']['user']['user_id'], node, str(directory))
+             for index, (node, name) in enumerate(zip(nodes, project_names))],
+        )
+    old = nodes[1]
     path = '/v1/computers/' + old
     require(public(cluster, path, 'DELETE', user='bob')['error']['code'] == 'resourceNotFound', 'Non-owner deletion was accepted')
     port = free_port()
@@ -51,6 +66,14 @@ def run(cluster):
         page.locator('.cmp-content').get_by_role('button', name=re.compile('旧测试工作站')).first.click()
         expect(page.locator('.cmp-inspector h2')).to_have_text('旧测试工作站')
         page.get_by_role('button', name='进入电脑', exact=True).click()
+        project_rows = page.locator('#talos-sidebar [data-sidebar-project-row] > button')
+        expect(project_rows).to_have_text([project_names[1]])
+        for index in (0, 1):
+            computer = page.locator(f'aside button[data-computer-id="{nodes[index]}"]')
+            computer.click()
+            expect(computer).to_have_attribute('aria-pressed', 'true')
+            expect(project_rows).to_have_text([project_names[index]])
+        print('CASE web_project_sidebar_follows_selected_computer PASS', flush=True)
         page.goto(url + '/computers')
         page.locator('.cmp-content').get_by_role('button', name=re.compile('旧测试工作站')).first.click()
         actions = page.locator('.cmp-registration-actions')
