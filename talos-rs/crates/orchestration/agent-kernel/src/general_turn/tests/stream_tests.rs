@@ -11,7 +11,7 @@ mod recovery_tests;
 
 struct DirectStreamingAnswerProvider;
 struct ExplicitFinalModelBlockProvider;
-struct ScriptedModelBlockProvider {
+pub(super) struct ScriptedModelBlockProvider {
     name: &'static str,
     events: Vec<ModelBlockStreamEvent>,
 }
@@ -21,7 +21,7 @@ struct DirectTerminalStreamingProvider {
 }
 
 impl ScriptedModelBlockProvider {
-    fn new(name: &'static str, events: Vec<ModelBlockStreamEvent>) -> Self {
+    pub(super) fn new(name: &'static str, events: Vec<ModelBlockStreamEvent>) -> Self {
         Self { name, events }
     }
 }

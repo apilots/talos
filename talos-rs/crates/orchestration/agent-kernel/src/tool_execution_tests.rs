@@ -439,11 +439,15 @@ async fn streaming_scheduler_stops_queued_calls_after_pending_user_action() {
             .expect("tool should schedule");
     }
 
-    let outputs = scheduler.finish().await.expect("scheduler should finish");
+    let completed = scheduler
+        .next_completed()
+        .await
+        .expect("scheduler should finish")
+        .expect("pending tool should complete");
 
-    assert_eq!(outputs.len(), 1);
-    assert!(outputs[0].output.outcome.pending().is_some());
-    assert!(outputs[0]
+    assert!(!scheduler.has_running());
+    assert!(completed.output.outcome.pending().is_some());
+    assert!(completed
         .output
         .metrics
         .as_ref()
@@ -956,10 +960,14 @@ async fn test_streaming_scheduler_forwards_tool_progress() {
         )
         .await
         .expect("tool should schedule");
-    let outputs = scheduler.finish().await.expect("tool should finish");
+    let completed = scheduler
+        .next_completed()
+        .await
+        .expect("scheduler should finish")
+        .expect("tool should complete");
 
-    assert_eq!(outputs.len(), 1);
-    assert!(!outputs[0].output.is_error);
+    assert!(!scheduler.has_running());
+    assert!(!completed.output.is_error);
     let mut saw_tool_progress = false;
     while let Ok(event) = stream_rx.try_recv() {
         if let AgentKernelEventPayload::ToolProgressDelta(data) = event.payload {
@@ -1024,8 +1032,16 @@ async fn test_streaming_scheduler_limits_parallel_safe_tools() {
             .await
             .expect("tool should schedule");
     }
-    let outputs = scheduler.finish().await.expect("tools should finish");
+    let mut completed_count = 0;
+    while scheduler
+        .next_completed()
+        .await
+        .expect("tools should finish")
+        .is_some()
+    {
+        completed_count += 1;
+    }
 
-    assert_eq!(outputs.len(), 4);
+    assert_eq!(completed_count, 4);
     assert_eq!(max_concurrent.load(Ordering::SeqCst), 2);
 }

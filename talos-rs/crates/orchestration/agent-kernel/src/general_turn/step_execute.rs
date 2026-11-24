@@ -587,7 +587,15 @@ pub(crate) async fn stream_round(
     }
 
     if let Some(scheduler) = scheduler.as_mut() {
-        for completed in scheduler.finish().await? {
+        loop {
+            for completed in scheduler.drain_completed().await? {
+                super::tool_batch::emit_tool_result_stream_event(stream_tx, &completed.output)
+                    .await;
+                streamed_tool_outputs.push(completed.output);
+            }
+            let Some(completed) = scheduler.next_completed().await? else {
+                break;
+            };
             super::tool_batch::emit_tool_result_stream_event(stream_tx, &completed.output).await;
             streamed_tool_outputs.push(completed.output);
         }

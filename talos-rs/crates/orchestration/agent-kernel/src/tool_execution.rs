@@ -598,28 +598,6 @@ impl StreamingToolScheduler {
         }))
     }
 
-    pub async fn finish(&mut self) -> TalosResult<Vec<StreamingToolExecutionOutput>> {
-        let mut completed = self.drain_completed().await?;
-        loop {
-            if (self.halted || self.pending_calls.is_empty())
-                && self.parallel_running == 0
-                && !self.serial_running
-            {
-                break;
-            }
-            if self.parallel_running == 0 && !self.serial_running {
-                self.schedule_ready_calls().await;
-                continue;
-            }
-            let Some(completed_output) = self.next_completed().await? else {
-                break;
-            };
-            completed.push(completed_output);
-            completed.extend(self.drain_completed().await?);
-        }
-        Ok(completed)
-    }
-
     fn classify_call(&self, tool_name: &str) -> StreamingToolSchedulingClass {
         if self.execution_mode == ToolExecutionMode::Sequential {
             return StreamingToolSchedulingClass::SerialOnly;
