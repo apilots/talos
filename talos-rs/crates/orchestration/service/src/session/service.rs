@@ -6,8 +6,8 @@ use talos_agent_api::AgentTurnRef;
 use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectStore;
 use talos_store::session::{
-    AccumulateSessionUsageParams, PatchSessionParams, SessionQuery, SessionRecord, SessionStore,
-    SessionTreeIdentity, SessionTreeScope,
+    AccumulateSessionUsageParams, PatchSessionParams, SessionQuery, SessionRecord,
+    SessionRecordPatch, SessionStore, SessionTreeIdentity, SessionTreeScope,
 };
 use talos_types::{
     OptionalCurrentDirectoryPatch, SessionConfigOverridePolicy, SessionInfo, SessionPatch,
@@ -18,6 +18,10 @@ use super::CreateSessionParams;
 
 #[path = "environment.rs"]
 mod environment;
+
+#[path = "worktree.rs"]
+mod worktree;
+pub(crate) use worktree::WorktreeDirective;
 
 #[path = "title.rs"]
 mod title;
@@ -171,11 +175,30 @@ impl SessionService {
             message_count: record.message_count,
             usage: record.usage.clone(),
             project_id: record.project_id.clone(),
-            current_directory: record.current_directory.clone(),
+            current_directory: record
+                .worktree_binding
+                .as_ref()
+                .map(|binding| binding.checkout_root.clone())
+                .or_else(|| record.current_directory.clone()),
         })
     }
 
-    async fn resolve_effective_root(&self, record: &SessionRecord) -> TalosResult<Option<PathBuf>> {
+    /// Resolve the saved directory shared by execution and Session file preview.
+    pub(crate) async fn resolve_working_directory(
+        &self,
+        record: &SessionRecord,
+    ) -> TalosResult<Option<PathBuf>> {
+        if let Some(binding) = record.worktree_binding.as_ref() {
+            let binding = self.verify_worktree(record, binding.clone()).await?;
+            return Ok(Some(binding.checkout_root));
+        }
+        self.resolve_unbound_directory(record).await
+    }
+
+    async fn resolve_unbound_directory(
+        &self,
+        record: &SessionRecord,
+    ) -> TalosResult<Option<PathBuf>> {
         let project_directory = if let Some(project_id) = record.project_id.as_deref() {
             Some(
                 self.project_store
@@ -237,7 +260,7 @@ impl SessionService {
         &self,
         params: CreateSessionParams,
     ) -> TalosResult<SessionRecord> {
-        self.create_session_with_tree_identity(params, SessionTreeIdentity::Primary)
+        self.create_session_with_tree_identity(params, None, SessionTreeIdentity::Primary)
             .await
     }
 
@@ -248,8 +271,13 @@ impl SessionService {
         tree_root_session_id: String,
         agent_path: talos_types::AgentPath,
     ) -> TalosResult<SessionRecord> {
+        let worktree_binding = self
+            .load_record(&parent.session_id)
+            .await?
+            .and_then(|record| record.worktree_binding);
         self.create_session_with_tree_identity(
             params,
+            worktree_binding,
             SessionTreeIdentity::Subagent {
                 parent,
                 tree_root_session_id,
@@ -262,6 +290,7 @@ impl SessionService {
     async fn create_session_with_tree_identity(
         &self,
         mut params: CreateSessionParams,
+        worktree_binding: Option<talos_types::SessionWorktreeBinding>,
         tree_identity: SessionTreeIdentity,
     ) -> TalosResult<SessionRecord> {
         if let Some(project_id) = params.project_id.as_deref() {
@@ -275,7 +304,9 @@ impl SessionService {
                 params.current_directory,
             )
             .await?;
-        let record = self.build_session_record(params, tree_identity).await?;
+        let record = self
+            .build_session_record(params, worktree_binding, tree_identity)
+            .await?;
         self.session_store.insert_session_record(&record).await?;
         Ok(record)
     }
@@ -307,21 +338,43 @@ impl SessionService {
         record: &SessionRecord,
         identity: AgentTurnRef,
     ) -> TalosResult<AgentContext> {
+        self.build_agent_context_for_turn(record, identity, None)
+            .await
+    }
+
+    pub(crate) async fn build_agent_context_for_turn(
+        &self,
+        record: &SessionRecord,
+        identity: AgentTurnRef,
+        worktree: Option<(WorktreeDirective, uuid::Uuid)>,
+    ) -> TalosResult<AgentContext> {
         let prepared = self.prepare_execution(record).await?;
-        let record = &prepared;
-        if record.id != identity.session_id {
+        if prepared.id != identity.session_id {
             return Err(TalosError::internal(
                 "Agent identity does not match its source Session",
             ));
         }
-        if record.agent_id.trim().is_empty() {
+        if prepared.agent_id.trim().is_empty() {
             return Err(
                 TalosError::internal("Session is missing its Agent binding.").context(format!(
                     "session '{}' is missing its Agent binding",
-                    record.id
+                    prepared.id
                 )),
             );
         }
+        let (record, working_directory) = match worktree {
+            Some((directive, operation_id)) => {
+                let (updated, checkout) = self
+                    .apply_worktree_directive(&prepared, directive, operation_id)
+                    .await?;
+                (updated, Some(checkout))
+            }
+            None => {
+                let root = self.resolve_working_directory(&prepared).await?;
+                (prepared, root)
+            }
+        };
+        let record = &record;
         let info = self.session_info(record).await?;
         let model_selection = info.model_selection;
         let model = self
@@ -333,7 +386,7 @@ impl SessionService {
             session: session_context,
             turn_id: identity.turn_id,
             project_id: record.project_id.clone(),
-            working_directory: self.resolve_effective_root(record).await?,
+            working_directory,
             environment: record.environment.clone(),
             model,
             model_selection,
@@ -522,6 +575,7 @@ impl SessionService {
     async fn build_session_record(
         &self,
         params: CreateSessionParams,
+        worktree_binding: Option<talos_types::SessionWorktreeBinding>,
         tree_identity: SessionTreeIdentity,
     ) -> TalosResult<SessionRecord> {
         let session_kind = self
@@ -590,6 +644,7 @@ impl SessionService {
             usage: Default::default(),
             conf,
             project_id: params.project_id,
+            worktree_binding,
             current_directory: params.current_directory,
         };
         Ok(record)
@@ -627,8 +682,10 @@ impl SessionService {
         self.session_store
             .patch_session(PatchSessionParams {
                 session_id: record.id,
-                conf: record.conf,
-                current_directory: record.current_directory,
+                change: SessionRecordPatch::Settings {
+                    conf: record.conf,
+                    current_directory: record.current_directory,
+                },
                 last_activity,
             })
             .await

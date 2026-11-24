@@ -758,6 +758,28 @@ impl WorkerEnvironment for AgentEnvironmentClient {
             )
         })
     }
+    fn session_worktree(
+        &self,
+        context: WorkerEnvironmentContext,
+        request: agent_protocol::WorkerWorktreeRequest,
+    ) -> AgentFuture<'_, TalosResult<talos_types::SessionWorktreeBinding>> {
+        Box::pin(async move {
+            invoke!(
+                self,
+                session_worktree,
+                SessionWorktree,
+                pb::SessionWorktreeRequest {
+                    auth: Some(node_pb::encode_auth(self.auth.clone())),
+                    context: Some(wire::encode_context(context)),
+                    operation: Some(wire::encode_worktree_operation(request)?)
+                },
+                session_worktree_response,
+                Binding,
+                decode_worktree_binding
+            )
+        })
+    }
+
     fn validate_project_directory(
         &self,
         context: WorkerEnvironmentContext,

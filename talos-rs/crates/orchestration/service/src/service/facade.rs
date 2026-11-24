@@ -509,25 +509,27 @@ impl TalosService {
                 selection,
             ));
         }
-        if let Some(current_directory) = request.current_directory.clone() {
-            match session.current_directory.as_ref() {
-                Some(bound) if bound != &current_directory => {
-                    return Err(talos_error::TalosError::new(
-                        talos_error::ErrorCode::InvalidRequest,
-                        format!(
-                            "session {} is bound to current_directory {}, but request used {}",
-                            session.id,
-                            bound.display(),
-                            current_directory.display()
-                        ),
-                    ));
+        if session.worktree_binding.is_none() {
+            if let Some(current_directory) = request.current_directory.clone() {
+                match session.current_directory.as_ref() {
+                    Some(bound) if bound != &current_directory => {
+                        return Err(talos_error::TalosError::new(
+                            talos_error::ErrorCode::InvalidRequest,
+                            format!(
+                                "session {} is bound to current_directory {}, but request used {}",
+                                session.id,
+                                bound.display(),
+                                current_directory.display()
+                            ),
+                        ));
+                    }
+                    None => {
+                        patch.current_directory = Some(OptionalCurrentDirectoryPatch::Set {
+                            path: current_directory,
+                        });
+                    }
+                    Some(_) => {}
                 }
-                None => {
-                    patch.current_directory = Some(OptionalCurrentDirectoryPatch::Set {
-                        path: current_directory,
-                    });
-                }
-                Some(_) => {}
             }
         }
         Ok(patch)

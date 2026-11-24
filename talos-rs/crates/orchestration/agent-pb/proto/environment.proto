@@ -146,6 +146,25 @@ message GetProjectStatusResponse {
     Failure failure = 2;
   }
 }
+message WorktreeBinding {
+  string checkout_root = 1;
+  string git_directory = 2;
+  string git_common_directory = 3;
+}
+message BindWorktreeParams { optional string repository = 1; string checkout = 2; }
+message CreateWorktreeParams { string repository = 1; string operation_id = 2; optional string expected_common_directory = 3; }
+message SessionWorktreeRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  oneof operation {
+    BindWorktreeParams bind = 3;
+    CreateWorktreeParams create_from_origin_main = 4;
+    WorktreeBinding verify = 5;
+  }
+}
+message SessionWorktreeResponse {
+  oneof result { WorktreeBinding binding = 1; Failure failure = 2; }
+}
 message ValidateProjectDirectoryRequest {
   NodeAuth auth = 1;
   WorkerEnvironmentContext context = 2;
@@ -357,6 +376,7 @@ service WorkerEnvironmentRpc {
   rpc ReadDirectory(ReadDirectoryRequest) returns (ReadDirectoryResponse);
   rpc CreateDirectory(CreateDirectoryRequest) returns (CreateDirectoryResponse);
   rpc GetProjectStatus(GetProjectStatusRequest) returns (GetProjectStatusResponse);
+  rpc SessionWorktree(SessionWorktreeRequest) returns (SessionWorktreeResponse);
   rpc ValidateProjectDirectory(ValidateProjectDirectoryRequest) returns (ValidateProjectDirectoryResponse);
 }
 

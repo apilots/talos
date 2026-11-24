@@ -66,6 +66,7 @@ impl SessionStore for MockSessionStore {
             conf: SessionConf::default(),
             workspace_id: "default".to_string(),
             project_id: None,
+            worktree_binding: None,
             current_directory: None,
         }))
     }
@@ -110,8 +111,17 @@ impl SessionStore for MockSessionStore {
         params: PatchSessionParams,
     ) -> TalosResult<Option<SessionRecord>> {
         let mut record = self.get_session_record(&params.session_id).await?.unwrap();
-        record.conf = params.conf;
-        record.current_directory = params.current_directory;
+        use super::SessionRecordPatch;
+        match params.change {
+            SessionRecordPatch::Settings {
+                conf,
+                current_directory,
+            } => {
+                record.conf = conf;
+                record.current_directory = current_directory;
+            }
+            SessionRecordPatch::Worktree(binding) => record.worktree_binding = Some(binding),
+        }
         record.last_activity = params.last_activity;
         Ok(Some(record))
     }

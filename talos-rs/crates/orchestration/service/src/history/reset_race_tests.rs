@@ -43,6 +43,7 @@ async fn reset_fixture() -> (
             usage: Default::default(),
             conf: Default::default(),
             project_id: None,
+            worktree_binding: None,
             current_directory: None,
         })
         .await

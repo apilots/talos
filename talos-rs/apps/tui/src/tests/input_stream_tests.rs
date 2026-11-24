@@ -295,6 +295,33 @@ async fn test_submit_input_sends_model_and_directory_after_first_turn() {
     );
 }
 
+#[tokio::test]
+async fn worktree_command_is_submitted_to_shared_turn_admission() {
+    let client = Arc::new(MockGatewayClient::new());
+    let mut app = TuiApp::new_with_gateway_client(client.clone());
+    app.initialize_session().await;
+    let message = "/worktree bind /tmp/linked-checkout";
+    app.input_buffer = message.to_string();
+    app.cursor_index = message.len();
+
+    app.submit_input().await.unwrap();
+    for _ in 0..10 {
+        app.on_tick().await;
+        tokio::task::yield_now().await;
+        if !client.state.lock().unwrap().sent_requests.is_empty() {
+            break;
+        }
+    }
+
+    let state = client.state.lock().unwrap();
+    let request = state.sent_requests.last().expect("expected a Turn request");
+    assert!(request
+        .input
+        .content
+        .iter()
+        .any(|item| matches!(item, talos_sdk::AgentUserContent::Text { text } if text == message)));
+}
+
 #[test]
 fn test_compose_user_input_text_expands_pasted_blocks_without_markers() {
     let mut app = create_embedded_app();

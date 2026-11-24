@@ -577,6 +577,16 @@ impl WorkerEnvironment for WorkerEnvironmentService {
                 .await
         })
     }
+    fn session_worktree(
+        &self,
+        context: WorkerEnvironmentContext,
+        request: agent_protocol::WorkerWorktreeRequest,
+    ) -> AgentFuture<'_, TalosResult<SessionWorktreeBinding>> {
+        Box::pin(async move {
+            Self::actor(&context)?;
+            crate::fs::worktree::resolve(request).await
+        })
+    }
     fn project_status(
         &self,
         context: WorkerEnvironmentContext,

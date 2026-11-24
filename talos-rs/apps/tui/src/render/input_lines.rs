@@ -113,7 +113,11 @@ impl TuiApp {
     }
 
     pub(crate) fn input_status_line(&self, width: usize) -> Line<'static> {
-        let directory = compact_directory_path(&self.startup_directory);
+        let directory = compact_directory_path(
+            self.current_project_root
+                .as_deref()
+                .unwrap_or(&self.startup_directory),
+        );
         let token_left = self
             .token_left_percent()
             .map(|percent| format!("{}% left", percent))

@@ -38,6 +38,8 @@ pub struct SessionRecord {
     pub project_id: Option<String>,
     #[serde(default)]
     pub current_directory: Option<PathBuf>,
+    #[serde(default)]
+    pub worktree_binding: Option<talos_types::SessionWorktreeBinding>,
 }
 
 impl SessionRecord {
@@ -86,12 +88,19 @@ pub struct SessionSummary {
     pub message_count: u64,
 }
 
-/// Store-owned columns replaced by one normalized Session settings patch.
+/// Store-owned columns changed by one update to an idle Session.
 pub struct PatchSessionParams {
     pub session_id: String,
-    pub conf: SessionConf,
-    pub current_directory: Option<PathBuf>,
+    pub change: SessionRecordPatch,
     pub last_activity: u64,
+}
+
+pub enum SessionRecordPatch {
+    Settings {
+        conf: SessionConf,
+        current_directory: Option<PathBuf>,
+    },
+    Worktree(talos_types::SessionWorktreeBinding),
 }
 
 /// Token delta accumulated into the latest persisted Session usage.

@@ -360,3 +360,51 @@ pub fn decode_preview_content(
         Result::Closed(_) => Response::Closed,
     })
 }
+
+pub fn encode_worktree_operation(
+    request: crate::WorkerWorktreeRequest,
+) -> TalosResult<pb::session_worktree_request::Operation> {
+    use crate::WorkerWorktreeRequest;
+    use pb::session_worktree_request::Operation;
+    Ok(match request {
+        WorkerWorktreeRequest::Bind {
+            repository,
+            checkout,
+        } => Operation::Bind(pb::BindWorktreeParams {
+            repository: repository.map(path).transpose()?,
+            checkout: path(checkout)?,
+        }),
+        WorkerWorktreeRequest::CreateFromOriginMain {
+            repository,
+            operation_id,
+            expected_common_directory,
+        } => Operation::CreateFromOriginMain(pb::CreateWorktreeParams {
+            repository: path(repository)?,
+            operation_id: operation_id.to_string(),
+            expected_common_directory: expected_common_directory.map(path).transpose()?,
+        }),
+        WorkerWorktreeRequest::Verify(binding) => {
+            Operation::Verify(encode_worktree_binding(binding)?)
+        }
+    })
+}
+
+pub fn encode_worktree_binding(
+    value: talos_types::SessionWorktreeBinding,
+) -> TalosResult<pb::WorktreeBinding> {
+    Ok(pb::WorktreeBinding {
+        checkout_root: path(value.checkout_root)?,
+        git_directory: path(value.git_directory)?,
+        git_common_directory: path(value.git_common_directory)?,
+    })
+}
+
+pub fn decode_worktree_binding(
+    value: pb::WorktreeBinding,
+) -> TalosResult<talos_types::SessionWorktreeBinding> {
+    Ok(talos_types::SessionWorktreeBinding {
+        checkout_root: value.checkout_root.into(),
+        git_directory: value.git_directory.into(),
+        git_common_directory: value.git_common_directory.into(),
+    })
+}

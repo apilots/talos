@@ -314,6 +314,27 @@ async fn embedded_direct_and_outbound_environment_share_paths_under_computer_aut
             .await
             .unwrap()
     );
+    for worker in [&direct as &dyn WorkerEnvironment, &*outbound] {
+        let missing = home.path().join("missing-worktree");
+        let error = worker
+            .session_worktree(
+                context.clone(),
+                agent_protocol::WorkerWorktreeRequest::Verify(
+                    talos_types::SessionWorktreeBinding {
+                        checkout_root: missing,
+                        git_directory: home.path().join("git-directory"),
+                        git_common_directory: home.path().join("git-common-directory"),
+                    },
+                ),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
+        assert!(error
+            .to_api_error()
+            .message
+            .contains("Current working directory missing"));
+    }
     // The credential authorizes the whole personal Computer. A claimed Session
     // keeps its original filesystem namespace without treating it as an account.
     let original_namespace = WorkerEnvironmentContext {

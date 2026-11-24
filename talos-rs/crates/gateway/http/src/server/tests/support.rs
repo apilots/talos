@@ -134,6 +134,7 @@ pub(crate) async fn test_session_store(
                 ..talos_types::SessionConf::default()
             },
             project_id: None,
+            worktree_binding: None,
             current_directory: None,
         })
         .await
