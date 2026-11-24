@@ -3,8 +3,10 @@ import path from 'node:path';
 import {appendFileSync,mkdirSync,writeFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {app} from 'electron';
+import {TALOS_IPC} from '../../../talos-app/desktop/src/ipc';
 import {createDesktopWindow} from '../../../talos-app/desktop/src/desktop-window';
 import {DesktopAppServerController} from '../../../talos-app/desktop/src/app-server-controller';
+import {DesktopAppIcons} from '../../../talos-app/desktop/src/desktop-app-icons';
 import {handleDesktopServerRequest} from '../../../talos-app/desktop/src/desktop-server-requests';
 import {registerDesktopIpcHandlers} from '../../../talos-app/desktop/src/desktop-ipc';
 import {desktopMediaHost} from '../../../talos-app/desktop/src/desktop-media';
@@ -20,15 +22,33 @@ async function waitFor(probe:()=>Promise<boolean>,message:string){
  assert.fail(message);
 }
 async function run(){await app.whenReady();
+ const frameLog=path.join(output,'native-media-frames.jsonl');
+ writeFileSync(frameLog,'');
+ // Keep completed records even if the fixture kills Electron before teardown.
+ const record=(event:Record<string,unknown>)=>appendFileSync(frameLog,JSON.stringify({at:Date.now(),...event})+'\n');
+ const acknowledge=desktopMediaHost.acknowledge.bind(desktopMediaHost),release=desktopMediaHost.release.bind(desktopMediaHost);
+ desktopMediaHost.acknowledge=(requestId,contents)=>{
+  try{acknowledge(requestId,contents);}
+  catch(error){record({phase:'ack',requestId,accepted:false});throw error;}
+  record({phase:'ack',requestId,accepted:true});
+ };
+ desktopMediaHost.release=(streamId,contents,notifyBackend=true)=>{
+  record({phase:'release',streamId,notifyBackend});release(streamId,contents,notifyBackend);
+ };
  const controller=new DesktopAppServerController({command:process.env.TALOS_APP_SERVER_BIN,env:{...process.env,TALOS_DESKTOP_HOSTNAME:'native-media-acceptance'},desktopHost:true,clientKind:'desktop',onRuntimeState:state=>console.log('RUNTIME',state),onServerRequest:async request=>{
   const started=Date.now();
   try{return await handleDesktopServerRequest(request);}
-  finally{if(request.method==='client/desktop/frame')appendFileSync(path.join(output,'native-media-frames.jsonl'),JSON.stringify({at:started,elapsedMs:Date.now()-started,bytes:(request.params as {dataBase64?:string}).dataBase64?.length??0})+'\n');}
+  finally{if(request.method==='client/desktop/frame')record({phase:'complete',requestId:request.id,started,elapsedMs:Date.now()-started,bytes:(request.params as {dataBase64?:string}).dataBase64?.length??0});}
  }});
  let product:ReturnType<typeof createDesktopWindow>|undefined;
  try{
-  await controller.connect();registerDesktopIpcHandlers(controller);
+  await controller.connect();registerDesktopIpcHandlers(controller,new DesktopAppIcons(path.join(root,'talos-app/desktop/dist')));
   product=createDesktopWindow({width:1200,height:760,show:true},{sandbox:true,contextIsolation:true,nodeIntegration:false,preload:path.join(root,'talos-app/desktop/dist/preload.cjs')});
+  const send=product.view.webContents.send.bind(product.view.webContents);
+  product.view.webContents.send=(channel,...args)=>{
+   if(channel===TALOS_IPC.desktopFrame)record({phase:'send',requestId:args[0].requestId,streamId:args[0].streamId});
+   send(channel,...args);
+  };
   await product.view.webContents.loadFile(path.join(import.meta.dirname,'../viewer-dist/index.html'),{query:{node:process.env.TALOS_E2E_REMOTE_NODE!}});
   const deadline=Date.now()+45000;let result:unknown;
   while(Date.now()<deadline){const error=await product.view.webContents.executeJavaScript('window.nativeMediaError');if(error)throw new Error(JSON.stringify(error));result=await product.view.webContents.executeJavaScript('window.nativeMediaResult');if(result)break;await new Promise(r=>setTimeout(r,100));}
@@ -62,6 +82,7 @@ async function run(){await app.whenReady();
   await waitFor(pixels,'Desktop IPC resumed without rendering pixels');
   writeFileSync(path.join(output,'native-docker-recovered.png'),(await view.capturePage()).toPNG());
   writeFileSync(path.join(output,'native-docker-control.json'),JSON.stringify({status:'passed',actualX11Input:true,releaseClearedHeldKey:true,disconnectSuspended:true,disconnectClearedHeldKey:true,resumed:true,resumedPixels:true},null,2));
+  writeFileSync(path.join(output,'native-docker-viewer-diagnostics.json'),JSON.stringify(await view.executeJavaScript('window.nativeMediaDiagnostics'),null,2));
   console.log('NATIVE_DOCKER_MEDIA_ACCEPTANCE_PASS');
  }catch(error){
   if(product){
@@ -69,6 +90,10 @@ async function run(){await app.whenReady();
    writeFileSync(path.join(output,'native-docker-viewer-failure.png'),(await product.view.webContents.capturePage()).toPNG());
   }
   throw error;
- }finally{desktopMediaHost.reset();product?.window.destroy();await controller.close();await desktopBrowserHost.reset();app.quit();}
+ }finally{
+  desktopMediaHost.reset();desktopMediaHost.acknowledge=acknowledge;desktopMediaHost.release=release;
+  product?.window.destroy();await controller.close();await desktopBrowserHost.reset();
+  app.quit();
+ }
 }
 void run().catch(error=>{console.error(error);app.exit(1);});
