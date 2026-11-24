@@ -2,7 +2,9 @@ use super::SessionService;
 use agent_protocol::WorkerWorktreeRequest;
 use std::path::PathBuf;
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_store::session::{PatchSessionParams, SessionRecord, SessionTreeIdentity};
+use talos_store::session::{
+    PatchSessionParams, SessionRecord, SessionRecordPatch, SessionTreeIdentity,
+};
 use talos_types::{AgentUserContent, AgentUserInput, SessionWorktreeBinding};
 
 /// Only a leading request in the user's message can change the execution directory.
@@ -135,12 +137,12 @@ impl SessionService {
             .await
     }
 
-    pub(crate) async fn apply_worktree_directive(
+    pub(super) async fn apply_worktree_directive(
         &self,
         record: &SessionRecord,
         directive: WorktreeDirective,
         operation_id: uuid::Uuid,
-    ) -> TalosResult<SessionRecord> {
+    ) -> TalosResult<(SessionRecord, PathBuf)> {
         if !matches!(record.tree_identity, SessionTreeIdentity::Primary)
             || self.has_active_subagent_turn(&record.id).await?
         {
@@ -163,20 +165,19 @@ impl SessionService {
             },
         };
         let binding = self.worktree_operation(record, operation).await?;
-        if let Some(previous) = record.worktree_binding.as_ref() {
-            if previous.git_common_directory != binding.git_common_directory {
-                return Err(TalosError::authorization_denied());
-            }
-            if previous == &binding {
-                return Ok(record.clone());
-            }
+        if record
+            .worktree_binding
+            .as_ref()
+            .is_some_and(|previous| previous.git_common_directory != binding.git_common_directory)
+        {
+            return Err(TalosError::authorization_denied());
         }
-        self.session_store
+        let checkout_root = binding.checkout_root.clone();
+        let updated = self
+            .session_store
             .patch_session(PatchSessionParams {
                 session_id: record.id.clone(),
-                conf: record.conf.clone(),
-                current_directory: record.current_directory.clone(),
-                worktree_binding: Some(binding),
+                change: SessionRecordPatch::Worktree(binding),
                 last_activity: chrono::Utc::now()
                     .timestamp_millis()
                     .try_into()
@@ -185,7 +186,8 @@ impl SessionService {
             .await?
             .ok_or_else(|| {
                 TalosError::new(ErrorCode::ResourceNotFound, "The Session no longer exists.")
-            })
+            })?;
+        Ok((updated, checkout_root))
     }
 
     async fn worktree_operation(

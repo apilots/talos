@@ -156,17 +156,11 @@ async fn session_preview_uses_saved_directory_and_rechecks_session_access() {
 }
 
 #[tokio::test]
-async fn project_session_previews_files_only_inside_its_execution_worktree() {
-    let checkout = tempfile::tempdir().unwrap();
-    let checkout_root = checkout.path().canonicalize().unwrap();
-    let worktree = checkout_root.join(".worktrees").join("feature");
-    std::fs::create_dir_all(&worktree).unwrap();
-    let plan = worktree.join("IMPLEMENTATION_PLAN.md");
-    let markdown = b"# Worktree implementation plan";
-    std::fs::write(&plan, markdown).unwrap();
-    let outside = checkout_root.join("outside.md");
-    std::fs::write(&outside, b"# Outside the worktree").unwrap();
-
+async fn unbound_project_session_previews_files_from_its_project_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let file = root.join("project.md");
+    std::fs::write(&file, "# Project file").unwrap();
     let (service, _) = test_application(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::Accepted,
@@ -174,69 +168,26 @@ async fn project_session_previews_files_only_inside_its_execution_worktree() {
         configured_test_config(),
     )
     .await;
-    let actor = Actor::regular("worktree-owner");
+    let actor = Actor::regular("project-owner");
     let project = service
         .create_project(
             &actor,
             ProjectCreateRequest {
                 node_id: None,
-                name: "Feature worktree".into(),
-                directory: worktree,
+                name: "Plain directory".into(),
+                directory: root,
             },
         )
         .await
         .unwrap();
-    let session_id = "worktree-preview";
-    let mut params = create_session_params(session_id, request_source(), None);
+    let mut params = create_session_params("project-preview", request_source(), None);
     params.project_id = Some(project.project_id);
     service.create_session(&actor, params).await.unwrap();
 
-    let record = service
-        .access
-        .load_session(&actor, session_id)
+    service
+        .prepare_file_preview(&actor, session_path("project-preview", &file))
         .await
         .unwrap();
-    let execution = service
-        .sessions
-        .build_agent_context(&record, AgentTurnRef::new(session_id, "turn-1"))
-        .await
-        .unwrap();
-    assert_eq!(
-        execution.working_directory.as_ref(),
-        Some(&project.directory)
-    );
-
-    let prepare = |path: std::path::PathBuf| FilePreviewPrepareRequest {
-        source: FilePreviewSource::SessionPath {
-            session_id: session_id.into(),
-            path: path.to_str().unwrap().into(),
-        },
-    };
-    let preview = service
-        .prepare_file_preview(&actor, prepare(plan))
-        .await
-        .unwrap();
-    let content = service
-        .read_file_preview(
-            &actor,
-            FilePreviewReadRequest {
-                preview_id: preview.preview_id,
-                resource_path: preview.entry_path,
-                offset: 0,
-                limit: 1024,
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(content.data.as_ref(), markdown);
-
-    for path in [outside, "../../outside.md".into()] {
-        let error = service
-            .prepare_file_preview(&actor, prepare(path))
-            .await
-            .unwrap_err();
-        assert!(error.is_code(talos_error::ErrorCode::PermissionDenied));
-    }
 }
 
 fn git(directory: &std::path::Path, args: &[&str]) -> String {

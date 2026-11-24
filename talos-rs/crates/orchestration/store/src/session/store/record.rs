@@ -10,15 +10,12 @@ use talos_types::talos::{SessionSourceProvider, SessionSourceType, TalosSessionE
 use talos_types::{AgentPath, SessionConf, SessionUsage, DEFAULT_SESSION_TITLE};
 
 impl DatabaseSessionStore {
-    pub(super) fn encode_worktree_binding(
-        binding: Option<&talos_types::SessionWorktreeBinding>,
-    ) -> TalosResult<Option<String>> {
-        binding
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| {
-                TalosError::internal_with_source("Encode the Session worktree binding.", error)
-            })
+    pub(super) fn serialize_worktree_binding(
+        binding: &talos_types::SessionWorktreeBinding,
+    ) -> TalosResult<String> {
+        serde_json::to_string(binding).map_err(|error| {
+            TalosError::internal_with_source("Encode the Session worktree binding.", error)
+        })
     }
 
     pub(crate) fn normalized_optional_string(value: Option<String>) -> Option<String> {

@@ -111,10 +111,16 @@ impl SessionStore for MockSessionStore {
         params: PatchSessionParams,
     ) -> TalosResult<Option<SessionRecord>> {
         let mut record = self.get_session_record(&params.session_id).await?.unwrap();
-        record.conf = params.conf;
-        record.current_directory = params.current_directory;
-        if params.worktree_binding.is_some() {
-            record.worktree_binding = params.worktree_binding;
+        use super::SessionRecordPatch;
+        match params.change {
+            SessionRecordPatch::Settings {
+                conf,
+                current_directory,
+            } => {
+                record.conf = conf;
+                record.current_directory = current_directory;
+            }
+            SessionRecordPatch::Worktree(binding) => record.worktree_binding = Some(binding),
         }
         record.last_activity = params.last_activity;
         Ok(Some(record))

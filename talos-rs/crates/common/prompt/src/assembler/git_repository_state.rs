@@ -9,11 +9,11 @@ pub(super) struct GitRepositoryState {
 
 pub(super) fn append_project_context(lines: &mut Vec<String>, project_root: &Path) {
     lines.push(format!("- project_root: {}", project_root.display()));
-    if std::fs::symlink_metadata(project_root.join(".git")).is_ok_and(|metadata| metadata.is_file())
-    {
-        lines.push("- The current project root is a linked checkout. When it already satisfies the user's worktree request, perform the development work here and do not create another checkout.".to_string());
-    }
     if let Some(repository_state) = inspect_git_repository_state(project_root) {
+        lines.push(
+            "- Use the current project root when it already satisfies the worktree request."
+                .to_string(),
+        );
         lines.push(format!("- git_branch: {}", repository_state.branch));
         lines.push(format!(
             "- git_status_summary: {}",

@@ -522,13 +522,13 @@ impl TurnService {
 
         let prepare = async {
             let sessions = &self.execution.sessions;
-            let mut session = sessions.load_record(&session_id).await?.ok_or_else(|| {
+            let session = sessions.load_record(&session_id).await?.ok_or_else(|| {
                 TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     "The Session no longer exists.",
                 )
             })?;
-            if let Some(directive) = worktree_directive {
+            let worktree = worktree_directive.map(|directive| {
                 let operation_id = match command_lease.as_ref() {
                     Some(lease) => {
                         use sha2::{Digest, Sha256};
@@ -541,12 +541,10 @@ impl TurnService {
                     }
                     None => Uuid::new_v4(),
                 };
-                session = sessions
-                    .apply_worktree_directive(&session, directive, operation_id)
-                    .await?;
-            }
+                (directive, operation_id)
+            });
             let context = sessions
-                .build_agent_context(&session, identity.clone())
+                .build_agent_context_for_turn(&session, identity.clone(), worktree)
                 .await?;
             Ok(AgentRunParams {
                 context,

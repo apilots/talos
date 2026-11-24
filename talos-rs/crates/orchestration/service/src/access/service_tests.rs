@@ -218,8 +218,17 @@ impl SessionStore for RecordingSessionStore {
         else {
             return Ok(None);
         };
-        stored.conf = params.conf;
-        stored.current_directory = params.current_directory;
+        use talos_store::session::SessionRecordPatch;
+        match params.change {
+            SessionRecordPatch::Settings {
+                conf,
+                current_directory,
+            } => {
+                stored.conf = conf;
+                stored.current_directory = current_directory;
+            }
+            SessionRecordPatch::Worktree(binding) => stored.worktree_binding = Some(binding),
+        }
         stored.last_activity = params.last_activity;
         Ok(Some(stored.clone()))
     }

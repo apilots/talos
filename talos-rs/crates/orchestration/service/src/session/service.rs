@@ -6,8 +6,8 @@ use talos_agent_api::AgentTurnRef;
 use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectStore;
 use talos_store::session::{
-    AccumulateSessionUsageParams, PatchSessionParams, SessionQuery, SessionRecord, SessionStore,
-    SessionTreeIdentity, SessionTreeScope,
+    AccumulateSessionUsageParams, PatchSessionParams, SessionQuery, SessionRecord,
+    SessionRecordPatch, SessionStore, SessionTreeIdentity, SessionTreeScope,
 };
 use talos_types::{
     OptionalCurrentDirectoryPatch, SessionConfigOverridePolicy, SessionInfo, SessionPatch,
@@ -338,21 +338,43 @@ impl SessionService {
         record: &SessionRecord,
         identity: AgentTurnRef,
     ) -> TalosResult<AgentContext> {
+        self.build_agent_context_for_turn(record, identity, None)
+            .await
+    }
+
+    pub(crate) async fn build_agent_context_for_turn(
+        &self,
+        record: &SessionRecord,
+        identity: AgentTurnRef,
+        worktree: Option<(WorktreeDirective, uuid::Uuid)>,
+    ) -> TalosResult<AgentContext> {
         let prepared = self.prepare_execution(record).await?;
-        let record = &prepared;
-        if record.id != identity.session_id {
+        if prepared.id != identity.session_id {
             return Err(TalosError::internal(
                 "Agent identity does not match its source Session",
             ));
         }
-        if record.agent_id.trim().is_empty() {
+        if prepared.agent_id.trim().is_empty() {
             return Err(
                 TalosError::internal("Session is missing its Agent binding.").context(format!(
                     "session '{}' is missing its Agent binding",
-                    record.id
+                    prepared.id
                 )),
             );
         }
+        let (record, working_directory) = match worktree {
+            Some((directive, operation_id)) => {
+                let (updated, checkout) = self
+                    .apply_worktree_directive(&prepared, directive, operation_id)
+                    .await?;
+                (updated, Some(checkout))
+            }
+            None => {
+                let root = self.resolve_working_directory(&prepared).await?;
+                (prepared, root)
+            }
+        };
+        let record = &record;
         let info = self.session_info(record).await?;
         let model_selection = info.model_selection;
         let model = self
@@ -364,7 +386,7 @@ impl SessionService {
             session: session_context,
             turn_id: identity.turn_id,
             project_id: record.project_id.clone(),
-            working_directory: self.resolve_working_directory(record).await?,
+            working_directory,
             environment: record.environment.clone(),
             model,
             model_selection,
@@ -660,9 +682,10 @@ impl SessionService {
         self.session_store
             .patch_session(PatchSessionParams {
                 session_id: record.id,
-                conf: record.conf,
-                worktree_binding: None,
-                current_directory: record.current_directory,
+                change: SessionRecordPatch::Settings {
+                    conf: record.conf,
+                    current_directory: record.current_directory,
+                },
                 last_activity,
             })
             .await

@@ -20,5 +20,5 @@ pub use mock_store::MockSessionStore;
 pub use store::{DatabaseSessionStore, SessionStore};
 pub use types::{
     AccumulateSessionUsageParams, PatchSessionParams, SessionPageCursor, SessionQuery,
-    SessionRecord, SessionSummary, SessionTreeIdentity, SessionTreeScope,
+    SessionRecord, SessionRecordPatch, SessionSummary, SessionTreeIdentity, SessionTreeScope,
 };

@@ -8,7 +8,7 @@ use talos_types::{AgentPath, ContextUsage, SessionUsage, DEFAULT_SESSION_TITLE};
 
 use super::{
     AccumulateSessionUsageParams, AgentExecutionStore, PatchSessionParams, SessionQuery,
-    SessionRecord, SessionSummary, SessionTreeIdentity, SessionTreeScope,
+    SessionRecord, SessionRecordPatch, SessionSummary, SessionTreeIdentity, SessionTreeScope,
 };
 
 mod record;
@@ -81,7 +81,7 @@ pub trait SessionStore: Send + Sync {
     /// Returns whether any Session currently owns a non-terminal Agent Turn.
     async fn has_nonterminal_turns(&self, node_id: Option<&str>) -> TalosResult<bool>;
 
-    /// Atomically rejects active Sessions and replaces only settings-owned columns.
+    /// Atomically rejects active Sessions and applies the specified record change.
     async fn patch_session(&self, params: PatchSessionParams)
         -> TalosResult<Option<SessionRecord>>;
 
@@ -320,7 +320,11 @@ impl SessionStore for DatabaseSessionStore {
                     .clone()
                     .map(|path| Value::String(path.display().to_string()))
                     .unwrap_or(Value::Null),
-                Self::encode_worktree_binding(record.worktree_binding.as_ref())?
+                record
+                    .worktree_binding
+                    .as_ref()
+                    .map(Self::serialize_worktree_binding)
+                    .transpose()?
                     .map(Value::String)
                     .unwrap_or(Value::Null),
             ],
@@ -578,25 +582,27 @@ impl SessionStore for DatabaseSessionStore {
             ));
         }
 
-        let conf_json = Self::build_conf_json(&params.conf)?;
-        let worktree = Self::encode_worktree_binding(params.worktree_binding.as_ref())?;
-        let current_directory = params
-            .current_directory
-            .as_ref()
-            .map(|path| path.display().to_string());
         let last_activity = params.last_activity.to_string();
-        let affected = transaction
-            .execute(
-                "UPDATE sessions SET conf_json = ?, current_directory = NULLIF(?, ''), worktree_binding_json = COALESCE(NULLIF(?, ''), worktree_binding_json), last_activity = ? WHERE session_key = ?",
-                &[
-                    conf_json.as_str(),
-                    current_directory.as_deref().unwrap_or_default(),
-                    worktree.as_deref().unwrap_or_default(),
-                    last_activity.as_str(),
-                    params.session_id.as_str(),
-                ],
-            )
-            .await?;
+        let affected = match params.change {
+            SessionRecordPatch::Settings {
+                conf,
+                current_directory,
+            } => {
+                let conf_json = Self::build_conf_json(&conf)?;
+                let directory = current_directory.map(|path| path.display().to_string());
+                transaction.execute(
+                    "UPDATE sessions SET conf_json = ?, current_directory = NULLIF(?, ''), last_activity = ? WHERE session_key = ?",
+                    &[&conf_json, directory.as_deref().unwrap_or_default(), &last_activity, &params.session_id],
+                ).await?
+            }
+            SessionRecordPatch::Worktree(binding) => {
+                let binding = Self::serialize_worktree_binding(&binding)?;
+                transaction.execute(
+                    "UPDATE sessions SET worktree_binding_json = ?, last_activity = ? WHERE session_key = ?",
+                    &[&binding, &last_activity, &params.session_id],
+                ).await?
+            }
+        };
         if affected == 0 {
             transaction.rollback().await?;
             return Ok(None);
