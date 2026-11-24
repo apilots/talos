@@ -783,3 +783,66 @@ async fn account_opt_out_precedes_binding_and_survives_the_schema_upgrade() {
         Some("saved-cursor")
     );
 }
+
+#[tokio::test]
+async fn retained_computer_upgrade_does_not_enqueue_directory_writes() {
+    let fixture = fixture().await;
+    let resource = SyncResourceKey::Computer {
+        computer_id: COMPUTER.into(),
+    };
+    capture(
+        &fixture,
+        resource.clone(),
+        vec![SyncChange::Metadata {
+            before: None,
+            after: Box::new(SyncResourceSnapshot::Computer(node("Retained computer"))),
+        }],
+    )
+    .await;
+    let batch = fixture
+        .sync
+        .export_pending(&fixture.binding, resource, 32)
+        .await
+        .unwrap()
+        .unwrap();
+    fixture.sync.acknowledge(&batch).await.unwrap();
+    fixture
+        .storage
+        .execute("UPDATE sync_documents SET replica_schema_version=1", &[])
+        .await
+        .unwrap();
+    fixture.sync.upgrade_local_replicas().await.unwrap();
+    assert_eq!(
+        fixture
+            .sync
+            .pending_changes(&fixture.binding)
+            .await
+            .unwrap(),
+        0
+    );
+    let actor = RequestIdentity {
+        user_id: fixture.binding.scope.account_id.clone(),
+        username: None,
+        role: UserRole::User,
+        user_type: Default::default(),
+        auth_disabled: false,
+        access_token: None,
+    };
+    let next = fixture
+        .sync
+        .bind_account(
+            &actor,
+            SyncBindParams {
+                scope: SyncScope {
+                    hub_id: "replacement-hub".into(),
+                    account_id: actor.user_id.clone(),
+                },
+                source_user_id: fixture.binding.source_user_id.clone(),
+                computers: fixture.binding.computers.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(fixture.sync.pending_changes(&next).await.unwrap(), 0);
+    assert_eq!(fixture.storage.query("SELECT resource_id FROM sync_documents WHERE hub_id='replacement-hub' AND kind='computer'", &[]).await.unwrap().len(), 1);
+}

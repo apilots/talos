@@ -5,7 +5,13 @@ import { isServiceUnavailable } from "./is-service-unavailable";
 import type { TalosWebClient } from "./client";
 import { managedWorkerKey, sessionDetailKey, type SessionDetail } from "./product-queries";
 
-export type ProductTarget = { nodeId?: string | null; sessionId?: string | null; readOnly?: boolean; service?: "files" | "models" };
+export type ProductTarget = {
+  nodeId?: string | null;
+  sessionId?: string | null;
+  /** Only retained project metadata may fall back after an authoritative directory miss. */
+  readOnly?: boolean | "retainedProjects";
+  service?: "files" | "models";
+};
 type OwnerOptions = Pick<ProductTarget, "readOnly" | "service">;
 
 function isMissing(error: unknown) {
@@ -63,8 +69,9 @@ export function desktopProductOwner(
       });
       return directory.managedWorkerPhase != null ? cloud : local;
     } catch (error) {
-      // Synced metadata can display history offline, even for an unclassified Computer.
       if (!service && readOnly && isServiceUnavailable(error)) return local;
+      // A directory miss remains authoritative for Computer details.
+      if (!service && readOnly === "retainedProjects" && isMissing(error)) return local;
       throw error;
     }
   };

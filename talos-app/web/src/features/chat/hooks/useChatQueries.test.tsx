@@ -8,12 +8,13 @@ import type { ModelSelection, SessionInfo } from "@talos/sdk-browser";
 
 import { connectionScope } from "@/shared/store/connection-scope";
 import { useAppStore } from "@/shared/store/app-store";
-import { chatKeys, useDeleteProjectMutation, useDeleteSessionMutation, useSessionActions, useUpdateSessionModelMutation } from "./useChatQueries";
+import { chatKeys, useDeleteProjectMutation, useDeleteSessionMutation, useProjectsQuery, useSessionActions, useUpdateSessionModelMutation } from "./useChatQueries";
 
 const apiMocks = vi.hoisted(() => ({
   compactSession: vi.fn(),
   deleteSession: vi.fn(),
   deleteProject: vi.fn(),
+  listProjects: vi.fn(),
   updateSessionModel: vi.fn(),
 }));
 
@@ -22,6 +23,7 @@ vi.mock("../api", async (importOriginal) => ({
   compactSession: apiMocks.compactSession,
   deleteSession: apiMocks.deleteSession,
   deleteProject: apiMocks.deleteProject,
+  listProjects: apiMocks.listProjects,
   updateSessionModel: apiMocks.updateSessionModel,
 }));
 
@@ -36,6 +38,28 @@ function createQueryHarness() {
     createElement(QueryClientProvider, { client: queryClient }, children);
   return { queryClient, wrapper };
 }
+
+describe("useProjectsQuery", () => {
+  afterEach(() => {
+    cleanup();
+    apiMocks.listProjects.mockReset();
+  });
+
+  it("does not request the account-wide list before a Computer is known", async () => {
+    const { wrapper } = createQueryHarness();
+    apiMocks.listProjects.mockResolvedValue([]);
+    const { result, rerender } = renderHook<ReturnType<typeof useProjectsQuery>, { nodeId?: string }>(
+      ({ nodeId }) => useProjectsQuery(nodeId),
+      { wrapper, initialProps: {} },
+    );
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(apiMocks.listProjects).not.toHaveBeenCalled();
+
+    rerender({ nodeId: "worker-a" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(apiMocks.listProjects).toHaveBeenCalledExactlyOnceWith("worker-a");
+  });
+});
 
 describe("useUpdateSessionModelMutation", () => {
   afterEach(() => {
