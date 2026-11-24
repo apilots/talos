@@ -76,6 +76,7 @@ async fn test_turn_completed_updates_session_usage_without_inferring_context_usa
             cache_read_input_tokens: Some(13),
         };
         state.session_context_usage = talos_sdk::ContextUsage::new(1_020, 32_768, 30_000, 2);
+        state.current_project_root = Some(std::path::PathBuf::from("/tmp/bound-worktree"));
     }
 
     app.handle_stream_event(metrics_updated_event(
@@ -110,9 +111,12 @@ async fn test_turn_completed_updates_session_usage_without_inferring_context_usa
     assert_eq!(app.session_usage.total_tokens, 980);
     assert_eq!(app.session_context_usage, None);
 
+    assert!(!line_plain_text(&app.input_status_line(120)).contains("/tmp/bound-worktree"));
+
     app.session_id = Some("sess-test".to_string());
     deliver_session_usage_refresh(&mut app, "sess-test", refreshed_session);
     app.poll_session_usage_refresh();
+    assert!(line_plain_text(&app.input_status_line(120)).contains("/tmp/bound-worktree"));
     assert_eq!(app.session_usage.total_tokens, 1_145);
     assert_eq!(
         app.session_context_usage

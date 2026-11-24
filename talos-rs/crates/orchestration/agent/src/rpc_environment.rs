@@ -567,6 +567,45 @@ impl pb::worker_environment_rpc_server::WorkerEnvironmentRpc for AgentHarnessRpc
             }),
         }))
     }
+    async fn session_worktree(
+        &self,
+        request: Request<pb::SessionWorktreeRequest>,
+    ) -> Result<Response<pb::SessionWorktreeResponse>, Status> {
+        use agent_protocol::WorkerWorktreeRequest;
+        use pb::session_worktree_request::Operation;
+        use pb::session_worktree_response::Result as Outcome;
+        let request = request.into_inner();
+        let result = async {
+            let (lease, context, environment) = self.environment_context(request.auth, request.context)?;
+            let request = match request.operation {
+                Some(Operation::Bind(value)) => WorkerWorktreeRequest::Bind {
+                    repository: value.repository.map(Into::into),
+                    checkout: value.checkout.into(),
+                },
+                Some(Operation::CreateFromOriginMain(value)) => WorkerWorktreeRequest::CreateFromOriginMain {
+                    repository: value.repository.into(),
+                    expected_common_directory: value.expected_common_directory.map(Into::into),
+                    operation_id: value.operation_id.parse().map_err(|_| talos_error::TalosError::new(
+                        talos_error::ErrorCode::InvalidRequest, "Invalid worktree operation ID."))?,
+                },
+                Some(Operation::Verify(value)) => WorkerWorktreeRequest::Verify(wire::decode_worktree_binding(value)?),
+                None => return Err(talos_error::TalosError::new(talos_error::ErrorCode::InvalidRequest, "Missing worktree operation.")),
+            };
+            let operation = environment.session_worktree(context, request);
+            let value = tokio::select! { biased; _ = lease.ended() => return Err(unauthenticated()), value = operation => value? };
+            wire::encode_worktree_binding(value)
+        }.await;
+        Ok(Response::new(pb::SessionWorktreeResponse {
+            result: Some(match result {
+                Ok(value) => Outcome::Binding(value),
+                Err(error) => {
+                    talos_logging::report_error(&error);
+                    Outcome::Failure(error_pb::encode_failure(&error))
+                }
+            }),
+        }))
+    }
+
     async fn validate_project_directory(
         &self,
         request: Request<pb::ValidateProjectDirectoryRequest>,

@@ -66,6 +66,7 @@ impl SessionStore for MockSessionStore {
             conf: SessionConf::default(),
             workspace_id: "default".to_string(),
             project_id: None,
+            worktree_binding: None,
             current_directory: None,
         }))
     }
@@ -112,6 +113,9 @@ impl SessionStore for MockSessionStore {
         let mut record = self.get_session_record(&params.session_id).await?.unwrap();
         record.conf = params.conf;
         record.current_directory = params.current_directory;
+        if params.worktree_binding.is_some() {
+            record.worktree_binding = params.worktree_binding;
+        }
         record.last_activity = params.last_activity;
         Ok(Some(record))
     }

@@ -48,7 +48,7 @@ pub use run::{
     AgentRunSettlementReceiver,
 };
 
-pub use environment::{WorkerEnvironment, WorkerEnvironmentContext};
+pub use environment::{WorkerEnvironment, WorkerEnvironmentContext, WorkerWorktreeRequest};
 pub use environment_plugin_changes::{
     WorkerPluginChange, WorkerPluginInstall, WorkerPluginPrepared, WorkerPluginUpdate,
 };

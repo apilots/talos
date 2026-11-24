@@ -402,6 +402,7 @@ fn record_for(
         conf,
         workspace_id: "default".to_string(),
         project_id,
+        worktree_binding: None,
         current_directory,
     }
 }

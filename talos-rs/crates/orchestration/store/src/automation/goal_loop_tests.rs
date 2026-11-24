@@ -48,6 +48,7 @@ async fn fixture() -> Fixture {
             usage: SessionUsage::default(),
             conf: SessionConf::default(),
             project_id: None,
+            worktree_binding: None,
             current_directory: None,
         })
         .await

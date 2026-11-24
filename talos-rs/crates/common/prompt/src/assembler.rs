@@ -13,7 +13,7 @@ use talos_skills::{SkillPromptContext, SkillPromptInjection};
 #[path = "assembler/git_repository_state.rs"]
 mod git_repository_state;
 
-use git_repository_state::inspect_git_repository_state;
+use git_repository_state::append_project_context;
 
 fn section(kind: PromptSectionKind, payload: impl Into<String>) -> PromptSection {
     PromptSection {
@@ -449,18 +449,7 @@ fn build_appended_system_context(builder: &PromptBuilder<'_>) -> Option<String> 
     let mut lines = Vec::new();
 
     if let Some(project_root) = builder.project_root.as_ref() {
-        lines.push(format!("- project_root: {}", project_root.display()));
-        if let Some(repository_state) = inspect_git_repository_state(project_root) {
-            lines.push(format!("- git_branch: {}", repository_state.branch));
-            lines.push(format!(
-                "- git_status_summary: {}",
-                repository_state.status_summary
-            ));
-            lines.push(format!(
-                "- has_uncommitted_changes: {}",
-                repository_state.has_uncommitted_changes
-            ));
-        }
+        append_project_context(&mut lines, project_root);
     }
 
     lines.push(format!(

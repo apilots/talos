@@ -41,6 +41,7 @@ fn record(
         conf: SessionConf::default(),
         workspace_id: "workspace-alpha".to_string(),
         project_id,
+        worktree_binding: None,
         current_directory,
     }
 }
@@ -358,6 +359,7 @@ async fn session_patch_updates_only_settings_owned_columns() {
         .patch_session(PatchSessionParams {
             session_id: "session-1".to_string(),
             conf: conf.clone(),
+            worktree_binding: None,
             current_directory: Some(PathBuf::from("/tmp/updated")),
             last_activity: 42,
         })

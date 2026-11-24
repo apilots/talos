@@ -133,17 +133,6 @@ impl DatabaseSessionStore {
         })
     }
 
-    pub(crate) fn normalized_optional_string(value: Option<String>) -> Option<String> {
-        value.and_then(|raw| {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        })
-    }
-
     fn append_tree_scope(
         scope: &SessionTreeScope,
         clauses: &mut Vec<&'static str>,
@@ -283,6 +272,7 @@ impl SessionStore for DatabaseSessionStore {
                 "workspace_id".to_string(),
                 "project_id".to_string(),
                 "current_directory".to_string(),
+                "worktree_binding_json".to_string(),
             ],
             vec![
                 Value::String(record.id.clone()),
@@ -329,6 +319,9 @@ impl SessionStore for DatabaseSessionStore {
                     .current_directory
                     .clone()
                     .map(|path| Value::String(path.display().to_string()))
+                    .unwrap_or(Value::Null),
+                Self::encode_worktree_binding(record.worktree_binding.as_ref())?
+                    .map(Value::String)
                     .unwrap_or(Value::Null),
             ],
         );
@@ -385,7 +378,7 @@ impl SessionStore for DatabaseSessionStore {
         let rows = self
             .storage
             .query(
-                "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
+                "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
                 &[tree_root_session_id, agent_path.as_str()],
             )
             .await?;
@@ -393,7 +386,7 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let mut sql = "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions".to_string();
+        let mut sql = "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json FROM sessions".to_string();
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);
@@ -586,6 +579,7 @@ impl SessionStore for DatabaseSessionStore {
         }
 
         let conf_json = Self::build_conf_json(&params.conf)?;
+        let worktree = Self::encode_worktree_binding(params.worktree_binding.as_ref())?;
         let current_directory = params
             .current_directory
             .as_ref()
@@ -593,10 +587,11 @@ impl SessionStore for DatabaseSessionStore {
         let last_activity = params.last_activity.to_string();
         let affected = transaction
             .execute(
-                "UPDATE sessions SET conf_json = ?, current_directory = NULLIF(?, ''), last_activity = ? WHERE session_key = ?",
+                "UPDATE sessions SET conf_json = ?, current_directory = NULLIF(?, ''), worktree_binding_json = COALESCE(NULLIF(?, ''), worktree_binding_json), last_activity = ? WHERE session_key = ?",
                 &[
                     conf_json.as_str(),
                     current_directory.as_deref().unwrap_or_default(),
+                    worktree.as_deref().unwrap_or_default(),
                     last_activity.as_str(),
                     params.session_id.as_str(),
                 ],

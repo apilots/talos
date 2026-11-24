@@ -490,17 +490,21 @@ impl TurnService {
         }
 
         let identity = AgentTurnRef::new(&session_id, &turn_id);
-        let context = match self
-            .execution
-            .sessions
-            .build_agent_context(&session, identity.clone())
-            .await
-        {
-            Ok(context) => context,
-            Err(error) => {
-                self.release_command(command_lease.take()).await;
-                return Err(error);
+        let worktree_directive = if submission.origin.is_none()
+            && submission.retry_of_message_id.is_none()
+            && matches!(
+                session.tree_identity,
+                talos_store::session::SessionTreeIdentity::Primary
+            ) {
+            match crate::session::WorktreeDirective::from_input(&submission.input) {
+                Ok(directive) => directive,
+                Err(error) => {
+                    self.release_command(command_lease.take()).await;
+                    return Err(error);
+                }
             }
+        } else {
+            None
         };
         let input = match super::completed_agent_user_input(
             &turn_id,
@@ -516,11 +520,40 @@ impl TurnService {
         };
         let profile_context = self.profile_turn_context(&session, request_id.clone());
 
-        let params = AgentRunParams {
-            context,
-            input,
-            checkpoint: None,
-            continuation: None,
+        let prepare = async {
+            let sessions = &self.execution.sessions;
+            let mut session = sessions.load_record(&session_id).await?.ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    "The Session no longer exists.",
+                )
+            })?;
+            if let Some(directive) = worktree_directive {
+                let operation_id = match command_lease.as_ref() {
+                    Some(lease) => {
+                        use sha2::{Digest, Sha256};
+                        let mut hash = Sha256::new();
+                        hash.update((session_id.len() as u64).to_be_bytes());
+                        hash.update(session_id.as_bytes());
+                        hash.update(lease.idempotency_key.as_bytes());
+                        let bytes = hash.finalize();
+                        Uuid::from_bytes(bytes[..16].try_into().expect("SHA-256 digest length"))
+                    }
+                    None => Uuid::new_v4(),
+                };
+                session = sessions
+                    .apply_worktree_directive(&session, directive, operation_id)
+                    .await?;
+            }
+            let context = sessions
+                .build_agent_context(&session, identity.clone())
+                .await?;
+            Ok(AgentRunParams {
+                context,
+                input,
+                checkpoint: None,
+                continuation: None,
+            })
         };
         let automation_object = submission
             .origin
@@ -534,7 +567,8 @@ impl TurnService {
         let execution_result = self
             .execution
             .start(
-                params,
+                identity.clone(),
+                prepare,
                 command_lease.clone(),
                 submission.origin,
                 subagent_limit,

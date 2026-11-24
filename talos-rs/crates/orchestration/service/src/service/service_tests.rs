@@ -601,6 +601,16 @@ async fn test_application_with_environment(
     environment: Option<Arc<dyn agent_protocol::WorkerEnvironment>>,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    test_application_with_storage(agent_execution, coordinator, config, environment, storage).await
+}
+
+async fn test_application_with_storage(
+    agent_execution: Arc<TestAgentExecution>,
+    coordinator: Arc<dyn AgentCoordinator>,
+    config: TalosConfig,
+    environment: Option<Arc<dyn agent_protocol::WorkerEnvironment>>,
+    storage: Arc<SqliteStorage>,
+) -> (TalosService, Arc<DatabaseSessionStore>) {
     run_test_migrations(storage.pool()).await;
     let profile_store: Arc<dyn ProfileStore> = Arc::new(DatabaseProfileStore::new(&storage));
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());

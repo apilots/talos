@@ -10,6 +10,28 @@ use talos_types::talos::{SessionSourceProvider, SessionSourceType, TalosSessionE
 use talos_types::{AgentPath, SessionConf, SessionUsage, DEFAULT_SESSION_TITLE};
 
 impl DatabaseSessionStore {
+    pub(super) fn encode_worktree_binding(
+        binding: Option<&talos_types::SessionWorktreeBinding>,
+    ) -> TalosResult<Option<String>> {
+        binding
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| {
+                TalosError::internal_with_source("Encode the Session worktree binding.", error)
+            })
+    }
+
+    pub(crate) fn normalized_optional_string(value: Option<String>) -> Option<String> {
+        value.and_then(|raw| {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    }
+
     pub(crate) fn parse_session_record(row: &Row) -> TalosResult<SessionRecord> {
         let message_count = row
             .get_i64("message_count")
@@ -107,6 +129,10 @@ impl DatabaseSessionStore {
 
         let session_kind =
             Self::parse_required_enum(row.get_string("session_kind"), &id, "session_kind")?;
+        let worktree_binding = row
+            .get_string("worktree_binding_json")
+            .map(|value| Self::parse_required_json(Some(value), &id, "worktree_binding_json"))
+            .transpose()?;
         Ok(SessionRecord {
             id,
             session_kind,
@@ -147,6 +173,7 @@ impl DatabaseSessionStore {
                 .unwrap_or_default(),
             usage,
             conf,
+            worktree_binding,
             project_id: Self::normalized_optional_string(row.get_string("project_id")),
             current_directory: Self::normalized_optional_string(
                 row.get_string("current_directory"),
@@ -285,7 +312,7 @@ impl DatabaseSessionStore {
     }
 
     pub(super) async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
-        let sql = "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?";
+        let sql = "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json FROM sessions WHERE session_key = ?";
         let rows = self.storage.query(sql, &[session_key]).await?;
         Ok(rows.into_iter().next())
     }
@@ -296,7 +323,7 @@ impl DatabaseSessionStore {
     ) -> TalosResult<Option<SessionRecord>> {
         let rows = transaction
             .query(
-                "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?",
+                "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json FROM sessions WHERE session_key = ?",
                 &[session_id],
             )
             .await?;

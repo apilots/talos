@@ -382,6 +382,7 @@ async fn enabling_capture_preserves_a_large_existing_history_at_the_pre_mutation
                 model_selection: None,
                 user_permission_mode: Some(UserPermissionMode::FullAccess),
             },
+            worktree_binding: None,
             current_directory: None,
             last_activity: 500,
         })

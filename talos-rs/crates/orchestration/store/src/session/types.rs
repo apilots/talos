@@ -38,6 +38,8 @@ pub struct SessionRecord {
     pub project_id: Option<String>,
     #[serde(default)]
     pub current_directory: Option<PathBuf>,
+    #[serde(default)]
+    pub worktree_binding: Option<talos_types::SessionWorktreeBinding>,
 }
 
 impl SessionRecord {
@@ -91,6 +93,7 @@ pub struct PatchSessionParams {
     pub session_id: String,
     pub conf: SessionConf,
     pub current_directory: Option<PathBuf>,
+    pub worktree_binding: Option<talos_types::SessionWorktreeBinding>,
     pub last_activity: u64,
 }
 

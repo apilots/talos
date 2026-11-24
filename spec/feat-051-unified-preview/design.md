@@ -103,6 +103,30 @@ The user has now authorized all T1–T6. The T6-only assessment above records th
 
 Expose one `FilePreviewSource` union: `{kind: "file", fileId}` or `{kind: "sessionPath", sessionId, path}`. One prepare/read/close interface returns explicit metadata, entry resource, expiration and capabilities. Registered content retains FileService authorization. Session content uses session ownership and the saved execution Worker/workspace/project directory; clients cannot supply a node or authorization root. Worker reads canonical targets within that root, permits in-root symlinks, rejects escapes and never falls back to another machine. File links use explicit relative/absolute paths or local `file://` URLs. A line citation such as `./source.rs:27` or `/workspace/source.rs#L27` retains that file intent; scheme-looking opaque URLs are not guessed as paths. Typed range reads bound memory and transport size. Grants and temporary output are runtime-owned and never persisted as workspace windows.
 
+Session-path preview and Turn execution resolve the same saved working directory.
+A Session worktree binding takes precedence over the bound Project directory.
+Sessions without a worktree continue to resolve the Project directory, an explicit
+Session directory, or the saved Worker Workspace in that order. Multiple Sessions
+in one Project may point to different linked checkouts.
+
+The shared Turn admission path recognizes direct worktree requests at the start
+of a human-authored message. For example, enter `Create a new worktree from
+origin/main` or `Bind existing worktree /absolute/checkout` in Desktop, Web, or
+TUI. The equivalent forms `/worktree create origin/main` and `/worktree bind
+/absolute/checkout` work without any composer controls. The Worker fetches
+`origin/main` and creates a detached linked checkout under `.worktrees` beside
+the primary checkout. Binding an existing checkout verifies the registration
+and, for a Project-bound Session, its shared Git directory. The TUI status card
+and chat footer show the Session working directory. Quoted paths may
+contain spaces. A create request uses the selected Project or the Session's
+explicit working directory as its source repository.
+
+The Session persists the canonical checkout and its Git registration identity.
+A subsequent Turn or preview validates that binding on the same Worker.
+Missing directories fail with a working-directory error. Changing the binding
+invalidates grants for the prior checkout. Shell directory changes leave the
+saved Session binding in place. Existing worktree lifecycle remains under Git.
+
 The chat workspace uses its conversation ID to select the File Service. For personal Talo, Web and Desktop prepare the registered file through the same Server SDK. A session path already identifies its owning conversation. The personal Talo page and its direct conversation link share the same session workspace. The issuing Service authorizes preparation, bounded reads and release. A native preview ID carries the issuer through Electron resource requests and tab cleanup. Clients treat the ID as opaque. Closing the tab or signing out immediately withdraws the native resource and starts removal of any local Open-in copy. Sign-out waits for local cleanup. The native client releases the remote grant in the background with a bounded request. A failure to release the Server grant is reported independently; the grant remains subject to its existing expiry.
 
 ### P2-R2 — Resource delivery (T2)

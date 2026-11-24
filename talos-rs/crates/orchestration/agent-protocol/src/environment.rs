@@ -23,6 +23,20 @@ pub struct WorkerEnvironmentContext {
     pub workspace_id: Option<String>,
 }
 
+/// A checked operation scoped to the Session's execution Worker.
+pub enum WorkerWorktreeRequest {
+    Bind {
+        repository: Option<PathBuf>,
+        checkout: PathBuf,
+    },
+    CreateFromOriginMain {
+        repository: PathBuf,
+        operation_id: uuid::Uuid,
+        expected_common_directory: Option<PathBuf>,
+    },
+    Verify(talos_types::SessionWorktreeBinding),
+}
+
 /// Node-local environment owner. Clients hide local/direct/outbound transport.
 /// Callers authorize the selected node; network adapters additionally verify its lease
 /// and actor. Implementations own path validation and I/O, never product persistence.
@@ -249,6 +263,11 @@ pub trait WorkerEnvironment: Send + Sync {
         context: WorkerEnvironmentContext,
         params: FsDirectoryCreateRequest,
     ) -> AgentFuture<'_, AgentResult<FsDirectoryCreateResponse>>;
+    fn session_worktree(
+        &self,
+        context: WorkerEnvironmentContext,
+        request: WorkerWorktreeRequest,
+    ) -> AgentFuture<'_, AgentResult<talos_types::SessionWorktreeBinding>>;
     fn project_status(
         &self,
         context: WorkerEnvironmentContext,

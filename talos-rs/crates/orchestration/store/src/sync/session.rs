@@ -116,15 +116,22 @@ pub(super) async fn apply_metadata(
     let conf = serde_json::to_string(&snapshot.conf).map_err(codec)?;
     let environment = serde_json::to_string(&snapshot.environment).map_err(codec)?;
     let usage = serde_json::to_string(&session.usage).map_err(codec)?;
+    let worktree = snapshot
+        .worktree_binding
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(codec)?
+        .unwrap_or_default();
     let current_directory = match session.current_directory.as_ref() {
         Some(path) => path
             .to_str()
             .ok_or_else(|| TalosError::internal("Synchronized Session directory must be UTF-8."))?,
         None => "",
     };
-    tx.execute(r#"INSERT INTO sessions(session_key, session_kind, agent_id, execution_node_id, workspace_id, workspace_user_id, user_id, title, source_type, source_provider, channel_id, thread_id, environment_json, conf_json, current_directory, project_id, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, parent_session_id, parent_turn_id, tree_root_session_id, agent_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, 0, 0, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
-        ON CONFLICT(session_key) DO UPDATE SET session_kind = CASE WHEN sessions.session_kind = 'talo' THEN sessions.session_kind ELSE excluded.session_kind END, title = excluded.title, conf_json = excluded.conf_json, current_directory = excluded.current_directory, last_activity = excluded.last_activity, message_count = excluded.message_count, usage_json = excluded.usage_json"#, &[&session.id, session.session_kind.as_str(), &snapshot.binding.agent_id, &local, &snapshot.binding.workspace_id, &snapshot.binding.workspace_user_id, &batch.scope.account_id, &session.title, source_type, source_provider, snapshot.channel_id.as_deref().unwrap_or_default(), snapshot.thread_id.as_deref().unwrap_or_default(), &environment, &conf, current_directory, session.project_id.as_deref().unwrap_or_default(), &session.created_at.to_string(), &session.last_activity.to_string(), &session.message_count.to_string(), &usage, parent_session.unwrap_or_default(), parent_turn.unwrap_or_default(), root.unwrap_or_default(), path.unwrap_or_default()]).await?;
+    tx.execute(r#"INSERT INTO sessions(session_key, session_kind, agent_id, execution_node_id, workspace_id, workspace_user_id, user_id, title, source_type, source_provider, channel_id, thread_id, environment_json, conf_json, current_directory, worktree_binding_json, project_id, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, parent_session_id, parent_turn_id, tree_root_session_id, agent_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, 0, 0, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
+        ON CONFLICT(session_key) DO UPDATE SET session_kind = CASE WHEN sessions.session_kind = 'talo' THEN sessions.session_kind ELSE excluded.session_kind END, title = excluded.title, conf_json = excluded.conf_json, current_directory = excluded.current_directory, worktree_binding_json = COALESCE(excluded.worktree_binding_json, sessions.worktree_binding_json), last_activity = excluded.last_activity, message_count = excluded.message_count, usage_json = excluded.usage_json"#, &[&session.id, session.session_kind.as_str(), &snapshot.binding.agent_id, &local, &snapshot.binding.workspace_id, &snapshot.binding.workspace_user_id, &batch.scope.account_id, &session.title, source_type, source_provider, snapshot.channel_id.as_deref().unwrap_or_default(), snapshot.thread_id.as_deref().unwrap_or_default(), &environment, &conf, current_directory, &worktree, session.project_id.as_deref().unwrap_or_default(), &session.created_at.to_string(), &session.last_activity.to_string(), &session.message_count.to_string(), &usage, parent_session.unwrap_or_default(), parent_turn.unwrap_or_default(), root.unwrap_or_default(), path.unwrap_or_default()]).await?;
     Ok(())
 }
 
