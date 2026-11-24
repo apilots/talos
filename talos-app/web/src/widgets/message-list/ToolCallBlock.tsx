@@ -8,7 +8,7 @@ import { ToolCallCard } from "@/widgets/tool-call-card/ToolCallCard";
 import { formatDuration } from "@/shared/lib/formatDuration";
 import { timelineToolTitle } from "./timelineToolPresentation";
 import { buildToolDisplayTitle, toolCommand, toolSearchQuery } from "./toolDisplay";
-import { ToolResultPreview, ToolResultRenderer } from "./ToolResultRenderer";
+import { lastBashOutput, ToolResultPreview, ToolResultRenderer } from "./ToolResultRenderer";
 
 function resolveTone(status: ChatToolStatus) {
   if (status === "done") {
@@ -33,6 +33,7 @@ export function ToolCallBlock({
   callId,
   contentItems,
   live = true,
+  onOpen,
   output,
   progress,
   prompt,
@@ -46,6 +47,7 @@ export function ToolCallBlock({
   callId: string;
   contentItems?: TalosContentItem[];
   live?: boolean;
+  onOpen?: () => void;
   output?: string;
   progress: Array<{ kind: TalosToolProgressKind; message: string }>;
   prompt?: string;
@@ -65,16 +67,25 @@ export function ToolCallBlock({
     : variant === "activity" ? timelineToolTitle(toolName, argumentsValue, t)
       : buildToolDisplayTitle(toolName, argumentsValue);
   const command = open && compact && toolName === "Bash" ? toolCommand(argumentsValue) : undefined;
-  const resultDurationMs = contentItems
-    ?.filter((item) => item.type === "bash_output")
-    .filter((item) => item.elapsed_ms !== null)
-    .at(-1)?.elapsed_ms;
-  const durationMs = timingMs ?? resultDurationMs;
+  const bashResult = lastBashOutput(contentItems);
+  const durationMs = timingMs ?? bashResult?.elapsed_ms;
+  const exitCode = bashResult?.exit_code;
   const running = live && status === "running";
-  const statusKey = !compact && status === "waiting_dynamic_input" ? "waiting" : status;
+  // The tool call failed to complete, but the command reports the more specific cancellation.
+  const displayStatus = status === "error" && bashResult?.status === "cancelled" ? "cancelled" : status;
+  const statusKey = !compact && displayStatus === "waiting_dynamic_input" ? "waiting" : displayStatus;
+  const statusLabel = status === "running" && !live ? t("toolLastSeenRunning") : t(`toolStatus.${statusKey}`);
   const duration = running && startedAtMs !== undefined && startedAtMs > 0
     ? <RunningToolDuration startedAtMs={startedAtMs} />
     : durationMs != null ? formatDuration(durationMs) : undefined;
+  // Persisted status deltas also include generic lifecycle notices already represented by the header.
+  const executingMessage = `executing ${toolName.toLowerCase()}`;
+  const progressMessages = open ? progress.flatMap(({ kind, message }) => {
+    if (kind !== "status") return [];
+    const text = message.trim().toLowerCase();
+    return !text || text === executingMessage || text === "execution started" || text === "waiting for execution slot"
+      ? [] : [message];
+  }) : [];
   const showQuietCommand = compact && running && toolName === "Bash" &&
     !output?.trim() && !contentItems?.length &&
     !progress.some(({ kind, message }) => kind !== "status" && message.trim());
@@ -90,14 +101,17 @@ export function ToolCallBlock({
       <ToolCallCard.Header
         compact={compact}
         description={query ? `· ("${query}")` : undefined}
-        onToggle={() => setOpen((value) => !value)}
+        onToggle={() => {
+          if (!open) onOpen?.();
+          setOpen(!open);
+        }}
         open={open}
         duration={collapsedActivity ? undefined : duration}
+        exitLabel={!collapsedActivity && exitCode != null ? t("toolExitCode", { code: exitCode }) : undefined}
         running={running}
-        statusLabel={collapsedActivity ? undefined :
-          status === "running" && !live ? t("toolLastSeenRunning") : t(`toolStatus.${statusKey}`)}
+        statusLabel={collapsedActivity ? undefined : statusLabel}
         title={title}
-        tone={resolveTone(status)}
+        tone={resolveTone(displayStatus)}
       />
       {showQuietCommand ? <p className="px-1 text-xs leading-5 text-muted">{t("toolNoOutputYet")}</p> : null}
       {open ? (
@@ -107,17 +121,20 @@ export function ToolCallBlock({
             compact={compact}
             contentItems={contentItems}
             fallbackOutput={output}
+            live={live}
             progress={progress}
             status={status}
           />
           {prompt ? <ToolCallCard.Prompt prompt={prompt} title={t("dynamicToolPrompt")} /> : null}
-          <ToolCallCard.Details compact={compact} title={t("details")}>
+          <ToolCallCard.Details compact={compact} onOpen={onOpen} title={t("details")}>
+            {progressMessages.length > 0 ? (
+              <ToolCallCard.Progress messages={progressMessages} title={t("toolExecutionProgress")} />
+            ) : null}
             <ToolCallCard.MetaLine label="call_id" value={callId} />
             <ToolCallCard.Input
               content={typeof argumentsValue === "string" ? argumentsValue : JSON.stringify(argumentsValue, null, 2)}
               title={t("arguments")}
             />
-            {progress.length > 0 ? <ToolCallCard.Progress entries={progress} title={t("progress")} /> : null}
           </ToolCallCard.Details>
         </ToolCallCard.Body>
       ) : collapsedActivity ? null : (

@@ -51,7 +51,8 @@ export function MessageTimelineBlock({
   );
   const answers = items.filter(isFinalAnswer);
   const processItems = items.filter((item) => !isFinalAnswer(item));
-  const rows = groupTimelineItems(processItems);
+  const [inspectedTools, setInspectedTools] = useState<ReadonlySet<string>>(() => new Set());
+  const rows = groupTimelineItems(processItems, inspectedTools);
   const [processExpanded, setProcessExpanded] = useState<boolean>();
   const [rowLimit, setRowLimit] = useState(TIMELINE_PAGE_SIZE);
   const activeItems = processItems.filter(
@@ -59,14 +60,18 @@ export function MessageTimelineBlock({
   );
   const active = block.live ?? (activeItems.length > 0);
   const live = active && !liveUpdatesPaused;
-  const expanded = processExpanded ?? active;
+  const expanded = processExpanded ?? (active || inspectedTools.size > 0);
   const inputRows = rows.filter((row) => row.kind === "tool_call" && row.status === "waitingForInput");
   const firstRecentRow = Math.max(0, rows.length - rowLimit);
   const latestCommentary = firstRecentRow > 0 ? lastCommentary(processItems) : undefined;
   const activeTools = new Set(activeItems.filter((item) => item.kind === "tool_call"));
-  const visibleRows = !expanded ? inputRows : rows.filter((row, index) =>
-    index >= firstRecentRow || row === latestCommentary || (row.kind === "tool_call" && activeTools.has(row)),
-  );
+  const visibleRows = rows.filter((row, index) => {
+    const tool = row.kind === "tool_call" ? row : undefined;
+    if (tool && inspectedTools.has(tool.itemId)) return true;
+    return expanded
+      ? index >= firstRecentRow || row === latestCommentary || (tool && activeTools.has(tool))
+      : tool?.status === "waitingForInput";
+  });
   const showEarlier = expanded && visibleRows.length < rows.length;
   const showWorkingIndicator = expanded && live && showWaitingIndicator && answers.length === 0 &&
     inputRows.length === 0 && rows.length > 0;
@@ -83,7 +88,10 @@ export function MessageTimelineBlock({
           <TimelineProcessHeader
             expanded={expanded}
             live={active}
-            onToggle={inputRows.length < rows.length ? () => setProcessExpanded(!expanded) : undefined}
+            onToggle={inputRows.length < rows.length ? () => {
+              if (expanded) setInspectedTools(new Set());
+              setProcessExpanded(!expanded);
+            } : undefined}
             paused={liveUpdatesPaused}
             timing={timelineProcessTiming(processItems, block)}
           />
@@ -113,7 +121,13 @@ export function MessageTimelineBlock({
                   ) : null;
                 }
                 return (
-                  <TimelineStep item={row} itemKey={itemKey} key={itemKey} live={live}>
+                  <TimelineStep
+                    item={row} itemKey={itemKey} key={itemKey} live={live}
+                    onToolOpen={row.kind === "tool_call" && activeTools.has(row) ? () => {
+                      // Keep the inspected row mounted on settlement without opening a collapsed rail.
+                      setInspectedTools((current) => current.has(row.itemId) ? current : new Set([...current, row.itemId]));
+                    } : undefined}
+                  >
                     {pendingUserAction?.itemId === row.itemId ? renderUserAction?.(pendingUserAction) : null}
                   </TimelineStep>
                 );

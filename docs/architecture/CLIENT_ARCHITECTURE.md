@@ -390,15 +390,30 @@ a tool runs. The spinner stops when the Turn requires user input.
 Consecutive successful tools can share a collapsed activity with a single action
 label. Expanding the group shows one row per tool. A tool's command, output and
 arguments are shown when its row is opened. Reasoning before or after a tool
-has its own collapsed disclosure. A completed reasoning block may join an
+has its own collapsed disclosure. A Thinking-only group shows one marker at
+its disclosure, not on each paragraph. A completed reasoning block may join an
 adjacent successful command only when its full timestamp range falls inside
 that command's recorded execution window.
 The rail and expanded groups render bounded pages and provide access to earlier
 steps. The latest commentary and active tool rows remain visible in the open
 rail when earlier activity is paged. Exceptional tools remain individual rows.
-The tool timer uses the
-existing block start time, so a quiet command shows its active status before
-output arrives. Turn failure comes from the Turn outcome. Individual tool
+The tool timer uses the existing block start time while a command is running,
+so a quiet command shows its active status before output arrives. A terminal
+row shows measured execution duration (or Bash's recorded elapsed time when
+execution metrics are absent), not queue or result publication delay. Failed
+rows show at most one preview line. Their expanded details put the execution
+error, standard output, standard error and any saved log reference in separate
+sections. Live stdout and stderr have their own output sections and are
+replaced by the final tool result when it arrives. A streamed channel retained
+as a fallback is labeled as a preview; truncated command output and saved log
+capture status are explicit. Result headings follow
+structured content, not tool names. The tool header owns the lifecycle status;
+the metadata disclosure shows the call ID, arguments, and any additional
+progress messages in order, without repeating generic lifecycle notices or
+output. An unresolved replay does not gain a terminal outcome. A live tool row
+opened by the user stays in place through completion in that view, including
+when an input request was inspected with the rest of the rail collapsed.
+Turn failure comes from the Turn outcome. Individual tool
 failures retain their own status and count in the response metrics. All
 content remains in state. Event bursts yield between
 bounded batches and publish one store update per batch. Navigation cancels

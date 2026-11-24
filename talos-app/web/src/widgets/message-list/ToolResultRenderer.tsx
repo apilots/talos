@@ -1,7 +1,10 @@
 import { FileImage } from "./FileImage";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 import { jsonContentValue } from "@talos/sdk-browser";
+import { decodeApiError } from "@talos/sdk-core";
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { cn } from "@/shared/lib/cn";
 import type { TalosContentItem } from "@/shared/types/protocol";
 import type { ChatTimelineItem, ChatToolStatus } from "@/shared/types/ui";
@@ -15,9 +18,14 @@ type SubagentSnapshot = Extract<
 >["result"];
 type AgentTreeNode = Extract<SubagentResult, { operation: "listAgents" }>["result"]["children"][number];
 
+type ToolFailureReason = "failed" | "timedOut" | "cancelled" | "captureFailed" | "unspecified";
+
 type ToolResultRenderModel = {
   summary: string;
   preview: string[];
+  failurePreview?: ToolFailureReason;
+  heading?: "command" | "file" | "search" | "diff" | "web" | "subagent" | "json" | "image" | "references";
+  streamed?: boolean;
   body: ReactNode;
 };
 
@@ -33,31 +41,119 @@ export function buildToolResultModel({
   status: ChatToolStatus;
 }): ToolResultRenderModel {
   const items = contentItems ?? [];
-  const subagentItem = items.find(
-    (item): item is SubagentResultItem => item.type === "subagent_result",
+  if (lastBashOutput(items)) {
+    const command = buildTaskModel(items, progress, status);
+    const other = items.filter((item) => item.type !== "bash_output");
+    return other.length ? combineResultModels([command, buildResultContentModel(other, [], status)]) : command;
+  }
+  if (status !== "error") {
+    return buildResultContentModel(items, progress, status, fallbackOutput);
+  }
+
+  const errors: string[] = [];
+  const structured = items.filter((item) => {
+    if (item.type === "text") {
+      errors.push(item.text);
+      return false;
+    }
+    if (item.type === "json") {
+      const error = decodeToolError(item.value);
+      if (error) {
+        errors.push(apiErrorMessage(error));
+        return false;
+      }
+    }
+    return true;
+  });
+  const error = errors.join("\n").trim() || (items.length === 0 ? fallbackOutput?.trim() : undefined);
+  // A final error may repeat a whole streamed channel. Do not discard distinct output.
+  const duplicateChannels = error ? (["stdout", "stderr"] as const).filter(
+    (channel) => collectToolOutput(progress, channel).trim() === error,
+  ) : [];
+  const remainingProgress = duplicateChannels.length > 0 ? progress.filter(
+    (entry) => entry.kind === "status" || !duplicateChannels.includes(entry.kind),
+  ) : progress;
+  const model = buildResultContentModel(structured, remainingProgress, status);
+  const preview = firstNonEmptyLine(error ?? "");
+  const body = model.body;
+  return {
+    ...model,
+    heading: undefined,
+    streamed: false,
+    preview: preview ? [preview] : [],
+    body: <>
+      {error || !body ? <ToolResultSection kind="error" failureReason="unspecified">{error}</ToolResultSection> : null}
+      {model.heading ? <TypedResultBody model={model} /> : body}
+    </>,
+  };
+}
+
+function decodeToolError(value: unknown) {
+  try {
+    return decodeApiError(value);
+  } catch {
+    // A JSON tool result is not necessarily an ApiError.
+    return null;
+  }
+}
+
+function buildResultContentModel(
+  items: TalosContentItem[],
+  progress: ToolProgress,
+  status: ChatToolStatus,
+  fallbackOutput?: string,
+): ToolResultRenderModel {
+  if (items.length === 0) return buildProgressFallbackModel(progress, fallbackOutput, status);
+  const hasWeb = items.some((item) => item.type === "web_reference");
+  const groups = new Map<"subagent_result" | "diff" | "file_read" | "search_results" | "web_reference" | "plain", TalosContentItem[]>();
+  for (const item of items) {
+    const kind = item.type;
+    const key = kind === "subagent_result" || kind === "diff" || kind === "file_read" || kind === "search_results"
+      ? kind : hasWeb ? "web_reference" : "plain";
+    const group = groups.get(key);
+    if (group) group.push(item);
+    else groups.set(key, [item]);
+  }
+  const models = Array.from(groups, ([key, group]) => {
+    switch (key) {
+      case "subagent_result": {
+        const agents = group.filter((item): item is SubagentResultItem => item.type === "subagent_result");
+        return combineResultModels(agents.map((item) => buildSubagentModel(item.result, status)));
+      }
+      case "diff": return buildDiffModel(group, status);
+      case "file_read": return buildFileModel(group, status);
+      case "search_results": return buildExploredModel(group, status);
+      case "web_reference": return buildReferenceModel(group, status);
+      default: return buildTextJsonModel(group, status);
+    }
+  });
+  return combineResultModels(models);
+}
+
+function combineResultModels([first, ...rest]: ToolResultRenderModel[]): ToolResultRenderModel {
+  if (rest.length === 0) return first;
+  return {
+    summary: first.summary,
+    preview: [first, ...rest].flatMap((model) => model.preview).slice(0, 2),
+    failurePreview: first.failurePreview,
+    get body() {
+      return <>{[first, ...rest].map((model, index) => <TypedResultBody key={index} model={model} />)}</>;
+    },
+  };
+}
+
+function TypedResultBody({ model }: { model: ToolResultRenderModel }) {
+  const { t } = useTranslation("chat");
+  const body = model.body;
+  if (!body) return null;
+  if (!model.heading) return body;
+  const title = t(`toolResultHeading.${model.heading}`);
+  return (
+    <section aria-label={title} className="space-y-2">
+      <h4 className="text-xs font-medium text-muted">{title}</h4>
+      {body}
+    </section>
   );
-  if (subagentItem) {
-    return buildSubagentModel(subagentItem.result, status);
-  }
-  if (items.some((item) => item.type === "bash_output")) {
-    return buildTaskModel(items, progress, status);
-  }
-  if (items.some((item) => item.type === "diff")) {
-    return buildDiffModel(items, status);
-  }
-  if (items.some((item) => item.type === "file_read")) {
-    return buildFileModel(items, status);
-  }
-  if (items.some((item) => item.type === "search_results")) {
-    return buildExploredModel(items, status);
-  }
-  if (items.some((item) => item.type === "web_reference")) {
-    return buildReferenceModel(items, status);
-  }
-  if (items.length > 0) {
-    return buildTextJsonModel(items, status);
-  }
-  return buildProgressFallbackModel(progress, fallbackOutput, status);
 }
 
 function buildSubagentModel(
@@ -99,6 +195,7 @@ function buildSubagentModel(
       break;
   }
   return {
+    heading: "subagent",
     summary: `${toolResultStateLabel(status)} · ${summary}`,
     preview: lines.slice(0, 2),
     body: <ResultList lines={lines} />,
@@ -139,25 +236,34 @@ export function ToolResultRenderer(props: {
   contentItems?: TalosContentItem[];
   compact?: boolean;
   fallbackOutput?: string;
+  live: boolean;
   progress: ToolProgress;
   status: ChatToolStatus;
 }) {
+  const { t } = useTranslation("chat");
   const model = buildToolResultModel(props);
   const summary = props.compact
     ? model.summary.replace(/^(Queued|Running|Waiting for input|Completed|Failed)(?: · )?/, "")
     : model.summary;
+  const body = model.body;
+  if (!body) return summary ? <ToolResultSummaryLine summary={summary} /> : null;
+  const title = t(model.streamed
+    ? props.live && props.status === "running" ? "toolLiveOutput" : "toolStreamedOutput"
+    : `toolResultHeading.${model.heading ?? "generic"}`);
   return (
-    <div
+    <section
+      aria-label={title}
       className={cn(
-        "space-y-3",
+        "space-y-3 border-t border-border/65 pt-3",
         props.compact &&
           "[&_[data-tool-result-list=true]]:border-0 [&_[data-tool-result-list=true]]:bg-transparent [&_[data-tool-result-list=true]]:p-0",
       )}
       data-tool-result-renderer={props.compact ? "compact" : "default"}
     >
+      <h3 className="text-xs font-semibold text-ink">{title}</h3>
       {summary ? <ToolResultSummaryLine summary={summary} /> : null}
-      {model.body}
-    </div>
+      {body}
+    </section>
   );
 }
 
@@ -168,11 +274,15 @@ export function ToolResultPreview(props: {
   progress: ToolProgress;
   status: ChatToolStatus;
 }) {
+  const { t } = useTranslation("chat");
   const model = buildToolResultModel(props);
-  const summary = props.compact
+  const summary = props.compact && props.status === "error" ? "" : props.compact
     ? model.summary.replace(/^(Queued|Running|Waiting for input|Completed|Failed)(?: · )?/, "")
     : model.summary;
-  if (model.preview.length === 0 && !summary) {
+  const preview = model.failurePreview
+    ? [[t(`toolFailureReason.${model.failurePreview}`), ...model.preview].join(" ")]
+    : model.preview;
+  if (preview.length === 0 && !summary) {
     return null;
   }
   return (
@@ -184,7 +294,7 @@ export function ToolResultPreview(props: {
       data-tool-result-preview={props.compact ? "compact" : "default"}
     >
       {summary ? <ToolResultSummaryLine summary={summary} /> : null}
-      {model.preview.slice(0, 2).map((line, index) => (
+      {preview.slice(0, props.status === "error" ? 1 : 2).map((line, index) => (
         <div className="truncate" key={`${line}-${index}`}>
           {line}
         </div>
@@ -197,37 +307,87 @@ function ToolResultSummaryLine({ summary }: { summary: string }) {
   return <div className="font-medium text-ink/75">{summary}</div>;
 }
 
+function ToolResultSection({ children, kind, failureReason, streamed = false }: {
+  children?: string;
+  kind: "error" | "stdout" | "stderr" | "log";
+  failureReason?: ToolFailureReason;
+  streamed?: boolean;
+}) {
+  const { t } = useTranslation("chat");
+  const channel = t(`toolResultSection.${kind}`);
+  const title = streamed ? t("toolResultStreamedChannel", { channel }) : channel;
+  const text = children?.trim() ? children : failureReason ? t(`toolFailureReason.${failureReason}`) : undefined;
+  if (!text) return null;
+  return (
+    <section aria-label={title} className="space-y-1" data-tool-result-section={kind}>
+      <h4 className={cn("text-xs font-medium", kind === "error" ? "text-danger" : "text-muted")}>{title}</h4>
+      <pre className={cn(
+        "max-h-80 overflow-auto rounded-lg border p-3 font-mono text-[12px] leading-5",
+        kind === "error" ? "whitespace-pre-wrap break-words border-danger/30 bg-danger/5 text-danger" : "border-border/70 bg-surface/85 text-ink",
+      )}>{text}</pre>
+    </section>
+  );
+}
+
+export function lastBashOutput(items: TalosContentItem[] | undefined) {
+  return items?.filter((item) => item.type === "bash_output").at(-1);
+}
+
 function buildTaskModel(
   items: TalosContentItem[],
   progress: ToolProgress,
   status: ChatToolStatus,
 ): ToolResultRenderModel {
   const taskItems = items.filter((item) => item.type === "bash_output");
-  const stdout = taskItems.map((item) => item.stdout).filter(Boolean).join("\n");
-  const stderr = taskItems.map((item) => item.stderr).filter(Boolean).join("\n");
-  const liveOutput = progress
-    .filter((entry) => entry.kind === "stdout" || entry.kind === "stderr")
-    .map((entry) => entry.message)
-    .join("");
-  const exitCode = lastDefined(taskItems.map((item) => item.exit_code));
-  const logLines = taskItems.flatMap((item) => item.outputLog ? [
-    `Full output: ${item.outputLog.path}`,
-    `${item.outputLog.storedBytes} / ${item.outputLog.totalBytes} bytes saved · ${item.outputLog.captureStatus} · expires ${new Date(item.outputLog.expiresAt * 1000).toLocaleString()}`,
-  ] : []);
-  const commandOutput = [stdout, stderr].filter(Boolean).join(stderr && stdout ? "\n\n" : "") || liveOutput;
-  const output = [commandOutput, ...logLines].filter(Boolean).join("\n\n");
-  const firstLine = firstNonEmptyLine(output);
-  const exitSuffix = exitCode !== undefined && exitCode !== null ? ` · exit ${exitCode}` : "";
-  const summary = `${toolResultStateLabel(status)}${exitSuffix}`;
+  const capturedStdout = taskItems.map((item) => item.stdout).filter(Boolean).join("\n");
+  const capturedStderr = taskItems.map((item) => item.stderr).filter(Boolean).join("\n");
+  const taskStatus = taskItems.at(-1)?.status;
+  const truncated = taskItems.some((item) => item.truncated);
+  const logs = taskItems.flatMap((item) => item.outputLog ? [item.outputLog] : []);
+  const mayLackOutput = !capturedStdout && !capturedStderr ||
+    status === "error" && taskStatus === "completed" || truncated ||
+    logs.some((log) => log.captureStatus !== "complete");
+  const stdout = capturedStdout || (mayLackOutput ? collectToolOutput(progress, "stdout") : "");
+  const stderr = capturedStderr || (mayLackOutput ? collectToolOutput(progress, "stderr") : "");
+  const failureReason: ToolFailureReason | undefined = status !== "error" ? undefined
+    : taskStatus === "timed_out" ? "timedOut"
+    : taskStatus === "cancelled" ? "cancelled"
+    : taskStatus === "failed" ? "failed"
+    : taskStatus === "completed" ? "captureFailed" : "unspecified";
+  const stderrTail = lastNonEmptyLine(stderr);
+  const preview = failureReason === "failed" ? stderrTail ?? lastNonEmptyLine(stdout)
+    : failureReason ? undefined : firstNonEmptyLine(stdout || stderr);
   return {
-    summary,
-    preview: firstLine ? [firstLine] : [],
-    body: output ? (
-      <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">
-        {output}
-      </pre>
-    ) : null,
+    heading: "command",
+    summary: "",
+    preview: preview ? [preview] : [],
+    failurePreview: failureReason === "failed" && stderrTail ? undefined : failureReason,
+    body: failureReason || truncated || stdout.trim() || stderr.trim() || logs.length > 0 ? <>
+      {failureReason ? <ToolResultSection kind="error" failureReason={failureReason} /> : null}
+      {truncated ? <TruncatedOutputNotice /> : null}
+      <ToolResultSection kind="stdout" streamed={!capturedStdout}>{stdout}</ToolResultSection>
+      <ToolResultSection kind="stderr" streamed={!capturedStderr}>{stderr}</ToolResultSection>
+      {logs.length > 0 ? <SavedOutputLog logs={logs} /> : null}
+    </> : null,
   };
+}
+
+function TruncatedOutputNotice() {
+  const { t } = useTranslation("chat");
+  return <p className="text-xs text-muted">{t("toolResultTruncated")}</p>;
+}
+
+function SavedOutputLog({ logs }: {
+  logs: NonNullable<Extract<TalosContentItem, { type: "bash_output" }>["outputLog"]>[];
+}) {
+  const { t, i18n } = useTranslation("chat");
+  const lines = logs.map((log) => `${log.path}\n${t("toolSavedOutputLog.summary", {
+    storedBytes: log.storedBytes,
+    totalBytes: log.totalBytes,
+    status: t(`toolSavedOutputLog.captureStatus.${log.captureStatus}`),
+    expires: new Date(log.expiresAt * 1000).toLocaleString(i18n.resolvedLanguage),
+  })}`);
+  return <ToolResultSection kind="log">{lines.join("\n\n")}</ToolResultSection>;
 }
 
 function buildDiffModel(items: TalosContentItem[], status: ChatToolStatus): ToolResultRenderModel {
@@ -265,6 +425,7 @@ function buildDiffModel(items: TalosContentItem[], status: ChatToolStatus): Tool
   }
   const summary = `${toolResultStateLabel(status)} · ${files} file(s) · +${added} -${removed}`;
   return {
+    heading: "diff",
     summary,
     preview: [`${files} file(s) changed · +${added} -${removed}`],
     body: (
@@ -292,6 +453,7 @@ function buildFileModel(items: TalosContentItem[], status: ChatToolStatus): Tool
   }
   const summary = `${toolResultStateLabel(status)} · ${count} lines`;
   return {
+    heading: "file",
     summary,
     preview: [firstNonEmptyLine(lines.join("\n")) ?? summary],
     body: (
@@ -332,6 +494,7 @@ function buildExploredModel(items: TalosContentItem[], status: ChatToolStatus): 
   }
   const summary = `${toolResultStateLabel(status)} · ${count} result(s)`;
   return {
+    heading: "search",
     summary,
     preview: lines.filter(Boolean).slice(0, 2),
     body: <ResultList lines={lines} />,
@@ -342,6 +505,7 @@ function buildReferenceModel(items: TalosContentItem[], status: ChatToolStatus):
   const preview = items.flatMap((item) => item.type === "web_reference" && item.title && item.title !== item.url
     ? [item.title] : []);
   return {
+    heading: "web",
     summary: toolResultStateLabel(status),
     preview: preview.slice(0, 2),
     get body() {
@@ -349,23 +513,27 @@ function buildReferenceModel(items: TalosContentItem[], status: ChatToolStatus):
         if (item.type === "web_reference") {
           return [item.title, item.source_domain, item.url, item.snippet].filter((line): line is string => Boolean(line));
         }
-        if (item.type === "artifact_ref") {
-          return [`artifact: ${item.label ?? item.artifact_id}${item.mime_type ? ` · ${item.mime_type}` : ""}`];
-        }
-        if (item.type === "mcp_resource_ref") {
-          return [`mcp: ${item.server}:${item.uri}${item.mime_type ? ` · ${item.mime_type}` : ""}`];
-        }
-        return [];
+        return [formatReference(item)].filter((line): line is string => line !== undefined);
       });
-      const hasBody = items.some((item) => item.type === "text" || item.type === "json" || item.type === "image");
+      const content = items.filter((item) =>
+        item.type === "text" || item.type === "json" || item.type === "image" || item.type === "progress");
       return (
         <div className="space-y-2">
           <div className="[overflow-wrap:anywhere]"><ResultList lines={Array.from(new Set(lines))} /></div>
-          {hasBody ? buildTextJsonModel(items, status).body : null}
+          {content.length > 0 ? buildTextJsonModel(content, status).body : null}
         </div>
       );
     },
   };
+}
+
+function formatReference(item: TalosContentItem) {
+  if (item.type === "artifact_ref") {
+    return `artifact: ${item.label ?? item.artifact_id}${item.mime_type ? ` · ${item.mime_type}` : ""}`;
+  }
+  if (item.type === "mcp_resource_ref") {
+    return `mcp: ${item.server}:${item.uri}${item.mime_type ? ` · ${item.mime_type}` : ""}`;
+  }
 }
 
 function buildTextJsonModel(items: TalosContentItem[], status: ChatToolStatus): ToolResultRenderModel {
@@ -379,21 +547,34 @@ function buildTextJsonModel(items: TalosContentItem[], status: ChatToolStatus): 
     if (item.type === "progress") {
       return [item.message];
     }
-    return [];
+    const reference = formatReference(item);
+    return reference ? [reference] : [];
   });
   const text = lines.join("\n");
+  const images = items.filter((item) => item.type === "image");
   const summary = toolResultStateLabel(status);
   const preview = firstNonEmptyLine(text);
+  const heading = items.every((item) => item.type === "json") ? "json"
+    : items.every((item) => item.type === "image") ? "image"
+    : items.every((item) => item.type === "artifact_ref" || item.type === "mcp_resource_ref") ? "references"
+    : undefined;
   return {
+    heading,
     summary,
     preview: preview && preview !== "{" && preview !== "[" ? [preview] : [],
-    body: <div className="flex flex-col gap-3">
-      {text && <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">{text}</pre>}
-      {items.filter((item) => item.type === "image").map((item) => (
+    body: text.trim() || images.length > 0 ? <div className="flex flex-col gap-3">
+      {text.trim() && <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">{text}</pre>}
+      {images.map((item) => (
         <FileImage key={item.fileId} fileId={item.fileId} label={item.label} />
       ))}
-    </div>,
+    </div> : null,
   };
+}
+
+function collectToolOutput(progress: ToolProgress, kind?: "stdout" | "stderr") {
+  return progress.filter((entry) => kind ? entry.kind === kind : entry.kind !== "status")
+    .map((entry) => entry.message)
+    .join("");
 }
 
 function buildProgressFallbackModel(
@@ -401,12 +582,9 @@ function buildProgressFallbackModel(
   fallbackOutput: string | undefined,
   status: ChatToolStatus,
 ): ToolResultRenderModel {
-  const output =
-    fallbackOutput ||
-    progress
-      .filter((entry) => entry.kind === "stdout" || entry.kind === "stderr")
-      .map((entry) => entry.message)
-      .join("");
+  const resultText = fallbackOutput?.trim() ? fallbackOutput : undefined;
+  const output = resultText ?? collectToolOutput(progress);
+  const streamed = !resultText && Boolean(output.trim());
   const summary = toolResultStateLabel(status);
   const preview = status === "running"
     ? output.trim().split(/\r?\n/).at(-1)
@@ -414,11 +592,15 @@ function buildProgressFallbackModel(
   return {
     summary,
     preview: preview ? [preview] : [],
-    body: output ? (
+    streamed,
+    body: resultText ? (
       <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">
-        {output}
+        {resultText}
       </pre>
-    ) : null,
+    ) : streamed ? <>
+      <ToolResultSection kind="stdout">{collectToolOutput(progress, "stdout")}</ToolResultSection>
+      <ToolResultSection kind="stderr">{collectToolOutput(progress, "stderr")}</ToolResultSection>
+    </> : null,
   };
 }
 
@@ -458,12 +640,6 @@ function firstNonEmptyLine(text: string) {
   return text.split("\n").find((line) => line.trim().length > 0)?.trim();
 }
 
-function lastDefined<T>(values: Array<T | null | undefined>) {
-  for (let index = values.length - 1; index >= 0; index -= 1) {
-    const value = values[index];
-    if (value !== undefined && value !== null) {
-      return value;
-    }
-  }
-  return undefined;
+function lastNonEmptyLine(text: string) {
+  return text.trimEnd().split("\n").at(-1)?.trim() || undefined;
 }
