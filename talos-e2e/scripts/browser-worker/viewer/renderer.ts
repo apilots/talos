@@ -5,8 +5,7 @@ const bridge=(window as unknown as {talos:import('@talos/sdk-app-server/desktop'
 const options={actorCredentials:{credential:{type:'existing_session_token' as const,token:'browser-contract-alice'}}};
 const nodeId=new URL(location.href).searchParams.get('node')!;
 const status=document.querySelector('#status')!;
-type CanvasTiming={operation:string;elapsedMs:number};
-const diagnostics:{frames:{requestId?:string;at:number;bytes:number;elapsedMs:number;canvas:CanvasTiming[]}[];errors:string[];disconnect?:unknown}={frames:[],errors:[]};
+const diagnostics:{frames:{requestId?:string;at:number;bytes:number;elapsedMs:number}[];errors:string[];disconnect?:unknown}={frames:[],errors:[]};
 (window as unknown as {nativeMediaDiagnostics:unknown}).nativeMediaDiagnostics=diagnostics;
 window.addEventListener('error',event=>diagnostics.errors.push(event.message));
 window.addEventListener('unhandledrejection',event=>diagnostics.errors.push(String(event.reason)));
@@ -14,18 +13,9 @@ window.addEventListener('unhandledrejection',event=>diagnostics.errors.push(Stri
  const actor=await bridge.invoke<import('@talos/sdk-core').AppProtocol.UserCurrentResponse>('user/current',{},options);
  if(actor.status==='error')throw actor.error;
  const observedBridge={...bridge,onDesktopFrame:(handler:Parameters<NonNullable<typeof bridge.onDesktopFrame>>[0])=>bridge.onDesktopFrame!(frame=>{
-  const at=Date.now(),canvas:CanvasTiming[]=[],restores:(()=>void)[]=[];
-  // Attribute synchronous canvas work without changing noVNC or ACK ordering.
-  for(const operation of ['getImageData','putImageData','drawImage'] as const){
-   const prototype=CanvasRenderingContext2D.prototype,original=Object.getOwnPropertyDescriptor(prototype,operation)!;
-   Object.defineProperty(prototype,operation,{...original,value:new Proxy(original.value,{apply(target,receiver,args){
-    const started=performance.now();try{return Reflect.apply(target,receiver,args);}finally{canvas.push({operation,elapsedMs:performance.now()-started});}
-   }})});
-   restores.push(()=>Object.defineProperty(prototype,operation,original));
-  }
+  const at=Date.now();
   try{handler(frame);}finally{
-   for(const restore of restores)restore();
-   diagnostics.frames.push({requestId:(frame as typeof frame & {requestId?:string}).requestId,at,bytes:frame.dataBase64?.length??0,elapsedMs:Date.now()-at,canvas});
+   diagnostics.frames.push({requestId:(frame as typeof frame & {requestId?:string}).requestId,at,bytes:frame.dataBase64?.length??0,elapsedMs:Date.now()-at});
   }
  })};
  const client=createElectronAppServerClient(observedBridge,{getActorCredentials:()=>options.actorCredentials});

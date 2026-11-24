@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import {mkdirSync,writeFileSync} from 'node:fs';
+import {appendFileSync,mkdirSync,writeFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {app} from 'electron';
 import {TALOS_IPC} from '../../../talos-app/desktop/src/ipc';
@@ -22,12 +22,15 @@ async function waitFor(probe:()=>Promise<boolean>,message:string){
  assert.fail(message);
 }
 async function run(){await app.whenReady();
- const frames:Record<string,unknown>[]=[];
- const record=(event:Record<string,unknown>)=>frames.push({at:Date.now(),...event});
+ const frameLog=path.join(output,'native-media-frames.jsonl');
+ writeFileSync(frameLog,'');
+ // Keep completed records even if the fixture kills Electron before teardown.
+ const record=(event:Record<string,unknown>)=>appendFileSync(frameLog,JSON.stringify({at:Date.now(),...event})+'\n');
  const acknowledge=desktopMediaHost.acknowledge.bind(desktopMediaHost),release=desktopMediaHost.release.bind(desktopMediaHost);
  desktopMediaHost.acknowledge=(requestId,contents)=>{
-  try{acknowledge(requestId,contents);record({phase:'ack',requestId,accepted:true});}
+  try{acknowledge(requestId,contents);}
   catch(error){record({phase:'ack',requestId,accepted:false});throw error;}
+  record({phase:'ack',requestId,accepted:true});
  };
  desktopMediaHost.release=(streamId,contents,notifyBackend=true)=>{
   record({phase:'release',streamId,notifyBackend});release(streamId,contents,notifyBackend);
@@ -88,12 +91,8 @@ async function run(){await app.whenReady();
   }
   throw error;
  }finally{
-  try{
-   desktopMediaHost.reset();desktopMediaHost.acknowledge=acknowledge;desktopMediaHost.release=release;
-   product?.window.destroy();await controller.close();await desktopBrowserHost.reset();
-  }finally{
-   writeFileSync(path.join(output,'native-media-frames.jsonl'),frames.map(frame=>JSON.stringify(frame)+'\n').join(''));
-  }
+  desktopMediaHost.reset();desktopMediaHost.acknowledge=acknowledge;desktopMediaHost.release=release;
+  product?.window.destroy();await controller.close();await desktopBrowserHost.reset();
   app.quit();
  }
 }
