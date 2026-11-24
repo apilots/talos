@@ -52,8 +52,9 @@ export async function listModels(nodeId?: string) {
   return client.models.list();
 }
 
-export async function listProjects(nodeId?: string) {
-  const response = await getTalosClient(nodeId).projects.list({});
+export async function listProjects(nodeId: string) {
+  const client = await getTalosClient({ nodeId, readOnly: "retainedProjects" });
+  const response = await client.projects.list({ nodeId });
   return response.projects.map(mapProjectView);
 }
 

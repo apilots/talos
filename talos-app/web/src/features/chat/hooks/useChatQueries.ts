@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ModelSelection,
   SessionInfo,
@@ -81,10 +81,11 @@ export function useSessionsQuery() {
 
 export function useProjectsQuery(nodeId?: string) {
   const selected = useSelectedComputerId();
-  const connectionKey = JSON.stringify([useProductScope(), nodeId ?? selected]);
+  const target = nodeId ?? selected;
+  const connectionKey = JSON.stringify([useProductScope(), target]);
   return useQuery({
     queryKey: chatKeys.projects(connectionKey),
-    queryFn: () => listProjects(nodeId ?? selected),
+    queryFn: target ? () => listProjects(target) : skipToken,
   });
 }
 

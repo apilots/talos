@@ -291,6 +291,14 @@ identity at the Gateway. After the owner connection is admitted, Desktop can
 record the public Computer metadata locally so the execution route also works
 before Sync imports that Computer.
 
+Project listing is a metadata read: Web queries its Server, and Desktop reads
+ordinary Computer projects from its local store and known managed Computer
+projects from the Server. If the directory cannot resolve a removed Computer
+or is unavailable, Desktop can read the retained metadata locally under the
+same account and Computer filter, without connecting to a Worker. The UI waits
+for a Computer target before querying. API callers that omit `nodeId` explicitly
+request the actor-visible account-wide list.
+
 - SDKs own the complete product API, typed domain objects, structured errors,
   stream contracts, and transport-neutral lifecycle semantics.
 - Transport adapters own serialization, authentication transport, connection
