@@ -47,7 +47,7 @@ function InteractiveInlineCode({
         {...props}
         className={cn(
           className,
-          "cursor-pointer underline decoration-border underline-offset-2 transition-colors hover:border-brand/40 hover:decoration-ink/60",
+          "cursor-pointer underline decoration-border underline-offset-2 transition-colors before:content-none after:content-none hover:border-brand/40 hover:decoration-ink/60",
         )}
       >
         {children}
