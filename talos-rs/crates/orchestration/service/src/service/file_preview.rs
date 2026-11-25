@@ -21,6 +21,7 @@ enum PreviewBinding {
     },
     Session {
         session_id: String,
+        worktree_binding: Option<SessionWorktreeBinding>,
         environment: Arc<dyn WorkerEnvironment>,
         context: WorkerEnvironmentContext,
         handle: String,
@@ -67,7 +68,11 @@ impl TalosService {
                     username: actor.username.clone(),
                     workspace_id: Some(saved.workspace.workspace_id),
                 };
-                let root = session.current_directory.unwrap_or(saved.workspace.root);
+                let root = self
+                    .sessions
+                    .resolve_working_directory(&session)
+                    .await?
+                    .unwrap_or(saved.workspace.root);
                 let resource = environment
                     .preview_resource(
                         context.clone(),
@@ -91,6 +96,7 @@ impl TalosService {
                 (
                     PreviewBinding::Session {
                         session_id,
+                        worktree_binding: session.worktree_binding,
                         environment,
                         context,
                         handle,
@@ -254,8 +260,13 @@ impl TalosService {
                         )
                         .await?;
                 }
-                PreviewBinding::Session { session_id, .. } => {
-                    self.access.load_session(actor, session_id).await?;
+                PreviewBinding::Session {
+                    session_id,
+                    worktree_binding,
+                    ..
+                } => {
+                    self.check_session_preview(actor, session_id, worktree_binding.as_ref())
+                        .await?;
                 }
             }
             return Ok(document.read(request.offset, request.limit));
@@ -308,6 +319,22 @@ impl TalosService {
         Ok(bytes.into())
     }
 
+    async fn check_session_preview(
+        &self,
+        actor: &Actor,
+        session_id: &str,
+        authorized: Option<&SessionWorktreeBinding>,
+    ) -> TalosResult<()> {
+        let session = self.access.load_session(actor, session_id).await?;
+        if authorized != session.worktree_binding.as_ref() {
+            return Err(TalosError::new(
+                ErrorCode::PermissionDenied,
+                "The Session working directory changed. Open the file again.",
+            ));
+        }
+        Ok(())
+    }
+
     async fn read_preview_source(
         &self,
         grant: &PreviewGrant,
@@ -333,11 +360,13 @@ impl TalosService {
             }
             PreviewBinding::Session {
                 session_id,
+                worktree_binding,
                 environment,
                 context,
                 handle,
             } => {
-                self.access.load_session(actor, session_id).await?;
+                self.check_session_preview(actor, session_id, worktree_binding.as_ref())
+                    .await?;
                 let content = environment
                     .preview_resource(
                         context.clone(),

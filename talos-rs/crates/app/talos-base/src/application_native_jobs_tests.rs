@@ -67,6 +67,7 @@ async fn insert_session(storage: Arc<SqliteStorage>, owner: &str) {
             usage: SessionUsage::default(),
             conf: SessionConf::default(),
             project_id: None,
+            worktree_binding: None,
             current_directory: None,
         })
         .await

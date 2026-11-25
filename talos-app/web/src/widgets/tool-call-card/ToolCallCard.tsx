@@ -22,8 +22,8 @@ function Section({
   title: string;
 }) {
   return (
-    <section>
-      <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-muted">{title}</div>
+    <section aria-label={title} className="space-y-2">
+      <h3 className="text-xs font-semibold text-ink">{title}</h3>
       {children}
     </section>
   );
@@ -62,6 +62,7 @@ export const ToolCallCard = {
     compact = false,
     description,
     duration,
+    exitLabel,
     open,
     onToggle,
     running,
@@ -72,6 +73,7 @@ export const ToolCallCard = {
     compact?: boolean;
     description?: string;
     duration?: ReactNode;
+    exitLabel?: string;
     open: boolean;
     onToggle: () => void;
     running: boolean;
@@ -108,6 +110,7 @@ export const ToolCallCard = {
           </div>
         </div>
         <div className={cn("flex shrink-0 items-center", compact ? "gap-2.5" : "gap-2")}>
+          {exitLabel ? <span className="whitespace-nowrap text-[11px] tabular-nums text-muted">{exitLabel}</span> : null}
           {duration ? <span className="whitespace-nowrap text-[11px] tabular-nums text-muted" data-tool-duration="true">{duration}</span> : null}
           {statusLabel && (compact ? (
             <span
@@ -176,40 +179,48 @@ export const ToolCallCard = {
       </Section>
     );
   },
-  Progress({
-    entries,
-    title,
-  }: {
-    entries: Array<{ kind: string; message: string }>;
-    title: string;
-  }) {
+  Progress({ messages, title }: { messages: string[]; title: string }) {
     return (
       <Section title={title}>
-        <div className="space-y-1.5 rounded-[0.95rem] border border-border/75 bg-surface/[0.88] p-3 font-mono text-[12px] leading-5">
-          {entries.map((entry, index) => (
-            <div key={`${entry.kind}-${index}`}>
-              <span className="mr-2 text-brand">{entry.kind}</span>
-              <span>{entry.message}</span>
-            </div>
+        <ol className="space-y-1 text-xs leading-5 [overflow-wrap:anywhere]" role="list">
+          {messages.map((message, index) => (
+            <li className="flex items-start gap-2 whitespace-pre-wrap" key={index}>
+              <span aria-hidden="true" className="mt-[3px] flex size-3.5 shrink-0 items-center justify-center">
+                <span className="size-1 rounded-full bg-muted/60" />
+              </span>
+              <span className="min-w-0">{message}</span>
+            </li>
           ))}
-        </div>
+        </ol>
       </Section>
     );
   },
-  Details({ children, compact = false, title }: { children: ReactNode; compact?: boolean; title: string }) {
+  Details({ children, compact = false, onOpen, title }: {
+    children: ReactNode;
+    compact?: boolean;
+    onOpen?: () => void;
+    title: string;
+  }) {
     return (
       <details
         className={cn(
-          compact ? "rounded-lg bg-transparent" : "rounded-lg border border-border/65 bg-background/40",
+          "group/details",
+          compact ? "border-t border-border/65" : "rounded-lg border border-border/65 bg-background/40",
         )}
       >
         <summary
+          onClick={(event) => {
+            // Native pointer and keyboard activation both click before toggling.
+            if (event.currentTarget.closest("details")?.open === false) onOpen?.();
+          }}
           className={cn(
-            "cursor-pointer text-[11px] uppercase tracking-[0.12em] text-muted",
-            compact ? "rounded-md px-1 py-2 hover:bg-hover" : "px-3 py-2",
+            "flex list-none items-center gap-1.5 rounded-md cursor-pointer text-[11px] font-medium uppercase tracking-[0.12em] text-muted marker:hidden [&::-webkit-details-marker]:hidden",
+            "transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand",
+            compact ? "px-1 py-2 hover:bg-hover" : "px-3 py-2",
           )}
         >
           {title}
+          <ChevronDown aria-hidden="true" className="shrink-0 group-open/details:rotate-180" size={13} />
         </summary>
         <div className={compact ? "space-y-3 px-1 pb-1 pt-2" : "space-y-3 border-t border-border/60 p-3"}>{children}</div>
       </details>

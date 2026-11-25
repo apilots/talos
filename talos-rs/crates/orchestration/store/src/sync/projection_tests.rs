@@ -378,11 +378,13 @@ async fn enabling_capture_preserves_a_large_existing_history_at_the_pre_mutation
     a.sessions
         .patch_session(PatchSessionParams {
             session_id: "large-history".into(),
-            conf: SessionConf {
-                model_selection: None,
-                user_permission_mode: Some(UserPermissionMode::FullAccess),
+            change: crate::session::SessionRecordPatch::Settings {
+                conf: SessionConf {
+                    model_selection: None,
+                    user_permission_mode: Some(UserPermissionMode::FullAccess),
+                },
+                current_directory: None,
             },
-            current_directory: None,
             last_activity: 500,
         })
         .await

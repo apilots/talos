@@ -14,7 +14,7 @@ export function TimelineActivityGroup({ group, timelineId }: { group: TimelineAc
   const [visibleCount, setVisibleCount] = useState(TIMELINE_PAGE_SIZE);
   const first = group.items[0];
   if (group.items.length === 1 && first?.kind === "tool_call") {
-    return <TimelineStep grouped item={first} itemKey={`${timelineId}:${first.itemId}`} />;
+    return <TimelineStep placement="tool-group" item={first} itemKey={`${timelineId}:${first.itemId}`} />;
   }
 
   const start = Math.max(0, group.items.length - visibleCount);
@@ -51,7 +51,11 @@ export function TimelineActivityGroup({ group, timelineId }: { group: TimelineAc
             <ol className="space-y-0.5">
               {group.items.slice(start).map((item) => {
                 const itemKey = `${timelineId}:${item.itemId}`;
-                return <li key={itemKey}><TimelineStep grouped={tools.length > 0} item={item} itemKey={itemKey} /></li>;
+                return (
+                  <li key={itemKey}>
+                    <TimelineStep placement={tools.length ? "tool-group" : "thinking-group"} item={item} itemKey={itemKey} />
+                  </li>
+                );
               })}
             </ol>
           </div>

@@ -12,12 +12,13 @@ export interface TimelineActivity {
 
 export const TIMELINE_PAGE_SIZE = 64;
 
-export function groupTimelineItems(items: ChatTimelineItem[]) {
+export function groupTimelineItems(items: ChatTimelineItem[], inspectedTools?: ReadonlySet<string>) {
   const rows: Array<TimelineActivity | ChatTimelineItem> = [];
   let lastGroupedTool: ToolItem | undefined;
 
   for (const item of items) {
-    const isRoutineTool = item.kind === "tool_call" && item.status === "completed" && !item.isError;
+    const isRoutineTool = item.kind === "tool_call" && item.status === "completed" && !item.isError &&
+      !inspectedTools?.has(item.itemId);
     const isThinking = item.kind === "reasoning";
     if (!isRoutineTool && !isThinking) {
       rows.push(item);
@@ -48,12 +49,6 @@ function thinkingDuringCommand(item: ChatTimelineItem, tool: ToolItem | undefine
 
   // Reasoning block timestamps are rounded down to seconds. Require the entire completion second.
   return item.startedAtMs >= execution.startedAtMs && item.completedAtMs + 1000 <= execution.finishedAtMs;
-}
-
-export function timelineItemDuration(item: ChatTimelineItem) {
-  return item.completedAtMs == null || item.startedAtMs <= 0
-    ? null
-    : Math.max(0, item.completedAtMs - item.startedAtMs);
 }
 
 export function timelineProcessTiming(items: ChatTimelineItem[], { error, metrics }: ProcessOutcome) {

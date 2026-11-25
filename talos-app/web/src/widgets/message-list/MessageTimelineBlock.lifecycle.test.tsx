@@ -15,7 +15,7 @@ const command: Extract<ChatTimelineItem, { kind: "tool_call" }> = {
   callId: "call-1",
   toolName: "Bash",
   arguments: { command: "sleep 30" },
-  progress: [{ kind: "status", message: "execution started" }],
+  progress: [],
   startedAtMs: 1_000,
 };
 
@@ -105,6 +105,40 @@ describe("MessageTimelineBlock lifecycle", () => {
     expect(screen.getByText("The first check passed.")).toBeTruthy();
   });
 
+  it.each([false, true])("keeps an inspected input request on settlement (process collapsed: %s)", (collapsed) => {
+    const commentary = { itemId: "progress", kind: "assistant_text", phase: "commentary",
+      status: "completed", text: "Approval required.", startedAtMs: 900 } satisfies ChatTimelineItem;
+    const view = (
+      <MessageList blocks={[{ id: "timeline-inspected-input", kind: "timeline", live: true,
+        items: [commentary, { ...command, status: "waitingForInput" }] }]}
+        emptyDetail="" emptyTitle="" />
+    );
+    const { rerender } = render(view);
+    if (collapsed) fireEvent.click(screen.getByRole("button", { name: /^Working/ }));
+    const tool = screen.getByRole("button", { name: /Bash.*sleep 30.*Waiting for input/ });
+    expect(tool.getAttribute("aria-expanded")).toBe("true");
+    const disclosure = screen.getByText("Details");
+    const details = disclosure.closest("details")!;
+    fireEvent.click(disclosure);
+    disclosure.focus();
+
+    rerender(<MessageList {...view.props} blocks={[{
+      ...view.props.blocks[0], live: false,
+      items: [commentary, { ...command, status: "completed", completedAtMs: 31_000 }],
+    }]} />);
+    expect(screen.getByRole("button", { name: /Bash.*sleep 30.*Completed/ })).toBe(tool);
+    expect(Boolean(screen.queryByText(commentary.text))).toBe(!collapsed);
+    expect(document.activeElement).toBe(disclosure);
+    expect(details.open).toBe(true);
+    expect(screen.getByRole("region", { name: "Arguments" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Execution progress" })).toBeNull();
+    const process = screen.getByRole("button", { name: /^Worked/ });
+    expect(process.getAttribute("aria-expanded")).toBe(String(!collapsed));
+    if (collapsed) fireEvent.click(process);
+    fireEvent.click(process);
+    expect(screen.queryByRole("button", { name: /Bash.*sleep 30.*Completed/ })).toBeNull();
+  });
+
   it("ticks while Bash is silent, exposes the latest output, and pauses live activity when disconnected", () => {
     vi.useFakeTimers();
     vi.setSystemTime(121_000);
@@ -182,6 +216,9 @@ describe("MessageTimelineBlock lifecycle", () => {
     expect(tools.getByText("command output")).toBeTruthy();
     fireEvent.click(within(groups[2]).getByText("Thinking"));
     expect(await within(groups[2]).findByText("Verify the read result.")).toBeTruthy();
+    const thinkingGroup = groups[2];
+    expect(thinkingGroup.parentElement?.parentElement?.querySelectorAll("[data-timeline-marker]")).toHaveLength(1);
+    expect(thinkingGroup.querySelector("[data-timeline-marker]")).toBeNull();
   });
 
   it("expands a single completed tool using one title and keeps its details accessible", async () => {
@@ -205,6 +242,24 @@ describe("MessageTimelineBlock lifecycle", () => {
     expect(screen.getByText(/"query": "WebSearch WebFetch"/)).toBeTruthy();
     fireEvent.click(disclosure);
     expect(screen.queryByText("Details", { exact: true })).toBeNull();
+  });
+
+  it.each([true, false])("uses tool execution metrics rather than wall time (live=%s)", (live) => {
+    const { container } = render(
+      <MessageList blocks={[{ id: "failed-tools", kind: "timeline", live, items: [
+        { ...command, status: "failed", completedAtMs: 31_000,
+          executionMetrics: { queuedAtMs: 1_000, startedAtMs: 5_000, finishedAtMs: 9_116,
+            queueDurationMs: 4_000, executionDurationMs: 4_116 } },
+        { ...command, itemId: "read", callId: "read", toolName: "Read", arguments: { path: "missing.txt" },
+          status: "failed", completedAtMs: 7_000, contentItems: [{ type: "text", text: "File not found." }] },
+      ] }]} emptyDetail="" emptyTitle="" />,
+    );
+    if (!live) fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+    const tools = container.querySelectorAll("[data-tool-call-card]");
+    expect(tools[0].querySelector("[data-tool-duration]")?.textContent).toBe("4.1s");
+    expect(tools[1].querySelector("[data-tool-duration]")).toBeNull();
+    fireEvent.click(within(tools[1] as HTMLElement).getByRole("button"));
+    expect(screen.getByRole("region", { name: "Execution error" }).querySelector("pre")?.textContent).toBe("File not found.");
   });
 
   it("nests Thinking only within verified Bash execution", async () => {

@@ -64,6 +64,13 @@ impl TuiApp {
             Ok(session) if session.id == update.session_id => {
                 self.session_usage = session.usage.tokens;
                 self.session_context_usage = session.usage.context;
+                let directory = session
+                    .current_directory
+                    .or_else(|| Some(self.startup_directory.clone()));
+                if self.current_project_root != directory {
+                    self.current_project_root = directory;
+                    self.sync_session_header();
+                }
                 self.request_chat_activity();
             }
             Ok(session) => self.push_right_event(format!(

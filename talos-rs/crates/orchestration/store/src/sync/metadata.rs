@@ -181,6 +181,7 @@ pub(super) async fn project_session(
     Ok(SyncResourceSnapshot::Session(Box::new(
         SyncSessionSnapshot {
             session: info,
+            worktree_binding: record.worktree_binding,
             conf: record.conf,
             environment: record.environment,
             channel_id: record.channel_id,

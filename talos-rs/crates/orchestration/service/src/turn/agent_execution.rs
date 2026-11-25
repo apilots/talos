@@ -166,19 +166,27 @@ impl AgentExecutionDriver {
 
     pub(crate) async fn start(
         &self,
-        params: AgentRunParams,
+        identity: AgentTurnRef,
+        prepare: impl std::future::Future<Output = TalosResult<AgentRunParams>>,
         command: Option<CommandLease>,
         automation_origin: Option<talos_types::AutomationTurnOrigin>,
         subagent_limit: Option<std::num::NonZeroU32>,
     ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
+        self.begin_admission(identity.clone())?;
+        let params = match prepare.await {
+            Ok(params) => params,
+            Err(error) => {
+                self.remove_live_execution(&identity);
+                return Err(error);
+            }
+        };
         if params.checkpoint.is_some() || params.continuation.is_some() {
+            self.remove_live_execution(&identity);
             return Err(TalosError::internal(
                 "fresh Agent execution cannot include continuation state",
             ));
         }
         let agent_id = params.context.session.agent_id.clone();
-        let identity = params.context.identity();
-        self.begin_admission(identity.clone())?;
         let execution = match self.coordinator.start(params).await {
             Ok(execution) => execution,
             Err(error) => {

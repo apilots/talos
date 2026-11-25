@@ -106,8 +106,8 @@ describe("MessageTimelineBlock rendering", () => {
       expect(getByText("Execution summary")).not.toBeNull();
       expect(getByText("Validation completed.")).not.toBeNull();
       expect(getAllByText(/Bash/)).toHaveLength(1);
-      expect(getByText("Failed")).not.toBeNull();
-      expect(getByText(/300ms/)).not.toBeNull();
+      expect(getByText("Stale element reference")).not.toBeNull();
+      expect(container.querySelector("[data-tool-duration]")).toBeNull();
       expect(container.querySelectorAll('[data-tool-call-card="true"]')).toHaveLength(1);
       expect(container.querySelector('[data-timeline-role="thinking"]')).not.toBeNull();
       expect(container.querySelector('[data-timeline-role="commentary"]')).not.toBeNull();

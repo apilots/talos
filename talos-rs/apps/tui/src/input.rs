@@ -493,9 +493,11 @@ impl TuiApp {
     }
 
     pub(crate) fn is_command_input(&self) -> bool {
+        let input = self.input_buffer.trim();
         self.pasted_blocks.is_empty()
             && self.pasted_image_attachments.is_empty()
-            && self.input_buffer.trim().starts_with('/')
+            && input.starts_with('/')
+            && input.split_whitespace().next() != Some("/worktree")
     }
 
     pub(crate) async fn refresh_skill_suggestions(&mut self) {

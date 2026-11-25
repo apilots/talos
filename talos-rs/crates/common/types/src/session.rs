@@ -7,6 +7,15 @@ use std::path::PathBuf;
 use talos_error::TalosError;
 use ts_rs::TS;
 
+/// A linked Git checkout verified by the Session's execution Worker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionWorktreeBinding {
+    pub checkout_root: PathBuf,
+    pub git_directory: PathBuf,
+    pub git_common_directory: PathBuf,
+}
+
 pub const DEFAULT_SESSION_TITLE: &str = "Untitled Session";
 
 pub fn normalize_session_title(title: &str) -> Option<String> {

@@ -74,7 +74,7 @@ def prepare_renderer(home):
 
 
 def invoke(page, token, method, params):
-    # Read-only verification follows the real public preload/IPC envelope.
+    # Exercise the real public preload/IPC envelope.
     return data(page.evaluate('''async ({token, method, params}) => window.talos.invoke(
         method, params, {actorCredentials: {credential: {type: 'existing_session_token', token}}})''',
         {'token': token, 'method': method, 'params': params}))
@@ -285,10 +285,11 @@ def run(cluster, exercise_resources=exercise):
                 evidence = exercise_resources(page, cluster.users['alice']['access_token'],
                     f'http://127.0.0.1:{preview.server_port}/', markdown, endpoint)
                 require(not errors, 'Unexpected production Desktop renderer errors: ' + repr(errors))
+                evidence.setdefault('createdTurn', False)
                 evidence.update(status='passed', renderer=str(renderer), productionMain=str(main),
                     productionMainSha256=hashlib.sha256(main.read_bytes()).hexdigest(),
                     privateProfile=str(home / 'electron-profile'), ownedPid=process.pid,
-                    remoteDebuggingPort=debug_port, createdTurn=False, frontendMocks=False)
+                    remoteDebuggingPort=debug_port, frontendMocks=False)
                 (REPORT / 'desktop-resources-acceptance.json').write_text(json.dumps(evidence, indent=2) + '\n')
             except Exception as error:
                 failure = {'errorType': type(error).__name__, 'error': str(error), 'electronExitCode': process.poll(), 'pageUrl': page.url, 'rendererErrors': errors,

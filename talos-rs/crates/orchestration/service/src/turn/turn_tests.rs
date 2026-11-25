@@ -924,6 +924,7 @@ fn test_session() -> SessionRecord {
             ..SessionConf::default()
         },
         project_id: None,
+        worktree_binding: None,
         current_directory: None,
     }
 }

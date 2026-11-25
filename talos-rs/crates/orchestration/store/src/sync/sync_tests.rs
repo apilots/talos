@@ -178,6 +178,7 @@ fn record(id: &str) -> SessionRecord {
             user_permission_mode: Some(UserPermissionMode::AskForApproval),
         },
         project_id: None,
+        worktree_binding: None,
         current_directory: Some("/worker/custom".into()),
     }
 }
@@ -387,6 +388,11 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
     assert_eq!(imported_project.session_count, 0);
     let mut talo = record("session-1");
     talo.session_kind = SessionKind::Talo;
+    talo.worktree_binding = Some(talos_types::SessionWorktreeBinding {
+        checkout_root: "/worker/feature".into(),
+        git_directory: "/worker/repository/.git/worktrees/feature".into(),
+        git_common_directory: "/worker/repository/.git".into(),
+    });
     // A pre-feature Desktop projection has no local managed Worker registration.
     let mut projection = record("session-1");
     projection.execution_node_id = COMPUTER.into();
@@ -410,6 +416,7 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
         .unwrap()
         .unwrap();
     assert_eq!(imported.session_kind, SessionKind::Talo);
+    assert_eq!(imported.worktree_binding, talo.worktree_binding);
     assert_eq!(imported.conf, record("session-1").conf);
     assert_eq!(
         imported.current_directory,

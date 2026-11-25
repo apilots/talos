@@ -111,6 +111,7 @@ message WorkerRpcCall {
     GetWorkspaceInfoRequest workspace_info = 30;
     ListWorkerModelsRequest list_models = 31;
     PreviewResourceRequest preview_resource = 122;
+    SessionWorktreeRequest session_worktree = 127;
     ReadDirectoryRequest read_directory = 32;
     CreateDirectoryRequest create_directory = 33;
     GetProjectStatusRequest project_status = 34;
@@ -192,6 +193,7 @@ message WorkerRpcResult {
     GetWorkspaceInfoResponse workspace_info = 30;
     ListWorkerModelsResponse list_models = 31;
     PreviewResourceResponse preview_resource = 122;
+    SessionWorktreeResponse session_worktree = 127;
     ReadDirectoryResponse read_directory = 32;
     CreateDirectoryResponse create_directory = 33;
     GetProjectStatusResponse project_status = 34;

@@ -171,6 +171,8 @@ pub enum SyncEventKey {
 pub struct SyncSessionSnapshot {
     #[serde(deserialize_with = "deserialize_session")]
     pub session: SessionInfo,
+    #[serde(default)]
+    pub worktree_binding: Option<talos_types::SessionWorktreeBinding>,
     pub conf: SessionConf,
     pub environment: Option<TalosSessionEnvironment>,
     pub channel_id: Option<String>,

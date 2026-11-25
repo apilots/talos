@@ -156,6 +156,9 @@ impl AgentHarnessRpcAdapter {
             Call::ResolveSkills(value) => unary!(value, resolve_skills, ResolveSkills),
             Call::WorkspaceInfo(value) => unary!(value, get_workspace_info, WorkspaceInfo),
             Call::ListModels(value) => unary!(value, list_worker_models, ListModels),
+            Call::SessionWorktree(value) => {
+                unary!(value, session_worktree, SessionWorktree)
+            }
             Call::PreviewResource(value) => {
                 unary!(value, preview_resource, PreviewResource)
             }

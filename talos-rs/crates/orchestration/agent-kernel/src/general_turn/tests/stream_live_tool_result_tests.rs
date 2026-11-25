@@ -1,7 +1,31 @@
+use super::stream_tests::ScriptedModelBlockProvider;
 use super::*;
 use serde_json::Value;
 use talos_tools::{Tool, ToolContext, ToolOutputPayload};
+use tokio::sync::Notify;
 use tokio::time::{timeout, Duration};
+
+fn test_tool_execution_context(workspace_dir: &Path) -> ToolExecutionContext {
+    ToolExecutionContext {
+        registration: None,
+        browser_uploads: Vec::new(),
+        session_id: "agent-a1".to_string(),
+        turn_id: "turn-1".to_string(),
+        agent_id: "agent-a1".to_string(),
+        workspace_id: "default".to_string(),
+        user_id: "talos".to_string(),
+        project_root: None,
+        kernel_config: Arc::new(AgentKernelConfig {
+            workspace_dir: workspace_dir.to_string_lossy().into_owned(),
+            ..AgentKernelConfig::default()
+        }),
+        dynamic_tool_results: std::collections::HashMap::new(),
+        user_action_responses: std::collections::HashMap::new(),
+        sandbox_approval_fingerprints: std::collections::HashMap::new(),
+        command_risk_assessor: None,
+        run_tasks: crate::test_run_tasks(),
+    }
+}
 
 struct HoldingToolStreamProvider;
 struct DelayedTextTool;
@@ -9,7 +33,7 @@ struct DelayedTextTool;
 #[async_trait]
 impl Tool for DelayedTextTool {
     fn name(&self) -> &str {
-        "DelayedText"
+        "echo_test"
     }
 
     fn description(&self) -> &str {
@@ -61,7 +85,7 @@ impl LlmProvider for HoldingToolStreamProvider {
                 ModelBlockStarted::tool_call(
                     0,
                     Some("call_delayed".to_string()),
-                    Some("DelayedText".to_string()),
+                    Some("echo_test".to_string()),
                 ),
             )))
             .await
@@ -98,22 +122,7 @@ async fn stream_round_emits_tool_result_when_model_stream_stays_open() {
     let request = ChatRequest::new_user("Run the delayed tool", "holding-tool-stream");
     let registry = Arc::new(ToolRegistry::new());
     registry.register(Arc::new(DelayedTextTool));
-    let execution_context = ToolExecutionContext {
-        registration: None,
-        browser_uploads: Vec::new(),
-        session_id: "agent-a1".to_string(),
-        turn_id: "turn-1".to_string(),
-        agent_id: "agent-a1".to_string(),
-        workspace_id: "default".to_string(),
-        user_id: "talos".to_string(),
-        project_root: None,
-        kernel_config: Arc::new(AgentKernelConfig::default()),
-        dynamic_tool_results: std::collections::HashMap::new(),
-        user_action_responses: std::collections::HashMap::new(),
-        sandbox_approval_fingerprints: std::collections::HashMap::new(),
-        command_risk_assessor: None,
-        run_tasks: crate::test_run_tasks(),
-    };
+    let execution_context = test_tool_execution_context(&std::env::temp_dir());
     let (tx, mut rx) = mpsc::channel(16);
 
     let stream_round_future = stream_round(
@@ -139,7 +148,7 @@ async fn stream_round_emits_tool_result_when_model_stream_stays_open() {
                 event = rx.recv() => {
                     let event = event.expect("stream event should arrive");
                     if let AgentKernelEventPayload::ToolResult(data) = event.payload {
-                        break data.call_id == "call_delayed";
+                        break data.call_id == "call_delayed" && !data.is_error;
                     }
                 }
                 result = &mut stream_round_future => {
@@ -152,6 +161,181 @@ async fn stream_round_emits_tool_result_when_model_stream_stays_open() {
     .expect("tool result should stream while the model stream is still open");
 
     assert!(saw_tool_result);
+}
+
+#[derive(Debug, Default)]
+struct DoneObserver(Notify);
+
+impl crate::trajectory::KernelModelObservation for DoneObserver {
+    fn model_event(&self, event: &ModelBlockStreamEvent) {
+        if matches!(event, ModelBlockStreamEvent::Done { .. }) {
+            self.0.notify_one();
+        }
+    }
+
+    fn response(&self, _response: &ChatResponse) {}
+    fn finished(&self, _error: Option<&TalosError>) {}
+    fn interrupted(&self) {}
+}
+
+#[derive(Default)]
+struct ToolGate {
+    started: Notify,
+    release: Notify,
+}
+
+struct GatedTool {
+    name: &'static str,
+    gate: Arc<ToolGate>,
+    output: ToolOutputPayload,
+}
+
+#[async_trait]
+impl Tool for GatedTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn description(&self) -> &str {
+        "Wait for the test to release this serial tool"
+    }
+
+    fn parameters_schema(&self) -> Option<Value> {
+        Some(json!({ "type": "object", "additionalProperties": false }))
+    }
+
+    async fn execute_payload(
+        &self,
+        _input: Value,
+        _context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
+        self.gate.started.notify_one();
+        self.gate.release.notified().await;
+        Ok(self.output.clone())
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stream_round_emits_failed_serial_tool_result_after_done_before_next_tool_finishes() {
+    let mut events = Vec::new();
+    // Stub two names in the registry's default allow list so both tool bodies execute.
+    for (index, (call_id, tool_name)) in [("call_a", "Read"), ("call_b", "Glob")]
+        .into_iter()
+        .enumerate()
+    {
+        let started = ModelBlockStarted::tool_call(
+            index,
+            Some(call_id.to_string()),
+            Some(tool_name.to_string()),
+        );
+        let completed = ModelBlockCompleted {
+            model_item_id: started.model_item_id.clone(),
+        };
+        events.push(ModelBlockStreamEvent::BlockStarted(started));
+        events.push(ModelBlockStreamEvent::BlockCompleted(completed));
+    }
+    events.push(ModelBlockStreamEvent::Done {
+        finish_reason: Some("tool_calls".to_string()),
+        usage: None,
+    });
+    let provider = Arc::new(ScriptedModelBlockProvider::new(
+        "gated-serial-tools",
+        events,
+    ));
+    let registry = Arc::new(ToolRegistry::new());
+    let first = Arc::new(ToolGate::default());
+    let second = Arc::new(ToolGate::default());
+    registry.register(Arc::new(GatedTool {
+        name: "Read",
+        gate: first.clone(),
+        output: ToolOutputPayload::failure_structured("gated failure", None),
+    }));
+    registry.register(Arc::new(GatedTool {
+        name: "Glob",
+        gate: second.clone(),
+        output: ToolOutputPayload::success_text("gated success"),
+    }));
+
+    let (tx, mut rx) = mpsc::channel(32);
+    let done = Arc::new(DoneObserver::default());
+    let observation = done.clone();
+    let round = tokio::spawn(async move {
+        stream_round(
+            provider,
+            ChatRequest::new_user("Run both serial tools", "gated-serial-tools"),
+            0,
+            KernelModelCallMode::WorkingLoop,
+            None,
+            Some(&tx),
+            Some(StreamingToolExecutionConfig {
+                execution_mode: ToolExecutionMode::Sequential,
+                max_parallelism: 1,
+                execution_context: test_tool_execution_context(&std::env::temp_dir()),
+                tool_registry: registry,
+            }),
+            Some(observation),
+        )
+        .await
+    });
+
+    let watchdog = Duration::from_secs(5);
+    timeout(watchdog, done.0.notified())
+        .await
+        .expect("the kernel should receive Done while A is still gated");
+    timeout(watchdog, first.started.notified())
+        .await
+        .expect("A should enter the gated tool body");
+    // On this single-thread runtime the round drains the Done event's ready work
+    // before yielding; the test cannot release A into that drain.
+    while let Ok(event) = rx.try_recv() {
+        match event.payload {
+            AgentKernelEventPayload::ToolExecuting(data) => assert_eq!(data.call_id, "call_a"),
+            AgentKernelEventPayload::ToolResult(_) => panic!("neither tool was released"),
+            _ => {}
+        }
+    }
+    first.release.notify_one();
+    timeout(watchdog, second.started.notified())
+        .await
+        .expect("B should start after A fails");
+    let first_result = timeout(watchdog, async {
+        loop {
+            let event = rx.recv().await.expect("round should still be running");
+            if let AgentKernelEventPayload::ToolResult(data) = event.payload {
+                break (data.call_id, data.is_error);
+            }
+        }
+    })
+    .await
+    .expect("A's failed result should publish while B is still blocked");
+    assert_eq!(first_result, ("call_a".to_string(), true));
+    assert!(!round.is_finished(), "the round should still wait for B");
+
+    second.release.notify_one();
+    let result = timeout(watchdog, round)
+        .await
+        .expect("the round should finish after B is released")
+        .expect("the round task should not panic")
+        .expect("the round should succeed despite A's tool failure");
+    assert_eq!(result.finish_reason.as_deref(), Some("tool_calls"));
+    assert_eq!(
+        result
+            .streamed_tool_outputs
+            .iter()
+            .map(|output| output.call_id.as_str())
+            .collect::<Vec<_>>(),
+        ["call_a", "call_b"]
+    );
+    let mut published = vec![first_result];
+    while let Ok(event) = rx.try_recv() {
+        if let AgentKernelEventPayload::ToolResult(data) = event.payload {
+            published.push((data.call_id, data.is_error));
+        }
+    }
+    assert_eq!(
+        published,
+        [("call_a".to_string(), true), ("call_b".to_string(), false)]
+    );
 }
 
 #[tokio::test]
@@ -167,22 +351,7 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
     let request = ChatRequest::new_user("Read the sample file", "streaming-tool-execution");
     let registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(registry.as_ref());
-    let execution_context = ToolExecutionContext {
-        registration: None,
-        browser_uploads: Vec::new(),
-        session_id: "agent-a1".to_string(),
-        turn_id: "turn-1".to_string(),
-        agent_id: "agent-a1".to_string(),
-        workspace_id: "default".to_string(),
-        user_id: "talos".to_string(),
-        project_root: None,
-        kernel_config: Arc::new(AgentKernelConfig::default()),
-        dynamic_tool_results: std::collections::HashMap::new(),
-        user_action_responses: std::collections::HashMap::new(),
-        sandbox_approval_fingerprints: std::collections::HashMap::new(),
-        command_risk_assessor: None,
-        run_tasks: crate::test_run_tasks(),
-    };
+    let execution_context = test_tool_execution_context(&workspace_dir);
     let (tx, mut rx) = mpsc::channel(16);
 
     let result = stream_round(

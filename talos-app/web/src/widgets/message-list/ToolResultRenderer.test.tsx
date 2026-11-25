@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import "@/shared/i18n/setup";
 import { buildToolResultModel } from "./ToolResultRenderer";
 
 describe("buildToolResultModel", () => {
@@ -27,15 +28,35 @@ describe("buildToolResultModel", () => {
     expect(html).toContain("byte_offset=4096");
     expect(html).not.toContain("NaN");
   });
-  it("preserves error status for text result items", () => {
+  it("shows a final text error alongside the streamed output preview", () => {
     const model = buildToolResultModel({
       contentItems: [{ type: "text", text: "permission denied" }],
-      progress: [],
+      progress: [{ kind: "stderr", message: "temporary file created\n" }],
       status: "error",
     });
 
     expect(model.summary).toBe("Failed");
     expect(model.preview).toEqual(["permission denied"]);
+    const html = renderToStaticMarkup(model.body);
+    expect(html).toContain('aria-label="Execution error"');
+    expect(html).toContain("permission denied");
+    expect(html).toContain('aria-label="Standard error (stderr) · streamed preview"');
+    expect(html).toContain("temporary file created");
+  });
+
+  it("retains a streamed channel omitted by truncated Bash capture without appending partial duplicates", () => {
+    const model = buildToolResultModel({ contentItems: [{ type: "bash_output", session_id: null,
+      status: "completed", exit_code: 0, stdout: "retained stdout", stderr: "", truncated: true,
+      elapsed_ms: 5, outputLog: null }],
+      progress: [{ kind: "stdout", message: "old stdout" }, { kind: "stderr", message: "previous stderr" }],
+      status: "done" });
+    const html = renderToStaticMarkup(model.body);
+    expect(html).toContain('aria-label="Standard output (stdout)"');
+    expect(html).toContain('aria-label="Standard error (stderr) · streamed preview"');
+    expect(html).toContain("The output shown here is truncated.");
+    expect(html).toContain("retained stdout");
+    expect(html).toContain("previous stderr");
+    expect(html).not.toContain("old stdout");
   });
 
   it("summarizes typed Bash output", () => {
@@ -56,7 +77,7 @@ describe("buildToolResultModel", () => {
     });
 
     expect({ summary: model.summary, preview: model.preview }).toEqual({
-      summary: "Completed · exit 0",
+      summary: "",
       preview: ["tests passed"],
     });
   });
@@ -87,8 +108,31 @@ describe("buildToolResultModel", () => {
 
     expect({ summary: model.summary, preview: model.preview }).toEqual({
       summary: "Failed · 1 file(s) · +1 -1",
-      preview: ["1 file(s) changed · +1 -1"],
+      preview: [],
     });
+    const html = renderToStaticMarkup(model.body);
+    expect(html).toContain("File changes");
+    expect(html).toContain("src/app.tsx");
+    expect(html).not.toContain("No error details were returned");
+  });
+
+  it("presents a structured subagent interrupt failure as an execution error", () => {
+    const message = "Subagent cleanup has not been confirmed.";
+    const model = buildToolResultModel({
+      contentItems: [{ type: "json", value: { code: "runCleanupUnconfirmed", message, localization: null } }],
+      progress: [], status: "error",
+    });
+    const html = renderToStaticMarkup(model.body);
+    expect(model.preview).toEqual([message]);
+    expect(html).toContain('aria-label="Execution error"');
+    expect(html).toContain(message);
+    expect(html).not.toContain("No error details were returned");
+    expect(html).not.toContain("runCleanupUnconfirmed");
+  });
+
+  it("reports missing error details when no result or output is available", () => {
+    const model = buildToolResultModel({ progress: [], status: "error" });
+    expect(renderToStaticMarkup(model.body)).toContain("No error details were returned");
   });
 
   it("renders server-owned subagent result without deriving lifecycle", () => {

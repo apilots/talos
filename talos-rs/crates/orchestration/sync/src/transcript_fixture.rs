@@ -15,6 +15,7 @@ pub(super) fn session_and_events(
         ..TokenUsage::default()
     };
     let session = SyncSessionSnapshot {
+        worktree_binding: None,
         session: SessionInfo {
             session_kind: talos_types::SessionKind::Standard,
             node_id: computer_id.into(),

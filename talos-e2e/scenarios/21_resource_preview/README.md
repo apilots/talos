@@ -13,8 +13,9 @@ covers registered HTML in a real WebContentsView with protocol isolation, Files
 images in the right pane, state retention, supported Open in actions and Desktop
 ordinary-link dispatch without adding a preview tab, real generated JSON upload/preview and Office→PDF rendering. OS default-application
 rendering is outside the harness; exact URL/policy branches have deterministic
-frontend unit coverage. Session scoping uses the shared renderer and is exercised
-through real sessions in the Web case. Live Computer media remains covered by
+frontend unit coverage. A Desktop Turn uses a chat message to bind an existing
+linked worktree under the same Project. It opens a worktree Markdown file in
+the right pane and denies a file in the main checkout. Live Computer media remains covered by
 group 23 Browser Worker scenarios; Computer lifecycle and original session image
 behavior also retain their owning component tests.
 
