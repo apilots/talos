@@ -5,7 +5,7 @@ use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use talos_sandbox_spi::{NetworkIsolationSpec, SandboxStdin};
+use talos_sandbox_spi::{AbsolutePathBuf, NetworkIsolationSpec, SandboxStdin};
 
 use crate::protocol::{LauncherRequest, MAX_LAUNCHER_PAYLOAD_BYTES};
 
@@ -81,6 +81,7 @@ fn build_bubblewrap_argv(request: &LauncherRequest) -> Result<Vec<String>, Strin
     {
         push_mount(&mut args, "--ro-bind", root);
     }
+    mount_network_resolver(&mut args, request.network, Path::new("/etc/resolv.conf"));
     push_mount(&mut args, "--ro-bind", request.helper_executable.as_path());
     push_mount(&mut args, "--ro-bind", request.command.program.as_path());
     for root in &request.file_system.readable_roots {
@@ -163,6 +164,40 @@ fn restore_target_stdin(stdin: &SandboxStdin) -> Result<(), String> {
     Ok(())
 }
 
+fn mount_network_resolver(args: &mut Vec<String>, network: NetworkIsolationSpec, resolver: &Path) {
+    if network != NetworkIsolationSpec::Enabled {
+        return;
+    }
+    if let Some((source, destination)) = network_resolver_mount(resolver) {
+        args.extend(["--ro-bind-try".to_owned(), source, destination]);
+    }
+}
+
+fn network_resolver_mount(resolver: &Path) -> Option<(String, String)> {
+    let source = resolver.canonicalize().ok()?;
+    if !source.is_file() {
+        return None;
+    }
+    let config_dir = resolver.parent()?;
+    let mut entry = resolver.to_path_buf();
+    // Preserve links in already mounted system directories. A link outside
+    // them can be satisfied by mounting the final file at that first hop.
+    for _ in 0..40 {
+        let target = entry.read_link().ok()?;
+        entry = AbsolutePathBuf::new(entry.parent()?.join(target))
+            .ok()?
+            .into_path_buf();
+        if !entry.starts_with(config_dir)
+            && !LINUX_RUNTIME_READ_ROOTS
+                .iter()
+                .any(|root| entry.starts_with(root))
+        {
+            return Some((source.to_str()?.to_owned(), entry.to_str()?.to_owned()));
+        }
+    }
+    None
+}
+
 fn push_mount(args: &mut Vec<String>, operation: &str, root: &Path) {
     let root = root.as_os_str().to_string_lossy().into_owned();
     args.extend([operation.to_string(), root.clone(), root]);
@@ -200,6 +235,30 @@ fn exec(program: &Path, args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enabled_network_mounts_the_resolver_symlink_target_read_only() {
+        let scratch = tempfile::tempdir().unwrap();
+        let config = scratch.path().join("etc");
+        let runtime = scratch.path().join("run");
+        std::fs::create_dir(&config).unwrap();
+        std::fs::create_dir(&runtime).unwrap();
+        let target = runtime.join("generated-resolver.conf");
+        std::fs::write(&target, "nameserver 127.0.0.1\n").unwrap();
+        let link = config.join("resolv.conf");
+        std::os::unix::fs::symlink("local-resolver.conf", &link).unwrap();
+        std::os::unix::fs::symlink("../run/current.conf", config.join("local-resolver.conf"))
+            .unwrap();
+        std::os::unix::fs::symlink(&target, runtime.join("current.conf")).unwrap();
+
+        let mut args = Vec::new();
+        mount_network_resolver(&mut args, NetworkIsolationSpec::Restricted, &link);
+        assert!(args.is_empty());
+        mount_network_resolver(&mut args, NetworkIsolationSpec::Enabled, &link);
+        let source = target.canonicalize().unwrap().display().to_string();
+        let destination = runtime.join("current.conf").display().to_string();
+        assert_eq!(args, ["--ro-bind-try".to_string(), source, destination]);
+    }
 
     #[test]
     fn rejects_unknown_protocol_version() {
