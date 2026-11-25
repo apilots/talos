@@ -480,10 +480,7 @@ function applyBlockDelta(
     case "toolProgress":
       if (block.content.type === "toolCall") {
         state.updateTimelineTool(sessionId, turnId, blockId, {
-          progress: block.content.data.progress.map((entry) => ({
-            kind: entry.kind,
-            message: entry.text,
-          })),
+          progress: toolProgressMessages(block.content.data),
         });
       }
       return;
@@ -633,10 +630,7 @@ function blockToChatItem(block: AgentMessageBlock): ChatTimelineItem | undefined
         callId: block.content.data.callId,
         toolName: block.content.data.name,
         arguments: toolArguments(block.content.data.arguments),
-        progress: block.content.data.progress.map((entry) => ({
-          kind: entry.kind,
-          message: entry.text,
-        })),
+        progress: toolProgressMessages(block.content.data),
       };
     case "toolResult":
       return undefined;
@@ -678,6 +672,15 @@ function assistantPhase(phase: AgentAssistantTextPhase): ChatTimelinePhase {
     case "finalAnswer":
       return "final_answer";
   }
+}
+
+function toolProgressMessages({ name, progress }: Extract<AgentMessageBlockContent, { type: "toolCall" }>["data"]) {
+  // Older servers persisted these two start notices alongside the tool state.
+  const executing = `Executing ${name}`;
+  return progress.flatMap(({ kind, text }) =>
+    kind === "status" && (text === executing || text === "execution started")
+      ? [] : [{ kind, message: text }],
+  );
 }
 
 function toolArguments(

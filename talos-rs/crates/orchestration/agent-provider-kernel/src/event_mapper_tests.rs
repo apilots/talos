@@ -6,7 +6,8 @@ use talos_agent_api::{
 use talos_agent_kernel::{
     AgentKernelEventPayload, AssistantTextCommittedStreamData, AssistantTextCompletedStreamData,
     AssistantTextDeltaStreamData, AssistantTextStartedStreamData, KernelStreamItemKey,
-    ToolCallStartStreamData,
+    ToolCallStartStreamData, ToolExecutingStreamData, ToolProgressDeltaStreamData,
+    ToolQueuedStreamData,
 };
 use talos_types::{
     ContextCompactionOutcome, ContextCompactionStage, ContextCompactionTrigger,
@@ -110,6 +111,48 @@ async fn assistant_kernel_lifecycle_maps_to_one_canonical_agent_block() {
             text: "done".to_string(),
         })
     );
+}
+
+#[tokio::test]
+async fn tool_execution_keeps_queue_progress_without_synthesizing_a_start_notice() {
+    let (pipeline, sink, _events) = AgentEventPipeline::fresh(AgentTurnRef::new("s", "t"));
+    pipeline
+        .record(AgentEventPayload::TurnStarted(AgentTurnStarted {}))
+        .await
+        .unwrap();
+    let mut mapper = KernelAgentEventMapper::new(sink);
+    let stream_key = ToolStreamKey { round: 1, index: 0 };
+    for payload in [
+        AgentKernelEventPayload::ToolQueued(ToolQueuedStreamData {
+            stream_key: stream_key.clone(),
+            call_id: "call-1".into(),
+            tool_name: "Bash".into(),
+        }),
+        AgentKernelEventPayload::ToolProgressDelta(ToolProgressDeltaStreamData {
+            stream_key: stream_key.clone(),
+            call_id: "call-1".into(),
+            tool_name: "Bash".into(),
+            message: "waiting for execution slot".into(),
+            progress_kind: ToolProgressKind::Status,
+        }),
+        AgentKernelEventPayload::ToolExecuting(ToolExecutingStreamData {
+            stream_key,
+            call_id: "call-1".into(),
+            tool_name: "Bash".into(),
+        }),
+    ] {
+        mapper.map(AgentKernelEvent::new(payload)).await.unwrap();
+    }
+    let checkpoint = pipeline.checkpoint().await;
+    let blocks = &checkpoint.messages[0].blocks;
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].status, AgentMessageBlockStatus::Running);
+    let AgentMessageBlockContent::ToolCall(call) = &blocks[0].content else {
+        panic!("expected a tool call");
+    };
+    assert_eq!(call.progress.len(), 1);
+    assert_eq!(call.progress[0].kind, TalosToolProgressKind::Status);
+    assert_eq!(call.progress[0].text, "waiting for execution slot");
 }
 
 #[tokio::test]
