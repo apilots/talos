@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use agent_protocol::{AgentHarness, Deployment};
@@ -18,7 +19,7 @@ use talos_service::{
 use talos_store::memory::MemoryStore;
 use talos_tools::{
     register_core_local_tools, register_network_tools, register_subagent_tools, AgentControl,
-    ToolImageStore, ToolRegistry,
+    ToolImageStore, ToolRegistry, WorkerToolEnvironment,
 };
 use talos_tools_sandbox::{SandboxRuntimePaths, ToolSandbox};
 
@@ -82,8 +83,26 @@ impl TalosWorker {
         )));
         let llm_provider_router: Arc<dyn LlmProviderRouter> = provider_router.clone();
 
+        let system_info = talos_system_info::collect().await?;
         let sandbox = ToolSandbox::with_runtime_paths(sandbox_runtime_paths(&config));
-        let tool_registry = Arc::new(ToolRegistry::new_with_sandbox(sandbox));
+        let tool_environment = WorkerToolEnvironment::discover(
+            &config.agent.kernel.tools.environment.path_prepend,
+            Path::new(&config.agent.kernel.workspace_dir),
+        )
+        .await;
+        let tool_environment = if std::env::var_os("TALOS_WORKER_PACKAGING")
+            .is_some_and(|packaging| packaging == "official-container")
+        {
+            tool_environment.with_packaged_ripgrep()
+        } else {
+            tool_environment.with_native_ripgrep(
+                &config.talos_paths().talos_home,
+                system_info.hostname.as_deref(),
+            )
+        };
+        let tool_registry = Arc::new(
+            ToolRegistry::new_with_sandbox(sandbox).with_worker_environment(tool_environment),
+        );
         tool_registry.set_image_store(resources.tool_image_store);
         if let Some(automation) = resources.automation_control {
             tool_registry.set_automation_control(automation);
@@ -239,7 +258,6 @@ impl TalosWorker {
             ));
         }
 
-        let system_info = talos_system_info::collect().await?;
         let background_tasks = Arc::new(talos_guard_task::GuardTasks::default());
         let output_logs_changed = background_tasks.register(
             talos_guard_task::GuardTaskSpec {

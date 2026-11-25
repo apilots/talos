@@ -40,8 +40,8 @@ impl ToolExecutorPort for ResourceTools {
             .execute_invocation_with_context(invocation, context)
             .await
     }
-    fn tool_supports_parallel(&self, name: &str) -> bool {
-        self.registry.tool_supports_parallel(name)
+    fn tool_supports_parallel(&self, name: &str, workspace_roots: &[&std::path::Path]) -> bool {
+        self.registry.tool_supports_parallel(name, workspace_roots)
     }
     fn tool_is_mutating(&self, name: &str) -> bool {
         self.registry.tool_is_mutating(name)

@@ -104,9 +104,11 @@ ENV HOME=/home/talos \
     TERM=xterm-256color \
     SHELL=/bin/bash \
     TALOS_RESOURCE_DIR=/opt/talos \
+    TALOS_WORKER_PACKAGING=official-container \
     PATH=/opt/talos/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 USER talos
+RUN rg --version
 WORKDIR /home/talos
 
 EXPOSE 8080

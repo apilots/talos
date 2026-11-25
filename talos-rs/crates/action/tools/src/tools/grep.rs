@@ -5,7 +5,7 @@ use talos_types::talos::TalosContentItem;
 
 use crate::runtimes::fs_search::{run, GrepFilesRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
-use crate::{Tool, ToolContext, ToolOutputPayload};
+use crate::{decode_tool_input, Tool, ToolContext, ToolOutputPayload};
 use talos_tools_sandbox::ToolSandboxOperationKind;
 
 pub struct GrepTool;
@@ -130,12 +130,7 @@ impl Tool for GrepTool {
         input: Value,
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
-        let request: GrepFilesRequest = serde_json::from_value(input).map_err(|err| {
-            talos_error::TalosError::new(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                format!("invalid grep arguments: {}", err),
-            )
-        })?;
+        let request: GrepFilesRequest = decode_tool_input(input, "Grep")?;
         let response = run(&request, &context).await?;
         let structured = serde_json::to_value(&response).map_err(|err| {
             talos_error::TalosError::new(

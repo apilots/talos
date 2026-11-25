@@ -171,6 +171,9 @@ agent:
     tool_parallelism: 3
     tool_result_max_bytes: 65536
     tools:
+      environment:
+        # Absolute directories on the Worker, in PATH precedence order.
+        path_prepend: []
       dynamic:
         on_timeout: error_to_model
         response_timeout_ms: 300000

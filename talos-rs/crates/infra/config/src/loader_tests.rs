@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn config_load_preserves_ordered_path_entries_and_rejects_malformed_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = TalosPaths::from_home(dir.path().join("home"));
+    let config_path = dir.path().join("talos.yaml");
+    let valid = vec![dir.path().join("first bin"), dir.path().join("second bin")];
+    let load = |path_prepend: Vec<PathBuf>| {
+        let mut config = Config::default();
+        config.agent.kernel.tools.environment.path_prepend = path_prepend;
+        let mut value = serde_json::to_value(config).unwrap();
+        value["logging"].as_object_mut().unwrap().remove("file");
+        value["storage"]
+            .as_object_mut()
+            .unwrap()
+            .remove("connection_string");
+        std::fs::write(&config_path, serde_yaml::to_string(&value).unwrap()).unwrap();
+        load_config_at(config_path.clone(), paths.clone())
+    };
+
+    let loaded = load(valid.clone()).unwrap();
+    assert_eq!(loaded.agent.kernel.tools.environment.path_prepend, valid);
+
+    #[cfg(unix)]
+    let unjoinable = dir.path().join("malformed:bin");
+    #[cfg(windows)]
+    let unjoinable = dir.path().join("malformed\"bin");
+    for bad_entry in [
+        PathBuf::new(),
+        PathBuf::from("relative/bin"),
+        unjoinable,
+        dir.path().join("malformed\0bin"),
+    ] {
+        let error = load(vec![valid[0].clone(), bad_entry]).unwrap_err();
+        assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+        let message = error.to_api_error().message;
+        assert!(message.contains("agent.kernel.tools.environment.path_prepend[1]"));
+        assert!(!message.contains("malformed"));
+    }
+}
+
+#[test]
 fn config_file_failures_preserve_the_filesystem_cause_and_public_explanation() {
     let directory = tempfile::tempdir().unwrap();
     let paths = TalosPaths::from_home(directory.path().join("home"));

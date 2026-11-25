@@ -22,6 +22,22 @@ fn bash_log_partial_config_preserves_defaults_and_rejects_invalid_quotas() {
 }
 
 #[test]
+fn tool_environment_defaults_when_omitted_and_rejects_unknown_fields() {
+    assert!(ToolsRuntimeConfig::default()
+        .environment
+        .path_prepend
+        .is_empty());
+    for yaml in ["{}", "environment: {}"] {
+        let config: ToolsRuntimeConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.environment.path_prepend.is_empty());
+    }
+    assert!(serde_yaml::from_str::<ToolsRuntimeConfig>("environment: {path_append: []}").is_err());
+    assert!(
+        serde_yaml::from_str::<ToolsRuntimeConfig>("environment: {path_prepend: ./bin}").is_err()
+    );
+}
+
+#[test]
 fn collaboration_tools_are_enabled_by_default() {
     let config = ToolsRuntimeConfig::default();
     assert!(config.enable_collaboration_tools);
@@ -192,7 +208,7 @@ fn bash_config_rejects_old_name_and_zero_cleanup_interval() {
 }
 
 #[test]
-fn maintained_yaml_templates_publish_identical_bash_log_defaults() {
+fn maintained_yaml_templates_publish_identical_tool_defaults() {
     for name in [
         "conf/talos.yaml",
         "conf/talos-dev.yaml",
@@ -207,6 +223,11 @@ fn maintained_yaml_templates_publish_identical_bash_log_defaults() {
             serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         let tools = &value["agent"]["kernel"]["tools"];
         assert!(tools.get("local_exec").is_none());
+        assert_eq!(
+            tools["environment"]["path_prepend"],
+            serde_yaml::to_value(ToolsRuntimeConfig::default().environment.path_prepend).unwrap(),
+            "{name}"
+        );
         let config: super::BashOutputLogConfig =
             serde_yaml::from_value(tools["bash"]["output_log"].clone()).unwrap();
         assert_eq!(config, super::BashOutputLogConfig::default());

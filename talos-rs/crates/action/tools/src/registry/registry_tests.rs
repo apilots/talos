@@ -655,27 +655,38 @@ async fn test_registry_binds_full_access_permit_for_bash() {
     assert!(payload.content().contains("sandbox-permit-bound"));
 }
 
+#[cfg(unix)]
 #[tokio::test]
-async fn test_registry_binds_full_access_permit_for_grep() {
+async fn worker_path_dispatches_grep_through_the_bound_permit() {
+    use std::os::unix::fs::PermissionsExt;
+
     let workspace = tempfile::tempdir().expect("temp dir should create");
-    std::fs::write(workspace.path().join("sample.txt"), "sandbox grep target\n")
-        .expect("fixture should write");
-    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Grep"]));
+    let bin = tempfile::tempdir().expect("fixture bin should create");
+    let bin_path = bin.path().canonicalize().unwrap();
+    let rg = bin_path.join("rg");
+    std::fs::write(
+        &rg,
+        r#"#!/bin/sh
+[ "$PATH/rg" = "$0" ] || exit 2
+printf '%s\n' '{"type":"match","data":{"path":{"text":"sample.txt"},"lines":{"text":"worker rg fixture"},"line_number":1,"submatches":[{"start":0}]}}'
+"#,
+    )
+    .expect("rg fixture should write");
+    std::fs::set_permissions(&rg, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let environment = WorkerToolEnvironment::assemble(&[bin_path], None, None);
+    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Grep"]))
+        .with_worker_environment(environment);
     register_core_local_tools(&registry);
     let invocation = registry
         .build_function_invocation(
-            "call-grep-sandbox-permit",
+            "call-grep-worker-path",
             "Grep",
-            serde_json::json!({
-                "pattern": "sandbox grep target",
-                "path": ".",
-                "output_mode": "content"
-            }),
+            json!({"pattern": "worker rg fixture", "path": ".", "output_mode": "content"}),
         )
         .expect("Grep invocation should build");
     let context = local_tool_context(
-        "session-grep-sandbox",
-        "user-grep-sandbox",
+        "session-grep-worker-path",
+        "user-grep-worker-path",
         full_access_kernel_config(),
         workspace.path(),
     );
@@ -687,7 +698,56 @@ async fn test_registry_binds_full_access_permit_for_grep() {
     let ToolDispatchOutcome::Executed { payload } = outcome else {
         panic!("Grep should execute synchronously");
     };
-    assert!(payload.content().contains("sandbox grep target"));
+    assert!(payload.content().contains("worker rg fixture"));
+}
+
+#[tokio::test]
+async fn missing_worker_rg_reports_an_actionable_dependency_error() {
+    let native = WorkerToolEnvironment::assemble(&[], None, None);
+    for (environment, expected, unexpected) in [
+        (
+            native.clone(),
+            "Install ripgrep",
+            "rebuild or replace the image",
+        ),
+        (
+            native.with_packaged_ripgrep(),
+            "rebuild or replace the image",
+            "Install ripgrep",
+        ),
+    ] {
+        let workspace = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new().with_worker_environment(environment);
+        registry.register(Arc::new(crate::GrepTool));
+        let invocation = registry
+            .build_function_invocation(
+                "missing-rg",
+                "Grep",
+                json!({"pattern": "unused", "path": "."}),
+            )
+            .unwrap();
+        let context = local_tool_context(
+            "missing-rg",
+            "user-missing-rg",
+            full_access_kernel_config(),
+            workspace.path(),
+        );
+
+        let Err(failure) = registry
+            .execute_invocation_with_context(invocation, context)
+            .await
+        else {
+            panic!("Grep should require rg from the Worker PATH");
+        };
+        assert_eq!(
+            failure.error().error_code(),
+            talos_error::ErrorCode::ResourceNotFound
+        );
+        let message = failure.error().to_api_error().message;
+        assert!(message.contains(expected));
+        assert!(!message.contains(unexpected));
+        assert!(message.contains("tools.environment.path_prepend"));
+    }
 }
 
 #[tokio::test]
@@ -974,8 +1034,8 @@ fn test_tool_catalog_tracks_parallel_metadata() {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(MemorySearchTool));
 
-    assert!(registry.tool_supports_parallel("MemorySearch"));
-    assert!(!registry.tool_supports_parallel("exec"));
+    assert!(registry.tool_supports_parallel("MemorySearch", &[]));
+    assert!(!registry.tool_supports_parallel("exec", &[]));
 }
 
 #[test]

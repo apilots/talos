@@ -14,7 +14,7 @@ use crate::spec::{
 };
 use crate::state::get_session_tool_state;
 use crate::ToolContext;
-use crate::{AgentControl, AutomationControl};
+use crate::{AgentControl, AutomationControl, WorkerToolEnvironment};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use serde_json::Value;
@@ -34,6 +34,7 @@ const GATE_SOURCE_ALLOW_LIST: &str = "allow_list";
 const GATE_SOURCE_TOOL_SEMANTIC: &str = "tool_semantic";
 
 mod catalog;
+mod grep_recovery;
 mod output_limits;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,7 +111,7 @@ pub trait ToolExecutorPort: ToolDefinitionProvider + Send + Sync {
         context: ToolContext,
     ) -> ToolDispatchResult<ToolDispatchOutcome>;
 
-    fn tool_supports_parallel(&self, name: &str) -> bool;
+    fn tool_supports_parallel(&self, name: &str, workspace_roots: &[&std::path::Path]) -> bool;
 
     fn tool_is_mutating(&self, name: &str) -> bool;
 
@@ -142,6 +143,7 @@ pub struct ToolRegistry {
     memory_reader: DashMap<&'static str, Arc<dyn MemoryReader>>,
     user_workspace_memory_writer: DashMap<&'static str, Arc<dyn UserWorkspaceMemoryWriter>>,
     sandbox: ToolSandbox,
+    worker_environment: Arc<WorkerToolEnvironment>,
 }
 
 impl ToolRegistry {
@@ -396,10 +398,7 @@ impl ToolRegistry {
         Self::new_with_policy_and_sandbox(ToolPolicy::default(), sandbox)
     }
 
-    /// Creates a registry with an explicitly assembled sandbox facade.
-    ///
-    /// Runtime composition owns provider selection; tool handlers only receive
-    /// invocation-bound permits produced by this facade.
+    /// Creates a registry with a runtime-selected sandbox that issues invocation-bound permits.
     pub fn new_with_policy_and_sandbox(policy: ToolPolicy, sandbox: ToolSandbox) -> Self {
         Self {
             specs: DashMap::new(),
@@ -413,7 +412,15 @@ impl ToolRegistry {
             image_store: DashMap::new(),
             user_workspace_memory_writer: DashMap::new(),
             sandbox,
+            worker_environment: Arc::new(WorkerToolEnvironment::inherited()),
         }
+    }
+
+    /// Installs the executing Worker's environment before the registry is shared.
+    /// This supplies subprocess PATH, not sandbox permissions or client settings.
+    pub fn with_worker_environment(mut self, environment: WorkerToolEnvironment) -> Self {
+        self.worker_environment = Arc::new(environment);
+        self
     }
 
     /// Register a legacy local tool by wrapping it into the new handler path.
@@ -545,9 +552,9 @@ impl ToolRegistry {
         let invocation = self
             .router
             .normalize(invocation, &ToolCatalog::new(vec![spec.clone()]))?;
-        context
-            .tool_context_mut()
-            .bind_current_call_id(invocation.call_id.clone());
+        let tool_context = context.tool_context_mut();
+        tool_context.bind_current_call_id(invocation.call_id.clone());
+        tool_context.bind_worker_environment(Arc::clone(&self.worker_environment));
         let spec = Some(spec);
         if !handler.matches(&invocation) {
             return Err(TalosError::new(
@@ -566,6 +573,8 @@ impl ToolRegistry {
             Ok(access) => access,
             Err(error) => return Err(Self::pre_execute_failure(error)),
         };
+        let ripgrep =
+            self.prepare_ripgrep_recovery(&invocation, context.tool_context(), spec.as_ref());
         let orchestrator = RegistryOrchestrator::from_context(context.tool_context());
         let preparation = match orchestrator
             .prepare_execution(
@@ -580,6 +589,16 @@ impl ToolRegistry {
             Ok(preparation) => preparation,
             Err(error) => return Err(Self::sandbox_failure(error)),
         };
+        if let Some(ripgrep) = ripgrep.filter(|_| !matches!(preparation, ToolPreparation::Rejected))
+        {
+            if let Some(outcome) = ripgrep
+                .recover(&invocation, context.tool_context(), self)
+                .await
+                .map_err(Self::execution_failure)?
+            {
+                return Ok(outcome);
+            }
+        }
         match preparation {
             ToolPreparation::Ready => {}
             ToolPreparation::RequiresApproval {
@@ -631,33 +650,6 @@ impl ToolRegistry {
             })
             .map(|spec| spec.definition.name.clone())
             .collect()
-    }
-
-    /// Check if a tool is available and allowed by policy.
-    pub fn is_tool_available(&self, name: &str) -> bool {
-        self.tool_catalog()
-            .find(name)
-            .map(|spec| {
-                Self::is_static_policy_exempt(spec)
-                    || self.policy_checker.policy.is_allowed(&spec.definition.name)
-            })
-            .unwrap_or(false)
-    }
-
-    /// Return all registered tools as model-friendly definitions.
-    pub fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
-        self.tool_catalog().model_definitions()
-    }
-
-    pub fn tool_supports_parallel(&self, name: &str) -> bool {
-        self.tool_catalog().supports_parallel(name)
-    }
-
-    pub fn tool_is_mutating(&self, name: &str) -> bool {
-        self.tool_catalog()
-            .find(name)
-            .map(|spec| !spec.behavior_flags.read_only)
-            .unwrap_or(true)
     }
 
     /// Build a context from execution state.
@@ -831,8 +823,8 @@ impl ToolExecutorPort for ToolRegistry {
         ToolRegistry::execute_invocation_with_context(self, invocation, context).await
     }
 
-    fn tool_supports_parallel(&self, name: &str) -> bool {
-        ToolRegistry::tool_supports_parallel(self, name)
+    fn tool_supports_parallel(&self, name: &str, workspace_roots: &[&std::path::Path]) -> bool {
+        ToolRegistry::tool_supports_parallel(self, name, workspace_roots)
     }
 
     fn image_store(&self) -> Option<Arc<dyn crate::ToolImageStore>> {

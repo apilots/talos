@@ -18,6 +18,8 @@ pub mod state;
 pub mod subagent;
 pub mod r#trait;
 pub mod trait_impl;
+mod worker_environment;
+pub use worker_environment::WorkerToolEnvironment;
 
 #[cfg(test)]
 mod test_support;

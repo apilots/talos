@@ -12,9 +12,8 @@ use tokio::process::Command;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 
-use crate::runtimes::{
-    map_sandbox_error, process_environment, resolve_base_dir, resolve_executable, resolve_path,
-};
+use crate::context::wait_for_cancellation;
+use crate::runtimes::{map_sandbox_error, process_environment, resolve_base_dir, resolve_path};
 use crate::{ToolContext, ToolProgressEmitter, ToolProgressKind};
 use talos_tools_sandbox::{
     RunningToolProcess, SandboxStdin, ToolProcessCommand, ToolProcessTerminationTarget,
@@ -207,7 +206,7 @@ impl BashSessionManager {
             .unwrap_or(base_dir);
 
         let capture = OutputCapture::new(context, policy).await?;
-        let command = build_command(request, &workdir)?;
+        let command = build_command(request, &workdir, context)?;
         let mut child = context
             .sandbox_permit()?
             .spawn(command)
@@ -419,30 +418,56 @@ pub(crate) async fn run_bash_command_with_policy(
         .await
 }
 
-fn build_command(request: &BashCommandRequest, workdir: &Path) -> TalosResult<ToolProcessCommand> {
+fn build_command(
+    request: &BashCommandRequest,
+    workdir: &Path,
+    context: &ToolContext,
+) -> TalosResult<ToolProcessCommand> {
+    let search_path = context.tool_search_path();
     let shell = request
         .shell
         .clone()
-        .or_else(|| std::env::var("SHELL").ok())
-        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("SHELL")
+                .ok()
+                .filter(|shell| !shell.trim().is_empty())
+        })
         .unwrap_or_else(|| "sh".to_string());
+    let program = search_path.resolve(&shell).ok_or_else(|| {
+        TalosError::new(
+            talos_error::ErrorCode::ResourceNotFound,
+            "The selected shell is not executable on the Worker. Check the Worker's shell and tool PATH configuration.",
+        )
+    })?;
 
-    let mut args = Vec::new();
-
-    if request.login {
-        args.push("-lc".to_string());
-    } else {
-        args.push("-c".to_string());
+    let mut args = vec![
+        if request.login { "-lc" } else { "-c" }.to_string(),
+        request.cmd.clone(),
+    ];
+    let shell_name = Path::new(&shell).file_name().and_then(|name| name.to_str());
+    let login_builtin = match (request.login, shell_name) {
+        (true, Some("bash" | "zsh")) => Some("\\builtin"),
+        (true, Some("sh" | "dash")) => Some("\\command"),
+        _ => None,
+    };
+    if let Some(builtin) = login_builtin {
+        // Pass PATH as an argument so verbose mode cannot print it as source.
+        // Suppress xtrace for the export and leave the user's trace mode intact.
+        args[1] = format!(
+            "{{ {builtin} export PATH=\"$1\"; }} 2>/dev/null || exit $?\n{builtin} shift\n{}",
+            request.cmd
+        );
+        args.push(program.to_string_lossy().into_owned());
+        args.push(search_path.as_str().to_owned());
     }
-    args.push(request.cmd.clone());
 
-    let mut env = process_environment();
+    let mut env = process_environment(&search_path);
     if request.tty {
         env.insert("TERM".to_string(), "xterm-256color".to_string());
     }
 
     Ok(ToolProcessCommand {
-        program: resolve_executable(&shell)?,
+        program,
         args,
         env,
         cwd: workdir.to_path_buf(),
@@ -576,13 +601,6 @@ fn spawn_timeout(session: Arc<BashSession>, timeout_ms: u64) -> JoinHandle<()> {
         }
         session.notify.notify_waiters();
     })
-}
-
-async fn wait_for_cancellation(cancellation: Option<crate::InvocationCancellation>) {
-    match cancellation {
-        Some(cancellation) => cancellation.requested().await,
-        None => std::future::pending().await,
-    }
 }
 
 async fn cancel_session(session: &BashSession) {

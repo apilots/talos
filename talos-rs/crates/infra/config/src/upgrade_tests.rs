@@ -99,6 +99,26 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
 }
 
 #[test]
+fn managed_upgrade_adds_default_path_prepend() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = TalosPaths::from_home(dir.path().join("home"));
+    let template_path = write_template(dir.path());
+    let environment_field = &["agent", "kernel", "tools", "environment"];
+    let mut saved = template_yaml();
+    remove_path_for_test(&mut saved, environment_field);
+    write_existing(&paths, &saved);
+
+    let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
+    assert!(report.changed);
+    let normalized = read_yaml_file(&paths.config_file).unwrap();
+    let path_prepend_field = &["agent", "kernel", "tools", "environment", "path_prepend"];
+    assert_eq!(
+        get_path_for_test(&normalized, path_prepend_field),
+        Some(&YamlValue::Sequence(Vec::new()))
+    );
+}
+
+#[test]
 fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     for profile in ["talos.yaml", "talos-prod.yaml", "talos-dev.yaml"] {
@@ -174,6 +194,12 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
         ] {
             set_path_for_test(&mut saved, &path, serde_yaml::from_str(value).unwrap());
         }
+        let configured_path = [dir.path().join("first bin"), dir.path().join("second bin")];
+        set_path_for_test(
+            &mut saved,
+            &["agent", "kernel", "tools", "environment", "path_prepend"],
+            serde_yaml::to_value(configured_path).unwrap(),
+        );
         // A newly introduced nullable setting triggers normalization of a saved home.
         remove_path_for_test(&mut saved, &["sync", "trusted_ca_file"]);
         let mut expected: Config = serde_yaml::from_value(saved.clone()).unwrap();

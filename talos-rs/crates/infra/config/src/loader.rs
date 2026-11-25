@@ -98,6 +98,7 @@ pub(crate) fn load_config_at(config_path: PathBuf, paths: TalosPaths) -> TalosRe
         )
     })?;
     let mut config = resolve_env_placeholders(config, &runtime_env)?.with_runtime_paths(paths);
+    config.agent.kernel.tools.environment.validate()?;
     config.source_path = Some(config_path);
     config.apply_derived_paths();
     config.attach_runtime_env(runtime_env);

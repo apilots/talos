@@ -1,5 +1,139 @@
 use super::*;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[tokio::test]
+async fn login_bash_restores_worker_path_after_startup_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("preferred'bin");
+    std::fs::create_dir(&bin).unwrap();
+    let program = bin.join("worker-fixture");
+    std::fs::write(&program, "#!/bin/sh\nprintf worker-path\n").unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(
+        home.path().join(".bash_profile"),
+        "builtin export PATH=/usr/bin:/bin LOGIN_MARKER=login\nexport() { printf shadowed; }\nset -x\n",
+    )
+    .unwrap();
+    let mut context = crate::test_support::full_access_process_context(
+        ToolContext::new("worker-path-login", "user").with_project_root(home.path()),
+    );
+    context.bind_worker_environment(Arc::new(crate::WorkerToolEnvironment::assemble(
+        &[bin],
+        None,
+        None,
+    )));
+    let mut command = build_command(
+        &BashCommandRequest {
+            cmd: "printf '%s ' \"$LOGIN_MARKER\"; worker-fixture".into(),
+            workdir: None,
+            shell: Some("/bin/bash".into()),
+            login: true,
+            tty: false,
+            yield_time_ms: 5000,
+            timeout_ms: Some(5000),
+            max_output_bytes: None,
+            sandbox_permissions: SandboxPermissions::UseDefault,
+            justification: None,
+            prefix_rule: None,
+        },
+        home.path(),
+        &context,
+    )
+    .unwrap();
+    command
+        .env
+        .insert("HOME".into(), home.path().display().to_string());
+    // Some distributions reset HOME in /etc/profile. A controlled shell start
+    // file makes both the login marker and the PATH reset observable.
+    command.args[1] = format!(". \"$2\"\n{}", command.args[1]);
+    command
+        .args
+        .push(home.path().join(".bash_profile").display().to_string());
+    let mut child = context
+        .sandbox_permit()
+        .unwrap()
+        .spawn(command)
+        .await
+        .unwrap();
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .unwrap()
+        .read_to_string(&mut output)
+        .await
+        .unwrap();
+    let mut stderr = String::new();
+    child
+        .take_stderr()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .await
+        .unwrap();
+    assert!(child.wait().await.unwrap().success());
+    assert_eq!(output, "login worker-path");
+    assert!(!stderr.contains("preferred'bin"));
+    assert!(stderr.contains("worker-fixture"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn worker_path_resolves_the_selected_shell_and_child_command() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let workspace = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let shell = bin.path().join("fixture-shell");
+    symlink("/bin/sh", &shell).unwrap();
+    let helper = bin.path().join("worker-path-fixture");
+    std::fs::write(&helper, "#!/bin/sh\nprintf worker-path-ok\n").unwrap();
+    std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut context = crate::test_support::full_access_process_context(
+        ToolContext::new("worker-path-bash", "user").with_project_root(workspace.path()),
+    );
+    let worker = Arc::new(crate::WorkerToolEnvironment::assemble(
+        &[bin.path().to_path_buf()],
+        None,
+        None,
+    ));
+    context.bind_worker_environment(Arc::clone(&worker));
+    let mut request = BashCommandRequest {
+        cmd: "worker-path-fixture".to_string(),
+        workdir: None,
+        shell: Some("fixture-shell".into()),
+        login: false,
+        tty: true,
+        yield_time_ms: 5000,
+        timeout_ms: Some(5000),
+        max_output_bytes: None,
+        sandbox_permissions: SandboxPermissions::UseDefault,
+        justification: None,
+        prefix_rule: None,
+    };
+    let command = build_command(&request, workspace.path(), &context).unwrap();
+    assert_eq!(command.program, shell);
+    assert_eq!(
+        command.env.get("PATH").map(String::as_str),
+        Some(worker.search_path(&[]).as_str())
+    );
+    assert_eq!(command.env.get("HOME").cloned(), std::env::var("HOME").ok());
+    assert_eq!(
+        command.env.get("TERM").map(String::as_str),
+        Some("xterm-256color")
+    );
+
+    let response = run_bash_command(&request, &context).await.unwrap();
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "worker-path-ok");
+
+    request.shell = Some("./fixture-shell".into());
+    let Err(error) = build_command(&request, bin.path(), &context) else {
+        panic!("Bash must not substitute another shell for a relative request");
+    };
+    assert_eq!(error.error_code(), talos_error::ErrorCode::ResourceNotFound);
+}
+
 fn completed_session(capture: OutputCapture) -> Arc<BashSession> {
     Arc::new(BashSession {
         session_id: 0,

@@ -1,6 +1,10 @@
 use super::ToolRegistry;
-use crate::{mcp::McpConnectionManager, spec::ToolCatalog};
+use crate::{
+    mcp::McpConnectionManager,
+    spec::{ToolCatalog, ToolSource},
+};
 use std::sync::Arc;
+use talos_llm_provider::ToolDefinition;
 
 impl ToolRegistry {
     fn tool_priority(name: &str) -> usize {
@@ -40,5 +44,42 @@ impl ToolRegistry {
         });
         specs.dedup_by(|left, right| left.definition.name == right.definition.name);
         ToolCatalog::new(specs)
+    }
+
+    /// Check if a tool is available and allowed by policy.
+    pub fn is_tool_available(&self, name: &str) -> bool {
+        self.tool_catalog()
+            .find(name)
+            .map(|spec| {
+                Self::is_static_policy_exempt(spec)
+                    || self.policy_checker.policy.is_allowed(&spec.definition.name)
+            })
+            .unwrap_or(false)
+    }
+
+    /// Return all registered tools as model-friendly definitions.
+    pub fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.tool_catalog().model_definitions()
+    }
+
+    pub fn tool_supports_parallel(&self, name: &str, workspace_roots: &[&std::path::Path]) -> bool {
+        let catalog = self.tool_catalog();
+        catalog.supports_parallel(name)
+            && !(self.worker_environment.ripgrep_recovery().is_some()
+                && catalog.find(name).is_some_and(|spec| {
+                    spec.source == ToolSource::Local && spec.internal_name == "grep"
+                })
+                && self
+                    .worker_environment
+                    .search_path(workspace_roots)
+                    .resolve("rg")
+                    .is_none())
+    }
+
+    pub fn tool_is_mutating(&self, name: &str) -> bool {
+        self.tool_catalog()
+            .find(name)
+            .map(|spec| !spec.behavior_flags.read_only)
+            .unwrap_or(true)
     }
 }

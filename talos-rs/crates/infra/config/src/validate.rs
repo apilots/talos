@@ -196,6 +196,7 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.context_compaction_max_bytes must be > 0".to_string(),
         ));
     }
+    config.agent.kernel.tools.environment.validate()?;
     let logs = &config.agent.kernel.tools.bash.output_log;
     logs.validate()?;
     if config.agent.kernel.tools.bash.max_output_bytes < 256

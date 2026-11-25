@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use std::fmt;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_memory::{MemoryReader, MemoryScope, UserWorkspaceMemoryWriter};
@@ -16,7 +16,7 @@ use crate::state::{
     ToolResultBudgetState,
 };
 use crate::CommandRiskAssessor;
-use crate::{AgentControl, AutomationControl};
+use crate::{AgentControl, AutomationControl, WorkerToolEnvironment};
 
 /// Classifies best-effort progress emitted while a tool is still running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +56,13 @@ impl InvocationCancellation {
     /// Wait until cancellation is requested for the owning Run.
     pub async fn requested(&self) {
         self.requested.clone().await;
+    }
+}
+
+pub(crate) async fn wait_for_cancellation(cancellation: Option<InvocationCancellation>) {
+    match cancellation {
+        Some(cancellation) => cancellation.requested().await,
+        None => std::future::pending().await,
     }
 }
 
@@ -102,8 +109,10 @@ pub struct ToolContext {
     sandbox_user_permission_mode: UserPermissionMode,
     sandbox_environment: Option<ToolSandboxEnvironment>,
     sandbox_permit: Option<ToolSandboxPermit>,
+    worker_environment: Option<Arc<WorkerToolEnvironment>>,
     command_risk_assessor: Option<Arc<dyn CommandRiskAssessor>>,
     cancellation: Option<InvocationCancellation>,
+    parallel_execution: bool,
 }
 
 impl ToolContext {
@@ -146,9 +155,55 @@ impl ToolContext {
             sandbox_user_permission_mode,
             sandbox_environment: None,
             sandbox_permit: None,
+            worker_environment: None,
             command_risk_assessor: None,
             cancellation: None,
+            parallel_execution: false,
         }
+    }
+
+    pub(crate) fn bind_worker_environment(&mut self, environment: Arc<WorkerToolEnvironment>) {
+        self.worker_environment = Some(environment);
+    }
+
+    pub(crate) fn tool_search_path(&self) -> crate::worker_environment::ToolSearchPath {
+        let roots: Vec<_> = self
+            .sandbox_environment()
+            .into_iter()
+            .flat_map(|environment| {
+                environment
+                    .workspace_roots
+                    .iter()
+                    .map(|root| root.as_path())
+            })
+            .chain(self.project_root.as_deref())
+            .chain(
+                self.kernel_config()
+                    .map(|config| Path::new(&config.workspace_dir)),
+            )
+            .collect();
+        match self.worker_environment.as_deref() {
+            Some(worker) => worker.search_path(&roots),
+            None => WorkerToolEnvironment::inherited().search_path(&roots),
+        }
+    }
+
+    /// Marks this call as running alongside other calls in the same Turn.
+    pub fn with_parallel_execution(mut self) -> Self {
+        self.parallel_execution = true;
+        self
+    }
+
+    pub(crate) fn missing_ripgrep(&self) -> talos_error::TalosError {
+        WorkerToolEnvironment::missing_ripgrep(
+            self.worker_environment
+                .as_deref()
+                .is_some_and(WorkerToolEnvironment::packaged_ripgrep),
+        )
+    }
+
+    pub(crate) fn is_parallel_execution(&self) -> bool {
+        self.parallel_execution
     }
 
     /// Attaches the application-owned child Session control port.
@@ -361,6 +416,11 @@ impl ToolContext {
         self.sandbox_approval_fingerprints
             .get(call_id)
             .map(|fingerprint| fingerprint.value().clone())
+    }
+
+    pub(crate) fn clear_sandbox_approval(&self, call_id: &str) {
+        self.sandbox_approval_fingerprints.remove(call_id);
+        self.user_action_responses.remove(call_id);
     }
 
     pub fn current_call_id(&self) -> Option<&str> {
