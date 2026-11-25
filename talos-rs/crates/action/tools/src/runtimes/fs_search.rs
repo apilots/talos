@@ -221,14 +221,14 @@ async fn run_rg(
     };
 
     let permit = context.sandbox_permit()?;
-    let worker_environment = context.worker_environment();
-    let program = worker_environment
+    let tool_path = context.tool_search_path();
+    let program = tool_path
         .resolve("rg")
-        .ok_or_else(|| worker_environment.missing_ripgrep())?;
+        .ok_or_else(|| context.missing_ripgrep())?;
     let command = ToolProcessCommand {
         program,
         args,
-        env: process_environment(&worker_environment),
+        env: process_environment(&tool_path),
         cwd: cwd.to_path_buf(),
         stdin: SandboxStdin::Closed,
     };

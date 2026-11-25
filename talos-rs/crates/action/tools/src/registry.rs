@@ -111,7 +111,7 @@ pub trait ToolExecutorPort: ToolDefinitionProvider + Send + Sync {
         context: ToolContext,
     ) -> ToolDispatchResult<ToolDispatchOutcome>;
 
-    fn tool_supports_parallel(&self, name: &str) -> bool;
+    fn tool_supports_parallel(&self, name: &str, workspace_roots: &[&std::path::Path]) -> bool;
 
     fn tool_is_mutating(&self, name: &str) -> bool;
 
@@ -823,8 +823,8 @@ impl ToolExecutorPort for ToolRegistry {
         ToolRegistry::execute_invocation_with_context(self, invocation, context).await
     }
 
-    fn tool_supports_parallel(&self, name: &str) -> bool {
-        ToolRegistry::tool_supports_parallel(self, name)
+    fn tool_supports_parallel(&self, name: &str, workspace_roots: &[&std::path::Path]) -> bool {
+        ToolRegistry::tool_supports_parallel(self, name, workspace_roots)
     }
 
     fn image_store(&self) -> Option<Arc<dyn crate::ToolImageStore>> {

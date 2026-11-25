@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use std::fmt;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_memory::{MemoryReader, MemoryScope, UserWorkspaceMemoryWriter};
@@ -112,6 +112,7 @@ pub struct ToolContext {
     worker_environment: Option<Arc<WorkerToolEnvironment>>,
     command_risk_assessor: Option<Arc<dyn CommandRiskAssessor>>,
     cancellation: Option<InvocationCancellation>,
+    parallel_execution: bool,
 }
 
 impl ToolContext {
@@ -157,6 +158,7 @@ impl ToolContext {
             worker_environment: None,
             command_risk_assessor: None,
             cancellation: None,
+            parallel_execution: false,
         }
     }
 
@@ -164,10 +166,44 @@ impl ToolContext {
         self.worker_environment = Some(environment);
     }
 
-    pub(crate) fn worker_environment(&self) -> Arc<WorkerToolEnvironment> {
-        self.worker_environment
-            .clone()
-            .unwrap_or_else(|| Arc::new(WorkerToolEnvironment::inherited()))
+    pub(crate) fn tool_search_path(&self) -> crate::worker_environment::ToolSearchPath {
+        let roots: Vec<_> = self
+            .sandbox_environment()
+            .into_iter()
+            .flat_map(|environment| {
+                environment
+                    .workspace_roots
+                    .iter()
+                    .map(|root| root.as_path())
+            })
+            .chain(self.project_root.as_deref())
+            .chain(
+                self.kernel_config()
+                    .map(|config| Path::new(&config.workspace_dir)),
+            )
+            .collect();
+        match self.worker_environment.as_deref() {
+            Some(worker) => worker.search_path(&roots),
+            None => WorkerToolEnvironment::inherited().search_path(&roots),
+        }
+    }
+
+    /// Marks this call as running alongside other calls in the same Turn.
+    pub fn with_parallel_execution(mut self) -> Self {
+        self.parallel_execution = true;
+        self
+    }
+
+    pub(crate) fn missing_ripgrep(&self) -> talos_error::TalosError {
+        WorkerToolEnvironment::missing_ripgrep(
+            self.worker_environment
+                .as_deref()
+                .is_some_and(WorkerToolEnvironment::packaged_ripgrep),
+        )
+    }
+
+    pub(crate) fn is_parallel_execution(&self) -> bool {
+        self.parallel_execution
     }
 
     /// Attaches the application-owned child Session control port.

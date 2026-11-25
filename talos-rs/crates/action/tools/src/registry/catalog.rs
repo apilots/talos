@@ -62,17 +62,18 @@ impl ToolRegistry {
         self.tool_catalog().model_definitions()
     }
 
-    pub fn tool_supports_parallel(&self, name: &str) -> bool {
+    pub fn tool_supports_parallel(&self, name: &str, workspace_roots: &[&std::path::Path]) -> bool {
         let catalog = self.tool_catalog();
-        if self.worker_environment.ripgrep_recovery().is_some()
-            && catalog.find(name).is_some_and(|spec| {
-                spec.source == ToolSource::Local && spec.internal_name == "grep"
-            })
-        {
-            // A missing dependency may suspend the batch for one user action.
-            return false;
-        }
         catalog.supports_parallel(name)
+            && !(self.worker_environment.ripgrep_recovery().is_some()
+                && catalog.find(name).is_some_and(|spec| {
+                    spec.source == ToolSource::Local && spec.internal_name == "grep"
+                })
+                && self
+                    .worker_environment
+                    .search_path(workspace_roots)
+                    .resolve("rg")
+                    .is_none())
     }
 
     pub fn tool_is_mutating(&self, name: &str) -> bool {

@@ -1034,8 +1034,8 @@ fn test_tool_catalog_tracks_parallel_metadata() {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(MemorySearchTool));
 
-    assert!(registry.tool_supports_parallel("MemorySearch"));
-    assert!(!registry.tool_supports_parallel("exec"));
+    assert!(registry.tool_supports_parallel("MemorySearch", &[]));
+    assert!(!registry.tool_supports_parallel("exec", &[]));
 }
 
 #[test]

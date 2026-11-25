@@ -115,7 +115,7 @@ async fn worker_path_resolves_the_selected_shell_and_child_command() {
     assert_eq!(command.program, shell);
     assert_eq!(
         command.env.get("PATH").map(String::as_str),
-        Some(worker.path())
+        Some(worker.search_path(&[]).as_str())
     );
     assert_eq!(command.env.get("HOME").cloned(), std::env::var("HOME").ok());
     assert_eq!(

@@ -423,7 +423,7 @@ fn build_command(
     workdir: &Path,
     context: &ToolContext,
 ) -> TalosResult<ToolProcessCommand> {
-    let worker_environment = context.worker_environment();
+    let search_path = context.tool_search_path();
     let shell = request
         .shell
         .clone()
@@ -433,7 +433,7 @@ fn build_command(
                 .filter(|shell| !shell.trim().is_empty())
         })
         .unwrap_or_else(|| "sh".to_string());
-    let program = worker_environment.resolve(&shell).ok_or_else(|| {
+    let program = search_path.resolve(&shell).ok_or_else(|| {
         TalosError::new(
             talos_error::ErrorCode::ResourceNotFound,
             "The selected shell is not executable on the Worker. Check the Worker's shell and tool PATH configuration.",
@@ -458,10 +458,10 @@ fn build_command(
             request.cmd
         );
         args.push(program.to_string_lossy().into_owned());
-        args.push(worker_environment.path().to_owned());
+        args.push(search_path.as_str().to_owned());
     }
 
-    let mut env = process_environment(&worker_environment);
+    let mut env = process_environment(&search_path);
     if request.tty {
         env.insert("TERM".to_string(), "xterm-256color".to_string());
     }

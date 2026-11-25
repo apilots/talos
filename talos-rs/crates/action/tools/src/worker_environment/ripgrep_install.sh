@@ -9,23 +9,24 @@ case "$4" in
     *) exit 24 ;;
 esac
 [ "$identity" = "$5" ] || exit 24
+archive=${TMPDIR:?}/ripgrep.tar.gz
+/usr/bin/curl -q --proto '=https' --proto-redir '=https' --location --max-redirs 3 \
+    --fail --silent --max-time 45 --max-filesize 8388608 --output "$archive" "$1" || exit 20
+case "$4" in
+    /usr/bin/shasum) digest=$("$4" -a 256 "$archive") || exit 21 ;;
+    /usr/bin/sha256sum) digest=$("$4" "$archive") || exit 21 ;;
+    *) exit 21 ;;
+esac
+[ "${digest%% *}" = "$2" ] || exit 21
 stage=$(/usr/bin/mktemp -d './.ripgrep.XXXXXXXX') || exit 24
 cleanup() {
-    /bin/rm -f "$stage/archive" "$stage/rg"
+    /bin/rm -f "$stage/rg"
     /bin/rmdir "$stage"
 }
 trap cleanup EXIT
 trap 'exit 24' HUP INT TERM
 
-/usr/bin/curl -q --proto '=https' --proto-redir '=https' --location --max-redirs 3 \
-    --fail --silent --max-time 45 --max-filesize 8388608 --output "$stage/archive" "$1" || exit 20
-case "$4" in
-    /usr/bin/shasum) digest=$("$4" -a 256 "$stage/archive") || exit 21 ;;
-    /usr/bin/sha256sum) digest=$("$4" "$stage/archive") || exit 21 ;;
-    *) exit 21 ;;
-esac
-[ "${digest%% *}" = "$2" ] || exit 21
-/usr/bin/tar -xOzf "$stage/archive" "$3" > "$stage/rg" || exit 22
+/usr/bin/tar -xOzf "$archive" "$3" > "$stage/rg" || exit 22
 /bin/chmod 0700 "$stage/rg" || exit 24
 "$stage/rg" --version || exit 23
 [ ! -d ./rg ] || exit 24

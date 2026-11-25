@@ -130,7 +130,7 @@ async fn dispatch(
 #[ignore = "run through the output_logs E2E case"]
 async fn worker_tool_path() {
     use crate::WorkerToolEnvironment;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{symlink, PermissionsExt};
 
     let workspace = tempfile::tempdir().unwrap();
     let bin = workspace.path().join("configured-bin");
@@ -147,7 +147,22 @@ fi
 "#,
     ).unwrap();
     std::fs::set_permissions(&rg, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let worker = WorkerToolEnvironment::assemble(&[bin], None, None);
+    let implicit = workspace.path().join("implicit-bin");
+    std::fs::create_dir(&implicit).unwrap();
+    std::fs::copy(&rg, implicit.join("workspace-only-marker")).unwrap();
+    let aliases = tempfile::tempdir().unwrap();
+    let alias = aliases.path().join("workspace-alias");
+    symlink(&implicit, &alias).unwrap();
+    let installed = tempfile::tempdir().unwrap();
+    let installed_command = installed.path().join("worker-installed-marker");
+    std::fs::write(
+        &installed_command,
+        "#!/bin/sh\nprintf '%s\\n' 'installed Worker command'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&installed_command, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let inherited = std::env::join_paths([implicit, alias, installed.path().to_owned()]).unwrap();
+    let worker = WorkerToolEnvironment::assemble(&[bin], None, Some(&inherited));
     let (sandbox, audit) = sandbox();
     let tools = registry(sandbox).with_worker_environment(worker);
     let ctx = || {
@@ -165,7 +180,11 @@ fi
         }))
     };
     for (call, tool, arguments) in [
-        ("bash", "Bash", json!({"command": "rg --version"})),
+        (
+            "bash",
+            "Bash",
+            json!({"command": "if command -v workspace-only-marker; then exit 12; fi; rg --version && worker-installed-marker --version"}),
+        ),
         (
             "grep",
             "Grep",
@@ -175,11 +194,11 @@ fi
         let result = dispatch(&tools, ctx(), call, tool, arguments)
             .await
             .unwrap();
-        assert!(result
-            .payload()
-            .unwrap()
-            .content()
-            .contains("configured rg fixture"));
+        let payload = result.payload().unwrap();
+        assert!(payload.content().contains("configured rg fixture"));
+        if tool == "Bash" {
+            assert!(payload.content().contains("installed Worker command"));
+        }
         assert!(audit.events.lock().unwrap().iter().any(|event| {
             event.invocation.call_id == call
                 && event.stage == ToolSandboxAuditStage::SpawnProcess

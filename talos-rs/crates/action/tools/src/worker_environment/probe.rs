@@ -9,7 +9,7 @@ use talos_tools_sandbox::ToolProcessTerminationTarget;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use super::{is_executable, valid_entry, WorkerToolEnvironment};
+use super::{is_executable, ToolEnvironmentConfig, WorkerToolEnvironment};
 
 const TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_OUTPUT: u64 = 64 * 1024;
@@ -35,7 +35,10 @@ struct Account {
     name: OsString,
 }
 
-pub(super) async fn discover_path(inherited: Option<&OsStr>) -> Result<OsString, Unavailable> {
+pub(super) async fn discover_path(
+    inherited: Option<&OsStr>,
+    workspace_root: &Path,
+) -> Result<OsString, Unavailable> {
     let account = tokio::time::timeout(TIMEOUT, tokio::task::spawn_blocking(worker_account))
         .await
         .map_err(|_| Unavailable::Timeout)?
@@ -55,7 +58,7 @@ pub(super) async fn discover_path(inherited: Option<&OsStr>) -> Result<OsString,
         .env("SHELL", &account.shell)
         .env("USER", &account.name)
         .env("LOGNAME", &account.name)
-        .env("PATH", inherited.path())
+        .env("PATH", inherited.search_path(&[workspace_root]).as_str())
         .env("TERM", "dumb");
     capture(command, TIMEOUT).await
 }
@@ -179,7 +182,8 @@ fn parse_path(bytes: &[u8]) -> Result<OsString, Unavailable> {
         .position(|byte| *byte == 0)
         .ok_or(Unavailable::InvalidPath)?;
     let path = OsStr::from_bytes(&rest[..end]);
-    if !std::env::split_paths(path).any(|entry| valid_entry(entry.as_os_str())) {
+    if !std::env::split_paths(path).any(|entry| ToolEnvironmentConfig::is_valid_path_entry(&entry))
+    {
         return Err(Unavailable::InvalidPath);
     }
     Ok(path.to_owned())

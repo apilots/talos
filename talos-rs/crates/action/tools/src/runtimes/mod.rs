@@ -18,7 +18,8 @@ use talos_config::resolve_runtime_path;
 use talos_error::{TalosError, TalosResult};
 use talos_tools_sandbox::{filter_inherited_tool_environment, TalosSandboxError};
 
-use crate::{ToolContext, WorkerToolEnvironment};
+use crate::worker_environment::ToolSearchPath;
+use crate::ToolContext;
 
 pub(crate) fn expand_workspace_dir(workspace_dir: &str) -> PathBuf {
     resolve_runtime_path(workspace_dir)
@@ -51,12 +52,12 @@ pub(crate) fn resolve_path(base_dir: &Path, raw_path: &str) -> PathBuf {
     }
 }
 
-pub(crate) fn process_environment(worker: &WorkerToolEnvironment) -> BTreeMap<String, String> {
+pub(crate) fn process_environment(path: &ToolSearchPath) -> BTreeMap<String, String> {
     let mut environment =
         filter_inherited_tool_environment(env::vars_os().filter_map(|(name, value)| {
             Some((name.into_string().ok()?, value.into_string().ok()?))
         }));
-    environment.insert("PATH".to_string(), worker.path().to_string());
+    environment.insert("PATH".to_string(), path.as_str().to_string());
     environment
 }
 

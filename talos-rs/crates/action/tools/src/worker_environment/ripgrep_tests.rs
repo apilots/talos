@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use serde_json::json;
 use talos_config::{AgentKernelConfig, ToolSandboxModeConfig, ToolUserPermissionModeConfig};
-use talos_tools_sandbox::{SandboxCapability, ToolSandboxPermit};
+use talos_tools_sandbox::{SandboxCapability, SandboxRuntimePaths, ToolSandboxPermit};
 use talos_types::UserActionResponse;
 
 use super::*;
-use crate::{ToolDispatchResult, ToolPending, ToolRegistry};
+use crate::{ToolDispatchResult, ToolPending, ToolRegistry, WorkerToolEnvironment};
 
 const FIXTURE_RG: &str = r#"#!/bin/sh
 printf '%s\n' '{"type":"match","data":{"path":{"text":"sample.txt"},"lines":{"text":"recovered search"},"line_number":1,"submatches":[{"start":0}]}}'
@@ -84,7 +84,6 @@ impl Scenario {
             }),
         });
         let mut worker = WorkerToolEnvironment::assemble(&[], None, None);
-        worker.path_with_managed_bin = Some(bin.to_str().unwrap().into());
         worker.ripgrep_recovery = Some(recovery);
         let registry = ToolRegistry::new().with_worker_environment(worker);
         registry.register(Arc::new(crate::GrepTool));
@@ -153,9 +152,30 @@ impl Scenario {
 }
 
 #[tokio::test]
-async fn ripgrep_existing_candidate_runs_without_installing() {
+async fn ripgrep_existing_managed_candidate_runs_without_an_installer() {
     let fixture = Scenario::new(Outcome::Install);
     write_fixture(&fixture.bin);
+    let unavailable = fixture.bin.join("unavailable-provider");
+    let sandbox = ToolSandbox::with_runtime_paths(SandboxRuntimePaths {
+        macos_sandbox_executable: Some(unavailable.clone()),
+        linux_helper_executable: Some(unavailable),
+    });
+    assert!(sandbox
+        .diagnostics()
+        .providers
+        .iter()
+        .all(|provider| provider.status != ToolSandboxProviderStatus::Available));
+    let worker = WorkerToolEnvironment::assemble(&[], None, None)
+        .with_native_ripgrep(fixture._home.path(), None);
+    let registry = ToolRegistry::new_with_sandbox(sandbox).with_worker_environment(worker);
+    registry.register(Arc::new(crate::GrepTool));
+    let fixture = Scenario {
+        registry,
+        ..fixture
+    };
+    assert!(fixture
+        .registry
+        .tool_supports_parallel("Grep", &[fixture.workspace.path()]));
     let result = fixture
         .grep("existing", fixture.context(Vec::new()))
         .await
@@ -165,13 +185,25 @@ async fn ripgrep_existing_candidate_runs_without_installing() {
         .unwrap()
         .content()
         .contains("recovered search"));
-    assert_eq!(fixture.attempts.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
 async fn ripgrep_full_access_requires_approval_and_resumes_concurrent_calls() {
     let fixture = Scenario::new(Outcome::Install);
-    assert!(!fixture.registry.tool_supports_parallel("Grep"));
+    assert!(!fixture
+        .registry
+        .tool_supports_parallel("Grep", &[fixture.workspace.path()]));
+    let parallel_error = fixture
+        .grep(
+            "removed-after-scheduling",
+            fixture.context(Vec::new()).with_parallel_execution(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        parallel_error.error().error_code(),
+        ErrorCode::ResourceNotFound
+    );
     let a = fixture
         .approval("first", SandboxApprovalDecision::AllowOnce)
         .await;

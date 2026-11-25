@@ -9,7 +9,7 @@ fn merges_in_precedence_order_and_deduplicates_exact_entries() {
         Some(OsStr::new("/inherited:/discovered:.:/shared")),
     );
     assert_eq!(
-        environment.path(),
+        environment.search_path(&[]).as_str(),
         "/configured:/shared:/discovered:/shared/:/inherited"
     );
 }
@@ -32,7 +32,7 @@ fn skips_broken_and_non_executable_candidates_and_disallows_relative_programs() 
     let executable = directories[2].join("tool");
     fs::write(&executable, "#!/bin/sh\n").unwrap();
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-    let environment = WorkerToolEnvironment::assemble(&directories, None, None);
+    let environment = WorkerToolEnvironment::assemble(&directories, None, None).search_path(&[]);
     assert_eq!(environment.resolve("tool"), Some(executable.clone()));
     assert_eq!(
         environment.resolve(executable.to_str().unwrap()),
@@ -73,12 +73,13 @@ fn no_usable_paths_never_searches_the_working_directory_or_default_paths() {
     use std::os::unix::fs::PermissionsExt;
     fs::write(&executable, "#!/bin/sh\nexit 42\n").unwrap();
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-    let environment = WorkerToolEnvironment::assemble(&[], None, Some(OsStr::new(":.:relative")));
+    let environment = WorkerToolEnvironment::assemble(&[], None, Some(OsStr::new(":.:relative")))
+        .search_path(&[]);
     assert_eq!(environment.resolve("sh"), None);
     let status = std::process::Command::new("/bin/sh")
         .current_dir(root.path())
         .env_clear()
-        .env("PATH", environment.path())
+        .env("PATH", environment.as_str())
         .args(["-c", "command -v worker-fixture >/dev/null && exit 42; command -v ls >/dev/null && exit 43; exit 0"])
         .status()
         .unwrap();

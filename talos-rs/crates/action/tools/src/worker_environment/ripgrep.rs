@@ -17,7 +17,7 @@ use talos_types::{
 };
 use tokio::sync::Mutex;
 
-use super::{is_executable, WorkerToolEnvironment};
+use super::{is_executable, ToolEnvironmentConfig};
 use crate::context::wait_for_cancellation;
 use crate::invocation::{ToolCallPayload, ToolInvocation};
 use crate::runtimes::fs_search;
@@ -71,11 +71,6 @@ impl Release {
     }
 }
 
-pub(crate) struct InstallApproval {
-    pub(crate) decision: SandboxApprovalDecision,
-    pub(crate) fingerprint: String,
-}
-
 pub(crate) struct RipgrepRecovery {
     root: AbsolutePathBuf,
     directory_identity: String,
@@ -88,20 +83,8 @@ pub(crate) struct RipgrepRecovery {
 }
 
 impl RipgrepRecovery {
-    pub(super) fn new(home: &Path, hostname: Option<&str>, sandbox: &ToolSandbox) -> Option<Self> {
+    pub(super) fn new(home: &Path, hostname: Option<&str>) -> Option<Self> {
         let release = Release::current()?;
-        if !sandbox
-            .diagnostics()
-            .providers
-            .iter()
-            .any(|provider| provider.status == ToolSandboxProviderStatus::Available)
-            || !required_programs()
-                .iter()
-                .all(|program| is_executable(Path::new(program)))
-        {
-            return None;
-        }
-
         let (root, directory_identity) = match private_install_dir(home) {
             Ok(directory) => directory,
             Err(_) => {
@@ -136,6 +119,21 @@ impl RipgrepRecovery {
 
     pub(crate) fn directory_is_current(&self) -> bool {
         directory_identity(self.root()).is_ok_and(|current| current == self.directory_identity)
+    }
+
+    pub(crate) fn installer_available(&self, sandbox: &ToolSandbox) -> bool {
+        #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+        if self.fixture.is_some() {
+            return true;
+        }
+        sandbox
+            .diagnostics()
+            .providers
+            .iter()
+            .any(|provider| provider.status == ToolSandboxProviderStatus::Available)
+            && required_programs()
+                .iter()
+                .all(|program| is_executable(Path::new(program)))
     }
 
     pub(crate) fn request(
@@ -203,15 +201,14 @@ impl RipgrepRecovery {
 
     pub(crate) async fn recover(
         &self,
-        mut request: ToolSandboxRequest,
-        replay: Option<InstallApproval>,
+        request: ToolSandboxRequest,
+        replay: Option<SandboxApprovalDecision>,
         invocation: &ToolInvocation,
         context: &ToolContext,
-        worker: &WorkerToolEnvironment,
         sandbox: &ToolSandbox,
     ) -> TalosResult<Option<ToolDispatchOutcome>> {
         if matches!(
-            replay.as_ref().map(|approval| approval.decision),
+            replay,
             Some(SandboxApprovalDecision::Deny | SandboxApprovalDecision::Cancel)
         ) {
             return Err(TalosError::new(
@@ -219,7 +216,7 @@ impl RipgrepRecovery {
                 format!("Ripgrep installation was declined. {MANUAL}"),
             ));
         }
-        if worker.resolve("rg").is_some() {
+        if context.tool_search_path().resolve("rg").is_some() {
             return Ok(None);
         }
         let ToolCallPayload::Function { arguments } = &invocation.payload else {
@@ -250,13 +247,13 @@ impl RipgrepRecovery {
             () = wait_for_cancellation(cancellation.clone()) => return Err(InstallFailure::Cancelled.into_error()),
             state = self.last_failure.lock() => state,
         };
-        if worker.resolve("rg").is_some() {
+        if context.tool_search_path().resolve("rg").is_some() {
             return Ok(None);
         }
         if let Some(failure) = *last_failure {
             return Err(failure.into_error());
         }
-        let Some(replay) = replay else {
+        if replay.is_none() {
             let Ok(ToolSandboxDecision::RequiresApproval(approval)) = sandbox.evaluate(request)
             else {
                 return Err(InstallFailure::Sandbox.into_error());
@@ -280,19 +277,14 @@ impl RipgrepRecovery {
                 },
                 approval.fingerprint().to_owned(),
             )));
-        };
-        let approval = sandbox.approval_request(&request);
-        request.approval_grant = Some(
-            approval
-                .allow_once(&replay.fingerprint)
-                .map_err(|_| InstallFailure::Sandbox.into_error())?,
-        );
+        }
         let Ok(ToolSandboxDecision::Allowed(permit)) = sandbox.evaluate(request) else {
             return Err(InstallFailure::Sandbox.into_error());
         };
         *last_failure = Some(InstallFailure::Interrupted);
         let result = self.install(&permit, cancellation).await.and_then(|()| {
-            worker
+            context
+                .tool_search_path()
                 .resolve("rg")
                 .is_some()
                 .then_some(())
@@ -412,7 +404,7 @@ fn private_install_dir(home: &Path) -> std::io::Result<(AbsolutePathBuf, String)
         Err(error) => return Err(error),
     }
     let identity = directory_identity(&root)?;
-    if !super::valid_entry(root.as_os_str()) {
+    if !ToolEnvironmentConfig::is_valid_path_entry(&root) {
         return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
     }
     let root = AbsolutePathBuf::new(root).map_err(std::io::Error::other)?;

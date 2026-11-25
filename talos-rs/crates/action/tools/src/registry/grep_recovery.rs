@@ -1,17 +1,17 @@
 use talos_error::TalosResult;
 use talos_tools_sandbox::ToolSandboxRequest;
-use talos_types::UserActionResponse;
+use talos_types::{SandboxApprovalDecision, UserActionResponse};
 
 use super::ToolRegistry;
 use crate::invocation::ToolInvocation;
 use crate::spec::{RegisteredToolSpec, ToolSource};
-use crate::worker_environment::{InstallApproval, RipgrepRecovery};
+use crate::worker_environment::RipgrepRecovery;
 use crate::{ToolContext, ToolDispatchOutcome};
 
 pub(super) struct RipgrepDispatch<'a> {
     recovery: &'a RipgrepRecovery,
     request: ToolSandboxRequest,
-    approval: Option<InstallApproval>,
+    approval: Option<SandboxApprovalDecision>,
 }
 
 impl ToolRegistry {
@@ -28,25 +28,29 @@ impl ToolRegistry {
         let recovery = self.worker_environment.ripgrep_recovery()?;
         let call_id = &invocation.call_id;
         let response = context.get_user_action_response(call_id);
-        if response.is_none() && self.worker_environment.resolve("rg").is_some() {
+        if response.is_none()
+            && (context.is_parallel_execution()
+                || context.tool_search_path().resolve("rg").is_some())
+        {
             return None;
         }
 
-        let request = recovery.request(invocation, context)?;
+        let mut request = recovery.request(invocation, context)?;
         let approval = match response {
-            None => None,
+            None if recovery.installer_available(&self.sandbox) => None,
+            None => return None,
             Some(UserActionResponse::SandboxApproval(decision)) => {
                 let fingerprint = context.get_sandbox_approval_fingerprint(call_id)?;
-                if fingerprint != self.sandbox.approval_request(&request).fingerprint() {
+                let approval = self.sandbox.approval_request(&request);
+                if decision == SandboxApprovalDecision::AllowOnce {
+                    request.approval_grant = Some(approval.allow_once(&fingerprint).ok()?);
+                } else if fingerprint != approval.fingerprint() {
                     return None;
                 }
                 // Installation approval has its own scope. Do not replay it as
                 // permission for the original search.
                 context.clear_sandbox_approval(call_id);
-                Some(InstallApproval {
-                    decision,
-                    fingerprint,
-                })
+                Some(decision)
             }
             Some(_) => return None,
         };
@@ -71,7 +75,6 @@ impl RipgrepDispatch<'_> {
                 self.approval,
                 invocation,
                 context,
-                &registry.worker_environment,
                 &registry.sandbox,
             )
             .await

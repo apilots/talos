@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use talos_config::{AgentKernelConfig, TalosPaths};
@@ -39,6 +39,18 @@ pub struct ToolExecutionContext {
     pub sandbox_approval_fingerprints: HashMap<String, String>,
     pub command_risk_assessor: Option<Arc<dyn talos_tools::CommandRiskAssessor>>,
     pub run_tasks: RunTaskGroup,
+}
+
+impl ToolExecutionContext {
+    fn workspace_roots(&self) -> impl Iterator<Item = &Path> {
+        std::iter::once(Path::new(&self.kernel_config.workspace_dir))
+            .chain(self.project_root.as_deref())
+    }
+
+    fn call_allows_parallel(&self, registry: &dyn ToolExecutorPort, tool_name: &str) -> bool {
+        let roots: Vec<_> = self.workspace_roots().collect();
+        registry.tool_supports_parallel(tool_name, &roots) && !registry.tool_is_mutating(tool_name)
+    }
 }
 
 impl fmt::Debug for ToolExecutionContext {
@@ -115,16 +127,10 @@ fn build_tool_context(
     call_id: &str,
     progress_emitter: Option<ToolProgressEmitter>,
 ) -> TalosResult<talos_tools::ToolContext> {
-    let mut workspace_roots = vec![PathBuf::from(
-        &execution_context.kernel_config.workspace_dir,
-    )];
-    if let Some(project_root) = &execution_context.project_root {
-        workspace_roots.push(project_root.clone());
-    }
-    let workspace_roots = workspace_roots
-        .into_iter()
+    let workspace_roots = execution_context
+        .workspace_roots()
         .map(|root| {
-            let root = std::fs::canonicalize(&root).map_err(|error| {
+            let root = std::fs::canonicalize(root).map_err(|error| {
                 let diagnostic = format!("resolve sandbox root {}: {error}", root.display());
                 TalosError::internal_with_source(
                     "Resolve sandbox root; technical details were withheld.",
@@ -244,6 +250,7 @@ async fn execute_single_tool_call(
     call: ToolExecutionInput,
     progress_emitter: Option<ToolProgressEmitter>,
     queued_at: ToolQueuedAt,
+    scheduling_class: ToolSchedulingClass,
 ) -> ToolExecutionOutput {
     let started = Instant::now();
     let started_at_ms = chrono::Utc::now().timestamp_millis();
@@ -255,6 +262,11 @@ async fn execute_single_tool_call(
     );
     let result: ToolDispatchResult<ToolDispatchOutcome> = async {
         let tool_context = tool_context.map_err(ToolDispatchFailure::from)?;
+        let tool_context = if scheduling_class == ToolSchedulingClass::ParallelSafe {
+            tool_context.with_parallel_execution()
+        } else {
+            tool_context
+        };
         if let Some(guard) = &execution_context.registration {
             guard
                 .check(&tool_context, &call.call_id, &call.tool_name)
@@ -363,6 +375,7 @@ impl ToolExecutor for SequentialToolExecutor {
                 call.clone(),
                 None,
                 queued_at,
+                ToolSchedulingClass::SerialOnly,
             )
             .await;
             let is_pending = output.outcome.pending().is_some();
@@ -377,19 +390,6 @@ impl ToolExecutor for SequentialToolExecutor {
 
 pub struct ParallelToolExecutor;
 
-impl ParallelToolExecutor {
-    fn batch_allows_parallel(
-        registry: &dyn ToolExecutorPort,
-        calls: &[ToolExecutionInput],
-    ) -> bool {
-        !calls.is_empty()
-            && calls.iter().all(|call| {
-                registry.tool_supports_parallel(&call.tool_name)
-                    && !registry.tool_is_mutating(&call.tool_name)
-            })
-    }
-}
-
 #[async_trait]
 impl ToolExecutor for ParallelToolExecutor {
     async fn execute(
@@ -398,7 +398,10 @@ impl ToolExecutor for ParallelToolExecutor {
         registry: Arc<dyn ToolExecutorPort>,
         calls: &[ToolExecutionInput],
     ) -> TalosResult<Vec<ToolExecutionOutput>> {
-        if !Self::batch_allows_parallel(registry.as_ref(), calls) {
+        if !calls
+            .iter()
+            .all(|call| execution_context.call_allows_parallel(registry.as_ref(), &call.tool_name))
+        {
             return SequentialToolExecutor
                 .execute(execution_context, registry, calls)
                 .await;
@@ -410,9 +413,15 @@ impl ToolExecutor for ParallelToolExecutor {
             let registry = registry.clone();
             let execution_context = execution_context.clone();
             join_set.spawn(async move {
-                let output =
-                    execute_single_tool_call(registry, &execution_context, call, None, queued_at)
-                        .await;
+                let output = execute_single_tool_call(
+                    registry,
+                    &execution_context,
+                    call,
+                    None,
+                    queued_at,
+                    ToolSchedulingClass::ParallelSafe,
+                )
+                .await;
                 (index, output)
             });
         }
@@ -467,7 +476,7 @@ impl ToolExecutionInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StreamingToolSchedulingClass {
+enum ToolSchedulingClass {
     ParallelSafe,
     SerialOnly,
 }
@@ -476,14 +485,14 @@ enum StreamingToolSchedulingClass {
 struct ScheduledStreamingToolCall {
     stream_key: crate::ToolStreamKey,
     input: ToolExecutionInput,
-    scheduling_class: StreamingToolSchedulingClass,
+    scheduling_class: ToolSchedulingClass,
     queued_at: ToolQueuedAt,
 }
 
 #[derive(Debug, Clone)]
 struct RunningStreamingToolCall {
     stream_key: crate::ToolStreamKey,
-    scheduling_class: StreamingToolSchedulingClass,
+    scheduling_class: ToolSchedulingClass,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -620,16 +629,17 @@ impl StreamingToolScheduler {
         Ok(completed)
     }
 
-    fn classify_call(&self, tool_name: &str) -> StreamingToolSchedulingClass {
+    fn classify_call(&self, tool_name: &str) -> ToolSchedulingClass {
         if self.execution_mode == ToolExecutionMode::Sequential {
-            return StreamingToolSchedulingClass::SerialOnly;
+            return ToolSchedulingClass::SerialOnly;
         }
-        if self.registry.tool_supports_parallel(tool_name)
-            && !self.registry.tool_is_mutating(tool_name)
+        if self
+            .execution_context
+            .call_allows_parallel(self.registry.as_ref(), tool_name)
         {
-            StreamingToolSchedulingClass::ParallelSafe
+            ToolSchedulingClass::ParallelSafe
         } else {
-            StreamingToolSchedulingClass::SerialOnly
+            ToolSchedulingClass::SerialOnly
         }
     }
 
@@ -647,7 +657,7 @@ impl StreamingToolScheduler {
             };
 
             match next_call.scheduling_class {
-                StreamingToolSchedulingClass::SerialOnly => {
+                ToolSchedulingClass::SerialOnly => {
                     if self.parallel_running > 0 {
                         return;
                     }
@@ -658,7 +668,7 @@ impl StreamingToolScheduler {
                     self.spawn_call(next_call).await;
                     return;
                 }
-                StreamingToolSchedulingClass::ParallelSafe => {
+                ToolSchedulingClass::ParallelSafe => {
                     if self.parallel_running >= self.max_parallelism {
                         return;
                     }
@@ -675,10 +685,10 @@ impl StreamingToolScheduler {
     async fn spawn_call(&mut self, scheduled: ScheduledStreamingToolCall) {
         self.emit_executing_event(&scheduled).await;
         match scheduled.scheduling_class {
-            StreamingToolSchedulingClass::ParallelSafe => {
+            ToolSchedulingClass::ParallelSafe => {
                 self.parallel_running += 1;
             }
-            StreamingToolSchedulingClass::SerialOnly => {
+            ToolSchedulingClass::SerialOnly => {
                 self.serial_running = true;
             }
         }
@@ -697,6 +707,7 @@ impl StreamingToolScheduler {
                 scheduled.input,
                 progress_emitter,
                 scheduled.queued_at,
+                scheduled.scheduling_class,
             )
             .await;
             (running_call, output)
@@ -729,10 +740,10 @@ impl StreamingToolScheduler {
 
     fn mark_completed(&mut self, running_call: &RunningStreamingToolCall) {
         match running_call.scheduling_class {
-            StreamingToolSchedulingClass::ParallelSafe => {
+            ToolSchedulingClass::ParallelSafe => {
                 self.parallel_running = self.parallel_running.saturating_sub(1);
             }
-            StreamingToolSchedulingClass::SerialOnly => {
+            ToolSchedulingClass::SerialOnly => {
                 self.serial_running = false;
             }
         }

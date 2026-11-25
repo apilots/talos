@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use agent_protocol::{AgentHarness, Deployment};
@@ -84,9 +85,11 @@ impl TalosWorker {
 
         let system_info = talos_system_info::collect().await?;
         let sandbox = ToolSandbox::with_runtime_paths(sandbox_runtime_paths(&config));
-        let tool_environment =
-            WorkerToolEnvironment::discover(&config.agent.kernel.tools.environment.path_prepend)
-                .await;
+        let tool_environment = WorkerToolEnvironment::discover(
+            &config.agent.kernel.tools.environment.path_prepend,
+            Path::new(&config.agent.kernel.workspace_dir),
+        )
+        .await;
         let tool_environment = if std::env::var_os("TALOS_WORKER_PACKAGING")
             .is_some_and(|packaging| packaging == "official-container")
         {
@@ -95,7 +98,6 @@ impl TalosWorker {
             tool_environment.with_native_ripgrep(
                 &config.talos_paths().talos_home,
                 system_info.hostname.as_deref(),
-                &sandbox,
             )
         };
         let tool_registry = Arc::new(

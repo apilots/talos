@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::ser::SerializeStruct;
@@ -68,17 +68,21 @@ impl ToolEnvironmentConfig {
                     format!("agent.kernel.tools.environment.path_prepend[{index}] must be an absolute path"),
                 ));
             }
-            let invalid_entry = || {
-                format!("agent.kernel.tools.environment.path_prepend[{index}] must be a single valid native PATH entry")
-            };
-            if path.as_os_str().as_encoded_bytes().contains(&0) {
-                return Err(TalosError::new(ErrorCode::InvalidRequest, invalid_entry()));
+            if !Self::is_valid_path_entry(path) {
+                return Err(TalosError::new(
+                    ErrorCode::InvalidRequest,
+                    format!("agent.kernel.tools.environment.path_prepend[{index}] must be a single valid native PATH entry"),
+                ));
             }
-            std::env::join_paths([path]).map_err(|error| {
-                TalosError::from_source(ErrorCode::InvalidRequest, invalid_entry(), error)
-            })?;
         }
         Ok(())
+    }
+
+    /// Whether this path can be used as a single entry in a UTF-8 tool child environment.
+    pub fn is_valid_path_entry(path: &Path) -> bool {
+        path.is_absolute()
+            && path.to_str().is_some_and(|text| !text.contains('\0'))
+            && std::env::join_paths([path]).is_ok()
     }
 }
 
