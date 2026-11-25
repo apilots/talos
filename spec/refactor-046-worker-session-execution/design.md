@@ -35,10 +35,10 @@ kernel code. Each keeps only a thin adapter. All of their active outbound
 registration and task and event transport use a bidirectional WebSocket
 to TalosServer. Native Worker uses this model in place of the previous
 gRPC relay. Desktop and TUI are self-contained: each includes a Worker
-and its own UI, and can operate the local machine. Other machines are
-ordinary Workers. A personal computer does not need a public inbound
-port. The same-network cloud Talos Docker Worker in the deployment
-exception below stays on RPC bidirectional streams.
+and its own UI, and can operate the local machine. Other machines see
+Desktop and TUI as ordinary Workers. A personal computer does not need
+a public inbound port. The same-network cloud Talos Docker Worker in
+the deployment exception below stays on RPC bidirectional streams.
 
 ### Worker authority and Server copy
 
