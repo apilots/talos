@@ -15,7 +15,7 @@ describe("Tool timeline inspection", () => {
     const command: Extract<ChatTimelineItem, { kind: "tool_call" }> = {
       itemId: "tool-1", kind: "tool_call", phase: "acting", status: "running",
       callId: "call-1", toolName: "Bash", arguments: { command: "sleep 30" },
-      progress: [{ kind: "status", message: "execution started" }, { kind: "stdout", message: "live stream" }],
+      progress: [{ kind: "stdout", message: "live stream" }],
       startedAtMs: 1_000,
     };
     const view = (
@@ -46,13 +46,12 @@ describe("Tool timeline inspection", () => {
 
   it("does not mark previously streamed output as live on an inactive card", () => {
     render(<ToolCallBlock argumentsValue={{}} callId="call-replay" toolName="Fixture" variant="timeline"
-      live={false} progress={[
-        { kind: "status", message: "Execution started" }, { kind: "stderr", message: "previous chunk" },
-      ]} status="running" />);
+      live={false} progress={[{ kind: "stderr", message: "previous chunk" }]} status="running" />);
     fireEvent.click(screen.getByRole("button", { name: /Fixture.*Last seen running/ }));
     expect(within(screen.getByRole("region", { name: "Streamed output" })).getByText("previous chunk")).toBeTruthy();
     fireEvent.click(screen.getByText("Details"));
-    expect(within(screen.getByText("Details").closest("details")!).getByRole("region", { name: "Arguments" })).toBeTruthy();
-    expect(screen.queryByText("Execution started")).toBeNull();
+    const details = within(screen.getByText("Details").closest("details")!);
+    expect(details.getByRole("region", { name: "Arguments" })).toBeTruthy();
+    expect(details.queryByRole("region", { name: "Execution progress" })).toBeNull();
   });
 });

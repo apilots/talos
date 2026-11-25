@@ -78,14 +78,9 @@ export function ToolCallBlock({
   const duration = running && startedAtMs !== undefined && startedAtMs > 0
     ? <RunningToolDuration startedAtMs={startedAtMs} />
     : durationMs != null ? formatDuration(durationMs) : undefined;
-  // Persisted status deltas also include generic lifecycle notices already represented by the header.
-  const executingMessage = `executing ${toolName.toLowerCase()}`;
-  const progressMessages = open ? progress.flatMap(({ kind, message }) => {
-    if (kind !== "status") return [];
-    const text = message.trim().toLowerCase();
-    return !text || text === executingMessage || text === "execution started" || text === "waiting for execution slot"
-      ? [] : [message];
-  }) : [];
+  const progressMessages = open ? progress.flatMap(({ kind, message }) =>
+    kind === "status" && message.trim() ? [message] : [],
+  ) : [];
   const showQuietCommand = compact && running && toolName === "Bash" &&
     !output?.trim() && !contentItems?.length &&
     !progress.some(({ kind, message }) => kind !== "status" && message.trim());

@@ -15,7 +15,7 @@ const command: Extract<ChatTimelineItem, { kind: "tool_call" }> = {
   callId: "call-1",
   toolName: "Bash",
   arguments: { command: "sleep 30" },
-  progress: [{ kind: "status", message: "execution started" }],
+  progress: [],
   startedAtMs: 1_000,
 };
 

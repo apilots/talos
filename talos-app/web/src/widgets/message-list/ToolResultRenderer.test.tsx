@@ -28,24 +28,20 @@ describe("buildToolResultModel", () => {
     expect(html).toContain("byte_offset=4096");
     expect(html).not.toContain("NaN");
   });
-  it("preserves error status for text result items", () => {
+  it("shows a final text error alongside the streamed output preview", () => {
     const model = buildToolResultModel({
       contentItems: [{ type: "text", text: "permission denied" }],
-      progress: [],
+      progress: [{ kind: "stderr", message: "temporary file created\n" }],
       status: "error",
     });
 
     expect(model.summary).toBe("Failed");
     expect(model.preview).toEqual(["permission denied"]);
-  });
-
-  it("does not repeat an error payload as stderr and retains distinct stdout", () => {
-    const model = buildToolResultModel({ contentItems: [{ type: "text", text: "permission denied" }],
-      progress: [{ kind: "stderr", message: "permission " }, { kind: "stderr", message: "denied\n" },
-        { kind: "stdout", message: "connected\n" }], status: "error" });
     const html = renderToStaticMarkup(model.body);
-    expect(html.match(/permission denied/g)).toHaveLength(1);
-    expect(html).toContain("connected");
+    expect(html).toContain('aria-label="Execution error"');
+    expect(html).toContain("permission denied");
+    expect(html).toContain('aria-label="Standard error (stderr) · streamed preview"');
+    expect(html).toContain("temporary file created");
   });
 
   it("retains a streamed channel omitted by truncated Bash capture without appending partial duplicates", () => {

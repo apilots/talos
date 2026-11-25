@@ -552,6 +552,10 @@ impl StreamingToolScheduler {
         self.emit_queued_event(&scheduled).await;
         self.pending_calls.push_back(scheduled);
         self.schedule_ready_calls().await;
+        // FIFO scheduling means the new call is still at the back if it could not start.
+        if let Some(waiting) = self.pending_calls.back() {
+            self.emit_waiting_for_slot(waiting).await;
+        }
         Ok(())
     }
 
@@ -732,21 +736,20 @@ impl StreamingToolScheduler {
             }),
         )
         .await;
-        if self.parallel_running > 0 || self.serial_running {
-            emit_stream_event(
-                self.stream_tx.as_ref(),
-                crate::AgentKernelEventPayload::ToolProgressDelta(
-                    crate::ToolProgressDeltaStreamData {
-                        stream_key: scheduled.stream_key.clone(),
-                        call_id: scheduled.input.call_id.clone(),
-                        tool_name: scheduled.input.tool_name.clone(),
-                        message: "waiting for execution slot".to_string(),
-                        progress_kind: crate::ToolProgressKind::Status,
-                    },
-                ),
-            )
-            .await;
-        }
+    }
+
+    async fn emit_waiting_for_slot(&self, scheduled: &ScheduledStreamingToolCall) {
+        emit_stream_event(
+            self.stream_tx.as_ref(),
+            crate::AgentKernelEventPayload::ToolProgressDelta(crate::ToolProgressDeltaStreamData {
+                stream_key: scheduled.stream_key.clone(),
+                call_id: scheduled.input.call_id.clone(),
+                tool_name: scheduled.input.tool_name.clone(),
+                message: "waiting for execution slot".to_string(),
+                progress_kind: crate::ToolProgressKind::Status,
+            }),
+        )
+        .await;
     }
 
     async fn emit_executing_event(&self, scheduled: &ScheduledStreamingToolCall) {
@@ -756,17 +759,6 @@ impl StreamingToolScheduler {
                 stream_key: scheduled.stream_key.clone(),
                 call_id: scheduled.input.call_id.clone(),
                 tool_name: scheduled.input.tool_name.clone(),
-            }),
-        )
-        .await;
-        emit_stream_event(
-            self.stream_tx.as_ref(),
-            crate::AgentKernelEventPayload::ToolProgressDelta(crate::ToolProgressDeltaStreamData {
-                stream_key: scheduled.stream_key.clone(),
-                call_id: scheduled.input.call_id.clone(),
-                tool_name: scheduled.input.tool_name.clone(),
-                message: "execution started".to_string(),
-                progress_kind: crate::ToolProgressKind::Status,
             }),
         )
         .await;

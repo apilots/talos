@@ -267,18 +267,10 @@ impl KernelAgentEventMapper {
                 .ensure_tool(data.stream_key, data.call_id, data.tool_name)
                 .await
                 .map(|_| ()),
-            AgentKernelEventPayload::ToolExecuting(data) => {
-                let tool = self
-                    .ensure_tool(data.stream_key, data.call_id, data.tool_name.clone())
-                    .await?;
-                self.append_tool_progress(
-                    &tool,
-                    TalosToolProgressKind::Status,
-                    format!("Executing {}", data.tool_name),
-                    event.occurred_at,
-                )
+            AgentKernelEventPayload::ToolExecuting(data) => self
+                .ensure_tool(data.stream_key, data.call_id, data.tool_name)
                 .await
-            }
+                .map(|_| ()),
             AgentKernelEventPayload::ToolProgressDelta(data) => {
                 let tool = self
                     .ensure_tool(data.stream_key, data.call_id, data.tool_name)

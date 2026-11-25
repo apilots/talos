@@ -43,10 +43,7 @@ describe("ToolCallBlock", () => {
     const props = {
       argumentsValue: { command: "fixture" }, callId: "call-stream", toolName: "Bash", variant: "timeline",
       progress: [
-        { kind: "status", message: "Execution started" },
-        { kind: "status", message: "Executing Bash" },
         { kind: "status", message: "waiting for execution slot" },
-        { kind: "status", message: "Executing a fallback step." },
         { kind: "status", message: "Some output was omitted." },
         { kind: "stdout", message: "stream out\n" },
         { kind: "stderr", message: "stream err\n" },
@@ -61,7 +58,7 @@ describe("ToolCallBlock", () => {
     expect(live.getByRole("region", { name: "Standard error (stderr)" }).querySelector("pre")?.textContent)
       .toBe("stream err\n");
     expect(within(screen.getByRole("region", { name: "Execution progress" })).getAllByRole("listitem")
-      .map((item) => item.textContent)).toEqual(["Executing a fallback step.", "Some output was omitted."]);
+      .map((item) => item.textContent)).toEqual(["waiting for execution slot", "Some output was omitted."]);
     expect(screen.getAllByText("stream out")).toHaveLength(1);
 
     rerender(<ToolCallBlock {...props} progress={[...props.progress]} status="done" contentItems={[{
@@ -75,35 +72,17 @@ describe("ToolCallBlock", () => {
     expect(screen.queryByText("stream err")).toBeNull();
     expect(screen.getByRole("button", { name: /Bash.*Completed/ })).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Execution progress" })).getAllByRole("listitem")
-      .map((item) => item.textContent)).toEqual(["Executing a fallback step.", "Some output was omitted."]);
-  });
-
-  it.each([
-    ["done", "Completed"], ["error", "Failed"], ["cancelled", "Cancelled"],
-  ] as const)("shows the %s outcome only in the card header for lifecycle-only progress", (status, label) => {
-    render(<ToolCallBlock argumentsValue={{}} callId="call-terminal" toolName="Grep" variant="activity"
-      live={false} progress={[
-        { kind: "status", message: "Executing Grep" }, { kind: "status", message: "execution started" },
-      ]} status={status} />);
-    const header = screen.getByRole("button", { name: "Searched files" });
-    fireEvent.click(header);
-    fireEvent.click(screen.getByText("Details"));
-    expect(within(header).getByText(label)).toBeTruthy();
-    const details = screen.getByText("Details").closest("details")!;
-    expect(within(details).getByRole("region", { name: "Arguments" })).toBeTruthy();
-    expect(within(details).queryByRole("list")).toBeNull();
+      .map((item) => item.textContent)).toEqual(["waiting for execution slot", "Some output was omitted."]);
   });
 
   it("shows a returned Bash cancellation as cancelled while preserving the result explanation", () => {
     render(<ToolCallBlock argumentsValue={{ command: "sleep 30" }} callId="call-cancelled" toolName="Bash"
-      live={false} variant="timeline" progress={[{ kind: "status", message: "execution started" }]}
+      live={false} variant="timeline" progress={[]}
       status="error" contentItems={[{
         type: "bash_output", session_id: null, status: "cancelled", exit_code: null,
         stdout: "partial output", stderr: "", truncated: false, elapsed_ms: 100, outputLog: null,
       }]} />);
     fireEvent.click(screen.getByRole("button", { name: /Bash.*Cancelled/ }));
-    fireEvent.click(screen.getByText("Details"));
-    expect(within(screen.getByText("Details").closest("details")!).queryByRole("list")).toBeNull();
     const result = within(screen.getByRole("region", { name: "Command result" }));
     expect(result.getByText("The command was cancelled.")).toBeTruthy();
     expect(result.getByText("partial output")).toBeTruthy();
@@ -288,19 +267,6 @@ describe("ToolCallBlock", () => {
     fireEvent.click(screen.getByRole("button", { name: /WebFetch/ }));
     expect(screen.getAllByText(url, { exact: true })).toHaveLength(1);
     expect(within(screen.getByRole("region", { name: "Web result" })).getByText(responseText, { exact: true })).toBeTruthy();
-  });
-
-  it("keeps multiple returned types in distinct sections of the same card", () => {
-    render(<ToolCallBlock argumentsValue={{}} callId="mixed" toolName="Fixture" status="done" progress={[]}
-      contentItems={[
-        { type: "file_read", path: "sample.txt", content: "file value", offset: 0, limit: 1,
-          total_lines: 1, nextByteOffset: null, truncated: false },
-        { type: "json", value: { extra: "structured value" } },
-      ]} />);
-    fireEvent.click(screen.getByRole("button", { name: /Fixture.*Completed/ }));
-    const result = within(screen.getByRole("region", { name: "Tool result" }));
-    expect(result.getByRole("region", { name: "File content" }).textContent).toContain("file value");
-    expect(result.getByRole("region", { name: "JSON response" }).textContent).toContain("structured value");
   });
 
   it("uses the returned content rather than the tool name to label JSON and references", () => {

@@ -41,13 +41,12 @@ export function buildToolResultModel({
   status: ChatToolStatus;
 }): ToolResultRenderModel {
   const items = contentItems ?? [];
-  if (lastBashOutput(items)) {
-    const command = buildTaskModel(items, progress, status);
-    const other = items.filter((item) => item.type !== "bash_output");
-    return other.length ? combineResultModels([command, buildResultContentModel(other, [], status)]) : command;
-  }
+  const subagent = items.find((item) => item.type === "subagent_result");
+  if (subagent) return buildSubagentModel(subagent.result, status);
+  if (lastBashOutput(items)) return buildTaskModel(items, progress, status);
   if (status !== "error") {
-    return buildResultContentModel(items, progress, status, fallbackOutput);
+    return items.length > 0 ? buildResultContentModel(items, status)
+      : buildProgressFallbackModel(progress, fallbackOutput, status);
   }
 
   const errors: string[] = [];
@@ -66,24 +65,16 @@ export function buildToolResultModel({
     return true;
   });
   const error = errors.join("\n").trim() || (items.length === 0 ? fallbackOutput?.trim() : undefined);
-  // A final error may repeat a whole streamed channel. Do not discard distinct output.
-  const duplicateChannels = error ? (["stdout", "stderr"] as const).filter(
-    (channel) => collectToolOutput(progress, channel).trim() === error,
-  ) : [];
-  const remainingProgress = duplicateChannels.length > 0 ? progress.filter(
-    (entry) => entry.kind === "status" || !duplicateChannels.includes(entry.kind),
-  ) : progress;
-  const model = buildResultContentModel(structured, remainingProgress, status);
+  const model = structured.length > 0 ? buildResultContentModel(structured, status) : undefined;
+  const streamedOutput = buildStreamedOutputBody(progress, true);
   const preview = firstNonEmptyLine(error ?? "");
-  const body = model.body;
   return {
-    ...model,
-    heading: undefined,
-    streamed: false,
+    summary: model?.summary ?? toolResultStateLabel(status),
     preview: preview ? [preview] : [],
     body: <>
-      {error || !body ? <ToolResultSection kind="error" failureReason="unspecified">{error}</ToolResultSection> : null}
-      {model.heading ? <TypedResultBody model={model} /> : body}
+      {error || (!model?.body && !streamedOutput) ? <ToolResultSection kind="error" failureReason="unspecified">{error}</ToolResultSection> : null}
+      {model ? <TypedResultBody model={model} /> : null}
+      {streamedOutput}
     </>,
   };
 }
@@ -97,49 +88,12 @@ function decodeToolError(value: unknown) {
   }
 }
 
-function buildResultContentModel(
-  items: TalosContentItem[],
-  progress: ToolProgress,
-  status: ChatToolStatus,
-  fallbackOutput?: string,
-): ToolResultRenderModel {
-  if (items.length === 0) return buildProgressFallbackModel(progress, fallbackOutput, status);
-  const hasWeb = items.some((item) => item.type === "web_reference");
-  const groups = new Map<"subagent_result" | "diff" | "file_read" | "search_results" | "web_reference" | "plain", TalosContentItem[]>();
-  for (const item of items) {
-    const kind = item.type;
-    const key = kind === "subagent_result" || kind === "diff" || kind === "file_read" || kind === "search_results"
-      ? kind : hasWeb ? "web_reference" : "plain";
-    const group = groups.get(key);
-    if (group) group.push(item);
-    else groups.set(key, [item]);
-  }
-  const models = Array.from(groups, ([key, group]) => {
-    switch (key) {
-      case "subagent_result": {
-        const agents = group.filter((item): item is SubagentResultItem => item.type === "subagent_result");
-        return combineResultModels(agents.map((item) => buildSubagentModel(item.result, status)));
-      }
-      case "diff": return buildDiffModel(group, status);
-      case "file_read": return buildFileModel(group, status);
-      case "search_results": return buildExploredModel(group, status);
-      case "web_reference": return buildReferenceModel(group, status);
-      default: return buildTextJsonModel(group, status);
-    }
-  });
-  return combineResultModels(models);
-}
-
-function combineResultModels([first, ...rest]: ToolResultRenderModel[]): ToolResultRenderModel {
-  if (rest.length === 0) return first;
-  return {
-    summary: first.summary,
-    preview: [first, ...rest].flatMap((model) => model.preview).slice(0, 2),
-    failurePreview: first.failurePreview,
-    get body() {
-      return <>{[first, ...rest].map((model, index) => <TypedResultBody key={index} model={model} />)}</>;
-    },
-  };
+function buildResultContentModel(items: TalosContentItem[], status: ChatToolStatus): ToolResultRenderModel {
+  if (items.some((item) => item.type === "diff")) return buildDiffModel(items, status);
+  if (items.some((item) => item.type === "file_read")) return buildFileModel(items, status);
+  if (items.some((item) => item.type === "search_results")) return buildExploredModel(items, status);
+  if (items.some((item) => item.type === "web_reference")) return buildReferenceModel(items, status);
+  return buildTextJsonModel(items, status);
 }
 
 function TypedResultBody({ model }: { model: ToolResultRenderModel }) {
@@ -577,6 +531,18 @@ function collectToolOutput(progress: ToolProgress, kind?: "stdout" | "stderr") {
     .join("");
 }
 
+function buildStreamedOutputBody(progress: ToolProgress, streamedPreview = false) {
+  const stdout = collectToolOutput(progress, "stdout");
+  const stderr = collectToolOutput(progress, "stderr");
+  if (!stdout.trim() && !stderr.trim()) return null;
+  return (
+    <>
+      <ToolResultSection kind="stdout" streamed={streamedPreview}>{stdout}</ToolResultSection>
+      <ToolResultSection kind="stderr" streamed={streamedPreview}>{stderr}</ToolResultSection>
+    </>
+  );
+}
+
 function buildProgressFallbackModel(
   progress: ToolProgress,
   fallbackOutput: string | undefined,
@@ -584,7 +550,7 @@ function buildProgressFallbackModel(
 ): ToolResultRenderModel {
   const resultText = fallbackOutput?.trim() ? fallbackOutput : undefined;
   const output = resultText ?? collectToolOutput(progress);
-  const streamed = !resultText && Boolean(output.trim());
+  const streamedBody = resultText ? null : buildStreamedOutputBody(progress);
   const summary = toolResultStateLabel(status);
   const preview = status === "running"
     ? output.trim().split(/\r?\n/).at(-1)
@@ -592,15 +558,12 @@ function buildProgressFallbackModel(
   return {
     summary,
     preview: preview ? [preview] : [],
-    streamed,
+    streamed: streamedBody !== null,
     body: resultText ? (
       <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">
         {resultText}
       </pre>
-    ) : streamed ? <>
-      <ToolResultSection kind="stdout">{collectToolOutput(progress, "stdout")}</ToolResultSection>
-      <ToolResultSection kind="stderr">{collectToolOutput(progress, "stderr")}</ToolResultSection>
-    </> : null,
+    ) : streamedBody,
   };
 }
 

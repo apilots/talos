@@ -403,14 +403,17 @@ row shows measured execution duration (or Bash's recorded elapsed time when
 execution metrics are absent), not queue or result publication delay. Failed
 rows show at most one preview line. Their expanded details put the execution
 error, standard output, standard error and any saved log reference in separate
-sections. Live stdout and stderr have their own output sections and are
-replaced by the final tool result when it arrives. A streamed channel retained
-as a fallback is labeled as a preview; truncated command output and saved log
-capture status are explicit. Result headings follow
-structured content, not tool names. The tool header owns the lifecycle status;
-the metadata disclosure shows the call ID, arguments, and any additional
-progress messages in order, without repeating generic lifecycle notices or
-output. An unresolved replay does not gain a terminal outcome. A live tool row
+sections. The final Bash result replaces live stdout and stderr when available;
+a streamed channel retained as a fallback is labeled as a preview. Truncated
+command output and saved log capture status are explicit. For other failures,
+available streamed channels remain labeled previews alongside the final error.
+Result headings follow structured content, not tool names. WebFetch shows its source reference with the
+returned text. The tool header owns the lifecycle status; the metadata disclosure
+shows the call ID, arguments, and additional progress in order, including waiting
+for an execution slot when a call cannot start at admission. The event mapper
+avoids synthesizing redundant start notices, and Web's timeline projection omits
+their persisted legacy equivalents.
+An unresolved replay does not gain a terminal outcome. A live tool row
 opened by the user stays in place through completion in that view, including
 when an input request was inspected with the rest of the rail collapsed.
 Turn failure comes from the Turn outcome. Individual tool

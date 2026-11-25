@@ -1008,12 +1008,13 @@ async fn test_streaming_scheduler_limits_parallel_safe_tools() {
         command_risk_assessor: None,
         run_tasks: crate::test_run_tasks(),
     };
+    let (stream_tx, mut stream_rx) = mpsc::channel(32);
     let mut scheduler = StreamingToolScheduler::new(
         ToolExecutionMode::Parallel,
         2,
         execution_context,
         registry,
-        None,
+        Some(stream_tx),
     );
 
     for index in 0..4 {
@@ -1044,4 +1045,28 @@ async fn test_streaming_scheduler_limits_parallel_safe_tools() {
 
     assert_eq!(completed_count, 4);
     assert_eq!(max_concurrent.load(Ordering::SeqCst), 2);
+    let mut wait_notices = Vec::new();
+    while let Ok(event) = stream_rx.try_recv() {
+        match event.payload {
+            AgentKernelEventPayload::ToolProgressDelta(data)
+                if data.progress_kind == ToolProgressKind::Status =>
+            {
+                wait_notices.push((data.call_id, data.message));
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        wait_notices,
+        [
+            (
+                "call_2".to_string(),
+                "waiting for execution slot".to_string()
+            ),
+            (
+                "call_3".to_string(),
+                "waiting for execution slot".to_string()
+            ),
+        ]
+    );
 }
