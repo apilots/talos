@@ -12,6 +12,7 @@ use tokio::process::Command;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 
+use crate::context::wait_for_cancellation;
 use crate::runtimes::{map_sandbox_error, process_environment, resolve_base_dir, resolve_path};
 use crate::{ToolContext, ToolProgressEmitter, ToolProgressKind};
 use talos_tools_sandbox::{
@@ -439,14 +440,26 @@ fn build_command(
         )
     })?;
 
-    let mut args = Vec::new();
-
-    if request.login {
-        args.push("-lc".to_string());
-    } else {
-        args.push("-c".to_string());
+    let mut args = vec![
+        if request.login { "-lc" } else { "-c" }.to_string(),
+        request.cmd.clone(),
+    ];
+    let shell_name = Path::new(&shell).file_name().and_then(|name| name.to_str());
+    let login_builtin = match (request.login, shell_name) {
+        (true, Some("bash" | "zsh")) => Some("\\builtin"),
+        (true, Some("sh" | "dash")) => Some("\\command"),
+        _ => None,
+    };
+    if let Some(builtin) = login_builtin {
+        // Pass PATH as an argument so verbose mode cannot print it as source.
+        // Suppress xtrace for the export and leave the user's trace mode intact.
+        args[1] = format!(
+            "{{ {builtin} export PATH=\"$1\"; }} 2>/dev/null || exit $?\n{builtin} shift\n{}",
+            request.cmd
+        );
+        args.push(program.to_string_lossy().into_owned());
+        args.push(worker_environment.path().to_owned());
     }
-    args.push(request.cmd.clone());
 
     let mut env = process_environment(&worker_environment);
     if request.tty {
@@ -588,13 +601,6 @@ fn spawn_timeout(session: Arc<BashSession>, timeout_ms: u64) -> JoinHandle<()> {
         }
         session.notify.notify_waiters();
     })
-}
-
-async fn wait_for_cancellation(cancellation: Option<crate::InvocationCancellation>) {
-    match cancellation {
-        Some(cancellation) => cancellation.requested().await,
-        None => std::future::pending().await,
-    }
 }
 
 async fn cancel_session(session: &BashSession) {

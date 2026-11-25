@@ -32,6 +32,11 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         echo "Tag ${tag}: metadata checked; publisher and release CI require exact-source candidate evidence."
         continue
     fi
+    if [[ "${checked_ref}" != true ]] &&
+        ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
+        echo "Python 3.11 or newer is required for pre-push checks. Add its bin directory to PATH. For the Talos Bash tool, set agent.kernel.tools.environment.path_prepend on the executing Worker and restart it." >&2
+        exit 1
+    fi
     checked_ref=true
     base="${remote_sha}"
     if [[ "${base}" == "${zero_sha}" ]]; then

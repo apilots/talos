@@ -84,7 +84,37 @@ pub async fn run(
     request: &GrepFilesRequest,
     context: &ToolContext,
 ) -> TalosResult<GrepFilesResponse> {
+    let search_path = search_path(request, context)?;
     let pattern = request.pattern.trim();
+    let limit = request.head_limit.unwrap_or(request.limit).min(MAX_LIMIT);
+    let context_lines = request
+        .context
+        .max(request.before_context.unwrap_or(0))
+        .max(request.after_context.unwrap_or(0));
+    let rg_output = run_rg(request, pattern, &search_path, context_lines, context).await?;
+    let total_matches = rg_output.page.total;
+    let offset = request.offset.min(total_matches);
+    let selected = rg_output.page.matches;
+    let more_available =
+        request.output_mode != GrepOutputMode::Count && offset + selected.len() < total_matches;
+    let content = render_grep_content(request.output_mode.clone(), &selected, total_matches);
+
+    Ok(GrepFilesResponse {
+        query: pattern.to_string(),
+        content,
+        matches: selected,
+        offset,
+        limit,
+        total_matches,
+        more_available,
+        partial: rg_output.timed_out,
+    })
+}
+
+pub(crate) fn search_path(
+    request: &GrepFilesRequest,
+    context: &ToolContext,
+) -> TalosResult<std::path::PathBuf> {
     if request.context > 20
         || request.before_context.is_some_and(|lines| lines > 20)
         || request.after_context.is_some_and(|lines| lines > 20)
@@ -94,7 +124,7 @@ pub async fn run(
             "Search context cannot exceed 20 lines on either side.",
         ));
     }
-    if pattern.is_empty() {
+    if request.pattern.trim().is_empty() {
         return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "pattern must not be empty".to_string(),
@@ -123,29 +153,7 @@ pub async fn run(
             "searching dotenv files is not allowed".to_string(),
         ));
     }
-    let limit = request.head_limit.unwrap_or(request.limit).min(MAX_LIMIT);
-    let context_lines = request
-        .context
-        .max(request.before_context.unwrap_or(0))
-        .max(request.after_context.unwrap_or(0));
-    let rg_output = run_rg(request, pattern, &search_path, context_lines, context).await?;
-    let total_matches = rg_output.page.total;
-    let offset = request.offset.min(total_matches);
-    let selected = rg_output.page.matches;
-    let more_available =
-        request.output_mode != GrepOutputMode::Count && offset + selected.len() < total_matches;
-    let content = render_grep_content(request.output_mode.clone(), &selected, total_matches);
-
-    Ok(GrepFilesResponse {
-        query: pattern.to_string(),
-        content,
-        matches: selected,
-        offset,
-        limit,
-        total_matches,
-        more_available,
-        partial: rg_output.timed_out,
-    })
+    Ok(search_path)
 }
 
 struct RgOutput {

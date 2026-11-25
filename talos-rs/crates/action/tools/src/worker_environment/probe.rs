@@ -55,7 +55,7 @@ pub(super) async fn discover_path(inherited: Option<&OsStr>) -> Result<OsString,
         .env("SHELL", &account.shell)
         .env("USER", &account.name)
         .env("LOGNAME", &account.name)
-        .env("PATH", inherited.path)
+        .env("PATH", inherited.path())
         .env("TERM", "dumb");
     capture(command, TIMEOUT).await
 }

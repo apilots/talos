@@ -1,5 +1,82 @@
 use super::*;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[tokio::test]
+async fn login_bash_restores_worker_path_after_startup_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("preferred'bin");
+    std::fs::create_dir(&bin).unwrap();
+    let program = bin.join("worker-fixture");
+    std::fs::write(&program, "#!/bin/sh\nprintf worker-path\n").unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(
+        home.path().join(".bash_profile"),
+        "builtin export PATH=/usr/bin:/bin LOGIN_MARKER=login\nexport() { printf shadowed; }\nset -x\n",
+    )
+    .unwrap();
+    let mut context = crate::test_support::full_access_process_context(
+        ToolContext::new("worker-path-login", "user").with_project_root(home.path()),
+    );
+    context.bind_worker_environment(Arc::new(crate::WorkerToolEnvironment::assemble(
+        &[bin],
+        None,
+        None,
+    )));
+    let mut command = build_command(
+        &BashCommandRequest {
+            cmd: "printf '%s ' \"$LOGIN_MARKER\"; worker-fixture".into(),
+            workdir: None,
+            shell: Some("/bin/bash".into()),
+            login: true,
+            tty: false,
+            yield_time_ms: 5000,
+            timeout_ms: Some(5000),
+            max_output_bytes: None,
+            sandbox_permissions: SandboxPermissions::UseDefault,
+            justification: None,
+            prefix_rule: None,
+        },
+        home.path(),
+        &context,
+    )
+    .unwrap();
+    command
+        .env
+        .insert("HOME".into(), home.path().display().to_string());
+    // Some distributions reset HOME in /etc/profile. A controlled shell start
+    // file makes both the login marker and the PATH reset observable.
+    command.args[1] = format!(". \"$2\"\n{}", command.args[1]);
+    command
+        .args
+        .push(home.path().join(".bash_profile").display().to_string());
+    let mut child = context
+        .sandbox_permit()
+        .unwrap()
+        .spawn(command)
+        .await
+        .unwrap();
+    let mut output = String::new();
+    child
+        .take_stdout()
+        .unwrap()
+        .read_to_string(&mut output)
+        .await
+        .unwrap();
+    let mut stderr = String::new();
+    child
+        .take_stderr()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .await
+        .unwrap();
+    assert!(child.wait().await.unwrap().success());
+    assert_eq!(output, "login worker-path");
+    assert!(!stderr.contains("preferred'bin"));
+    assert!(stderr.contains("worker-fixture"));
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn worker_path_resolves_the_selected_shell_and_child_command() {

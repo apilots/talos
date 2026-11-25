@@ -3,3 +3,4 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/common.sh"
 source "${TALOS_E2E_DIR}/scripts/sandbox.sh"
 run_native_sandbox_case bash_output_logs
+run_native_sandbox_case worker_tool_path

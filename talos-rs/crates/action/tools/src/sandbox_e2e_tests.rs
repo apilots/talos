@@ -125,6 +125,72 @@ async fn dispatch(
         .map_err(ToolDispatchFailure::into_error)
 }
 
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "run through the output_logs E2E case"]
+async fn worker_tool_path() {
+    use crate::WorkerToolEnvironment;
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let bin = workspace.path().join("configured-bin");
+    std::fs::create_dir(&bin).unwrap();
+    let rg = bin.join("rg");
+    std::fs::write(
+        &rg,
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+    printf '%s\n' 'configured rg fixture'
+else
+    printf '%s\n' '{"type":"match","data":{"path":{"text":"sample.txt"},"lines":{"text":"configured rg fixture"},"line_number":1,"submatches":[{"start":0}]}}'
+fi
+"#,
+    ).unwrap();
+    std::fs::set_permissions(&rg, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let worker = WorkerToolEnvironment::assemble(&[bin], None, None);
+    let (sandbox, audit) = sandbox();
+    let tools = registry(sandbox).with_worker_environment(worker);
+    let ctx = || {
+        context(
+            workspace.path(),
+            ToolUserPermissionModeConfig::ApproveForMe,
+            ToolSandboxNetworkConfig::Restricted,
+        )
+        .with_command_risk_assessor(Arc::new(FixedRiskAssessor {
+            assessment: CommandRiskAssessment {
+                verdict: CommandRiskVerdict::Safe,
+                categories: Vec::new(),
+                summary: "Run the fixed version fixture.".into(),
+            },
+        }))
+    };
+    for (call, tool, arguments) in [
+        ("bash", "Bash", json!({"command": "rg --version"})),
+        (
+            "grep",
+            "Grep",
+            json!({"path": ".", "pattern": "configured rg fixture", "output_mode": "content"}),
+        ),
+    ] {
+        let result = dispatch(&tools, ctx(), call, tool, arguments)
+            .await
+            .unwrap();
+        assert!(result
+            .payload()
+            .unwrap()
+            .content()
+            .contains("configured rg fixture"));
+        assert!(audit.events.lock().unwrap().iter().any(|event| {
+            event.invocation.call_id == call
+                && event.stage == ToolSandboxAuditStage::SpawnProcess
+                && matches!(
+                    event.enforcement,
+                    Some(ToolSandboxEnforcement::LocalOs { .. })
+                )
+        }));
+    }
+}
+
 #[tokio::test]
 #[ignore = "run through the output_logs E2E case"]
 async fn bash_output_logs() {

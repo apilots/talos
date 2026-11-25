@@ -82,6 +82,7 @@ impl TalosWorker {
         )));
         let llm_provider_router: Arc<dyn LlmProviderRouter> = provider_router.clone();
 
+        let system_info = talos_system_info::collect().await?;
         let sandbox = ToolSandbox::with_runtime_paths(sandbox_runtime_paths(&config));
         let tool_environment =
             WorkerToolEnvironment::discover(&config.agent.kernel.tools.environment.path_prepend)
@@ -91,7 +92,11 @@ impl TalosWorker {
         {
             tool_environment.with_packaged_ripgrep()
         } else {
-            tool_environment
+            tool_environment.with_native_ripgrep(
+                &config.talos_paths().talos_home,
+                system_info.hostname.as_deref(),
+                &sandbox,
+            )
         };
         let tool_registry = Arc::new(
             ToolRegistry::new_with_sandbox(sandbox).with_worker_environment(tool_environment),
@@ -251,7 +256,6 @@ impl TalosWorker {
             ));
         }
 
-        let system_info = talos_system_info::collect().await?;
         let background_tasks = Arc::new(talos_guard_task::GuardTasks::default());
         let output_logs_changed = background_tasks.register(
             talos_guard_task::GuardTaskSpec {

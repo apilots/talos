@@ -34,6 +34,7 @@ const GATE_SOURCE_ALLOW_LIST: &str = "allow_list";
 const GATE_SOURCE_TOOL_SEMANTIC: &str = "tool_semantic";
 
 mod catalog;
+mod grep_recovery;
 mod output_limits;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -572,6 +573,8 @@ impl ToolRegistry {
             Ok(access) => access,
             Err(error) => return Err(Self::pre_execute_failure(error)),
         };
+        let ripgrep =
+            self.prepare_ripgrep_recovery(&invocation, context.tool_context(), spec.as_ref());
         let orchestrator = RegistryOrchestrator::from_context(context.tool_context());
         let preparation = match orchestrator
             .prepare_execution(
@@ -586,6 +589,16 @@ impl ToolRegistry {
             Ok(preparation) => preparation,
             Err(error) => return Err(Self::sandbox_failure(error)),
         };
+        if let Some(ripgrep) = ripgrep.filter(|_| !matches!(preparation, ToolPreparation::Rejected))
+        {
+            if let Some(outcome) = ripgrep
+                .recover(&invocation, context.tool_context(), self)
+                .await
+                .map_err(Self::execution_failure)?
+            {
+                return Ok(outcome);
+            }
+        }
         match preparation {
             ToolPreparation::Ready => {}
             ToolPreparation::RequiresApproval {
@@ -637,33 +650,6 @@ impl ToolRegistry {
             })
             .map(|spec| spec.definition.name.clone())
             .collect()
-    }
-
-    /// Check if a tool is available and allowed by policy.
-    pub fn is_tool_available(&self, name: &str) -> bool {
-        self.tool_catalog()
-            .find(name)
-            .map(|spec| {
-                Self::is_static_policy_exempt(spec)
-                    || self.policy_checker.policy.is_allowed(&spec.definition.name)
-            })
-            .unwrap_or(false)
-    }
-
-    /// Return all registered tools as model-friendly definitions.
-    pub fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
-        self.tool_catalog().model_definitions()
-    }
-
-    pub fn tool_supports_parallel(&self, name: &str) -> bool {
-        self.tool_catalog().supports_parallel(name)
-    }
-
-    pub fn tool_is_mutating(&self, name: &str) -> bool {
-        self.tool_catalog()
-            .find(name)
-            .map(|spec| !spec.behavior_flags.read_only)
-            .unwrap_or(true)
     }
 
     /// Build a context from execution state.

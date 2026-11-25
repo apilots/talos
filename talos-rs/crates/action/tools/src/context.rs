@@ -59,6 +59,13 @@ impl InvocationCancellation {
     }
 }
 
+pub(crate) async fn wait_for_cancellation(cancellation: Option<InvocationCancellation>) {
+    match cancellation {
+        Some(cancellation) => cancellation.requested().await,
+        None => std::future::pending().await,
+    }
+}
+
 impl ToolProgressEmitter {
     pub fn new(sink: impl Fn(ToolProgressEvent) + Send + Sync + 'static) -> Self {
         Self {
@@ -373,6 +380,11 @@ impl ToolContext {
         self.sandbox_approval_fingerprints
             .get(call_id)
             .map(|fingerprint| fingerprint.value().clone())
+    }
+
+    pub(crate) fn clear_sandbox_approval(&self, call_id: &str) {
+        self.sandbox_approval_fingerprints.remove(call_id);
+        self.user_action_responses.remove(call_id);
     }
 
     pub fn current_call_id(&self) -> Option<&str> {

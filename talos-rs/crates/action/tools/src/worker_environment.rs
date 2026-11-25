@@ -3,14 +3,22 @@
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use std::{env, fs};
+
+use talos_tools_sandbox::ToolSandbox;
+
+mod ripgrep;
+pub(crate) use ripgrep::{InstallApproval, RipgrepRecovery};
 
 /// Immutable executable search path for one executing Worker. Construct at Worker
 /// startup from trusted operator configuration, not from an invocation or client.
 #[derive(Clone)]
 pub struct WorkerToolEnvironment {
     path: String,
+    path_with_managed_bin: Option<String>,
     packaged_ripgrep: bool,
+    ripgrep_recovery: Option<Arc<RipgrepRecovery>>,
 }
 
 impl WorkerToolEnvironment {
@@ -57,7 +65,9 @@ impl WorkerToolEnvironment {
         .expect("validated PATH entries are UTF-8");
         Self {
             path,
+            path_with_managed_bin: None,
             packaged_ripgrep: false,
+            ripgrep_recovery: None,
         }
     }
 
@@ -66,6 +76,35 @@ impl WorkerToolEnvironment {
     pub fn with_packaged_ripgrep(mut self) -> Self {
         self.packaged_ripgrep = true;
         self
+    }
+
+    /// Enables the native, user-approved route under the Worker's private home.
+    /// The managed directory is searched after configured, discovered and
+    /// inherited paths, so an installed system executable keeps precedence.
+    pub fn with_native_ripgrep(
+        mut self,
+        home: &Path,
+        hostname: Option<&str>,
+        sandbox: &ToolSandbox,
+    ) -> Self {
+        if let Some(recovery) = RipgrepRecovery::new(home, hostname, sandbox) {
+            if !env::split_paths(OsStr::new(&self.path)).any(|entry| entry == recovery.root()) {
+                let entries = env::split_paths(OsStr::new(&self.path))
+                    .filter(|entry| !entry.as_os_str().is_empty())
+                    .chain(std::iter::once(recovery.root().to_path_buf()));
+                let path = env::join_paths(entries)
+                    .expect("validated native PATH entries are joinable")
+                    .into_string()
+                    .expect("validated PATH entries are UTF-8");
+                self.path_with_managed_bin = Some(path);
+            }
+            self.ripgrep_recovery = Some(Arc::new(recovery));
+        }
+        self
+    }
+
+    pub(crate) fn ripgrep_recovery(&self) -> Option<&RipgrepRecovery> {
+        self.ripgrep_recovery.as_deref()
     }
 
     pub(crate) fn missing_ripgrep(&self) -> talos_error::TalosError {
@@ -78,6 +117,12 @@ impl WorkerToolEnvironment {
     }
 
     pub(crate) fn path(&self) -> &str {
+        if let Some(path) = self.path_with_managed_bin.as_deref().filter(|_| {
+            self.ripgrep_recovery()
+                .is_some_and(RipgrepRecovery::directory_is_current)
+        }) {
+            return path;
+        }
         // Some POSIX shells treat an empty PATH like a current-directory entry.
         // /dev/null is an absolute non-directory, so neither shell fallback nor
         // workspace lookup is possible when no usable entries exist.
@@ -97,7 +142,7 @@ impl WorkerToolEnvironment {
         {
             return None;
         }
-        env::split_paths(OsStr::new(&self.path))
+        env::split_paths(OsStr::new(self.path()))
             .filter(|directory| directory.is_absolute())
             .map(|directory| directory.join(path))
             .find(|candidate| is_executable(candidate))
