@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { parseFilePreviewReference, type FilePreviewSource } from "@talos/sdk-core";
+import { isLocalFileReference, parseFilePreviewReference, type FilePreviewSource } from "@talos/sdk-core";
 import type { FilePreviewPosition } from "@/shared/store/workspace-window";
 import { Download, FileText, RotateCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -68,7 +68,7 @@ export function FilePreview({ source, owner = {}, connectionKey, instanceKey, po
   }, [descriptor, resourcePath]);
   const sessionId = source.kind === "sessionPath" ? source.sessionId : null;
   const openLink = useCallback(async (reference: string) => {
-    if (/^[a-z][a-z\d+.-]*:/i.test(reference) || reference.startsWith("//")) { await openResourceLink(reference, owner.nodeId); return; }
+    if (!isLocalFileReference(reference) || /^file:\/\//i.test(reference)) { await openResourceLink(reference, owner.nodeId); return; }
     const citation = parseFilePreviewReference(reference, { fromPath: resourcePath });
     const path = resourcePath ? citation.path : undefined;
     if (path !== undefined) {
@@ -97,6 +97,6 @@ export function FilePreview({ source, owner = {}, connectionKey, instanceKey, po
       : display?.kind === "browser" && display.mimeType === "application/pdf" && url && resourcePath ? <Suspense fallback={loading}><PdfPreview key={`${descriptor?.previewId}:${resourcePath}`} url={url} resourcePath={resourcePath} position={position} onPositionChange={onPositionChange} onOpenLink={openLink} /></Suspense>
       : display?.kind === "browser" ? <><p className="shrink-0 border-b border-divider px-4 py-1.5 text-[11px] text-muted">{t(display.mimeType === "text/html" ? "preview.htmlHint" : "preview.nativeHint")}</p>{url ? <BrowserFrame key={surface.native ? "native" : url} surface={surface} url={url} title={file?.originalFilename ?? t("preview.title")} /> : loading}</>
       : text === null && descriptor && resourcePath ? <TextPreview key={`${descriptor.previewId}:${resourcePath}`} descriptor={descriptor} resourcePath={resourcePath} position={position} onPositionChange={onPositionChange} />
-      : <DocumentScroll key={`${descriptor?.previewId}:${resourcePath}`} resourcePath={resourcePath ?? ""} position={position} onPositionChange={onPositionChange}>{!text?.trim() ? <p className="text-sm text-muted">{t("preview.empty")}</p> : <MarkdownRenderer className="markdown-body prose prose-sm max-w-none break-words" text={text ?? ""} onOpenLink={openLink} resolveImageUrl={resolveImageUrl} renderFileImage={renderFileImage} />}</DocumentScroll>}
+      : <DocumentScroll key={`${descriptor?.previewId}:${resourcePath}`} resourcePath={resourcePath ?? ""} position={position} onPositionChange={onPositionChange}>{!text?.trim() ? <p className="text-sm text-muted">{t("preview.empty")}</p> : <MarkdownRenderer className="markdown-body prose prose-sm max-w-none break-words" text={text ?? ""} onOpenLink={openLink} resolveImageUrl={resolveImageUrl} renderFileImage={renderFileImage} interactiveCodeReferences={sessionId !== null} />}</DocumentScroll>}
   </section>;
 }

@@ -44,15 +44,30 @@ it("resolves Markdown and HTML references from their document directory with sta
   expect(resolvePreviewResourcePath("docs/report.md", "plots/100%25%20done.png")).toBe("docs/plots/100% done.png");
   expect(resolvePreviewResourcePath("docs/report.md", "plots/100% done.png")).toBe("docs/plots/100% done.png");
   expect(resolvePreviewResourcePath("docs/report.md", "https://example.com/report")).toBeUndefined();
+  expect(resolvePreviewResourcePath("docs/report.md", "report.md:12")).toBeUndefined();
 });
 
 it("normalizes source citations against their document directory", async () => {
-  const { parseFilePreviewReference } = await import("../file-preview");
+  const { isLocalFileReference, isRootFileLineCitation, parseFilePreviewReference } = await import("../file-preview");
   expect(parseFilePreviewReference("src/worker.rs:27:5")).toEqual({ path: "src/worker.rs", line: 27 });
+  expect(parseFilePreviewReference("report.md:12")).toEqual({ path: "report.md", line: 12 });
+  expect(parseFilePreviewReference("lib.rs:27:5", { fromPath: "docs/report.md" })).toEqual({ path: "docs/lib.rs", line: 27 });
   expect(parseFilePreviewReference("file:///tmp/report%20one.rs#L12")).toEqual({ path: "/tmp/report one.rs", line: 12 });
   expect(parseFilePreviewReference("a%23b.rs:12", { fromPath: "docs/report.md" })).toEqual({ path: "docs/a#b.rs", line: 12 });
   expect(parseFilePreviewReference("/workspace/project/src/lib.rs#L27", { fromPath: "docs/report.md" })).toEqual({ path: "/workspace/project/src/lib.rs", line: 27 });
   expect(parseFilePreviewReference("../src/lib.rs#L27", { fromPath: "docs/report.md" })).toEqual({ path: "src/lib.rs", line: 27 });
   expect(parseFilePreviewReference("reports/100% done.md")).toEqual({ path: "reports/100% done.md" });
   expect(parseFilePreviewReference("file:///workspace/reports/100%25%20done.md#L12")).toEqual({ path: "/workspace/reports/100% done.md", line: 12 });
+  expect(isRootFileLineCitation("report.md:12")).toBe(true);
+  expect(isRootFileLineCitation("lib.rs:27:5")).toBe(true);
+  expect(isRootFileLineCitation("tel:12345")).toBe(false);
+  expect(isRootFileLineCitation("127.0.0.1:8080")).toBe(false);
+  expect(isRootFileLineCitation("https://example.com:8080")).toBe(false);
+  expect(isLocalFileReference("report.md:12")).toBe(true);
+  expect(isLocalFileReference("file:///tmp/a.md")).toBe(true);
+  expect(isLocalFileReference("mailto:support@example.test")).toBe(false);
+  expect(isLocalFileReference("tel:12345")).toBe(false);
+  expect(isLocalFileReference("https://example.test:8080/page")).toBe(false);
+  expect(isLocalFileReference("#section")).toBe(false);
+  expect(isLocalFileReference("//example.test/page")).toBe(false);
 });

@@ -1,3 +1,4 @@
+import { isLocalFileReference } from "@talos/sdk-core";
 import { useState, type ComponentProps, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { openResourceLink } from "@/shared/lib/open-resource";
@@ -8,7 +9,8 @@ export function ResourceLink({ href, children, title, className, onOpenLink }: C
   const open = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.type === "auxclick" && event.button !== 1) return;
     // Markdown owns URL sanitization; leave its other safe protocols to the browser.
-    if (href?.startsWith("#") || (href && /^[a-z][a-z\d+.-]*:/i.test(href) && !/^(https?|talos-file|file):/i.test(href))) return;
+    const handled = !href || href.startsWith("//") || isLocalFileReference(href) || /^(https?|talos-file):/i.test(href);
+    if (!handled) return;
     event.preventDefault(); setFailed(false);
     void (onOpenLink ?? openResourceLink)(href ?? "").catch(() => setFailed(true));
   };
