@@ -1,5 +1,62 @@
 use super::*;
 
+#[cfg(unix)]
+#[tokio::test]
+async fn worker_path_resolves_the_selected_shell_and_child_command() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let workspace = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let shell = bin.path().join("fixture-shell");
+    symlink("/bin/sh", &shell).unwrap();
+    let helper = bin.path().join("worker-path-fixture");
+    std::fs::write(&helper, "#!/bin/sh\nprintf worker-path-ok\n").unwrap();
+    std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut context = crate::test_support::full_access_process_context(
+        ToolContext::new("worker-path-bash", "user").with_project_root(workspace.path()),
+    );
+    let worker = Arc::new(crate::WorkerToolEnvironment::assemble(
+        &[bin.path().to_path_buf()],
+        None,
+        None,
+    ));
+    context.bind_worker_environment(Arc::clone(&worker));
+    let mut request = BashCommandRequest {
+        cmd: "worker-path-fixture".to_string(),
+        workdir: None,
+        shell: Some("fixture-shell".into()),
+        login: false,
+        tty: true,
+        yield_time_ms: 5000,
+        timeout_ms: Some(5000),
+        max_output_bytes: None,
+        sandbox_permissions: SandboxPermissions::UseDefault,
+        justification: None,
+        prefix_rule: None,
+    };
+    let command = build_command(&request, workspace.path(), &context).unwrap();
+    assert_eq!(command.program, shell);
+    assert_eq!(
+        command.env.get("PATH").map(String::as_str),
+        Some(worker.path())
+    );
+    assert_eq!(command.env.get("HOME").cloned(), std::env::var("HOME").ok());
+    assert_eq!(
+        command.env.get("TERM").map(String::as_str),
+        Some("xterm-256color")
+    );
+
+    let response = run_bash_command(&request, &context).await.unwrap();
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(response.output, "worker-path-ok");
+
+    request.shell = Some("./fixture-shell".into());
+    let Err(error) = build_command(&request, bin.path(), &context) else {
+        panic!("Bash must not substitute another shell for a relative request");
+    };
+    assert_eq!(error.error_code(), talos_error::ErrorCode::ResourceNotFound);
+}
+
 fn completed_session(capture: OutputCapture) -> Arc<BashSession> {
     Arc::new(BashSession {
         session_id: 0,

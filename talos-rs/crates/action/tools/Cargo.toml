@@ -41,6 +41,9 @@ globset = "0.4"
 regex = "1"
 html2text = "0.12"
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tempfile = "3.8"
 

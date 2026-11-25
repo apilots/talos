@@ -14,7 +14,7 @@ use crate::spec::{
 };
 use crate::state::get_session_tool_state;
 use crate::ToolContext;
-use crate::{AgentControl, AutomationControl};
+use crate::{AgentControl, AutomationControl, WorkerToolEnvironment};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use serde_json::Value;
@@ -142,6 +142,7 @@ pub struct ToolRegistry {
     memory_reader: DashMap<&'static str, Arc<dyn MemoryReader>>,
     user_workspace_memory_writer: DashMap<&'static str, Arc<dyn UserWorkspaceMemoryWriter>>,
     sandbox: ToolSandbox,
+    worker_environment: Arc<WorkerToolEnvironment>,
 }
 
 impl ToolRegistry {
@@ -396,10 +397,7 @@ impl ToolRegistry {
         Self::new_with_policy_and_sandbox(ToolPolicy::default(), sandbox)
     }
 
-    /// Creates a registry with an explicitly assembled sandbox facade.
-    ///
-    /// Runtime composition owns provider selection; tool handlers only receive
-    /// invocation-bound permits produced by this facade.
+    /// Creates a registry with a runtime-selected sandbox that issues invocation-bound permits.
     pub fn new_with_policy_and_sandbox(policy: ToolPolicy, sandbox: ToolSandbox) -> Self {
         Self {
             specs: DashMap::new(),
@@ -413,7 +411,15 @@ impl ToolRegistry {
             image_store: DashMap::new(),
             user_workspace_memory_writer: DashMap::new(),
             sandbox,
+            worker_environment: Arc::new(WorkerToolEnvironment::inherited()),
         }
+    }
+
+    /// Installs the executing Worker's environment before the registry is shared.
+    /// This supplies subprocess PATH, not sandbox permissions or client settings.
+    pub fn with_worker_environment(mut self, environment: WorkerToolEnvironment) -> Self {
+        self.worker_environment = Arc::new(environment);
+        self
     }
 
     /// Register a legacy local tool by wrapping it into the new handler path.
@@ -545,9 +551,9 @@ impl ToolRegistry {
         let invocation = self
             .router
             .normalize(invocation, &ToolCatalog::new(vec![spec.clone()]))?;
-        context
-            .tool_context_mut()
-            .bind_current_call_id(invocation.call_id.clone());
+        let tool_context = context.tool_context_mut();
+        tool_context.bind_current_call_id(invocation.call_id.clone());
+        tool_context.bind_worker_environment(Arc::clone(&self.worker_environment));
         let spec = Some(spec);
         if !handler.matches(&invocation) {
             return Err(TalosError::new(

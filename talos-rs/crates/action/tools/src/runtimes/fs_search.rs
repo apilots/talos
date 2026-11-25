@@ -8,7 +8,7 @@ use talos_types::talos::TalosToolSearchMatch;
 use tokio::io::AsyncReadExt;
 
 use crate::runtimes::fs_read::{normalize_existing_tool_path, resolve_tool_path};
-use crate::runtimes::{map_sandbox_error, process_environment, resolve_executable};
+use crate::runtimes::{map_sandbox_error, process_environment};
 use crate::ToolContext;
 
 mod page;
@@ -212,18 +212,19 @@ async fn run_rg(
         })?
     };
 
+    let permit = context.sandbox_permit()?;
+    let worker_environment = context.worker_environment();
+    let program = worker_environment
+        .resolve("rg")
+        .ok_or_else(|| worker_environment.missing_ripgrep())?;
     let command = ToolProcessCommand {
-        program: resolve_executable("rg")?,
+        program,
         args,
-        env: process_environment(),
+        env: process_environment(&worker_environment),
         cwd: cwd.to_path_buf(),
         stdin: SandboxStdin::Closed,
     };
-    let mut child = context
-        .sandbox_permit()?
-        .spawn(command)
-        .await
-        .map_err(map_sandbox_error)?;
+    let mut child = permit.spawn(command).await.map_err(map_sandbox_error)?;
     let stdout = child.take_stdout().ok_or_else(|| {
         TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,

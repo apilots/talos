@@ -16,7 +16,7 @@ use crate::state::{
     ToolResultBudgetState,
 };
 use crate::CommandRiskAssessor;
-use crate::{AgentControl, AutomationControl};
+use crate::{AgentControl, AutomationControl, WorkerToolEnvironment};
 
 /// Classifies best-effort progress emitted while a tool is still running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,6 +102,7 @@ pub struct ToolContext {
     sandbox_user_permission_mode: UserPermissionMode,
     sandbox_environment: Option<ToolSandboxEnvironment>,
     sandbox_permit: Option<ToolSandboxPermit>,
+    worker_environment: Option<Arc<WorkerToolEnvironment>>,
     command_risk_assessor: Option<Arc<dyn CommandRiskAssessor>>,
     cancellation: Option<InvocationCancellation>,
 }
@@ -146,9 +147,20 @@ impl ToolContext {
             sandbox_user_permission_mode,
             sandbox_environment: None,
             sandbox_permit: None,
+            worker_environment: None,
             command_risk_assessor: None,
             cancellation: None,
         }
+    }
+
+    pub(crate) fn bind_worker_environment(&mut self, environment: Arc<WorkerToolEnvironment>) {
+        self.worker_environment = Some(environment);
+    }
+
+    pub(crate) fn worker_environment(&self) -> Arc<WorkerToolEnvironment> {
+        self.worker_environment
+            .clone()
+            .unwrap_or_else(|| Arc::new(WorkerToolEnvironment::inherited()))
     }
 
     /// Attaches the application-owned child Session control port.

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use schemars::JsonSchema;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -6,6 +8,8 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolsRuntimeConfig {
+    #[serde(default)]
+    pub environment: ToolEnvironmentConfig,
     #[serde(default)]
     pub sandbox_policy: ToolSandboxPolicy,
     #[serde(default)]
@@ -29,6 +33,7 @@ pub struct ToolsRuntimeConfig {
 impl Default for ToolsRuntimeConfig {
     fn default() -> Self {
         Self {
+            environment: ToolEnvironmentConfig::default(),
             sandbox_policy: ToolSandboxPolicy::default(),
             bash: BashToolConfig::default(),
             file: FileToolConfig::default(),
@@ -39,6 +44,41 @@ impl Default for ToolsRuntimeConfig {
             enable_dynamic_tools: false,
             enable_collaboration_tools: true,
         }
+    }
+}
+
+/// Worker-local environment settings for Bash and Grep.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolEnvironmentConfig {
+    /// Ordered absolute directories placed before discovered and inherited PATH entries.
+    /// Directories need not exist at configuration load time. Changes take effect on Worker restart.
+    #[serde(default)]
+    pub path_prepend: Vec<PathBuf>,
+}
+
+impl ToolEnvironmentConfig {
+    pub(crate) fn validate(&self) -> talos_error::TalosResult<()> {
+        use talos_error::{ErrorCode, TalosError};
+
+        for (index, path) in self.path_prepend.iter().enumerate() {
+            if !path.is_absolute() {
+                return Err(TalosError::new(
+                    ErrorCode::InvalidRequest,
+                    format!("agent.kernel.tools.environment.path_prepend[{index}] must be an absolute path"),
+                ));
+            }
+            let invalid_entry = || {
+                format!("agent.kernel.tools.environment.path_prepend[{index}] must be a single valid native PATH entry")
+            };
+            if path.as_os_str().as_encoded_bytes().contains(&0) {
+                return Err(TalosError::new(ErrorCode::InvalidRequest, invalid_entry()));
+            }
+            std::env::join_paths([path]).map_err(|error| {
+                TalosError::from_source(ErrorCode::InvalidRequest, invalid_entry(), error)
+            })?;
+        }
+        Ok(())
     }
 }
 

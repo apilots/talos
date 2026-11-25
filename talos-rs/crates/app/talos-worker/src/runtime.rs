@@ -18,7 +18,7 @@ use talos_service::{
 use talos_store::memory::MemoryStore;
 use talos_tools::{
     register_core_local_tools, register_network_tools, register_subagent_tools, AgentControl,
-    ToolImageStore, ToolRegistry,
+    ToolImageStore, ToolRegistry, WorkerToolEnvironment,
 };
 use talos_tools_sandbox::{SandboxRuntimePaths, ToolSandbox};
 
@@ -83,7 +83,19 @@ impl TalosWorker {
         let llm_provider_router: Arc<dyn LlmProviderRouter> = provider_router.clone();
 
         let sandbox = ToolSandbox::with_runtime_paths(sandbox_runtime_paths(&config));
-        let tool_registry = Arc::new(ToolRegistry::new_with_sandbox(sandbox));
+        let tool_environment =
+            WorkerToolEnvironment::discover(&config.agent.kernel.tools.environment.path_prepend)
+                .await;
+        let tool_environment = if std::env::var_os("TALOS_WORKER_PACKAGING")
+            .is_some_and(|packaging| packaging == "official-container")
+        {
+            tool_environment.with_packaged_ripgrep()
+        } else {
+            tool_environment
+        };
+        let tool_registry = Arc::new(
+            ToolRegistry::new_with_sandbox(sandbox).with_worker_environment(tool_environment),
+        );
         tool_registry.set_image_store(resources.tool_image_store);
         if let Some(automation) = resources.automation_control {
             tool_registry.set_automation_control(automation);

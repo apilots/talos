@@ -91,9 +91,10 @@ pub use domains::storage::{
 pub use domains::sync::SyncConfig;
 pub use domains::tools::{
     BashOutputLogConfig, BashToolConfig, DynamicToolConfig, DynamicToolTimeoutBehavior,
-    FileToolConfig, McpToolConfig, ToolSandboxModeConfig, ToolSandboxNetworkConfig,
-    ToolSandboxPlatformConfig, ToolSandboxPolicy, ToolUserPermissionModeConfig, ToolsRuntimeConfig,
-    WebSearchProviderConfig, WebSearchProviderRuntimeConfig, WebSearchToolConfig,
+    FileToolConfig, McpToolConfig, ToolEnvironmentConfig, ToolSandboxModeConfig,
+    ToolSandboxNetworkConfig, ToolSandboxPlatformConfig, ToolSandboxPolicy,
+    ToolUserPermissionModeConfig, ToolsRuntimeConfig, WebSearchProviderConfig,
+    WebSearchProviderRuntimeConfig, WebSearchToolConfig,
 };
 pub use env::{EnvSecretStore, RuntimeEnv};
 pub use loader::{install_database_migrations, DatabaseMigrationsInstallReport};

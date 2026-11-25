@@ -67,8 +67,10 @@ ENV HOME=/home/talos \
     LANG=en_US.UTF-8 \
     SHELL=/bin/bash \
     TALOS_RESOURCE_DIR=/opt/talos \
+    TALOS_WORKER_PACKAGING=official-container \
     PATH=/opt/talos/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 USER talos
+RUN rg --version
 WORKDIR /home/talos
 VOLUME ["/home/talos/.talos"]
 # Outbound registration requires no published port. Direct RPC is opt-in config.

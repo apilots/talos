@@ -12,9 +12,7 @@ use tokio::process::Command;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 
-use crate::runtimes::{
-    map_sandbox_error, process_environment, resolve_base_dir, resolve_executable, resolve_path,
-};
+use crate::runtimes::{map_sandbox_error, process_environment, resolve_base_dir, resolve_path};
 use crate::{ToolContext, ToolProgressEmitter, ToolProgressKind};
 use talos_tools_sandbox::{
     RunningToolProcess, SandboxStdin, ToolProcessCommand, ToolProcessTerminationTarget,
@@ -207,7 +205,7 @@ impl BashSessionManager {
             .unwrap_or(base_dir);
 
         let capture = OutputCapture::new(context, policy).await?;
-        let command = build_command(request, &workdir)?;
+        let command = build_command(request, &workdir, context)?;
         let mut child = context
             .sandbox_permit()?
             .spawn(command)
@@ -419,13 +417,27 @@ pub(crate) async fn run_bash_command_with_policy(
         .await
 }
 
-fn build_command(request: &BashCommandRequest, workdir: &Path) -> TalosResult<ToolProcessCommand> {
+fn build_command(
+    request: &BashCommandRequest,
+    workdir: &Path,
+    context: &ToolContext,
+) -> TalosResult<ToolProcessCommand> {
+    let worker_environment = context.worker_environment();
     let shell = request
         .shell
         .clone()
-        .or_else(|| std::env::var("SHELL").ok())
-        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("SHELL")
+                .ok()
+                .filter(|shell| !shell.trim().is_empty())
+        })
         .unwrap_or_else(|| "sh".to_string());
+    let program = worker_environment.resolve(&shell).ok_or_else(|| {
+        TalosError::new(
+            talos_error::ErrorCode::ResourceNotFound,
+            "The selected shell is not executable on the Worker. Check the Worker's shell and tool PATH configuration.",
+        )
+    })?;
 
     let mut args = Vec::new();
 
@@ -436,13 +448,13 @@ fn build_command(request: &BashCommandRequest, workdir: &Path) -> TalosResult<To
     }
     args.push(request.cmd.clone());
 
-    let mut env = process_environment();
+    let mut env = process_environment(&worker_environment);
     if request.tty {
         env.insert("TERM".to_string(), "xterm-256color".to_string());
     }
 
     Ok(ToolProcessCommand {
-        program: resolve_executable(&shell)?,
+        program,
         args,
         env,
         cwd: workdir.to_path_buf(),

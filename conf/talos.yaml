@@ -71,6 +71,9 @@ agent:
     tool_result_max_bytes: 65536
     context_compaction_max_bytes: 262144
     tools:
+      environment:
+        # Absolute directories on the Worker, in PATH precedence order.
+        path_prepend: []
       enable_collaboration_tools: true
       sandbox_policy:
         user_permission_mode: "full_access"

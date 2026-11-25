@@ -18,7 +18,7 @@ use talos_config::resolve_runtime_path;
 use talos_error::{TalosError, TalosResult};
 use talos_tools_sandbox::{filter_inherited_tool_environment, TalosSandboxError};
 
-use crate::ToolContext;
+use crate::{ToolContext, WorkerToolEnvironment};
 
 pub(crate) fn expand_workspace_dir(workspace_dir: &str) -> PathBuf {
     resolve_runtime_path(workspace_dir)
@@ -51,31 +51,13 @@ pub(crate) fn resolve_path(base_dir: &Path, raw_path: &str) -> PathBuf {
     }
 }
 
-pub(crate) fn resolve_executable(program: &str) -> TalosResult<PathBuf> {
-    let path = PathBuf::from(program);
-    if path.components().count() > 1 {
-        return std::fs::canonicalize(&path).map_err(|error| {
-            TalosError::new(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                format!("resolve executable {}: {error}", path.display()),
-            )
-        });
-    }
-    let paths = env::var_os("PATH").ok_or_else(|| TalosError::internal("PATH is unavailable"))?;
-    env::split_paths(&paths)
-        .map(|directory| directory.join(&path))
-        .find(|candidate| candidate.is_file())
-        .and_then(|candidate| std::fs::canonicalize(candidate).ok())
-        .ok_or_else(|| {
-            TalosError::new(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                format!("executable not found on PATH: {program}"),
-            )
-        })
-}
-
-pub(crate) fn process_environment() -> BTreeMap<String, String> {
-    filter_inherited_tool_environment(env::vars())
+pub(crate) fn process_environment(worker: &WorkerToolEnvironment) -> BTreeMap<String, String> {
+    let mut environment =
+        filter_inherited_tool_environment(env::vars_os().filter_map(|(name, value)| {
+            Some((name.into_string().ok()?, value.into_string().ok()?))
+        }));
+    environment.insert("PATH".to_string(), worker.path().to_string());
+    environment
 }
 
 /// Project sandbox failures once for filesystem and process tools. Preserve
