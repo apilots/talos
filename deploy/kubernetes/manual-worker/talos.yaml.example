@@ -18,6 +18,6 @@ agent_node:
     control_plane_endpoint: https://talos-server.talos.svc:9443
     credential_file: /home/talos/.talos/conf/node.credential
     trusted_ca_file: /home/talos/.talos/conf/ca.crt
-    transport: outbound
+    transport: outboundGrpc
 sync:
   enabled: false

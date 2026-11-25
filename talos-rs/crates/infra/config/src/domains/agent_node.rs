@@ -83,7 +83,8 @@ pub struct AgentNodeControlConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentNodeRunnerConfig {
-    /// Omitted uses outbound Connect; listener settings never select registration transport.
+    /// Omitted uses outbound WSS; cloud Docker seeds explicitly select outboundGrpc.
+    /// Listener settings never select registration transport.
     #[serde(default)]
     pub transport: Option<AgentNodeTransport>,
     pub node_id: String,
@@ -97,13 +98,33 @@ pub struct AgentNodeRunnerConfig {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentNodeTransport {
+    /// Personal computers: outbound authenticated WSS task/event stream.
     Outbound,
+    /// Cloud Docker Workers on the Server network: outbound gRPC stream.
+    OutboundGrpc,
     Direct,
 }
 
 impl AgentNodeRunnerConfig {
     pub fn transport(&self) -> AgentNodeTransport {
         self.transport.unwrap_or(AgentNodeTransport::Outbound)
+    }
+
+    /// Official cloud container packaging keeps its existing gRPC carrier, even
+    /// when a persisted home predates the explicit outboundGrpc configuration.
+    /// Native packaging uses WSS. This is a deployment selection, never fallback.
+    pub fn transport_for_packaging(
+        &self,
+        packaging: Option<&std::ffi::OsStr>,
+    ) -> AgentNodeTransport {
+        match self.transport() {
+            AgentNodeTransport::Outbound
+                if packaging.is_some_and(|value| value == "official-container") =>
+            {
+                AgentNodeTransport::OutboundGrpc
+            }
+            transport => transport,
+        }
     }
 }
 

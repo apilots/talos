@@ -9,7 +9,7 @@ struct Ingress {
     coordinators: pb::agent_coordinator_rpc_client::AgentCoordinatorRpcClient<Channel>,
     endpoint: String,
     trust: agent_client::AgentTlsTrust,
-    identity: Identity,
+    identity: axum_server::tls_rustls::RustlsConfig,
     stop: CancellationToken,
     task: tokio::task::JoinHandle<()>,
 }
@@ -31,7 +31,12 @@ impl Ingress {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let pem = certificate.cert.pem();
-        let identity = Identity::from_pem(&pem, certificate.signing_key.serialize_pem());
+        let identity = axum_server::tls_rustls::RustlsConfig::from_pem(
+            pem.as_bytes().to_vec(),
+            certificate.signing_key.serialize_pem().into_bytes(),
+        )
+        .await
+        .unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let (stop, task) = Self::serve(control, auth, listener, identity.clone(), output);
@@ -62,13 +67,9 @@ impl Ingress {
         control: NodeControlRpc,
         auth: Arc<dyn AuthService>,
         listener: tokio::net::TcpListener,
-        identity: Identity,
+        identity: axum_server::tls_rustls::RustlsConfig,
         output: liveness_tests::CoordinatorOutput,
     ) -> (CancellationToken, tokio::task::JoinHandle<()>) {
-        let incoming = futures_util::stream::unfold(listener, |listener| async {
-            let result = listener.accept().await.map(|(stream, _)| stream);
-            Some((result, listener))
-        });
         let stop = control.shutdown.clone();
         let server_stop = stop.clone();
         let coordinators = super::super::super::coordinator_rpc::CoordinatorRpc::new(
@@ -77,23 +78,31 @@ impl Ingress {
             stop.clone(),
         );
         let task = tokio::spawn(async move {
-            Server::builder()
-                .tls_config(ServerTlsConfig::new().identity(identity))
+            let websocket = control.clone().websocket_routes();
+            let routes = tonic::service::Routes::new(
+                pb::agent_node_control_server::AgentNodeControlServer::new(control),
+            )
+            .add_service(
+                pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(
+                    liveness_tests::CoordinatorOutputRpc {
+                        inner: coordinators,
+                        output,
+                    },
+                ),
+            )
+            .into_axum_router()
+            .merge(websocket);
+            let handle = axum_server::Handle::new();
+            let signal = handle.clone();
+            let server = axum_server::from_tcp_rustls(listener.into_std().unwrap(), identity)
                 .unwrap()
-                .add_service(pb::agent_node_control_server::AgentNodeControlServer::new(
-                    control,
-                ))
-                .add_service(
-                    pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(
-                        liveness_tests::CoordinatorOutputRpc {
-                            inner: coordinators,
-                            output,
-                        },
-                    ),
-                )
-                .serve_with_incoming_shutdown(incoming, server_stop.cancelled_owned())
-                .await
-                .unwrap();
+                .handle(handle)
+                .serve(routes.into_make_service());
+            tokio::pin!(server);
+            tokio::select! {
+                result = &mut server => result.unwrap(),
+                _ = server_stop.cancelled() => { signal.graceful_shutdown(Some(std::time::Duration::from_secs(1))); server.await.unwrap(); }
+            }
         });
         (stop, task)
     }
@@ -240,6 +249,15 @@ async fn ready(stream: &mut tonic::Streaming<pb::ControlToNodeFrame>) {
 
 #[tokio::test]
 async fn worker_reconnect_retains_lease_and_replacement_stops_old_runner() {
+    worker_reconnect_scenario(talos_config::AgentNodeTransport::OutboundGrpc).await;
+}
+
+#[tokio::test]
+async fn websocket_worker_reconnect_retains_lease_and_replacement_stops_old_runner() {
+    worker_reconnect_scenario(talos_config::AgentNodeTransport::Outbound).await;
+}
+
+async fn worker_reconnect_scenario(transport: talos_config::AgentNodeTransport) {
     let mut fixture = Fixture::new(/* endpoint */ None).await;
     let mut ingress = Ingress::new(fixture.control.clone()).await;
     let node_id = fixture.credential.node_id.clone();
@@ -259,9 +277,13 @@ async fn worker_reconnect_retains_lease_and_replacement_stops_old_runner() {
     let registered_adapter = adapter.clone();
     let stop = CancellationToken::new();
     let runner = AgentNodeRunner::new(
-        AgentNodeClient::connect(&ingress.endpoint, ingress.trust.clone())
-            .await
-            .unwrap(),
+        match transport {
+            talos_config::AgentNodeTransport::Outbound => {
+                AgentNodeClient::connect_websocket(&ingress.endpoint, ingress.trust.clone()).await
+            }
+            _ => AgentNodeClient::connect(&ingress.endpoint, ingress.trust.clone()).await,
+        }
+        .unwrap(),
         node_id.clone(),
         fixture.credential.token.clone(),
         vec![agent_protocol::Deployment {
@@ -624,3 +646,212 @@ mod environment_tests;
 
 #[path = "agent_node_liveness_tests.rs"]
 mod liveness_tests;
+
+#[tokio::test]
+async fn websocket_lifecycle_preserves_auth_revocation_and_tls_validation() {
+    use agent_protocol::{HeartbeatParams, NodeHealth, NodeRequest, RegisterParams};
+    let fixture = Fixture::new(None).await;
+    let ingress = Ingress::new(fixture.control.clone()).await;
+    let client = AgentNodeClient::connect_websocket(&ingress.endpoint, ingress.trust.clone())
+        .await
+        .unwrap();
+    let credential = NodeAuth {
+        node_id: fixture.credential.node_id.clone(),
+        token: fixture.credential.token.clone(),
+    };
+    let params = RegisterParams {
+        deployments: vec![Deployment {
+            agent_id: "talos".into(),
+        }],
+        system_info: None,
+    };
+    let error = client
+        .register(NodeRequest {
+            auth: NodeAuth {
+                token: "invalid".into(),
+                ..credential.clone()
+            },
+            params: params.clone(),
+        })
+        .await
+        .err()
+        .unwrap();
+    assert!(error.is_code(ErrorCode::Unauthenticated));
+    let untrusted =
+        AgentNodeClient::connect_websocket(&ingress.endpoint, AgentTlsTrust::SystemRoots)
+            .await
+            .unwrap();
+    assert!(untrusted
+        .register(NodeRequest {
+            auth: credential.clone(),
+            params: params.clone()
+        })
+        .await
+        .is_err());
+    assert!(
+        AgentNodeClient::connect_websocket("http://127.0.0.1:1", AgentTlsTrust::SystemRoots)
+            .await
+            .is_err()
+    );
+    let registration = client
+        .register(NodeRequest {
+            auth: credential.clone(),
+            params: params.clone(),
+        })
+        .await
+        .unwrap();
+    let auth = NodeAuth {
+        token: registration.lease_token,
+        ..credential.clone()
+    };
+    client
+        .renew_lease(NodeRequest {
+            auth: auth.clone(),
+            params: (),
+        })
+        .await
+        .unwrap();
+    client
+        .heartbeat(NodeRequest {
+            auth: auth.clone(),
+            params: HeartbeatParams {
+                health: NodeHealth::Healthy,
+            },
+        })
+        .await
+        .unwrap();
+    client
+        .unregister(NodeRequest {
+            auth: auth.clone(),
+            params: (),
+        })
+        .await
+        .unwrap();
+    assert!(client
+        .renew_lease(NodeRequest { auth, params: () })
+        .await
+        .is_err());
+    fixture
+        .publisher
+        .nodes
+        .set_computer_status(
+            &Actor::regular("user-1"),
+            talos_types::SetComputerStatusRequest {
+                node_id: credential.node_id.clone(),
+                status: talos_types::NodeStatus::Disabled,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(client
+        .register(NodeRequest {
+            auth: credential,
+            params
+        })
+        .await
+        .is_err());
+    ingress.close().await;
+}
+
+#[tokio::test]
+async fn websocket_oversized_frame_closes_publication() {
+    use futures_util::{SinkExt, StreamExt};
+    use prost::Message;
+    use reqwest_websocket::{Message as WsMessage, RequestBuilderExt};
+    let fixture = Fixture::new(None).await;
+    let ingress = Ingress::new(fixture.control.clone()).await;
+    let client = AgentNodeClient::connect_websocket(&ingress.endpoint, ingress.trust.clone())
+        .await
+        .unwrap();
+    let request = fixture.registration(&["talos"]).into_inner();
+    let registration = client
+        .register(agent_protocol::NodeRequest {
+            auth: node_pb::decode_auth(request.auth).unwrap(),
+            params: node_pb::decode_register(request.params).unwrap(),
+        })
+        .await
+        .unwrap();
+    let AgentTlsTrust::Certificate(pem) = &ingress.trust else {
+        panic!("private fixture CA required")
+    };
+    let http = reqwest::Client::builder()
+        .http1_only()
+        .add_root_certificate(reqwest::Certificate::from_pem(pem).unwrap())
+        .build()
+        .unwrap();
+    let mut socket = http
+        .get(format!(
+            "{}/talos/worker/connect",
+            ingress.endpoint.replacen("https://", "wss://", 1)
+        ))
+        .upgrade()
+        .send()
+        .await
+        .unwrap()
+        .into_websocket()
+        .await
+        .unwrap();
+    let handshake = pb::NodeToControlFrame {
+        body: Some(pb::node_to_control_frame::Body::Connect(
+            pb::ConnectNodeRequest {
+                auth: Some(pb::NodeAuth {
+                    node_id: fixture.credential.node_id.clone(),
+                    token: registration.lease_token,
+                }),
+                params: Some(pb::Empty {}),
+                stream_heartbeat: true,
+            },
+        )),
+    };
+    socket
+        .send(WsMessage::Binary(handshake.encode_to_vec().into()))
+        .await
+        .unwrap();
+    let WsMessage::Binary(bytes) = socket.next().await.unwrap().unwrap() else {
+        panic!("ready frame required")
+    };
+    assert!(matches!(
+        pb::ControlToNodeFrame::decode(bytes).unwrap().body,
+        Some(pb::control_to_node_frame::Body::Connected(
+            pb::ConnectNodeResponse {
+                result: Some(pb::connect_node_response::Result::Ready(_)),
+                ..
+            }
+        ))
+    ));
+    // Exceeds the same 4 MiB envelope used by gRPC; WSS is not an unlimited Sync upload channel.
+    let _ = socket
+        .send(WsMessage::Binary(vec![0; 4 * 1024 * 1024 + 1].into()))
+        .await;
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if fixture
+                .publisher
+                .coordinator
+                .worker_environment(&fixture.credential.node_id, "user-1")
+                .await
+                .is_err()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("oversized carrier must unpublish the Worker");
+    assert!(
+        !fixture
+            .publisher
+            .nodes
+            .get_node(
+                &Actor::regular("user-1"),
+                agent_protocol::GetNodeRequest {
+                    node_id: fixture.credential.node_id
+                }
+            )
+            .await
+            .unwrap()
+            .available
+    );
+    ingress.close().await;
+}

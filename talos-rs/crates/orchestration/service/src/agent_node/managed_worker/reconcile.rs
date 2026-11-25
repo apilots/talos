@@ -176,7 +176,7 @@ impl AgentNodeService {
                     control_plane_endpoint: managed.connection.control_plane_endpoint.clone(),
                     credential_file: path_in_home(CREDENTIAL_PATH),
                     trusted_ca_file: managed.trusted_ca.as_ref().map(|_| path_in_home(CA_PATH)),
-                    transport: None,
+                    transport: Some(talos_config::AgentNodeTransport::OutboundGrpc),
                 };
                 let mut files = vec![SeedFile::new(
                     "conf/talos.yaml",

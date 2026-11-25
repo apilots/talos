@@ -12,13 +12,16 @@ named Docker context is required. The image contains only `talos-worker`, the
 existing Linux sandbox launcher, built-in Browser MCP, managed Chromium and its
 Browser Use driver, Xvfb/Openbox/x11vnc, tint2, xterm, PCManFM, fonts and runtime
 tools; it contains no Server, WebUI, build target directory or provider secrets.
-It runs as UID/GID 10001 and uses outbound Connect by default.
+It runs as UID/GID 10001 and uses outbound gRPC Connect. The existing
+`TALOS_WORKER_PACKAGING=official-container` image marker preserves this carrier
+for persisted homes with older omitted/`outbound` transport settings; Native
+Workers, Desktop and TUI use outbound WSS instead.
 
 Prepare an isolated, writable home with the existing YAML configuration at
 `conf/talos.yaml`, the node credential at `conf/node.credential`, and provider
 keys in `.env`. Create the user-owned node through the original Computer API and
 retain its issued UUID; configure `agent_node.runner` with that same UUID,
-`control_plane_endpoint`, `credential_file`, and `transport: outbound`. Production
+`control_plane_endpoint`, `credential_file`, and `transport: outboundGrpc`. Production
 uses `https://agent.talos.love`; local TLS tests also configure `trusted_ca_file`.
 Credential files must be private and readable by the container's chosen UID.
 Managed default configuration is upgraded from the bundled template before load,

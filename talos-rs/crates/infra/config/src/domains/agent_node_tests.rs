@@ -59,3 +59,32 @@ fn node_network_configuration_requires_authenticated_tls() {
     config.worker_rpc.bind_address = "[::1]:0".to_string();
     assert!(config.validate(&gateway).is_ok());
 }
+
+#[test]
+fn personal_outbound_and_cloud_grpc_are_explicit_without_fallback() {
+    let mut runner: AgentNodeRunnerConfig = serde_yaml::from_str(
+        "node_id: laptop-1\ncontrol_plane_endpoint: https://localhost:18800\ncredential_file: /tmp/node.credential\n"
+    ).unwrap();
+    assert_eq!(runner.transport(), AgentNodeTransport::Outbound);
+    assert_eq!(
+        runner.transport_for_packaging(None),
+        AgentNodeTransport::Outbound
+    );
+    assert_eq!(
+        runner.transport_for_packaging(Some(std::ffi::OsStr::new("official-container"))),
+        AgentNodeTransport::OutboundGrpc
+    );
+    assert_eq!(
+        runner.transport_for_packaging(Some(std::ffi::OsStr::new("native"))),
+        AgentNodeTransport::Outbound
+    );
+    runner.transport = Some(AgentNodeTransport::OutboundGrpc);
+    let encoded = serde_yaml::to_string(&runner).unwrap();
+    assert!(encoded.contains("outboundGrpc"));
+    assert_eq!(
+        serde_yaml::from_str::<AgentNodeRunnerConfig>(&encoded)
+            .unwrap()
+            .transport(),
+        AgentNodeTransport::OutboundGrpc
+    );
+}

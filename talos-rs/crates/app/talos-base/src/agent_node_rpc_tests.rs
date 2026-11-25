@@ -536,8 +536,8 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
             )
             .await
             {
-                Ok(client) => break client,
-                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(20)).await,
+                Ok(client) if client.get_node("user-1", &node_id).await.is_ok() => break client,
+                _ => tokio::time::sleep(std::time::Duration::from_millis(20)).await,
             }
         }
     })

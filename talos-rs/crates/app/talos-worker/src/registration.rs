@@ -123,7 +123,9 @@ impl RegisteredWorker {
         on_failure: Option<Arc<dyn Fn(TalosError) + Send + Sync>>,
     ) -> Self {
         let node = match transport {
-            AgentNodeTransport::Outbound => node.with_execution_adapter(rpc.adapter()),
+            AgentNodeTransport::Outbound | AgentNodeTransport::OutboundGrpc => {
+                node.with_execution_adapter(rpc.adapter())
+            }
             AgentNodeTransport::Direct => node,
         };
         let shutdown = CancellationToken::new();
@@ -323,7 +325,20 @@ async fn registration_client(
     let mut node_config = config.agent_node.clone();
     node_config.runner = Some(runner.clone());
     node_config.validate(&config.gateway)?;
-    AgentNodeClient::connect(&runner.control_plane_endpoint, registration_trust(runner)?).await
+    let packaging = std::env::var_os("TALOS_WORKER_PACKAGING");
+    match runner.transport_for_packaging(packaging.as_deref()) {
+        AgentNodeTransport::Outbound => {
+            AgentNodeClient::connect_websocket(
+                &runner.control_plane_endpoint,
+                registration_trust(runner)?,
+            )
+            .await
+        }
+        AgentNodeTransport::OutboundGrpc | AgentNodeTransport::Direct => {
+            AgentNodeClient::connect(&runner.control_plane_endpoint, registration_trust(runner)?)
+                .await
+        }
+    }
 }
 
 fn registration_trust(runner: &AgentNodeRunnerConfig) -> TalosResult<AgentTlsTrust> {

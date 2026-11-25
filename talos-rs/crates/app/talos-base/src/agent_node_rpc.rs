@@ -1,4 +1,4 @@
-//! Control-plane gRPC ingress for node lifecycle and owner management.
+//! Control-plane TLS ingress: WSS/gRPC node lifecycle and existing owner management.
 
 use std::sync::Arc;
 use std::{fs, net::SocketAddr};
@@ -13,6 +13,8 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::{Actor, AgentNodeService};
 use talos_tools::{AgentControl, AutomationControl};
 use tokio_util::sync::CancellationToken;
+
+#[cfg(test)]
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
@@ -47,7 +49,7 @@ pub struct NodeResourceServices {
 
 pub struct NodeRpcServer {
     bind_address: SocketAddr,
-    identity: Identity,
+    identity: (Vec<u8>, Vec<u8>),
     nodes: AgentNodeService,
     auth_service: Arc<dyn AuthService>,
     session_data: NodeSessionDataRpc,
@@ -121,7 +123,7 @@ impl NodeRpcServer {
             NodeAutomationControlRpc::new(session_data.clone(), automation_control);
         Ok(Self {
             bind_address,
-            identity: Identity::from_pem(certificate, private_key),
+            identity: (certificate, private_key),
             nodes,
             auth_service,
             session_data,
@@ -153,12 +155,13 @@ impl NodeRpcServer {
 
     pub async fn run(self, shutdown: CancellationToken) -> TalosResult<()> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let control =
-            pb::agent_node_control_server::AgentNodeControlServer::new(NodeControlRpc::new(
-                self.nodes.clone(),
-                self.remote_publisher.clone(),
-                shutdown.clone(),
-            ));
+        let node_control = NodeControlRpc::new(
+            self.nodes.clone(),
+            self.remote_publisher.clone(),
+            shutdown.clone(),
+        );
+        let websocket = node_control.clone().websocket_routes();
+        let control = pb::agent_node_control_server::AgentNodeControlServer::new(node_control);
         let management = NodeManagementRpc::new(self.nodes, self.auth_service);
         let desktop = pb::agent_desktop_media_server::AgentDesktopMediaServer::new(
             desktop::DesktopMediaRpc::new(management.clone(), shutdown.clone()),
@@ -190,15 +193,7 @@ impl NodeRpcServer {
             pb::agent_automation_control_rpc_server::AgentAutomationControlRpcServer::new(
                 self.automation_control,
             );
-        Server::builder()
-            .tls_config(ServerTlsConfig::new().identity(self.identity))
-            .map_err(|error| {
-                TalosError::internal_with_source(
-                    "Configure Agent node control TLS; technical details were withheld.",
-                    error,
-                )
-            })?
-            .add_service(control)
+        let mut routes = tonic::service::Routes::new(control)
             .add_service(management)
             .add_service(desktop)
             .add_service(pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(callers))
@@ -206,24 +201,46 @@ impl NodeRpcServer {
             .add_service(session_data)
             .add_service(subagent_control)
             .add_service(automation_control)
-            .add_service(tool_images)
-            .add_optional_service(
-                self.worker_adapter
-                    .clone()
-                    .map(pb::worker_environment_rpc_server::WorkerEnvironmentRpcServer::new),
-            )
-            .add_optional_service(
-                self.worker_adapter
-                    .map(pb::agent_harness_rpc_server::AgentHarnessRpcServer::new),
-            )
-            .serve_with_shutdown(self.bind_address, shutdown.cancelled_owned())
+            .add_service(tool_images);
+        if let Some(adapter) = self.worker_adapter {
+            routes = routes
+                .add_service(
+                    pb::worker_environment_rpc_server::WorkerEnvironmentRpcServer::new(
+                        adapter.clone(),
+                    ),
+                )
+                .add_service(pb::agent_harness_rpc_server::AgentHarnessRpcServer::new(
+                    adapter,
+                ));
+        }
+        let router = routes.into_axum_router().merge(websocket);
+        let tls = axum_server::tls_rustls::RustlsConfig::from_pem(self.identity.0, self.identity.1)
             .await
             .map_err(|error| {
                 TalosError::internal_with_source(
-                    "Serve Agent node control RPC; technical details were withheld.",
+                    "Configure Agent node TLS; technical details were withheld.",
                     error,
                 )
-            })
+            })?;
+        let handle = axum_server::Handle::new();
+        let signal = handle.clone();
+        let server = axum_server::bind_rustls(self.bind_address, tls)
+            .handle(handle)
+            .serve(router.into_make_service());
+        tokio::pin!(server);
+        tokio::select! {
+            result = &mut server => result,
+            _ = shutdown.cancelled() => {
+                signal.graceful_shutdown(Some(std::time::Duration::from_secs(10)));
+                server.await
+            }
+        }
+        .map_err(|error| {
+            TalosError::internal_with_source(
+                "Serve Agent node control; technical details were withheld.",
+                error,
+            )
+        })
     }
 }
 
