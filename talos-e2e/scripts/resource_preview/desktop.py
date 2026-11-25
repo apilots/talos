@@ -23,6 +23,8 @@ def exercise_worktree(page, token, home, model):
                     '--detach', str(worktree)], check=True)
     plan = worktree / 'IMPLEMENTATION_PLAN.md'
     plan.write_text('# Worktree implementation plan\n')
+    notes = worktree / 'NOTES.md'
+    notes.write_text('# Worktree notes\n')
     outside = checkout / 'outside.md'
     outside.write_text('# Outside the worktree\n')
     identity = data(page.evaluate('async () => window.talos.workerIdentity()'))
@@ -31,7 +33,7 @@ def exercise_worktree(page, token, home, model):
         'nodeId': node, 'name': 'Worktree preview project', 'directory': str(checkout),
     })['project']
     session = f'sess_{uuid4().hex}'
-    ModelReply.text = f'[Worktree plan](<{plan}>)\n\n[Outside file](<{outside}>)'
+    ModelReply.text = f'Inspect `NOTES.md` or [Worktree plan](<{plan}>)\n\n[Outside file](<{outside}>)'
     invoke(page, token, 'turn/start', {
         'nodeId': node, 'sessionId': session, 'projectId': project['project_id'],
         'currentDirectory': None, 'clientRequestId': str(uuid4()),
@@ -40,8 +42,12 @@ def exercise_worktree(page, token, home, model):
     })
     page.goto(page.url.split('#', 1)[0] + '#/sessions/' + session)
     workspace = page.get_by_role('dialog', name='Right workspace', exact=True)
-    page.get_by_role('link', name='Worktree plan', exact=True).click(timeout=45_000)
+    page.get_by_role('link', name='NOTES.md', exact=True).click(timeout=45_000)
+    expect(workspace.get_by_role('heading', name='Worktree notes')).to_be_visible()
+    expect(workspace.get_by_role('textbox', name='File location', exact=True)).to_have_value('NOTES.md')
+    page.get_by_role('link', name='Worktree plan', exact=True).click()
     expect(workspace.get_by_role('heading', name='Worktree implementation plan')).to_be_visible()
+    expect(workspace.get_by_role('textbox', name='File location', exact=True)).to_have_value(str(plan))
     page.screenshot(path=str(REPORT / 'native-worktree-preview.png'))
     page.get_by_role('link', name='Outside file', exact=True).click()
     expect(workspace.get_by_role('alert')).to_have_text('authorization denied')
@@ -76,16 +82,15 @@ def exercise(page, token, destination, markdown, endpoint, *, model):
     workspace.get_by_role('tab', name='native-report.html', exact=True).click()
     expect(frame.get_by_role('textbox', name='Report draft')).to_have_value('Native registered HTML')
     links = home / 'native-links.md'
-    links.write_text('[Default browser](' + destination + ')\n')
+    links.write_text('[Embedded browser](' + destination + ')\n')
     page.locator('input[type=file]').set_input_files(str(links))
     expect(page.get_by_role('heading', name=links.name, exact=True)).to_be_visible()
     page.get_by_role('button', name='Open file', exact=True).click()
-    expect(workspace.get_by_role('link', name='Default browser', exact=True)).to_be_visible()
+    expect(workspace.get_by_role('link', name='Embedded browser', exact=True)).to_be_visible()
     count = workspace.get_by_role('tab').count()
-    workspace.get_by_role('link', name='Default browser', exact=True).click()
-    expect(workspace.get_by_role('tab')).to_have_count(count)
-    # Real preload/main dispatches the URL. OS default-app rendering is outside
-    # this harness; deterministic URL/policy branches live in frontend units.
+    workspace.get_by_role('link', name='Embedded browser', exact=True).click()
+    expect(workspace.get_by_role('tab')).to_have_count(count + 1)
+    expect(workspace.get_by_role('textbox', name='Web address', exact=True)).to_have_value(destination)
     expect(workspace.get_by_role('alert')).to_have_count(0)
     workspace.get_by_role('button', name='Open in options', exact=True).click()
     expect(page.get_by_role('menuitem', name='Talos', exact=True)).to_be_visible()
@@ -110,7 +115,7 @@ def exercise(page, token, destination, markdown, endpoint, *, model):
         return next(file for file in invoke(page, token, 'file/list', {'limit': 50})['data'] if file['originalFilename'] == case['name'])
     formats = exercise_formats(page, upload_format, native_pages=native_pages)
     return {'formatsVerified': len(formats), 'genericHtml': True, 'filesImageRightPane': True,
-            'desktopLinkDoesNotCreateTab': True, 'osDefaultApplicationRenderingVerified': False,
+            'desktopLinkOpensEmbeddedTab': True, 'osDefaultApplicationRenderingVerified': False,
             'createdTurn': True, 'worktreePreview': True, 'outsideWorktreeDenied': True,
             'missingWorktreeReported': True}
 

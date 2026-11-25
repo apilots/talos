@@ -11,11 +11,12 @@ are controlled loopback fixtures; product services, history and storage remain r
 `02_desktop_preview` reuses the production main/preload/app-server harness and
 covers registered HTML in a real WebContentsView with protocol isolation, Files
 images in the right pane, state retention, supported Open in actions and Desktop
-ordinary-link dispatch without adding a preview tab, real generated JSON upload/preview and Office→PDF rendering. OS default-application
+ordinary-link opening in the right embedded browser tab, real generated JSON upload/preview and Office→PDF rendering. OS default-application
 rendering is outside the harness; exact URL/policy branches have deterministic
 frontend unit coverage. A Desktop Turn uses a chat message to bind an existing
-linked worktree under the same Project. It opens a worktree Markdown file in
-the right pane and denies a file in the main checkout. Live Computer media remains covered by
+linked worktree under the same Project. It opens a worktree Markdown file from
+both an inline-code reference and an explicit link in the right pane and denies
+a file in the main checkout. Live Computer media remains covered by
 group 23 Browser Worker scenarios; Computer lifecycle and original session image
 behavior also retain their owning component tests.
 

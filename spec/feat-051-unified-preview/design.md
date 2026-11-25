@@ -37,12 +37,13 @@ The following R1–R5 describe the Phase 1 baseline. Expanded P2-R1–P2-R5 supe
 | Session message image (inline or attachment) | Show the existing inline thumbnail on every client; click it to view the original image in the FileImage dialog, without opening a right-workspace tab |
 | Files list/grid or details, any type including image | Open/reuse registered file in Files right workspace |
 | Session non-image attachment or `talos-file://fileId` link | Open/reuse file in current session right workspace |
-| Ordinary HTTP(S) chat/document link | Desktop default browser through existing bridge; Web right browser |
+| Ordinary HTTP(S) chat/document link | Right embedded browser on both Web and Desktop (external browser stays available from the Open in menu) |
 | Explicit Talos opening | Right browser on both clients |
 | Explicit external website opening | Desktop default browser; Web new browser tab |
+| Session message or Markdown preview inline-code file path or URL | Clickable reference routed through the same right-workspace opening boundary (`sessionFile` / `webpage`); server root authorization remains authoritative |
 | Computer | Existing independent tab and ComputerDesktop lifecycle/control UI |
 
-Expose a small typed opening API for file references and webpages, with an explicit preview/link intent. Reject invalid or credential-bearing URLs. Preserve session image renderer. Do not interpret arbitrary text or relative workspace paths as file IDs. Preserve other safe Markdown protocols through the existing browser anchor behavior.
+Expose a small typed opening API for file references and webpages, with an explicit preview/external intent. Reject invalid or credential-bearing URLs. Preserve session image renderer. Do not interpret arbitrary text or relative workspace paths as file IDs. Preserve other safe Markdown protocols through the existing browser anchor behavior.
 
 Use existing Radix menu and theme/control tokens. Open in split button/menu uses Talos branding, supported external browser action where applicable, separator and Copy link. Do not advertise Chrome/Safari/iTerm selection without a real capability. Copy file references as `talos-file://fileId`; these are authenticated product references, not public sharing links. Download is separate from application selection. Close menus on context/tab/collapse changes without focusing hidden triggers.
 

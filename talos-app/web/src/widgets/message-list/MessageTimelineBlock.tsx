@@ -220,6 +220,7 @@ function FinalAnswerTextContent({ item }: { item: TimelineTextItem }) {
     <MarkdownRenderer
       className="markdown-body prose prose-sm max-w-none prose-headings:font-display prose-headings:tracking-[-0.035em] prose-p:my-2 prose-p:leading-[1.9] prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-li:leading-[1.8]"
       text={visibleText}
+      interactiveCodeReferences
     />
   ) : <div className="text-sm leading-6 text-muted">…</div>;
 }

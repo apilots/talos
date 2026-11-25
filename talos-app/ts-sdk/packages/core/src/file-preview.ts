@@ -47,10 +47,25 @@ export function createFilePreviewClient(transport: FilePreviewTransport, resourc
   };
 }
 
+const SCHEME_RE = /^[a-z][a-z\d+.-]*:/i;
+const ROOT_FILE_LINE_RE = /^[^:/\s]+\.[a-z][^:/\s]*:[1-9]\d*(?::[1-9]\d*)?$/i;
+
+/** Match a root-level filename with a line citation such as `report.md:12` or `lib.rs:27:5`. */
+export function isRootFileLineCitation(value: string): boolean {
+  return ROOT_FILE_LINE_RE.test(value);
+}
+
+/** Distinguish local file paths and citations from explicit URL schemes and fragments. */
+export function isLocalFileReference(value: string): boolean {
+  if (!value || value.startsWith("#") || value.startsWith("//")) return false;
+  if (/^file:\/\//i.test(value)) return true;
+  return !SCHEME_RE.test(value) || ROOT_FILE_LINE_RE.test(value);
+}
+
 /** Resolve a document reference with the browser's URL rules, within its root.
  * External schemes remain the caller's explicit link-opening policy. */
 export function resolvePreviewResourcePath(fromPath: string, reference: string): string | undefined {
-  if (/^[a-z][a-z\d+.-]*:/i.test(reference) || reference.startsWith("//")) return undefined;
+  if (SCHEME_RE.test(reference) || reference.startsWith("//")) return undefined;
   const base = new URL(fromPath.split("/").map(encodeURIComponent).join("/"), "https://preview.invalid/");
   return decodeUriComponent(new URL(reference, base).pathname.slice(1));
 }
@@ -59,7 +74,7 @@ export interface FilePreviewReference { path: string; line?: number }
 /** File citation syntax is resolved once for all shells. It never selects a
  * Worker or authorizes a root; those remain the saved session's responsibility. */
 export function parseFilePreviewReference(reference: string, options: { fromPath?: string } = {}): FilePreviewReference {
-  if (/^[a-z][a-z\d+.-]*:/i.test(reference) && !/^file:\/\//i.test(reference)) return { path: reference };
+  if (!isLocalFileReference(reference)) return { path: reference };
   let path = reference;
   let hash = "";
   if (/^file:\/\//i.test(reference)) {

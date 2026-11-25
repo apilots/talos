@@ -34,9 +34,11 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clients.splice(0).forEach(client => client.clear()); });
 
 it("renders through one prepared resource and releases its grant when the tab closes", async () => {
+  api.content.mockResolvedValueOnce(new TextEncoder().encode("# Product\n\nSee `src/local.ts`.\n\n| Feature | Evidence |\n| --- | --- |\n| Browser | Real task |\n\n<script>unsafe()</script>"));
   const view = setup();
   expect(await screen.findByRole("heading", { name: "Product" })).toBeInTheDocument();
   expect(screen.getByRole("table")).toHaveTextContent("Real task");
+  expect(screen.queryByRole("link", { name: "src/local.ts" })).toBeNull();
   expect(view.container.querySelector("script")).toBeNull();
   expect(api.prepare).toHaveBeenCalledWith({ source });
   expect(api.content).toHaveBeenCalledWith(expect.objectContaining({ previewId: "preview-1" }), "Review.md");
@@ -88,10 +90,14 @@ it("resolves Markdown resources and retains their images until an explicit refre
   api.prepare.mockImplementation(async ({ source }: { source: FilePreviewSource }) => source.kind === "sessionPath"
     ? { ...descriptor, previewId: `preview-${++documents}`, entryPath: "docs/report.md" }
     : { ...descriptor, previewId: `picture-${++images}`, entryPath: "attached.png", metadata: { name: "attached.png", mimeType: "image/png", sizeBytes: 4 } });
-  api.content.mockResolvedValue(new TextEncoder().encode("[Next](next.md)\n\n[Source](/workspace/project/src/lib.rs#L27)\n\n![Chart](images/100%25%20done.png)\n\n![Attached](talos-file://image-1)"));
+  api.content.mockResolvedValue(new TextEncoder().encode("[Next](next.md)\n\n[Sibling](sibling.rs:14)\n\nInspect `../src/main.rs:9`.\n\n[Source](/workspace/project/src/lib.rs#L27)\n\n![Chart](images/100%25%20done.png)\n\n![Attached](talos-file://image-1)"));
   const view = setup({ kind: "sessionPath", sessionId: "session-1", path: "docs/report.md" });
   fireEvent.click(await screen.findByRole("link", { name: "Next" }));
   expect(api.openResource).toHaveBeenCalledWith({ kind: "sessionFile", sessionId: "session-1", path: "docs/next.md" });
+  fireEvent.click(screen.getByRole("link", { name: "Sibling" }));
+  expect(api.openResource).toHaveBeenLastCalledWith({ kind: "sessionFile", sessionId: "session-1", path: "docs/sibling.rs", position: { kind: "text", resourcePath: null, line: 14, encoding: "utf-8" } });
+  fireEvent.click(screen.getByRole("link", { name: "../src/main.rs:9" }));
+  expect(api.openResource).toHaveBeenLastCalledWith({ kind: "sessionFile", sessionId: "session-1", path: "src/main.rs", position: { kind: "text", resourcePath: null, line: 9, encoding: "utf-8" } });
   fireEvent.click(screen.getByRole("link", { name: "Source" }));
   expect(api.openResource).toHaveBeenLastCalledWith({ kind: "sessionFile", sessionId: "session-1", path: "/workspace/project/src/lib.rs", position: { kind: "text", resourcePath: null, line: 27, encoding: "utf-8" } });
   const chart = screen.getByAltText("Chart"); const attached = await screen.findByAltText("Attached");

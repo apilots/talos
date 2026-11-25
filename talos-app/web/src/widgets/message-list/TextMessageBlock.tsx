@@ -73,6 +73,7 @@ export function TextMessageBlock({
                   isSystem && "prose-p:my-0 prose-p:text-muted",
                 )}
                 text={text}
+                interactiveCodeReferences
               />
             </Suspense>
         </div>
