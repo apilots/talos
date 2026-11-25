@@ -8,7 +8,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 062 |
 | `fix` | 014 |
-| `refactor` | 045 |
+| `refactor` | 047 |
 | `docs` | 001 |
 
 ## Active Specs
@@ -16,6 +16,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | ID | Directory | Status |
 | --- | --- | --- |
 | feat-061 | [Worker tool PATH resolution](feat-061-worker-tool-path/design.md) | draft |
+| refactor-046 | [Worker-owned Session execution](refactor-046-worker-session-execution/design.md) | draft |
 | feat-060 | [Browser automation benchmarks](feat-060-browser-automation-benchmarks/design.md) | active |
 | feat-059 | [Phase two benchmark execution](feat-059-benchmark-execution/design.md) | active |
 | feat-058 | [Portable benchmark runs and official artifacts](feat-058-portable-benchmark-runs/design.md) | active |
@@ -47,6 +48,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | ID | Owner | Reason |
 | --- | --- | --- |
 | fix-010 | `docs/worker-memory-ownership` | Separate unmerged Memory/Dream parsing and retry proposal; do not reuse its allocated ID. |
+| refactor-045 | `docs/worker-memory-ownership` | Allocated by the separate Worker Memory ownership proposal. |
 
 ## Archived Specs
 
