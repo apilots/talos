@@ -38,7 +38,7 @@ agent_node:
     node_id: ${TALOS_WORKER_NODE_ID}
     control_plane_endpoint: https://agent.talos.love
     credential_file: /home/talos/.talos/conf/node.credential
-    transport: outboundGrpc
+    transport: outbound
     trusted_ca_file: null
   worker_rpc:
     bind_address: 127.0.0.1:0

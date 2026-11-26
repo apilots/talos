@@ -83,9 +83,8 @@ pub struct AgentNodeControlConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentNodeRunnerConfig {
-    /// Omitted uses outbound WSS. Official managed homes seed `outbound` so
-    /// older Worker images can load a fresh config; official-container
-    /// packaging then selects gRPC. Listener settings never select transport.
+    /// Omitted uses outbound WSS, or gRPC with official-container packaging.
+    /// Listener settings never select transport.
     #[serde(default)]
     pub transport: Option<AgentNodeTransport>,
     pub node_id: String,

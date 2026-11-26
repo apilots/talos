@@ -2,7 +2,8 @@
 
 This example starts only the published `talos-worker` image. It has no WebUI,
 management HTTP listener or Sync client. Dispatch and callbacks use outbound
-gRPC Connect (`transport: outboundGrpc`) to Talos Server; no inbound port or public Worker domain is required.
+gRPC Connect to Talos Server with the published image's `transport: outbound`
+configuration. The Worker needs no inbound port or public domain.
 
 ## Prepare one owned Computer
 
