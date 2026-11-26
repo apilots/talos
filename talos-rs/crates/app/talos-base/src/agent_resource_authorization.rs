@@ -17,14 +17,15 @@ impl NodeSessionDataRpc {
         &self,
         context: &agent_protocol::AgentSessionContext,
     ) -> TalosResult<SessionRecord> {
-        let caller = pb::CoordinatorCallContext {
-            session: Some(agent_protocol::harness_pb::encode_session_context(
-                context.clone(),
-            )),
-            ..Default::default()
-        };
-        self.authorize_scope("embedded", &caller, &context.session_id)
-            .await
+        self.authorize_scope(
+            "embedded",
+            &context.session_id,
+            &context.session_id,
+            &context.agent_id,
+            &context.workspace.workspace_id,
+            &context.workspace.user_id,
+        )
+        .await
     }
 
     pub(super) async fn authorize_agent_caller(
@@ -110,13 +111,33 @@ impl NodeSessionDataRpc {
                 {
                     return Err(denied());
                 }
-                self.authorize_scope(&auth.node_id, _caller.ok_or_else(denied)?, session_id)
-                    .await
+                let caller = _caller.ok_or_else(denied)?;
+                let scope = caller.session.as_ref().ok_or_else(denied)?;
+                self.authorize_scope(
+                    &auth.node_id,
+                    session_id,
+                    &scope.session_id,
+                    &scope.agent_id,
+                    &scope.workspace_id,
+                    &scope.user_id,
+                )
+                .await
             }
             ResourceAuthority::Invocation {
                 computer_id,
                 caller,
-            } => self.authorize_scope(computer_id, caller, session_id).await,
+            } => {
+                let scope = caller.session.as_ref().ok_or_else(denied)?;
+                self.authorize_scope(
+                    computer_id,
+                    session_id,
+                    &scope.session_id,
+                    &scope.agent_id,
+                    &scope.workspace_id,
+                    &scope.user_id,
+                )
+                .await
+            }
         }
     }
     pub(super) async fn authorize_owner(
@@ -150,20 +171,22 @@ impl NodeSessionDataRpc {
     async fn authorize_scope(
         &self,
         computer_id: &str,
-        caller: &pb::CoordinatorCallContext,
         session_id: &str,
+        scope_session_id: &str,
+        agent_id: &str,
+        workspace_id: &str,
+        user_id: &str,
     ) -> TalosResult<SessionRecord> {
-        let scope = caller.session.as_ref().ok_or_else(denied)?;
         let session = self.session(session_id).await?;
         let namespace = self
             .sessions
             .get_workspace_user_id(session_id)
             .await?
             .unwrap_or_else(|| session.user_id.clone());
-        if scope.session_id != session_id
-            || scope.agent_id != session.agent_id
-            || scope.user_id != namespace
-            || scope.workspace_id != session.workspace_id
+        if scope_session_id != session_id
+            || agent_id != session.agent_id
+            || user_id != namespace
+            || workspace_id != session.workspace_id
             || computer_id != session.execution_node_id
         {
             return Err(denied());

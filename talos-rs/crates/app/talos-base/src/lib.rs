@@ -115,6 +115,7 @@ pub struct TalosServerRuntime {
     browser: Arc<talos_browser::BrowserRuntime>,
     worker_rpc: Arc<talos_worker::WorkerRpcHost>,
     resource_stop: tokio_util::sync::CancellationToken,
+    _resource_stop_guard: Arc<tokio_util::sync::DropGuard>,
     worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
 }
 
@@ -134,6 +135,7 @@ pub struct TalosApplicationRuntime {
     pub(crate) worker: talos_worker::TalosWorker,
     pub(crate) worker_rpc: Arc<talos_worker::WorkerRpcHost>,
     pub(crate) resource_stop: tokio_util::sync::CancellationToken,
+    resource_stop_guard: Arc<tokio_util::sync::DropGuard>,
     pub(crate) worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
     pub(crate) worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     pub config: Config,
@@ -508,6 +510,7 @@ impl TalosServerRuntime {
             browser,
             worker_rpc,
             resource_stop,
+            _resource_stop_guard,
             worker_registration,
             _native_job_host,
         } = self;
@@ -700,6 +703,7 @@ async fn start_server_after_startup(
         browser: runtime.worker.browser(),
         worker_rpc: runtime.worker_rpc,
         resource_stop: runtime.resource_stop,
+        _resource_stop_guard: runtime.resource_stop_guard,
         worker_registration: runtime.worker_registration,
         http_server,
         channel_server,

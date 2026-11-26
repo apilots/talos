@@ -347,6 +347,7 @@ pub(crate) async fn build_application_runtime_with_policy(
         }
     });
     let resource_stop = tokio_util::sync::CancellationToken::new();
+    let resource_stop_guard = std::sync::Arc::new(resource_stop.clone().drop_guard());
     let media = super::agent_node_rpc::DesktopRelay::new(resource_stop.clone());
     service.set_desktop_ingress(Arc::new(
         super::application_desktop::ApplicationDesktopIngress {
@@ -514,6 +515,7 @@ pub(crate) async fn build_application_runtime_with_policy(
         worker,
         worker_rpc,
         resource_stop,
+        resource_stop_guard,
         worker_registration,
         worker_failures,
         config,

@@ -46,7 +46,9 @@ impl AgentHarnessRpcAdapter {
     }
 
     // Both the library handle and RPC projection use this same admission and
-    // settlement owner. No network frame or transport limit enters this path.
+    // settlement owner. Events are forwarded only into a single rendezvous
+    // slot so the RPC projection's 32-frame queue remains the backpressure
+    // limit, while this owner can still drop the original receiver.
     pub(super) fn guard_run(
         &self,
         lease: Lease,
@@ -66,7 +68,7 @@ impl AgentHarnessRpcAdapter {
         use tokio::sync::oneshot;
         let identity = caller.turn_ref();
         let agent_id = caller.agent_id;
-        let (events_tx, events_rx) = mpsc::channel(32);
+        let (events_tx, events_rx) = mpsc::channel(1);
         let (settlement_tx, settlement_rx) = oneshot::channel();
         let (commit_tx, commit_rx) = oneshot::channel();
         let (accepted_tx, accepted_rx) = oneshot::channel();
@@ -154,10 +156,17 @@ impl AgentHarnessRpcAdapter {
                     biased;
                     _ = lease.ended() => break,
                     _ = events_tx.closed() => break,
-                    event = events.recv(), if events_open => {
-                        if let Some(event) = event {
-                            if lease.send(&events_tx, event).await.is_err() { break; }
-                        } else { events_open = false; }
+                    permit = events_tx.reserve(), if events_open => {
+                        let Ok(permit) = permit else { break };
+                        match tokio::select! {
+                            biased;
+                            _ = lease.ended() => break,
+                            _ = events_tx.closed() => break,
+                            event = events.recv() => event,
+                        } {
+                            Some(event) => permit.send(event),
+                            None => events_open = false,
+                        }
                     }
                     result = &mut settlement, if !events_open => {
                         let result = result.and_then(|settlement| {
