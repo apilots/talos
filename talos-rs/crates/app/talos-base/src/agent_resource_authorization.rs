@@ -5,8 +5,6 @@ use agent_protocol::NodeAuth;
 #[derive(Clone)]
 pub(super) enum ResourceAuthority {
     Lease,
-    #[cfg(test)]
-    Host(NodeAuth),
     Invocation {
         computer_id: String,
         caller: Box<pb::CoordinatorCallContext>,
@@ -34,12 +32,9 @@ impl NodeSessionDataRpc {
         caller: &talos_types::AgentCaller,
         supplied_scope: Option<&pb::CoordinatorCallContext>,
     ) -> TalosResult<()> {
-        self.authorize(auth, &caller.session_id, supplied_scope)
-            .await?;
+        self.authorize(auth, &caller.session_id).await?;
         let scope = match &self.authority {
             ResourceAuthority::Invocation { caller, .. } => Some(caller.as_ref()),
-            #[cfg(test)]
-            ResourceAuthority::Host(_) => supplied_scope,
             ResourceAuthority::Lease => supplied_scope,
         };
         if let Some(scope) = scope {
@@ -67,12 +62,6 @@ impl NodeSessionDataRpc {
         self.routes = Some(routes);
         self
     }
-    #[cfg(test)]
-    pub(crate) fn with_host_auth(mut self, auth: NodeAuth) -> Self {
-        self.authority = ResourceAuthority::Host(auth);
-        self.routes = None;
-        self
-    }
     pub(crate) fn for_invocation(
         &self,
         computer_id: String,
@@ -90,7 +79,6 @@ impl NodeSessionDataRpc {
         &self,
         auth: Option<pb::NodeAuth>,
         session_id: &str,
-        _caller: Option<&pb::CoordinatorCallContext>,
     ) -> TalosResult<SessionRecord> {
         let auth = node_pb::decode_auth(auth)?;
         match &self.authority {
@@ -99,29 +87,6 @@ impl NodeSessionDataRpc {
                 let session = self.session(session_id).await?;
                 self.nodes.authorize_session_lease(&auth, &session).await?;
                 Ok(session)
-            }
-            #[cfg(test)]
-            ResourceAuthority::Host(expected) => {
-                use sha2::{Digest, Sha256};
-                use subtle::ConstantTimeEq;
-                let expected_hash: [u8; 32] = Sha256::digest(expected.token.as_bytes()).into();
-                let supplied_hash: [u8; 32] = Sha256::digest(auth.token.as_bytes()).into();
-                if expected.node_id != auth.node_id
-                    || !bool::from(expected_hash.ct_eq(&supplied_hash))
-                {
-                    return Err(denied());
-                }
-                let caller = _caller.ok_or_else(denied)?;
-                let scope = caller.session.as_ref().ok_or_else(denied)?;
-                self.authorize_scope(
-                    &auth.node_id,
-                    session_id,
-                    &scope.session_id,
-                    &scope.agent_id,
-                    &scope.workspace_id,
-                    &scope.user_id,
-                )
-                .await
             }
             ResourceAuthority::Invocation {
                 computer_id,
@@ -140,27 +105,17 @@ impl NodeSessionDataRpc {
             }
         }
     }
-    pub(super) async fn authorize_owner(
-        &self,
-        auth: &NodeAuth,
-        supplied: Option<&pb::CoordinatorCallContext>,
-    ) -> TalosResult<String> {
-        if matches!(self.authority, ResourceAuthority::Lease) {
-            return self.nodes.authorize_lease_owner(auth).await;
+    pub(super) async fn authorize_owner(&self, auth: &NodeAuth) -> TalosResult<String> {
+        match &self.authority {
+            ResourceAuthority::Lease => self.nodes.authorize_lease_owner(auth).await,
+            ResourceAuthority::Invocation { caller, .. } => {
+                let session_id = &caller.session.as_ref().ok_or_else(denied)?.session_id;
+                Ok(self
+                    .authorize(Some(node_pb::encode_auth(auth.clone())), session_id)
+                    .await?
+                    .user_id)
+            }
         }
-        let caller = match &self.authority {
-            ResourceAuthority::Invocation { caller, .. } => caller.as_ref(),
-            _ => supplied.ok_or_else(denied)?,
-        };
-        let session_id = &caller.session.as_ref().ok_or_else(denied)?.session_id;
-        Ok(self
-            .authorize(
-                Some(node_pb::encode_auth(auth.clone())),
-                session_id,
-                Some(caller),
-            )
-            .await?
-            .user_id)
     }
     async fn session(&self, session_id: &str) -> TalosResult<SessionRecord> {
         self.sessions

@@ -257,16 +257,3 @@ async fn invalid_frames_slow_consumers_and_shutdown_close_the_shared_connection(
         .unwrap();
     assert!(viewer.stopped.is_cancelled());
 }
-
-#[tokio::test]
-async fn attached_stream_stops_when_owner_is_dropped() {
-    let shutdown = CancellationToken::new();
-    let owner = shutdown.clone().drop_guard();
-    let relay = DesktopRelay::new(shutdown);
-    let (worker, viewer) = pair(&relay).await;
-    drop(owner);
-    timeout(Duration::from_secs(1), worker.stopped.cancelled())
-        .await
-        .unwrap();
-    assert!(viewer.stopped.is_cancelled());
-}

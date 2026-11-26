@@ -28,8 +28,6 @@ const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 mod agent_node_rpc;
 mod application_automation_control;
 mod application_native_jobs;
-#[cfg(test)]
-mod local_resource_rpc;
 pub use agent_node_rpc::{
     NodeResourceServices, NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc,
 };

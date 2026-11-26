@@ -1,10 +1,10 @@
-//! Regression for protected local callbacks and foreign leases at the current owner.
+//! Resource authorization and history regressions at the original owner.
 use super::*;
-use agent_protocol::{harness_pb, NodeAuth};
+use agent_protocol::harness_pb;
 use pb::agent_session_data_rpc_server::AgentSessionDataRpc;
 
 #[tokio::test]
-async fn local_callback_ports_and_current_invocation_use_the_persisted_session_owner() {
+async fn reverse_invocation_is_bound_to_the_persisted_session() {
     let storage = Arc::new(
         SqliteStorage::new_with_max_connections(":memory:", 1)
             .await
@@ -20,28 +20,18 @@ async fn local_callback_ports_and_current_invocation_use_the_persisted_session_o
     let sessions = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
     let record = session_record();
     sessions.insert_session_record(&record).await.unwrap();
+    let memory = Arc::new(TestMemoryProgress::default());
+    memory
+        .advance_processed_until_event_seq(&record.id, 0, 7)
+        .await
+        .unwrap();
     let data = NodeSessionDataRpc::new(
-        nodes.clone(),
+        nodes,
         sessions,
         Arc::new(EmptyHistory),
         Arc::new(TestAttachments),
-        Arc::new(TestMemoryProgress::default()),
+        memory,
     );
-    let auth = NodeAuth {
-        node_id: record.execution_node_id.clone(),
-        token: "private-host-token".into(),
-    };
-    let (host, resources) = crate::local_resource_rpc::LocalResourceRpc::start(
-        auth.clone(),
-        NodeResourceServices {
-            session_data: data.clone(),
-            tool_images: NodeToolImageRpc::new(nodes, Arc::new(TestToolImages), 1024),
-            agent_control: Arc::new(TestAgentControl),
-            automation_control: Arc::new(TestAutomationControl),
-        },
-    )
-    .await
-    .unwrap();
     let context = agent_protocol::AgentSessionContext {
         agent_id: record.agent_id.clone(),
         session_id: record.id.clone(),
@@ -49,73 +39,20 @@ async fn local_callback_ports_and_current_invocation_use_the_persisted_session_o
             .resolve_workspace("default", "user-1")
             .unwrap(),
     };
-    let resources = resources
-        .for_invocation(auth.clone(), &context, None)
-        .unwrap();
-    assert!(SessionHistoryReader::read(
-        &resources,
-        SessionHistoryReadParams {
-            session_id: record.id.clone(),
-            window: talos_agent::SessionHistoryWindow::Latest,
-            limit: 10,
-        }
-    )
-    .await
-    .unwrap()
-    .is_empty());
-    resources
-        .advance_processed_until_event_seq(&record.id, 0, 7)
-        .await
-        .unwrap();
-    assert_eq!(
-        resources
-            .processed_until_event_seq(&record.id)
-            .await
-            .unwrap(),
-        7
-    );
-    let caller = talos_types::AgentCaller {
-        session_id: record.id.clone(),
-        turn_id: "turn-1".into(),
-        agent_id: record.agent_id.clone(),
-    };
-    assert!(AgentControl::list(
-        &resources,
-        ListSubagentsRequest {
-            caller: caller.clone()
-        }
-    )
-    .await
-    .unwrap()
-    .children
-    .is_empty());
-    let images = ToolImageStore::save(
-        &resources,
-        "ignored-by-wire",
-        vec![Attachment::new(
-            AttachmentKind::Image,
-            "image.png",
-            "image/png",
-            bytes::Bytes::from_static(b"image"),
-        )],
-    )
-    .await
-    .unwrap();
-    assert_eq!(images[0].file_id, "image-1");
     let scope = pb::CoordinatorCallContext {
         coordinator_id: String::new(),
         connection_id: uuid::Uuid::new_v4().to_string(),
         rpc_call_id: 1,
         session: Some(harness_pb::encode_session_context(context)),
-        turn_id: Some(caller.turn_id),
+        turn_id: Some("turn-1".into()),
         project_id: None,
     };
     // The callback owner has the original Session facts but no foreign Worker lease row.
-    let owner = data.for_invocation(record.execution_node_id, scope.clone());
+    let owner = data.for_invocation(record.execution_node_id.clone(), scope.clone());
     let request = |session_id| {
         Request::new(pb::ReadMemoryProgressRequest {
             auth: Some(pb::NodeAuth {
-                node_id: auth.node_id.clone(),
+                node_id: record.execution_node_id.clone(),
                 token: "foreign-lease".into(),
             }),
             caller: Some(scope.clone()),
@@ -123,7 +60,7 @@ async fn local_callback_ports_and_current_invocation_use_the_persisted_session_o
         })
     };
     let result = owner
-        .read_memory_progress(request(record.id))
+        .read_memory_progress(request(record.id.clone()))
         .await
         .unwrap()
         .into_inner();
@@ -144,67 +81,30 @@ async fn local_callback_ports_and_current_invocation_use_the_persisted_session_o
         result.result,
         Some(pb::read_memory_progress_response::Result::Failure(_))
     ));
-    host.shutdown().await.unwrap();
 }
 
-#[tokio::test]
-async fn history_supplement_stream_round_trips_large_invocation_and_uses_original_history() {
+pub(super) async fn assert_large_history_supplement_round_trip(
+    storage: &SqliteStorage,
+    sessions: &DatabaseSessionStore,
+    resources: &AgentSessionDataClient,
+    session_id: &str,
+) {
     use talos_agent_api::{trajectory::*, AgentTurnRef};
     use talos_storage::Storage;
-    let storage = Arc::new(
-        SqliteStorage::new_with_max_connections(":memory:", 1)
-            .await
-            .unwrap(),
-    );
-    talos_store::migration::run_migrations(
-        storage.pool(),
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite"),
-    )
-    .await
-    .unwrap();
-    let nodes = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(&storage)));
-    let sessions = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
-    let record = session_record();
-    sessions.insert_session_record(&record).await.unwrap();
+
     let event = serde_json::to_string(&talos_agent_api::AgentEventPayload::TurnStarted(
         talos_agent_api::AgentTurnStarted {},
     ))
     .unwrap();
-    storage.execute("INSERT INTO agent_events(session_id,turn_id,sequence,occurred_at,persisted_at,payload_json) VALUES (?, 't',1,1,1,?)", &[&record.id,&event]).await.unwrap();
-    let history = Arc::new(talos_service::SessionHistoryService::new(Arc::new(
-        talos_service::TimelineEventService::new(sessions.clone()),
-    )));
-    let data = NodeSessionDataRpc::new(
-        nodes.clone(),
-        sessions.clone(),
-        history,
-        Arc::new(TestAttachments),
-        Arc::new(TestMemoryProgress::default()),
-    );
-    let auth = NodeAuth {
-        node_id: record.execution_node_id.clone(),
-        token: "private-host-token".into(),
-    };
-    let (host, resources) = crate::local_resource_rpc::LocalResourceRpc::start(
-        auth.clone(),
-        NodeResourceServices {
-            session_data: data,
-            tool_images: NodeToolImageRpc::new(nodes, Arc::new(TestToolImages), 1024),
-            agent_control: Arc::new(TestAgentControl),
-            automation_control: Arc::new(TestAutomationControl),
-        },
-    )
-    .await
-    .unwrap();
-    let context = agent_protocol::AgentSessionContext {
-        agent_id: record.agent_id.clone(),
-        session_id: record.id.clone(),
-        workspace: talos_config::Config::default()
-            .resolve_workspace("default", "user-1")
-            .unwrap(),
-    };
-    let resources = resources.for_invocation(auth, &context, None).unwrap();
-    let identity = AgentTurnRef::new(&record.id, "t");
+    storage
+        .execute(
+            "INSERT INTO agent_events(session_id, turn_id, sequence, occurred_at, persisted_at, payload_json)
+             VALUES (?, 't', 1, 1, 1, ?)",
+            &[session_id, &event],
+        )
+        .await
+        .unwrap();
+    let identity = AgentTurnRef::new(session_id, "t");
     let mut supplement = SessionHistorySupplement {
         identity: identity.clone(),
         clock_segments: vec![],
@@ -255,19 +155,25 @@ async fn history_supplement_stream_round_trips_large_invocation_and_uses_origina
             });
     }
     assert!(serde_json::to_vec(&supplement).unwrap().len() > 4 * 1024 * 1024);
-    SessionHistoryReader::append_supplement(&resources, supplement.clone())
+    SessionHistoryReader::append_supplement(resources, supplement.clone())
         .await
         .unwrap();
-    let row = storage.query("SELECT payload_json, execution_capture_json FROM agent_events WHERE session_id=? AND turn_id='t' AND sequence=1", &[&record.id]).await.unwrap();
+    let row = storage
+        .query(
+            "SELECT payload_json, execution_capture_json FROM agent_events
+             WHERE session_id = ? AND turn_id = 't' AND sequence = 1",
+            &[session_id],
+        )
+        .await
+        .unwrap();
     assert_eq!(row[0].get_string("payload_json").unwrap(), event);
     let saved: SessionHistorySupplement =
         serde_json::from_str(&row[0].get_string("execution_capture_json").unwrap()).unwrap();
     assert_eq!(saved, supplement);
-    sessions.delete_session_record(&record.id).await.unwrap();
+    sessions.delete_session_record(session_id).await.unwrap();
     assert!(
-        SessionHistoryReader::append_supplement(&resources, supplement)
+        SessionHistoryReader::append_supplement(resources, supplement)
             .await
             .is_err()
     );
-    host.shutdown().await.unwrap();
 }

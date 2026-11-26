@@ -130,13 +130,6 @@ impl LocalAgentHarness {
             .resolve_workspace(&session.workspace.workspace_id, &session.workspace.user_id)?;
         Ok(session)
     }
-    fn caller(&self, session: &agent_protocol::AgentSessionContext) -> pb::CoordinatorCallContext {
-        pb::CoordinatorCallContext {
-            coordinator_id: self.coordinator_id.clone(),
-            session: Some(harness_pb::encode_session_context(session.clone())),
-            ..Default::default()
-        }
-    }
 }
 impl AgentHarness for LocalAgentHarness {
     fn read_session_execution_state(
@@ -169,9 +162,8 @@ impl AgentHarness for LocalAgentHarness {
                 return Err(invalid_request());
             }
             params.context.session = self.session(params.context.session)?;
-            let caller = self.caller(&params.context.session);
             self.adapter
-                .admit_start(&self.auth, params, Some(&caller))
+                .admit_start(&self.auth, params, &self.coordinator_id)
                 .await
         })
     }
@@ -184,9 +176,8 @@ impl AgentHarness for LocalAgentHarness {
                 return Err(invalid_request());
             }
             context.session = self.session(context.session)?;
-            let caller = self.caller(&context.session);
             self.adapter
-                .admit_compact(&self.auth, context, Some(&caller))
+                .admit_compact(&self.auth, context, &self.coordinator_id)
                 .await
         })
     }
@@ -199,13 +190,9 @@ impl AgentHarness for LocalAgentHarness {
                 return Err(invalid_request());
             }
             let lease = self.adapter.authorize(&self.auth)?;
-            let caller = pb::CoordinatorCallContext {
-                coordinator_id: self.coordinator_id.clone(),
-                ..Default::default()
-            };
             let admission = self
                 .adapter
-                .admit_input(&self.auth, params, Some(&caller))
+                .admit_input(&self.auth, params, &self.coordinator_id)
                 .await?;
             Ok(agent_protocol::AgentAdmission {
                 events: admission.events,
@@ -235,15 +222,10 @@ impl AgentHarness for LocalAgentHarness {
     ) -> crate::AgentFuture<'_, TalosResult<()>> {
         Box::pin(async move {
             let session = self.session(session)?;
-            let _ownership = self.adapter.session_owner.pin(&session.session_id)?;
-            let _reservation =
+            let (_ownership, _reservation, harness) =
                 self.adapter
-                    .session_gate
-                    .maintenance(&session, &self.coordinator_id, &expected)?;
-            self.adapter
-                .harness(&self.agent_id)?
-                .clear_session(session, expected)
-                .await
+                    .prepare_maintenance(&session, &self.coordinator_id, &expected)?;
+            harness.clear_session(session, expected).await
         })
     }
     fn close_session(
@@ -253,15 +235,10 @@ impl AgentHarness for LocalAgentHarness {
     ) -> crate::AgentFuture<'_, TalosResult<()>> {
         Box::pin(async move {
             let session = self.session(session)?;
-            let _ownership = self.adapter.session_owner.pin(&session.session_id)?;
-            let _reservation =
+            let (_ownership, _reservation, harness) =
                 self.adapter
-                    .session_gate
-                    .maintenance(&session, &self.coordinator_id, &expected)?;
-            self.adapter
-                .harness(&self.agent_id)?
-                .close_session(session, expected)
-                .await
+                    .prepare_maintenance(&session, &self.coordinator_id, &expected)?;
+            harness.close_session(session, expected).await
         })
     }
     fn read_workspace_memory(

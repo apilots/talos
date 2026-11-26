@@ -5,7 +5,6 @@ struct PreparedRun {
     harness: Arc<dyn AgentHarness>,
     auth: NodeAuth,
     session: agent_protocol::AgentSessionContext,
-    callback: Option<pb::CoordinatorCallContext>,
     identity: talos_types::AgentCaller,
     ownership: crate::SessionLease,
     reservation: super::session_gate::Reservation,
@@ -313,13 +312,13 @@ impl AgentHarnessRpcAdapter {
         auth: &NodeAuth,
         context: &agent_protocol::AgentContext,
         admission: super::session_gate::RunAdmission,
-        caller: Option<&pb::CoordinatorCallContext>,
+        coordinator: TalosResult<&str>,
     ) -> TalosResult<PreparedRun> {
         let lease = self.authorize(auth)?;
         let identity = context.identity();
         let agent_id = context.session.agent_id.clone();
         let harness = self.harness(&agent_id)?;
-        let coordinator = self.coordinator_id(caller, &context.session)?;
+        let coordinator = coordinator?;
         let ownership = self.session_owner.pin(&identity.session_id)?;
         if matches!(admission, super::session_gate::RunAdmission::Continuation) {
             self.session_gate
@@ -340,7 +339,6 @@ impl AgentHarnessRpcAdapter {
             harness,
             auth: auth.clone(),
             session: context.session.clone(),
-            callback: caller.cloned(),
             identity: talos_types::AgentCaller {
                 agent_id,
                 session_id: identity.session_id,
@@ -355,13 +353,10 @@ impl AgentHarnessRpcAdapter {
         &self,
         prepared: PreparedRun,
         execution: AgentRunExecution,
+        callback: Option<&pb::CoordinatorCallContext>,
     ) -> TalosResult<AgentRunExecution> {
         let resource_guard = self
-            .bind_resources(
-                &prepared.auth,
-                &prepared.session,
-                prepared.callback.as_ref(),
-            )
+            .bind_resources(&prepared.auth, &prepared.session, callback)
             .await?;
         Ok(self.guard_run(
             prepared.lease,
@@ -376,16 +371,16 @@ impl AgentHarnessRpcAdapter {
         &self,
         auth: &NodeAuth,
         params: agent_protocol::AgentRunParams,
-        caller: Option<&pb::CoordinatorCallContext>,
+        coordinator: &str,
     ) -> TalosResult<AgentRunExecution> {
         let admission = if params.continuation.is_some() {
             super::session_gate::RunAdmission::Continuation
         } else {
             super::session_gate::RunAdmission::NewTurn
         };
-        let prepared = self.prepare_run(auth, &params.context, admission, caller)?;
+        let prepared = self.prepare_run(auth, &params.context, admission, Ok(coordinator))?;
         let execution = prepared.harness.start(params).await?;
-        self.finish_admission(prepared, execution).await
+        self.finish_admission(prepared, execution, None).await
     }
 
     pub(super) async fn serve_start(
@@ -418,12 +413,13 @@ impl AgentHarnessRpcAdapter {
         } else {
             super::session_gate::RunAdmission::NewTurn
         };
+        let coordinator = self.coordinator_id(first.caller.as_ref(), &params.context.session);
         let prepared = self
-            .prepare_run(&auth, &params.context, admission, first.caller.as_ref())
+            .prepare_run(&auth, &params.context, admission, coordinator)
             .map_err(status_from_error)?;
         let execution = match prepared.harness.start(params).await {
             Ok(execution) => Ok(self
-                .finish_admission(prepared, execution)
+                .finish_admission(prepared, execution, first.caller.as_ref())
                 .await
                 .map_err(status_from_error)?),
             Err(error) => Err(error),
@@ -441,16 +437,16 @@ impl AgentHarnessRpcAdapter {
         &self,
         auth: &NodeAuth,
         context: agent_protocol::AgentContext,
-        caller: Option<&pb::CoordinatorCallContext>,
+        coordinator: &str,
     ) -> TalosResult<AgentRunExecution> {
         let prepared = self.prepare_run(
             auth,
             &context,
             super::session_gate::RunAdmission::NewTurn,
-            caller,
+            Ok(coordinator),
         )?;
         let execution = prepared.harness.compact_session(context).await?;
-        self.finish_admission(prepared, execution).await
+        self.finish_admission(prepared, execution, None).await
     }
 
     pub(super) async fn serve_compact_session(
@@ -479,17 +475,18 @@ impl AgentHarnessRpcAdapter {
             &self.config.read().expect("Worker config lock poisoned"),
         )
         .map_err(status_from_error)?;
+        let coordinator = self.coordinator_id(first.caller.as_ref(), &context.session);
         let prepared = self
             .prepare_run(
                 &auth,
                 &context,
                 super::session_gate::RunAdmission::NewTurn,
-                first.caller.as_ref(),
+                coordinator,
             )
             .map_err(status_from_error)?;
         let execution = match prepared.harness.compact_session(context).await {
             Ok(execution) => Ok(self
-                .finish_admission(prepared, execution)
+                .finish_admission(prepared, execution, first.caller.as_ref())
                 .await
                 .map_err(status_from_error)?),
             Err(error) => Err(error),
@@ -507,10 +504,10 @@ impl AgentHarnessRpcAdapter {
         &self,
         auth: &NodeAuth,
         params: &agent_protocol::AgentInputParams,
-        caller: Option<&pb::CoordinatorCallContext>,
+        peer: Option<&str>,
     ) -> TalosResult<Arc<dyn AgentHarness>> {
         self.authorize(auth)?;
-        let peer = caller.ok_or_else(invalid_request)?.coordinator_id.as_str();
+        let peer = peer.ok_or_else(invalid_request)?;
         self.session_gate
             .authorize_active(&params.agent_id, &params.identity, peer)?;
         if !self
@@ -535,9 +532,9 @@ impl AgentHarnessRpcAdapter {
         &self,
         auth: &NodeAuth,
         params: agent_protocol::AgentInputParams,
-        caller: Option<&pb::CoordinatorCallContext>,
+        peer: &str,
     ) -> TalosResult<agent_protocol::AgentAdmission> {
-        self.prepare_input(auth, &params, caller)?
+        self.prepare_input(auth, &params, Some(peer))?
             .submit_input(params)
             .await
     }
@@ -564,8 +561,12 @@ impl AgentHarnessRpcAdapter {
             )));
         };
         let params = harness_pb::decode_input_params(params).map_err(status_from_error)?;
+        let peer = first
+            .caller
+            .as_ref()
+            .map(|caller| caller.coordinator_id.as_str());
         let harness = self
-            .prepare_input(&auth, &params, first.caller.as_ref())
+            .prepare_input(&auth, &params, peer)
             .map_err(status_from_error)?;
         let admission = harness.submit_input(params).await;
         let (tx, rx) = mpsc::channel(4);

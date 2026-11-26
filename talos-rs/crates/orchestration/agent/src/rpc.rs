@@ -288,6 +288,22 @@ impl AgentHarnessRpcAdapter {
             })
     }
 
+    fn prepare_maintenance(
+        &self,
+        session: &agent_protocol::AgentSessionContext,
+        peer: &str,
+        expected: &talos_types::SessionHistoryCursor,
+    ) -> TalosResult<(
+        crate::SessionLease,
+        session_gate::Reservation,
+        Arc<dyn AgentHarness>,
+    )> {
+        let ownership = self.session_owner.pin(&session.session_id)?;
+        let reservation = self.session_gate.maintenance(session, peer, expected)?;
+        let harness = self.harness(&session.agent_id)?;
+        Ok((ownership, reservation, harness))
+    }
+
     fn prepare_interrupt(
         &self,
         auth: &NodeAuth,
@@ -515,19 +531,10 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
             })?,
         )
         .map_err(status_from_error)?;
-        let _ownership = self
-            .session_owner
-            .pin(&params.session_id)
+        let (_ownership, _reservation, harness) = self
+            .prepare_maintenance(&params, peer, &expected_history_cursor)
             .map_err(status_from_error)?;
-        let _reservation = self
-            .session_gate
-            .maintenance(&params, peer, &expected_history_cursor)
-            .map_err(status_from_error)?;
-        let result = self
-            .harness(&params.agent_id)
-            .map_err(status_from_error)?
-            .clear_session(params, expected_history_cursor)
-            .await;
+        let result = harness.clear_session(params, expected_history_cursor).await;
         Ok(Response::new(empty_response(result)))
     }
 
@@ -555,19 +562,10 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
             })?,
         )
         .map_err(status_from_error)?;
-        let _ownership = self
-            .session_owner
-            .pin(&params.session_id)
+        let (_ownership, _reservation, harness) = self
+            .prepare_maintenance(&params, peer, &expected_history_cursor)
             .map_err(status_from_error)?;
-        let _reservation = self
-            .session_gate
-            .maintenance(&params, peer, &expected_history_cursor)
-            .map_err(status_from_error)?;
-        let result = self
-            .harness(&params.agent_id)
-            .map_err(status_from_error)?
-            .close_session(params, expected_history_cursor)
-            .await;
+        let result = harness.close_session(params, expected_history_cursor).await;
         Ok(Response::new(empty_response(result)))
     }
 
