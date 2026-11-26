@@ -290,7 +290,7 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
         worker.shutdown().await.unwrap();
     }
     restarted.worker_rpc.shutdown().await.unwrap();
-    restarted.resource_rpc.shutdown().await.unwrap();
+    restarted.resource_stop.cancel();
     restarted.automation.shutdown().await.unwrap();
     restarted.worker.shutdown().await.unwrap();
     fixture.stop.cancel();

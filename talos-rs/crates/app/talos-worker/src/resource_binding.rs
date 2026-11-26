@@ -10,8 +10,13 @@ use talos_agent_provider_kernel::{KernelExecutionResources, KernelResourceResolv
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
 type Key = (String, String);
-type LocalResolver =
-    Arc<dyn Fn(&AgentSessionContext) -> TalosResult<TalosWorkerResources> + Send + Sync>;
+type LocalResolver = Arc<
+    dyn Fn(
+            AgentSessionContext,
+        ) -> talos_agent::AgentFuture<'static, TalosResult<TalosWorkerResources>>
+        + Send
+        + Sync,
+>;
 #[derive(Clone)]
 pub(crate) struct ResourceBindings {
     active: Arc<RwLock<HashMap<Key, (String, TalosWorkerResources)>>>,
@@ -48,12 +53,17 @@ impl ResourceBindings {
             }))
         })
     }
-    fn bind(
+    async fn bind(
         &self,
         auth: &NodeAuth,
         context: &AgentSessionContext,
         caller: Option<&agent_pb::CoordinatorCallContext>,
     ) -> TalosResult<Box<dyn Send>> {
+        let local = self
+            .local
+            .read()
+            .expect("Worker resource lock poisoned")
+            .clone();
         let resources = if let Some(caller) = caller {
             let remote = self
                 .remote
@@ -68,13 +78,8 @@ impl ResourceBindings {
                 })?;
             let client = remote.for_invocation(auth.clone(), context, Some(caller.clone()))?;
             client_resources(client)
-        } else if let Some(local) = self
-            .local
-            .read()
-            .expect("Worker resource lock poisoned")
-            .clone()
-        {
-            local(context)?
+        } else if let Some(local) = local {
+            local(context.clone()).await?
         } else {
             // The original standalone registration owner supplies default ports
             // before its listener is published. No remote failure falls back here.
@@ -135,21 +140,28 @@ impl TalosWorker {
 
     pub(crate) fn resource_binder(&self) -> talos_agent::AgentInvocationResourceBinder {
         let resources = self.resource_bindings.clone();
-        Arc::new(move |auth, session, caller| resources.bind(auth, session, caller))
+        Arc::new(move |auth, session, caller| {
+            let resources = resources.clone();
+            let (auth, session, caller) = (auth.clone(), session.clone(), caller.cloned());
+            Box::pin(async move { resources.bind(&auth, &session, caller.as_ref()).await })
+        })
     }
-    /// Install the protected loopback SDK before exposing local management APIs.
-    pub fn use_local_resource_rpc(&self, client: AgentSessionDataClient) {
+    /// Install the original product ports with their persisted invocation-scope
+    /// check. Local history and callbacks never cross a transport boundary.
+    pub fn use_local_resources(
+        &self,
+        resolver: impl Fn(
+                AgentSessionContext,
+            ) -> talos_agent::AgentFuture<'static, TalosResult<TalosWorkerResources>>
+            + Send
+            + Sync
+            + 'static,
+    ) {
         *self
             .resource_bindings
             .local
             .write()
-            .expect("Worker resource lock poisoned") = Some(Arc::new(move |session| {
-            Ok(client_resources(client.for_invocation(
-                client.current_auth(),
-                session,
-                None,
-            )?))
-        }));
+            .expect("Worker resource lock poisoned") = Some(Arc::new(resolver));
     }
     pub(crate) fn use_remote_resource_rpc(&self, client: AgentSessionDataClient) {
         *self

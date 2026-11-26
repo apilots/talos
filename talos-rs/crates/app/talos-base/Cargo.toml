@@ -17,7 +17,6 @@ talos-sync = { workspace = true }
 talos-sync-sdk = { workspace = true }
 talos-sync-types = { workspace = true }
 sha2 = { workspace = true }
-subtle = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

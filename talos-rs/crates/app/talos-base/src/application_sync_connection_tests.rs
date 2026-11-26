@@ -469,7 +469,7 @@ impl Fixture {
     async fn shutdown_runtime(&self) {
         self.runtime.shutdown_sync().await.unwrap();
         self.runtime.worker_rpc.shutdown().await.unwrap();
-        self.runtime.resource_rpc.shutdown().await.unwrap();
+        self.runtime.resource_stop.cancel();
         self.runtime.automation.shutdown().await.unwrap();
         self.runtime.worker.shutdown().await.unwrap();
     }

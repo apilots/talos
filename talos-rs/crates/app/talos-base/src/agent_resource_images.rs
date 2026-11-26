@@ -98,9 +98,7 @@ impl NodeToolImageRpc {
                 .ok_or_else(invalid_resource_request)?;
             let auth = node_pb::decode_auth(first.auth)?;
             let owner = if let Some(authorization) = &self.authorization {
-                authorization
-                    .authorize_owner(&auth, first.caller.as_ref())
-                    .await?
+                authorization.authorize_owner(&auth).await?
             } else {
                 self.nodes.authorize_lease_owner(&auth).await?
             };

@@ -110,6 +110,56 @@ impl ToolImageStore for ToolImages {
     }
 }
 
+/// Preserve the original callback authority: file access uses the persisted
+/// Session owner, not a caller-supplied identity or workspace namespace.
+pub(crate) struct InvocationFiles {
+    pub owner_user_id: String,
+    pub attachments: Arc<dyn AttachmentReader>,
+    pub images: Arc<dyn ToolImageStore>,
+}
+impl AttachmentReader for InvocationFiles {
+    fn read<'a>(
+        &'a self,
+        scope: &'a TurnFileScope,
+        file_ids: &'a [String],
+    ) -> talos_agent::AgentFuture<'a, TalosResult<Vec<talos_agent::ResolvedAttachment>>> {
+        Box::pin(async move {
+            self.attachments
+                .read(
+                    &TurnFileScope {
+                        owner_user_id: self.owner_user_id.clone(),
+                        project_id: scope.project_id.clone(),
+                    },
+                    file_ids,
+                )
+                .await
+        })
+    }
+}
+impl ToolImageStore for InvocationFiles {
+    fn save<'a>(
+        &'a self,
+        _: &'a str,
+        images: Vec<Attachment>,
+    ) -> BoxFuture<'a, TalosResult<Vec<FileInfo>>> {
+        self.images.save(&self.owner_user_id, images)
+    }
+    fn save_files<'a>(
+        &'a self,
+        _: &'a str,
+        files: Vec<talos_types::ToolOutputFile>,
+    ) -> BoxFuture<'a, TalosResult<Vec<FileInfo>>> {
+        self.images.save_files(&self.owner_user_id, files)
+    }
+    fn read<'a>(
+        &'a self,
+        _: &'a str,
+        file_ids: &'a [String],
+    ) -> BoxFuture<'a, TalosResult<Vec<Attachment>>> {
+        self.images.read(&self.owner_user_id, file_ids)
+    }
+}
+
 #[cfg(test)]
 #[path = "tool_images_tests.rs"]
 mod tests;

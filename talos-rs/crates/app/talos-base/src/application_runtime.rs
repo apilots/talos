@@ -27,6 +27,29 @@ use super::{
     application_automation, application_storage, ApplicationAgentControl, TalosApplicationRuntime,
 };
 
+// Invocation metadata belongs to the capability; history storage stays with its owner.
+struct LocalHistory {
+    node_id: String,
+    history: Arc<dyn SessionHistoryReader>,
+}
+impl SessionHistoryReader for LocalHistory {
+    fn source_node_id(&self) -> Option<String> {
+        Some(self.node_id.clone())
+    }
+    fn append_supplement(
+        &self,
+        supplement: talos_agent_api::trajectory::SessionHistorySupplement,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<()>> {
+        self.history.append_supplement(supplement)
+    }
+    fn read(
+        &self,
+        params: talos_agent::SessionHistoryReadParams,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<Vec<talos_agent_api::SessionHistoryTurn>>> {
+        self.history.read(params)
+    }
+}
+
 #[cfg(test)]
 pub(crate) async fn build_application_runtime_with_migration_dir(
     config: Config,
@@ -141,20 +164,15 @@ pub(crate) async fn build_application_runtime_with_policy(
         node_store.clone(),
     ));
     let (worker_rpc, local_auth) = worker
-        .start_local_rpc(session_ownership.kind, session_ownership.hold)
+        .start_local(session_ownership.kind, session_ownership.hold)
         .await?;
     coordinator
         .register_environment(
             "embedded".into(),
-            worker
-                .local_rpc_environment(&worker_rpc, local_auth.clone())
-                .await?,
+            worker.local_environment(&worker_rpc, local_auth.clone())?,
         )
         .await;
-    for (agent_id, agent) in worker
-        .local_rpc_harnesses(&worker_rpc, &local_auth, sync.peer_id())
-        .await?
-    {
+    for (agent_id, agent) in worker.local_harnesses(&worker_rpc, &local_auth, sync.peer_id())? {
         coordinator
             .register_agent("embedded".into(), agent_id, agent)
             .await?;
@@ -275,29 +293,62 @@ pub(crate) async fn build_application_runtime_with_policy(
     let automation_control: Arc<dyn talos_tools::AutomationControl> = Arc::new(
         super::application_automation_control::ApplicationAutomationControl::new(service.clone()),
     );
-    let (resource_rpc, resource_client) = super::local_resource_rpc::LocalResourceRpc::start(
-        local_auth,
-        super::agent_node_rpc::NodeResourceServices {
-            session_data: super::agent_node_rpc::NodeSessionDataRpc::new(
-                node_service.clone(),
-                session_store.clone(),
-                session_history_reader.clone(),
-                attachment_reader.clone(),
-                memory_progress_store.clone(),
-            ),
-            tool_images: super::agent_node_rpc::NodeToolImageRpc::new(
-                node_service.clone(),
-                tool_image_store.clone(),
-                config.storage.files.limits.max_upload_bytes,
-            ),
-            agent_control: agent_control.clone(),
-            automation_control: automation_control.clone(),
-        },
-    )
-    .await?;
-    worker.use_local_resource_rpc(resource_client);
-
-    let media = super::agent_node_rpc::DesktopRelay::new(resource_rpc.cancellation_token());
+    let local_data = super::agent_node_rpc::NodeSessionDataRpc::new(
+        node_service.clone(),
+        session_store.clone(),
+        session_history_reader.clone(),
+        attachment_reader.clone(),
+        memory_progress_store.clone(),
+    );
+    worker.use_local_resources({
+        let service = Arc::downgrade(&service);
+        let history: Arc<dyn SessionHistoryReader> = Arc::new(LocalHistory {
+            node_id: local_auth.node_id.clone(),
+            history: session_history_reader.clone(),
+        });
+        let memory = memory_progress_store.clone();
+        let attachments = attachment_reader.clone();
+        let images = tool_image_store.clone();
+        move |session| {
+            let data = local_data.clone();
+            let service = service.clone();
+            let (history, memory, attachments, images) = (
+                history.clone(),
+                memory.clone(),
+                attachments.clone(),
+                images.clone(),
+            );
+            Box::pin(async move {
+                let record = data.authorize_local_session(&session).await?;
+                let files = Arc::new(super::tool_images::InvocationFiles {
+                    owner_user_id: record.user_id,
+                    attachments,
+                    images,
+                });
+                let service = service.upgrade().ok_or_else(|| {
+                    talos_error::TalosError::new(
+                        talos_error::ErrorCode::ServiceUnavailable,
+                        "Local application is shutting down",
+                    )
+                })?;
+                Ok(TalosWorkerResources {
+                    session_history_reader: history,
+                    memory_progress_store: memory,
+                    attachment_reader: files.clone(),
+                    tool_image_store: files,
+                    agent_control: Some(Arc::new(ApplicationAgentControl::new(service.clone()))),
+                    automation_control: Some(Arc::new(
+                        super::application_automation_control::ApplicationAutomationControl::new(
+                            service,
+                        ),
+                    )),
+                })
+            })
+        }
+    });
+    let resource_stop = tokio_util::sync::CancellationToken::new();
+    let resource_stop_guard = std::sync::Arc::new(resource_stop.clone().drop_guard());
+    let media = super::agent_node_rpc::DesktopRelay::new(resource_stop.clone());
     service.set_desktop_ingress(Arc::new(
         super::application_desktop::ApplicationDesktopIngress {
             local: media.clone(),
@@ -463,7 +514,8 @@ pub(crate) async fn build_application_runtime_with_policy(
         sync,
         worker,
         worker_rpc,
-        resource_rpc,
+        resource_stop,
+        resource_stop_guard,
         worker_registration,
         worker_failures,
         config,

@@ -120,8 +120,7 @@ impl pb::agent_session_data_rpc_server::AgentSessionDataRpc for NodeSessionDataR
         let result = async {
             let request = request.into_inner();
             let params = request.params.ok_or_else(invalid_resource_request)?;
-            self.authorize(request.auth, &params.session_id, request.caller.as_ref())
-                .await?;
+            self.authorize(request.auth, &params.session_id).await?;
             let window = params.completed_event_seq.map_or(
                 SessionHistoryWindow::Latest,
                 |completed_event_seq| SessionHistoryWindow::OldestAfter {
@@ -193,7 +192,7 @@ impl pb::agent_session_data_rpc_server::AgentSessionDataRpc for NodeSessionDataR
             let request = request.into_inner();
             let params = request.params.ok_or_else(invalid_resource_request)?;
             let auth = node_pb::decode_auth(request.auth)?;
-            let owner_user_id = self.authorize_owner(&auth, request.caller.as_ref()).await?;
+            let owner_user_id = self.authorize_owner(&auth).await?;
             if let ResourceAuthority::Invocation { caller, .. } = &self.authority {
                 if caller.project_id != params.project_id {
                     return Err(TalosError::new(
@@ -298,8 +297,7 @@ impl pb::agent_session_data_rpc_server::AgentSessionDataRpc for NodeSessionDataR
         let result = async {
             let request = request.into_inner();
             let params = request.params.ok_or_else(invalid_resource_request)?;
-            self.authorize(request.auth, &params.session_id, request.caller.as_ref())
-                .await?;
+            self.authorize(request.auth, &params.session_id).await?;
             self.memory_progress
                 .processed_until_event_seq(&params.session_id)
                 .await
@@ -358,8 +356,7 @@ impl pb::agent_session_data_rpc_server::AgentSessionDataRpc for NodeSessionDataR
         let result = async {
             let request = request.into_inner();
             let params = request.params.ok_or_else(invalid_resource_request)?;
-            self.authorize(request.auth, &params.session_id, request.caller.as_ref())
-                .await?;
+            self.authorize(request.auth, &params.session_id).await?;
             self.memory_progress
                 .advance_processed_until_event_seq(
                     &params.session_id,
