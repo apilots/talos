@@ -7,6 +7,10 @@ license.workspace = true
 description = "Concrete Agent node and remote Harness clients"
 
 [dependencies]
+prost.workspace = true
+reqwest.workspace = true
+reqwest-websocket = "0.5.1"
+tungstenite = { version = "0.27", default-features = false }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 sha2 = { workspace = true }

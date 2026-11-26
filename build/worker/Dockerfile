@@ -57,6 +57,20 @@ RUN bash /build/container/install-runtime.sh && rm -rf /build/container
 COPY --from=product /artifacts/talos-worker /opt/talos/bin/talos-worker
 COPY --from=product /artifacts/talos-linux-sandbox-launcher /opt/talos/bin/talos-linux-sandbox-launcher
 COPY talos/conf/talos-prod.yaml /opt/talos/conf/talos.yaml
+COPY talos/build/worker/runner.yaml /tmp/talos-worker-runner.yaml
+# Package a complete shared schema with Docker-specific runner defaults.
+# Startup Upgrade uses this YAML; no image marker selects the transport.
+RUN python3 - <<'PYTHON'
+from pathlib import Path
+config = Path("/opt/talos/conf/talos.yaml")
+runner = Path("/tmp/talos-worker-runner.yaml")
+source = config.read_text()
+marker = "  runner: null\n"
+if source.count(marker) != 1:
+    raise SystemExit("Expected one runner default in the shared template")
+config.write_text(source.replace(marker, runner.read_text()))
+runner.unlink()
+PYTHON
 COPY talos/LICENSE talos/NOTICE talos/THIRD_PARTY_NOTICES /usr/share/licenses/talos/
 RUN /opt/talos/bin/talos-worker --version \
     && test -s /usr/share/licenses/talos/LICENSE \
@@ -73,6 +87,6 @@ USER talos
 RUN rg --version
 WORKDIR /home/talos
 VOLUME ["/home/talos/.talos"]
-# Outbound registration requires no published port. Direct RPC is opt-in config.
+# Docker defaults to Worker-initiated gRPC Connect; no inbound port is published.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/opt/talos/bin/talos-worker"]

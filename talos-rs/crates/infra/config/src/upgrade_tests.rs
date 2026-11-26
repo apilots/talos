@@ -39,6 +39,11 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
             serde_yaml::to_value(&credential).unwrap(),
         );
         set_path_for_test(&mut old, &["agent_node", "runner"], runner.clone());
+        set_path_for_test(
+            &mut old,
+            &["agent_node", "worker_rpc"],
+            serde_yaml::from_str("bind_address: 0.0.0.0:18801\ntls: null\n").unwrap(),
+        );
         if transport == "direct" {
             set_path_for_test(
                 &mut runner,
@@ -53,7 +58,7 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
             set_path_for_test(&mut old, &["agent_node", "worker_rpc", "tls"], tls);
         }
         if central {
-            let control: YamlValue = serde_yaml::from_str("bind_address: 127.0.0.1:18800\ntls_certificate_file: /private/server.crt\ntls_private_key_file: /private/server.key\ntrusted_node_ca_file: /private/ca.crt\n").unwrap();
+            let control: YamlValue = serde_yaml::from_str("bind_address: 127.0.0.1:18800\ntls_certificate_file: /private/server.crt\ntls_private_key_file: /private/server.key\n").unwrap();
             set_path_for_test(&mut old, &["agent_node", "control_plane"], control);
             set_path_for_test(
                 &mut old,
@@ -61,19 +66,33 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
                 YamlValue::Null,
             );
         }
-        let expected_nodes = get_path_for_test(&old, &["agent_node"]).unwrap().clone();
-        // The old document differs from the new strict schema only in retired modes.
+        // Remove retired fields before validating the current schema.
         let mut current = old.clone();
         remove_path_for_test(&mut current, &["mode"]);
         remove_path_for_test(&mut current, &["desktop"]);
+        remove_path_for_test(&mut current, &["agent_node", "worker_rpc"]);
+        let expected_nodes = get_path_for_test(&current, &["agent_node"])
+            .unwrap()
+            .clone();
         validate_config_value(&current, &RuntimeEnv::default()).unwrap();
+        if central {
+            set_path_for_test(
+                &mut old,
+                &["agent_node", "control_plane", "trusted_node_ca_file"],
+                YamlValue::String("/private/retired-worker-ca.crt".into()),
+            );
+        }
         write_existing(&paths, &old);
         std::fs::write(&credential, "existing-registration-credential").unwrap();
 
         let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
         let mut removed = report.removed_paths.clone();
         removed.sort();
-        assert_eq!(removed, vec!["desktop", "mode"]);
+        let mut expected_removed = vec!["agent_node.worker_rpc", "desktop", "mode"];
+        if central {
+            expected_removed.insert(0, "agent_node.control_plane.trusted_node_ca_file");
+        }
+        assert_eq!(removed, expected_removed);
         assert_eq!(
             read_yaml_file(report.backup_path.as_ref().unwrap()).unwrap(),
             old
@@ -95,6 +114,85 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
                 .unwrap()
                 .changed
         );
+    }
+}
+
+#[test]
+fn packaged_worker_transport_default_upgrades_existing_identity() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let docker_defaults = read_yaml_file(&repo.join("build/worker/runner.yaml")).unwrap();
+    for docker in [false, true] {
+        for saved_transport in [None, Some("null"), Some("outbound"), Some("direct")] {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = TalosPaths::from_home(dir.path().join("home"));
+            let mut template = template_yaml();
+            if docker {
+                set_path_for_test(
+                    &mut template,
+                    &["agent_node", "runner"],
+                    docker_defaults["runner"].clone(),
+                );
+            }
+            let template_path = dir.path().join("template.yaml");
+            std::fs::write(&template_path, serde_yaml::to_string(&template).unwrap()).unwrap();
+            if docker && saved_transport.is_none() {
+                write_existing(&paths, &template_yaml());
+                upgrade_default_config_from_template(&paths, &template_path).unwrap();
+                let unconfigured = read_yaml_file(&paths.config_file).unwrap();
+                assert_eq!(
+                    get_path_for_test(&unconfigured, &["agent_node", "runner"]),
+                    Some(&YamlValue::Null)
+                );
+            }
+            let mut original = template_yaml();
+            let mut runner: YamlValue = serde_yaml::from_str("node_id: a03f484f-dfb3-4bf8-8796-35c6ce239d31\ncontrol_plane_endpoint: https://private-server.example\ncredential_file: /private/worker.credential\ntrusted_ca_file: /private/server-ca.crt\n").unwrap();
+            if let Some(transport) = saved_transport {
+                set_path_for_test(
+                    &mut runner,
+                    &["transport"],
+                    serde_yaml::from_str(transport).unwrap(),
+                );
+            }
+            set_path_for_test(&mut original, &["agent_node", "runner"], runner.clone());
+            write_existing(&paths, &original);
+            let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
+            let normalized = read_yaml_file(&paths.config_file).unwrap();
+            let mut expected = runner;
+            if docker && matches!(saved_transport, None | Some("null")) {
+                set_path_for_test(
+                    &mut expected,
+                    &["transport"],
+                    YamlValue::String("direct".into()),
+                );
+            }
+            assert_eq!(
+                get_path_for_test(&normalized, &["agent_node", "runner"]),
+                Some(&expected)
+            );
+            let config: Config = serde_yaml::from_value(normalized).unwrap();
+            let expected_transport = if saved_transport == Some("direct")
+                || (docker && matches!(saved_transport, None | Some("null")))
+            {
+                crate::AgentNodeTransport::Direct
+            } else {
+                crate::AgentNodeTransport::Outbound
+            };
+            assert_eq!(
+                config.agent_node.runner.unwrap().transport(),
+                expected_transport
+            );
+            if report.changed {
+                assert_eq!(
+                    read_yaml_file(report.backup_path.as_ref().unwrap()).unwrap(),
+                    original
+                );
+            }
+            assert!(
+                !upgrade_default_config_from_template(&paths, &template_path)
+                    .unwrap()
+                    .changed
+            );
+        }
     }
 }
 
@@ -423,18 +521,18 @@ fn managed_profiles_preserve_complete_valid_operator_config() {
 }
 
 #[test]
-fn upgrade_refuses_to_erase_worker_identity_when_tls_is_missing() {
+fn upgrade_refuses_to_erase_worker_identity_when_control_endpoint_is_insecure() {
     let dir = tempfile::tempdir().unwrap();
     let paths = TalosPaths::from_home(dir.path().join(".talos"));
     let template_path = write_template(dir.path());
     let mut old = template_yaml();
     set_path_for_test(&mut old, &["mode"], YamlValue::String("local".into()));
-    let runner = serde_yaml::from_str("node_id: a03f484f-dfb3-4bf8-8796-35c6ce239d31\ncontrol_plane_endpoint: https://agent.example\ncredential_file: /private/node.credential\ntransport: direct\n").unwrap();
+    let runner = serde_yaml::from_str("node_id: a03f484f-dfb3-4bf8-8796-35c6ce239d31\ncontrol_plane_endpoint: http://agent.example\ncredential_file: /private/node.credential\ntransport: direct\n").unwrap();
     set_path_for_test(&mut old, &["agent_node", "runner"], runner);
     write_existing(&paths, &old);
     let original = std::fs::read(&paths.config_file).unwrap();
 
-    // A damaged listener must require repair, never silently reset enrollment.
+    // Invalid control-plane TLS must require repair without resetting enrollment.
     let error = upgrade_default_config_from_template(&paths, &template_path).unwrap_err();
     assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
     assert_eq!(std::fs::read(&paths.config_file).unwrap(), original);
@@ -609,7 +707,6 @@ fn upgrade_preserves_configured_agent_node_listener() {
 bind_address: 127.0.0.1:18800
 tls_certificate_file: /tmp/control.crt
 tls_private_key_file: /tmp/control.key
-trusted_node_ca_file: /tmp/node-ca.crt
 "#,
         )
         .expect("Agent node listener should encode"),

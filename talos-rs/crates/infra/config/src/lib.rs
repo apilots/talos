@@ -48,7 +48,6 @@ pub use domains::agent::{
 };
 pub use domains::agent_node::{
     AgentNodeConfig, AgentNodeControlConfig, AgentNodeRunnerConfig, AgentNodeTransport,
-    WorkerRpcConfig, WorkerRpcTlsConfig,
 };
 pub use domains::automation::{
     AutomationConfig, DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig,

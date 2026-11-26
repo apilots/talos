@@ -171,7 +171,6 @@ class Fixture:
             "bind_address": "0.0.0.0:9443",
             "tls_certificate_file": "/run/talos-tls/tls.crt",
             "tls_private_key_file": "/run/talos-tls/tls.key",
-            "trusted_node_ca_file": "/run/talos-tls/ca.crt",
         }}
         profile["cloud"].update(agent_base_url=f"https://{HOST}:9443", agent_trusted_ca_file="/run/talos-tls/ca.crt")
         profile["talos"] = {

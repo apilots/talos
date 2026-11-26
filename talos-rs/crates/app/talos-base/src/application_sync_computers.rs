@@ -268,7 +268,7 @@ async fn verify_saved_computer(
         &actor.user_id,
     )
     .await?;
-    validate_saved_node(config, actor, Some(runner), &node)
+    validate_saved_node(actor, &node)
 }
 
 fn local_computer_denied(actor: &Actor, computer_id: &str) -> TalosError {

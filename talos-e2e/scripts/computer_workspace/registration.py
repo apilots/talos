@@ -125,6 +125,16 @@ def start_ingress(cluster):
             }}
         }}
     }}
+    @worker path /talos/worker/*
+    handle @worker {{
+        reverse_proxy https://127.0.0.1:{cluster.rpc_port} {{
+            flush_interval -1
+            transport http {{
+                versions 1.1
+                tls_trusted_ca_certs {cluster.cert}
+            }}
+        }}
+    }}
     handle {{
         reverse_proxy {cluster.url}
     }}

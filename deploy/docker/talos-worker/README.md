@@ -2,7 +2,8 @@
 
 This example starts only the published `talos-worker` image. It has no WebUI,
 management HTTP listener or Sync client. Dispatch and callbacks use outbound
-Connect to Talos Server; no inbound port or public Worker domain is required.
+gRPC Connect to Talos Server with the explicit `transport: direct`
+configuration. The Worker needs no inbound port or public domain.
 
 ## Prepare one owned Computer
 
@@ -35,8 +36,9 @@ public `https://agent.talos.love` endpoint uses system trust.
 The example lists the shared configuration fields. Its required `gateway` section
 does not start HTTP in `talos-worker`; management, channel and Sync sections are
 not consumed by this process. Execution tools, model settings and workspace paths
-apply to this Worker. For direct transport, configure reachable Worker RPC TLS
-and the Computer endpoint together; outbound requires no inbound listener.
+apply to this Worker. `direct` opens a TLS gRPC bidirectional stream to the
+Server. `outbound` opens WSS. Both use `control_plane_endpoint` and require
+no Server dialback to a Worker listener.
 
 ## Validate and start on the chosen Worker host
 
@@ -76,3 +78,16 @@ for the Server and Worker network paths.
 See [Worker image browser boundary](../../../build/worker/README.md#managed-browser-boundary)
 for pins, profile origin and sandbox requirements. Retain the Worker home when
 replacing the container to preserve browser login and explicit pause choices.
+
+The registered Worker does not bind an execution listener. Do not configure
+`agent_node.worker_rpc` or provision a Worker server certificate/private key.
+Keep the Server's TLS identity and the Worker's optional `runner.trusted_ca_file`
+when using a private Server CA. Managed-home upgrades remove the retired block;
+remove it explicitly from operator-owned `TALOS_CONFIG` files.
+
+The generic omitted/null transport defaults to `outbound` (WSS). The Docker
+image packages `direct` in its runner YAML defaults. Startup Upgrade applies
+that default to an existing managed-home runner only when transport is missing
+or null, including retained v0.1.18 Talo homes. Explicit transports and identity
+settings are preserved. An explicit `TALOS_CONFIG` file remains operator-owned
+and must choose `direct` itself; runtime image markers never choose a carrier.

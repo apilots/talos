@@ -60,7 +60,7 @@ Desktop 继续启动已打包的 app-server，由它组装现有 TalosWorker lib
 ### Desktop 宿主入口（阶段 1.3）
 
 Electron main 给现有 app-server 传入宿主设备名，仍只启动一个已打包的进程。
-Desktop/TUI 登录后使用统一个人 Worker 注册流程；不再提供连接模式或部署模式配置。普通 stdio/Server 保留完整管理组装，direct/outbound 与 endpoint 继续只决定传输。
+Desktop/TUI 登录后使用统一个人 Worker 注册流程；不再提供连接模式或部署模式配置。普通 stdio/Server 保留完整管理组装，`direct` selects gRPC Connect and `outbound` selects WSS. Directory endpoints do not select transport.
 cloud 宿主复用 AccountService/CloudSessionCache，登录完成和重启恢复后调用受信任的 `desktop/workerEnroll`；
 app-server保存身份，以同一Worker+Runner注册，同时保留本地Project/Session/Timeline数据库。共享启停不换DB或销毁管理宿主；导入走原Store事务，不迁移Computer。
 
@@ -75,7 +75,7 @@ app-server保存身份，以同一Worker+Runner注册，同时保留本地Projec
 登录成功与 Worker 注册失败独立：保留登录结果和缓存，注册错误通过现有 Desktop runtime-state 的 ApiError 返回。
 退出先让 stdio EOF 触发宿主 drain/注销，再退出进程；注销失败仍由既有租约过期规则收敛。
 首次 Register 已发出时在既有 RPC 超时范围内等响应，退出再注销；不丢弃已签发租约，不新增持久化状态。
-Register 建立身份与租约；direct 使用可达 TLS RPC 发布执行能力，outbound 则在同一 RegisteredWorker 的主动 Connect 确认后安装远程 Harness 并发布执行能力。
+Register establishes identity and lease. Both `direct` gRPC Connect and `outbound` WSS install remote Harness handles and publish execution only after the same RegisteredWorker initiates an authenticated ready stream.
 
 ## 4. 注册、身份与可用性
 
@@ -95,8 +95,10 @@ Register 建立身份与租约；direct 使用可达 TLS RPC 发布执行能力�
    owner 不可改绑；账户与保存身份不一致时拒绝复用旧凭据，通过连接流程建立正确归属。
 
 Worker 只需出站访问控制面，不要求个人电脑暴露公网监听端口、固定地址或自行准备服务端证书。
-Runner 默认使用系统 TLS 信任；私有部署可配置 CA。保留现有 direct RPC 部署的显式配置，默认使用 outbound。
-控制面仍需自己的 TLS 身份；trusted_node_ca 仅在拨入 direct Worker 时需要，outbound-only 不要求虚构节点 CA 文件。
+Runner uses system TLS trust by default; private deployments may configure a Server CA.
+`outbound` defaults to WSS; `direct` selects gRPC Connect. The Server supplies
+its TLS identity and accepts both carriers. Container packaging does not override
+transport, and neither carrier requires a Server-dialback CA or Worker TLS listener.
 单一逻辑控制面本期部署在一个承载 Registry/连接的 Server 实例；公网 HTTP 与 gRPC 入口必须落到该实例。
 多副本跨实例转发不在本期引入，不能靠共享 DB 假装共享内存连接。
 
@@ -105,7 +107,7 @@ Runner 默认使用系统 TLS 信任；私有部署可配置 CA。保留现有 d
 | agent_nodes field group | Contract |
 | --- | --- |
 | node_id / owner_user_id / display_name / mode | 原身份与归属不变；云注册 Worker 为 remote，宿主内嵌共享节点仍为 embedded |
-| endpoint | 改为可选：outbound 节点为空；已有 direct 部署使用真实 HTTPS 地址。不使用虚构地址占位 |
+| endpoint | Optional directory metadata; neither its presence nor its absence selects transport or publishes execution |
 | status / health / heartbeat / credential and lease hashes / expiries | 沿用原字段与校验；不存明文 token、流 ID、RPC 请求或结果 |
 | created_at / updated_at | 沿用 |
 
@@ -140,7 +142,7 @@ Web 手工连接允许一次性受控展示凭据，禁止加入通用查询缓�
 | Target | Select / execute | Environment management |
 | --- | --- | --- |
 | 个人云注册 Computer，包含 Desktop 内嵌 Worker | 当前 owner；管理员跨用户管理目录不混入自己的任务选择器 | owner 管理完整 Worker 环境；Pod 限制由节点本地能力与沙箱执行 |
-| Server 内嵌 Worker | 首位管理员自动认领并绑定个人 owner，签发 UUID；本机调用 loopback，对外使用中心 TLS 入口的 direct RPC | 其他管理员不隐式获得该 Computer 的执行或环境权限 |
+| Server embedded Worker | The first administrator claims its personal owner and UUID. Local calls use loopback; remote publication uses direct gRPC Connect on the central TLS endpoint | Other administrators gain no implicit execution or environment permissions |
 | 显式本地模式 embedded Computer | 现有可信本地 Actor，包括 auth_disabled 的本地连接 | 现有本地权限；此规则不能放宽公网节点注册/管理的认证 |
 
 配置/插件/MCP 权限按目标计算，不能直接复用控制面的管理员目录权限限制个人节点。

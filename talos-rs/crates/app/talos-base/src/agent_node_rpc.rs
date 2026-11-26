@@ -1,11 +1,11 @@
-//! Control-plane gRPC ingress for node lifecycle and owner management.
+//! Control-plane TLS ingress: WSS/gRPC node lifecycle and existing owner management.
 
 use std::sync::Arc;
 use std::{fs, net::SocketAddr};
 
-use agent_client::{AgentTlsTrust, RemoteAgentClient};
+use agent_client::RemoteAgentClient;
 use agent_pb as pb;
-use agent_protocol::{error_pb, node_pb, AgentHarness, Deployment, NodeAuth, Registration};
+use agent_protocol::{error_pb, node_pb, NodeAuth};
 use talos_auth::AuthService;
 use talos_config::AgentNodeControlConfig;
 use talos_coordinator::CoordinatorImpl;
@@ -13,6 +13,8 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::{Actor, AgentNodeService};
 use talos_tools::{AgentControl, AutomationControl};
 use tokio_util::sync::CancellationToken;
+
+#[cfg(test)]
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
@@ -47,7 +49,7 @@ pub struct NodeResourceServices {
 
 pub struct NodeRpcServer {
     bind_address: SocketAddr,
-    identity: Identity,
+    identity: (Vec<u8>, Vec<u8>),
     nodes: AgentNodeService,
     auth_service: Arc<dyn AuthService>,
     session_data: NodeSessionDataRpc,
@@ -60,7 +62,7 @@ pub struct NodeRpcServer {
 
 impl NodeRpcServer {
     /// Compose the complete node listener with its existing resource owners.
-    /// Direct registration publishes execution clients; outbound registration awaits Connect.
+    /// Registration awaits an authenticated WSS or gRPC Connect execution stream.
     /// Callers must supply all resource services before starting the listener.
     pub fn new(
         config: &AgentNodeControlConfig,
@@ -94,23 +96,9 @@ impl NodeRpcServer {
                 error,
             )
         })?;
-        let trusted_node_ca = config
-            .trusted_node_ca_file
-            .as_ref()
-            .map(fs::read)
-            .transpose()
-            .map_err(|error| {
-                TalosError::internal_with_source(
-                    "Read trusted Agent node CA; technical details were withheld.",
-                    error,
-                )
-            })?;
         let remote_publisher = RemoteNodePublisher {
             coordinator_id: uuid::Uuid::new_v4().to_string(),
             coordinator,
-            nodes: nodes.clone(),
-            trusted_node_ca: trusted_node_ca
-                .map_or(AgentTlsTrust::SystemRoots, AgentTlsTrust::Certificate),
             connections: Arc::default(),
             resource_routes: ResourceRoutes::default(),
         };
@@ -121,7 +109,7 @@ impl NodeRpcServer {
             NodeAutomationControlRpc::new(session_data.clone(), automation_control);
         Ok(Self {
             bind_address,
-            identity: Identity::from_pem(certificate, private_key),
+            identity: (certificate, private_key),
             nodes,
             auth_service,
             session_data,
@@ -153,12 +141,13 @@ impl NodeRpcServer {
 
     pub async fn run(self, shutdown: CancellationToken) -> TalosResult<()> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let control =
-            pb::agent_node_control_server::AgentNodeControlServer::new(NodeControlRpc::new(
-                self.nodes.clone(),
-                self.remote_publisher.clone(),
-                shutdown.clone(),
-            ));
+        let node_control = NodeControlRpc::new(
+            self.nodes.clone(),
+            self.remote_publisher.clone(),
+            shutdown.clone(),
+        );
+        let websocket = node_control.clone().websocket_routes();
+        let control = pb::agent_node_control_server::AgentNodeControlServer::new(node_control);
         let management = NodeManagementRpc::new(self.nodes, self.auth_service);
         let desktop = pb::agent_desktop_media_server::AgentDesktopMediaServer::new(
             desktop::DesktopMediaRpc::new(management.clone(), shutdown.clone()),
@@ -190,15 +179,7 @@ impl NodeRpcServer {
             pb::agent_automation_control_rpc_server::AgentAutomationControlRpcServer::new(
                 self.automation_control,
             );
-        Server::builder()
-            .tls_config(ServerTlsConfig::new().identity(self.identity))
-            .map_err(|error| {
-                TalosError::internal_with_source(
-                    "Configure Agent node control TLS; technical details were withheld.",
-                    error,
-                )
-            })?
-            .add_service(control)
+        let mut routes = tonic::service::Routes::new(control)
             .add_service(management)
             .add_service(desktop)
             .add_service(pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(callers))
@@ -206,33 +187,97 @@ impl NodeRpcServer {
             .add_service(session_data)
             .add_service(subagent_control)
             .add_service(automation_control)
-            .add_service(tool_images)
-            .add_optional_service(
-                self.worker_adapter
-                    .clone()
-                    .map(pb::worker_environment_rpc_server::WorkerEnvironmentRpcServer::new),
-            )
-            .add_optional_service(
-                self.worker_adapter
-                    .map(pb::agent_harness_rpc_server::AgentHarnessRpcServer::new),
-            )
-            .serve_with_shutdown(self.bind_address, shutdown.cancelled_owned())
+            .add_service(tool_images);
+        if let Some(adapter) = self.worker_adapter {
+            routes = routes
+                .add_service(
+                    pb::worker_environment_rpc_server::WorkerEnvironmentRpcServer::new(
+                        adapter.clone(),
+                    ),
+                )
+                .add_service(pb::agent_harness_rpc_server::AgentHarnessRpcServer::new(
+                    adapter,
+                ));
+        }
+        let router = node_control_router(routes, websocket);
+        let tls = axum_server::tls_rustls::RustlsConfig::from_pem(self.identity.0, self.identity.1)
             .await
             .map_err(|error| {
                 TalosError::internal_with_source(
-                    "Serve Agent node control RPC; technical details were withheld.",
+                    "Configure Agent node TLS; technical details were withheld.",
                     error,
                 )
-            })
+            })?;
+        let handle = axum_server::Handle::new();
+        let signal = handle.clone();
+        let server = axum_server::bind_rustls(self.bind_address, tls)
+            .handle(handle)
+            .serve(router.into_make_service());
+        tokio::pin!(server);
+        tokio::select! {
+            result = &mut server => result,
+            _ = shutdown.cancelled() => {
+                signal.graceful_shutdown(Some(std::time::Duration::from_secs(10)));
+                server.await
+            }
+        }
+        .map_err(|error| {
+            TalosError::internal_with_source(
+                "Serve Agent node control; technical details were withheld.",
+                error,
+            )
+        })
     }
+}
+
+fn node_control_router(
+    routes: tonic::service::Routes,
+    websocket: axum_ws::Router,
+) -> axum_ws::Router {
+    routes
+        .into_axum_router()
+        .layer(axum_ws::middleware::from_fn(honor_grpc_timeout))
+        .merge(websocket)
+}
+
+async fn honor_grpc_timeout(
+    request: axum_ws::extract::Request,
+    next: axum_ws::middleware::Next,
+) -> axum_ws::response::Response {
+    match grpc_timeout(request.headers()) {
+        Some(deadline) => match tokio::time::timeout(deadline, next.run(request)).await {
+            Ok(response) => response,
+            Err(_) => Status::cancelled("Timeout expired").into_http(),
+        },
+        None => next.run(request).await,
+    }
+}
+
+fn grpc_timeout(headers: &axum_ws::http::HeaderMap) -> Option<std::time::Duration> {
+    let value = headers.get("grpc-timeout")?.to_str().ok()?;
+    if value.is_empty() {
+        return None;
+    }
+    let (amount, unit) = value.split_at(value.len() - 1);
+    if amount.is_empty() || amount.len() > 8 {
+        return None;
+    }
+    let amount = amount.parse().ok()?;
+    Some(match unit {
+        "H" => std::time::Duration::from_secs(amount * 60 * 60),
+        "M" => std::time::Duration::from_secs(amount * 60),
+        "S" => std::time::Duration::from_secs(amount),
+        "m" => std::time::Duration::from_millis(amount),
+        "u" => std::time::Duration::from_micros(amount),
+        "n" => std::time::Duration::from_nanos(amount),
+        _ => return None,
+    })
 }
 
 #[derive(Clone)]
 pub struct RemoteNodePublisher {
     coordinator_id: String,
     coordinator: Arc<CoordinatorImpl>,
-    nodes: AgentNodeService,
-    trusted_node_ca: AgentTlsTrust,
     // Live transport handles belong to the existing publication owner; no
     // additional persisted registry or execution ledger is introduced.
     resource_routes: ResourceRoutes,
@@ -244,97 +289,6 @@ pub struct RemoteNodePublisher {
 }
 
 impl RemoteNodePublisher {
-    async fn publish(
-        &self,
-        node_id: &str,
-        registration: &Registration,
-        deployments: &[Deployment],
-    ) -> TalosResult<()> {
-        let node = self
-            .nodes
-            .read_registered_computer(&NodeAuth {
-                node_id: node_id.to_owned(),
-                token: registration.lease_token.clone(),
-            })
-            .await?;
-        let Some(endpoint) = node.endpoint else {
-            // Registration alone is not evidence of an outbound execution connection.
-            self.unpublish(node_id).await;
-            return Ok(());
-        };
-        let mut clients = Vec::<(String, Arc<dyn AgentHarness>)>::with_capacity(deployments.len());
-        for deployment in deployments {
-            let client = RemoteAgentClient::connect(
-                &endpoint,
-                self.trusted_node_ca.clone(),
-                deployment.agent_id.clone(),
-                NodeAuth {
-                    node_id: node_id.to_owned(),
-                    token: registration.lease_token.clone(),
-                },
-            )
-            .await?;
-            let client = client.with_coordinator_id(self.coordinator_id.clone())?;
-            clients.push((deployment.agent_id.clone(), Arc::new(client)));
-        }
-        self.coordinator.unregister_remote_node(node_id).await;
-        for (agent_id, client) in clients {
-            self.coordinator
-                .replace_remote_agent(node_id.to_owned(), agent_id, client)
-                .await?;
-        }
-        let environment = Arc::new(
-            agent_client::AgentEnvironmentClient::connect(
-                &endpoint,
-                self.trusted_node_ca.clone(),
-                NodeAuth {
-                    node_id: node_id.to_owned(),
-                    token: registration.lease_token.clone(),
-                },
-            )
-            .await?,
-        );
-        self.coordinator
-            .register_environment(node_id.to_owned(), environment.clone())
-            .await;
-        let coordinator = self.coordinator.clone();
-        self.connections
-            .lock()
-            .await
-            .insert(node_id.to_owned(), environment.clone());
-        let admission = environment.clone();
-        self.nodes
-            .set_registration_deletion_hook(
-                &NodeAuth {
-                    node_id: node_id.to_owned(),
-                    token: registration.lease_token.clone(),
-                },
-                Arc::new(move |blocked| {
-                    let admission = admission.clone();
-                    Box::pin(async move { admission.set_registration_admission(blocked).await })
-                }),
-            )
-            .await?;
-        let published_node_id = node_id.to_owned();
-        self.nodes
-            .mark_registration_published(
-                &NodeAuth {
-                    node_id: node_id.to_owned(),
-                    token: registration.lease_token.clone(),
-                },
-                Arc::new(move || {
-                    let coordinator = coordinator.clone();
-                    let environment = environment.clone();
-                    let node_id = published_node_id.clone();
-                    Box::pin(async move {
-                        environment.close();
-                        coordinator.unregister_remote_node(&node_id).await;
-                    })
-                }),
-            )
-            .await
-    }
-
     async fn unpublish(&self, node_id: &str) {
         if let Some(connection) = self.connections.lock().await.remove(node_id) {
             connection.close();
@@ -385,12 +339,9 @@ impl pb::agent_node_control_server::AgentNodeControl for NodeControlRpc {
             let auth = node_pb::decode_auth(request.auth)?;
             let _lifecycle = self.nodes.lock_lifecycle(&auth.node_id).await;
             let params = node_pb::decode_register(request.params)?;
-            let deployments = params.deployments.clone();
             let principal = self.nodes.authenticate_registration(&auth).await?;
             let registration = self.nodes.register(&principal, params).await?;
-            self.remote_publisher
-                .publish(&auth.node_id, &registration, &deployments)
-                .await?;
+            self.remote_publisher.unpublish(&auth.node_id).await;
             Ok(registration)
         }
         .await;

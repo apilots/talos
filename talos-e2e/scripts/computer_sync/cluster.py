@@ -123,10 +123,7 @@ class SyncCluster(Cluster):
 
     def add_worker(self, name, owner, *, container):
         direct = name == "Mac-Worker"
-        worker_port = free_port() if direct else None
         params = {"display_name": name, "credential_expires_at": int(time.time()) + 3600}
-        if direct:
-            params["endpoint"] = f"https://127.0.0.1:{worker_port}"
         created = self.manage(owner, 'CreateNode', params)['created']
         node = created['node']['node_id']
         home = self.root / name
@@ -143,14 +140,7 @@ class SyncCluster(Cluster):
         document['cloud'].update(api_base_url=f'http://host.docker.internal:{self.cloud_port}' if container else self.cloud_url,
                                  agent_base_url=endpoint, agent_trusted_ca_file=base + '/conf/tls.crt')
         document['agent_node'] = {'runner': {'node_id': node, 'control_plane_endpoint': endpoint, 'credential_file': base + '/conf/node.credential',
-                                           'trusted_ca_file': base + '/conf/tls.crt', 'transport': 'direct' if direct else 'outbound'},
-                                  'worker_rpc': {'bind_address': f'127.0.0.1:{worker_port}' if direct else '127.0.0.1:0'}}
-        if direct:
-            key = home / 'conf/tls.key'
-            key.write_bytes(self.key.read_bytes())
-            key.chmod(0o600)
-            document['agent_node']['worker_rpc']['tls'] = {
-                'certificate_file': str(ca), 'private_key_file': str(key)}
+                                           'trusted_ca_file': base + '/conf/tls.crt', 'transport': 'direct' if direct else 'outbound'}}
         path.write_text(yaml.safe_dump(document, sort_keys=False))
         record = {'node_id': node, 'owner': owner, 'home': home}
         if container:

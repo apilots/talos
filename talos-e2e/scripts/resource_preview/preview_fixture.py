@@ -103,9 +103,7 @@ class PreviewCluster(ContractAuthCluster):
         credential = home / 'conf/node.credential'
         env = self.config(home, {'runner': {'node_id': node,
             'control_plane_endpoint': f'https://127.0.0.1:{self.rpc_port}',
-            'credential_file': str(credential), 'trusted_ca_file': str(self.cert), 'transport': transport},
-            'worker_rpc': {'bind_address': f'127.0.0.1:{port}',
-                'tls': {'certificate_file': str(self.cert), 'private_key_file': str(self.key)}}})
+            'credential_file': str(credential), 'trusted_ca_file': str(self.cert), 'transport': transport}})
         credential.write_text(response['credential']['token'])
         credential.chmod(0o600)
         self.nodes[name] = dict(node_id=node, owner='alice', home=home, port=port, env=env, credential=credential)

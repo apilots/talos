@@ -15,7 +15,6 @@ agent-client = { workspace = true }
 agent-pb = { workspace = true }
 agent-protocol = { workspace = true }
 async-trait = { workspace = true }
-rustls = { workspace = true }
 talos-agent-api = { workspace = true }
 talos-agent = { workspace = true }
 talos-agent-provider-kernel = { workspace = true }
@@ -41,8 +40,6 @@ talos-tools-sandbox = { workspace = true }
 talos-types = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "signal"] }
 tokio-util = { workspace = true }
-tokio-stream = { workspace = true, features = ["net"] }
-tonic = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 

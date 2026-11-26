@@ -10,6 +10,9 @@ license.workspace = true
 e2e = []
 
 [dependencies]
+axum-ws = { package = "axum", version = "0.8", features = ["ws"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+prost.workspace = true
 chrono = { workspace = true }
 base64.workspace = true
 talos-browser.workspace = true

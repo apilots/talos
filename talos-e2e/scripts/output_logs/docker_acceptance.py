@@ -171,7 +171,7 @@ walk(root)
         config = base.config(self.home, int(self.url.rsplit(':', 1)[1]), self.mock.server_port)
         config['cloud'].update(agent_base_url=f'https://127.0.0.1:{self.rpc}', agent_trusted_ca_file=str(cert))
         config['agent_node'] = {'control_plane': {'bind_address': f'0.0.0.0:{self.rpc}', 'tls_certificate_file': str(cert),
-            'tls_private_key_file': str(key), 'trusted_node_ca_file': str(cert)}}
+            'tls_private_key_file': str(key)}}
         conf = self.home / 'talos.yaml'
         conf.write_text(yaml.safe_dump(config, sort_keys=False))
         env = {key: os.environ[key] for key in ('PATH', 'TMPDIR') if key in os.environ}
@@ -191,7 +191,7 @@ walk(root)
         worker['llm']['custom_providers'][base.MODEL_PROVIDER]['base_url'] = f'http://host.docker.internal:{self.mock.server_port}/v1'
         worker['agent']['kernel']['tools']['bash']['output_log']['cleanup_interval_secs'] = 1
         worker['agent_node'] = {'runner': {'node_id': self.node, 'control_plane_endpoint': f'https://host.docker.internal:{self.rpc}',
-            'credential_file': '/home/talos/.talos/conf/node.credential', 'trusted_ca_file': '/home/talos/.talos/conf/tls.crt', 'transport': 'outbound'}}
+            'credential_file': '/home/talos/.talos/conf/node.credential', 'trusted_ca_file': '/home/talos/.talos/conf/tls.crt', 'transport': 'direct'}}
         (fixture / 'talos.yaml').write_text(yaml.safe_dump(worker, sort_keys=False))
         (fixture / 'node.credential').write_text(created['credential']['token'])
         (fixture / 'node.credential').chmod(0o600)

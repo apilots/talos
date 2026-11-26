@@ -12,56 +12,6 @@ use super::network::GatewayConfig;
 pub struct AgentNodeConfig {
     pub control_plane: Option<AgentNodeControlConfig>,
     pub runner: Option<AgentNodeRunnerConfig>,
-    pub worker_rpc: WorkerRpcConfig,
-}
-
-/// The execution listener is independent of registration and Connect transport.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct WorkerRpcConfig {
-    pub bind_address: String,
-    pub tls: Option<WorkerRpcTlsConfig>,
-}
-
-impl Default for WorkerRpcConfig {
-    fn default() -> Self {
-        Self {
-            bind_address: "127.0.0.1:0".into(),
-            tls: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkerRpcTlsConfig {
-    pub certificate_file: PathBuf,
-    pub private_key_file: PathBuf,
-}
-
-impl WorkerRpcConfig {
-    /// Plain HTTP/2 is restricted to an explicit loopback socket, with NodeAuth.
-    pub fn address(&self) -> TalosResult<std::net::SocketAddr> {
-        let address: std::net::SocketAddr = self.bind_address.parse().map_err(|error| {
-            TalosError::from_source(
-                ErrorCode::InvalidRequest,
-                "Worker RPC bind address is invalid",
-                error,
-            )
-        })?;
-        if (!address.ip().is_loopback() && self.tls.is_none())
-            || self.tls.as_ref().is_some_and(|tls| {
-                tls.certificate_file.as_os_str().is_empty()
-                    || tls.private_key_file.as_os_str().is_empty()
-            })
-        {
-            return Err(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "Non-loopback Worker RPC requires a TLS identity",
-            ));
-        }
-        Ok(address)
-    }
 }
 
 /// TLS listener serving node registration and authenticated management.
@@ -71,9 +21,6 @@ pub struct AgentNodeControlConfig {
     pub bind_address: String,
     pub tls_certificate_file: PathBuf,
     pub tls_private_key_file: PathBuf,
-    /// Optional private CA for direct Harness listeners; omitted uses system roots.
-    #[serde(default)]
-    pub trusted_node_ca_file: Option<PathBuf>,
 }
 
 /// Stable identity and TLS endpoints for a standalone Agent node.
@@ -83,7 +30,9 @@ pub struct AgentNodeControlConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentNodeRunnerConfig {
-    /// Omitted uses outbound Connect; listener settings never select registration transport.
+    /// Omitted/null uses outbound WSS unless managed-home Upgrade fills an
+    /// explicit packaged YAML default (Docker: direct gRPC Connect).
+    /// Explicit values win; listener settings and image markers never select it.
     #[serde(default)]
     pub transport: Option<AgentNodeTransport>,
     pub node_id: String,
@@ -97,7 +46,9 @@ pub struct AgentNodeRunnerConfig {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentNodeTransport {
+    /// Personal computers: outbound authenticated WSS task/event stream.
     Outbound,
+    /// Authenticated gRPC bidirectional task/event stream to the Server.
     Direct,
 }
 
@@ -110,7 +61,6 @@ impl AgentNodeRunnerConfig {
 impl AgentNodeConfig {
     /// Reject node network surfaces without authentication and TLS material.
     pub fn validate(&self, gateway: &GatewayConfig) -> TalosResult<()> {
-        self.worker_rpc.address()?;
         if let Some(control) = &self.control_plane {
             if !gateway.auth {
                 return Err(TalosError::new(
@@ -121,10 +71,6 @@ impl AgentNodeConfig {
             if control.bind_address.trim().is_empty()
                 || control.tls_certificate_file.as_os_str().is_empty()
                 || control.tls_private_key_file.as_os_str().is_empty()
-                || control
-                    .trusted_node_ca_file
-                    .as_ref()
-                    .is_some_and(|path| path.as_os_str().is_empty())
             {
                 return Err(TalosError::new(
                     ErrorCode::InvalidRequest,
@@ -137,9 +83,6 @@ impl AgentNodeConfig {
                 || runner.node_id == "embedded"
                 || !runner.control_plane_endpoint.starts_with("https://")
                 || runner.credential_file.as_os_str().is_empty()
-                || (runner.transport() == AgentNodeTransport::Direct
-                    && self.worker_rpc.tls.is_none()
-                    && self.control_plane.is_none())
                 || runner
                     .trusted_ca_file
                     .as_ref()
@@ -147,7 +90,7 @@ impl AgentNodeConfig {
             {
                 return Err(TalosError::new(
                     ErrorCode::InvalidRequest,
-                    "Agent node runner requires a node ID, HTTPS control endpoint, credential file, and TLS for direct access",
+                    "Agent node runner requires a node ID, HTTPS control endpoint, credential file",
                 ));
             }
         }

@@ -1,4 +1,4 @@
-//! Central administrator claim uses direct RPC and preserves personal ownership.
+//! Central administrator claim uses gRPC Connect and preserves personal ownership.
 use super::*;
 use agent_protocol::WorkerEnvironment;
 use axum::{routing::post, Json, Router};
@@ -88,7 +88,6 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
         bind_address: rpc.to_string(),
         tls_certificate_file: cert.clone(),
         tls_private_key_file: key,
-        trusted_node_ca_file: Some(cert.clone()),
     });
     config.cloud.agent_base_url = format!("https://{rpc}");
     config.cloud.agent_trusted_ca_file = Some(cert.clone());

@@ -8,8 +8,8 @@ for command in cargo docker git openssl protoc python3 pnpm; do require_command 
 python3 -c 'import grpc, yaml; from google.protobuf import descriptor_pool'
 docker info >/dev/null
 worker_image="${TALOS_WORKER_E2E_IMAGE:-}"
-# Sync v0.1.6 ships the SDK/types 0.1.5 tool history schema used by Talos.
-sync_image="${TALOS_SYNC_E2E_IMAGE:-ghcr.io/apilots/talos-sync:v0.1.6@sha256:8d3c2d0d5ae7bbfa198c765aafdc2d691b95f8f4b57fd37c9b415f0f990d6d70}"
+# Service v0.1.9 uses protocol/schema 2 and the SDK/types 0.1.8 pinned by Talos.
+sync_image="${TALOS_SYNC_E2E_IMAGE:-ghcr.io/apilots/talos-sync:v0.1.9@sha256:4dfc540a83238a69c8d21a1090ed9c7b9a437ca1a0fafa8161b007a204d0d647}"
 [[ "${sync_image}" =~ @sha256:[a-f0-9]{64}$ ]] || { echo 'CASE sync_image_preflight FAIL requires an immutable image digest' >&2; exit 1; }
 image_marker="${TALOS_E2E_RESOURCE_ROOT}/shared/computer-sync-images-${TALOS_E2E_RUN_ID:?}.ids"
 image_context=""

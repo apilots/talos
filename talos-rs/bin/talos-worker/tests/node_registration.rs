@@ -74,9 +74,9 @@ async fn verify_node_lifecycle(configuration: Configuration) {
         bind_address: address.to_string(),
         tls_certificate_file: certificate_path.clone(),
         tls_private_key_file: private_key_path.clone(),
-        trusted_node_ca_file: Some(certificate_path.clone()),
     };
 
+    // The directory endpoint remains unreachable throughout registration and Connect.
     let node_socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let node_address = node_socket.local_addr().unwrap();
     drop(node_socket);
@@ -126,9 +126,7 @@ async fn verify_node_lifecycle(configuration: Configuration) {
     std::fs::write(
         &config_path,
         format!(
-            "workspaces:\n  default_workspace_id: default\n  definitions:\n    - workspace_id: default\n      root_prefix: workspace-talos\nagent:\n  name: talos\ngateway:\n  host: 127.0.0.1\n  port: 8080\n  auth: true\nllm:\n  provider: openai\n  model: test\nagent_node:\n  worker_rpc:\n    bind_address: {node_address}\n    tls:\n      certificate_file: {:?}\n      private_key_file: {:?}\n  runner:\n    transport: direct\n    node_id: {node_id}\n    control_plane_endpoint: https://{address}\n    credential_file: {:?}\n    trusted_ca_file: {:?}\n",
-            certificate_path.display().to_string(),
-            private_key_path.display().to_string(),
+            "workspaces:\n  default_workspace_id: default\n  definitions:\n    - workspace_id: default\n      root_prefix: workspace-talos\nagent:\n  name: talos\ngateway:\n  host: 127.0.0.1\n  port: 8080\n  auth: true\nllm:\n  provider: openai\n  model: test\nagent_node:\n  runner:\n    transport: direct\n    node_id: {node_id}\n    control_plane_endpoint: https://{address}\n    credential_file: {:?}\n    trusted_ca_file: {:?}\n",
             credential_path.display().to_string(),
             certificate_path.display().to_string(),
         ),

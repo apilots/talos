@@ -268,8 +268,8 @@ if __name__ == '__main__':
             recovery(cluster)
             isolation(cluster)
         elif sys.argv[1] == 'interactions':
-            from interactions import failed_direct_registration, source_files, commands, question_and_child, waiting_plugin_mutations_with_sync_offline
-            failed_direct_registration(cluster)
+            from interactions import registration_requires_execution_stream, source_files, commands, question_and_child, waiting_plugin_mutations_with_sync_offline
+            registration_requires_execution_stream(cluster)
             source_files(cluster)
             commands(cluster)
             question_and_child(cluster)

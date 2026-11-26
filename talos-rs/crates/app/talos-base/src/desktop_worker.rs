@@ -309,7 +309,7 @@ impl WorkerEnrollment<'_> {
                 }
                 Err(error) => return Err(error),
             };
-            validate_saved_node(&config, &actor, existing.as_ref(), &node)?;
+            validate_saved_node(&actor, &node)?;
             if existing
                 .as_ref()
                 .is_some_and(|saved| saved.node_id != *node_id)
@@ -424,7 +424,7 @@ impl WorkerEnrollment<'_> {
             self.store.save_node_identity(&runner, &credential.token)?;
         } else if transport_changed {
             // Preserve the Server-issued UUID and protected credential when retiring
-            // an old self-outbound registration in favor of the central direct ingress.
+            // an old WSS registration in favor of central gRPC Connect.
             let token = std::fs::read_to_string(&runner.credential_file).map_err(|error| {
                 TalosError::internal_with_source(
                     "Read existing Worker credential; technical details were withheld.",
@@ -478,27 +478,17 @@ async fn enrollment_gateway(
     AgentNodeClient::connect(endpoint, trust).await
 }
 
-pub(crate) fn validate_saved_node(
-    config: &Config,
-    actor: &RequestIdentity,
-    runner: Option<&AgentNodeRunnerConfig>,
-    node: &NodeInfo,
-) -> TalosResult<()> {
+pub(crate) fn validate_saved_node(actor: &RequestIdentity, node: &NodeInfo) -> TalosResult<()> {
     if node.status == agent_protocol::NodeStatus::Disabled {
         return Err(TalosError::new(
             ErrorCode::PermissionDenied,
             "Enable this computer before registering its Worker",
         ));
     }
-    if node.mode != NodeMode::Remote
-        || node.owner_user_id.as_deref() != Some(&actor.user_id)
-        || (config.agent_node.control_plane.is_none()
-            && node.endpoint.is_some()
-                != runner.is_some_and(|runner| runner.transport() == AgentNodeTransport::Direct))
-    {
+    if node.mode != NodeMode::Remote || node.owner_user_id.as_deref() != Some(&actor.user_id) {
         return Err(TalosError::new(
             ErrorCode::PermissionDenied,
-            "Saved computer ownership or transport does not match this Worker",
+            "Saved computer ownership does not match this Worker",
         ));
     }
     Ok(())

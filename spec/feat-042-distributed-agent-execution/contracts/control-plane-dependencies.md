@@ -43,9 +43,12 @@ History、Memory、Subagent 对象要逐字段投影；无法无损投影时先�
 - Kernel transcript、summary、continuation、shell/文件工具工作目录属于节点本地
   Workspace，不经过此 RPC。模型、skills、MCP、网络工具在节点按生产配置构造，
   其所需密钥和插件目录必须在节点配置，不从控制面隐式读取。
-- 控制面必须配置可信节点 TLS CA；节点 Harness listener 使用证书和私钥。
-  Register 处理期间发布对应 RemoteAgentClient；节点收到响应后安装 token，健康心跳后允许路由。停用、租约
-  失效、endpoint 变更或重新 Register 时撤下旧实例。控制面重启后等待重登记。
+- The control plane serves its TLS identity. Workers verify it and initiate
+  WSS (`outbound`) or gRPC Connect (`direct`). Register issues a lease, and the
+  authenticated ready stream installs RemoteAgentClient and environment handles.
+  Disable, lease expiry, endpoint changes and re-registration withdraw old
+  handles through the original lifecycle. A control-plane restart waits for
+  registration and a new execution stream.
 
 本清单对应的协议定义在 [resources.proto](../../../talos-rs/crates/orchestration/agent-pb/proto/resources.proto)。
 生产组合和验收证据见[节点接口](node-api.md)及[阶段 9](../plans/09-review-ablation.md)。

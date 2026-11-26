@@ -118,7 +118,7 @@ try {
   const serverConfig = structuredClone(config);
   serverConfig.sync.enabled = false;
   serverConfig.gateway.port = httpPort;
-  serverConfig.agent_node = { control_plane: { bind_address: `127.0.0.1:${rpcPort}`, tls_certificate_file: cert, tls_private_key_file: key, trusted_node_ca_file: cert } };
+  serverConfig.agent_node = { control_plane: { bind_address: `127.0.0.1:${rpcPort}`, tls_certificate_file: cert, tls_private_key_file: key } };
   const serverPath = path.join(serverHome, "selected-config.yaml");
   await writeFile(serverPath, JSON.stringify(serverConfig));
   const server = spawn(process.env.TALOS_SERVER_BIN!, [], { env: { ...process.env, TALOS_HOME: serverHome, TALOS_CONFIG: serverPath, TALOS_DESKTOP_HOSTNAME: undefined }, stdio: ["ignore", "ignore", "inherit"] });

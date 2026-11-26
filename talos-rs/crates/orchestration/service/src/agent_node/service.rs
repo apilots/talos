@@ -173,17 +173,6 @@ impl AgentNodeService {
         auth: &NodeAuth,
     ) -> TalosResult<Vec<agent_protocol::Deployment>> {
         self.authenticate_lease(auth).await?;
-        let node = self
-            .store
-            .get(&auth.node_id)
-            .await?
-            .ok_or_else(unauthenticated)?;
-        if node.endpoint.is_some() {
-            return Err(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "Direct nodes cannot open outbound execution",
-            ));
-        }
         let current = self.current.lock().await;
         let registration = current.get(&auth.node_id).ok_or_else(unauthenticated)?;
         if !bool::from(registration.token_hash.ct_eq(&hash_token(&auth.token))) {

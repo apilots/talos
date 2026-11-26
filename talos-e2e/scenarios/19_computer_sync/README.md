@@ -26,8 +26,8 @@ execution and synchronization use public APIs, original SDKs and WSS/TLS.
   Computer and Session remain absent from Alice's Desktop databases while G
   retains both accounts.
 
-- `05_resource_interactions`: failed Direct registrations with an unreachable
-  endpoint or invalid TLS hostname never advertise Connected; an actual B
+- `05_resource_interactions`: registration with an absent or unreachable endpoint
+  succeeds but never advertises Connected before an execution stream exists; an actual B
   Coordinator Connect receives paused admission and disconnects before commit,
   restoring the complete original Worker marker. With B and H stopped, A still
   continues the same Session without an abandoned tool side effect or history.
@@ -68,10 +68,10 @@ fixture executable (`TALOS_CLOUD_SERVER_BIN` or `cloud-server` on `PATH`),
 Node/pnpm, Python grpcio/protobuf/PyYAML, and existing DEV configuration.
 Execution cases use the configured funded DeepSeek provider in `.env`; no model
 key is baked into an image. Sync uses the public
-[v0.1.6 Release](https://github.com/apilots/talos-sync/releases/tag/v0.1.6),
+[v0.1.9 Release](https://github.com/apilots/talos-sync/releases/tag/v0.1.9),
 locked in `scripts/computer_sync/run.sh` to its release-manifest multi-platform
-digest. This is the first Hub release using SDK/types 0.1.5, matching the tool
-history schema in Talos. No adjacent source checkout or moving `latest` tag is
+digest. Service v0.1.9 uses protocol/schema 2 with SDK/types 0.1.8, matching the
+product workspace. Service and SDK versions are independently published. No adjacent source checkout or moving `latest` tag is
 used. `TALOS_SYNC_E2E_IMAGE` may select another explicit digest; tag-only
 overrides fail before setup. Updating the pin requires
 checking the Release manifest checksum, platform digests and registry manifest.

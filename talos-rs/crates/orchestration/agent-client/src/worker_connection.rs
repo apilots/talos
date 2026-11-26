@@ -6,6 +6,7 @@ use super::{
 };
 use agent_pb as pb;
 use agent_protocol::{error_pb, node_pb, NodeAuth};
+use futures_util::StreamExt;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 use talos_agent::AgentHarnessRpcAdapter;
@@ -14,8 +15,14 @@ use tokio::{
     sync::{mpsc, watch},
     task::JoinSet,
 };
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
+
+pub(crate) const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
+
+type ControlStream = std::pin::Pin<
+    Box<dyn futures_util::Stream<Item = Result<pb::ControlToNodeFrame, tonic::Status>> + Send>,
+>;
 
 type Call = pb::worker_rpc_call::Request;
 struct Pending {
@@ -54,18 +61,27 @@ impl AgentNodeClient {
                 },
             )),
         })?;
-        let mut input = tokio::time::timeout(
-            Duration::from_secs(10),
-            pb::agent_node_control_client::AgentNodeControlClient::new(self.channel.clone())
-                .connect(ReceiverStream::new(output)),
-        )
-        .await
-        .map_err(|error| {
-            TalosError::from_source(ErrorCode::Timeout, "Agent Connect timed out", error)
-        })?
-        .map_err(crate::decode_rpc_status)?
-        .into_inner();
-        let first = tokio::time::timeout(Duration::from_secs(10), input.message())
+        let mut input: ControlStream = if self.uses_websocket() {
+            self.websocket_execution_stream(output, stop.clone())
+                .await?
+        } else {
+            Box::pin(
+                tokio::time::timeout(
+                    Duration::from_secs(10),
+                    pb::agent_node_control_client::AgentNodeControlClient::new(
+                        self.channel.clone(),
+                    )
+                    .connect(ReceiverStream::new(output)),
+                )
+                .await
+                .map_err(|error| {
+                    TalosError::from_source(ErrorCode::Timeout, "Agent Connect timed out", error)
+                })?
+                .map_err(crate::decode_rpc_status)?
+                .into_inner(),
+            )
+        };
+        let first = tokio::time::timeout(Duration::from_secs(10), input.next())
             .await
             .map_err(|error| {
                 TalosError::from_source(
@@ -74,8 +90,8 @@ impl AgentNodeClient {
                     error,
                 )
             })?
-            .map_err(crate::decode_rpc_status)?
-            .ok_or_else(closed)?;
+            .ok_or_else(closed)?
+            .map_err(crate::decode_rpc_status)?;
         let stream_heartbeat = match first.body {
             Some(pb::control_to_node_frame::Body::Connected(pb::ConnectNodeResponse {
                 result: Some(pb::connect_node_response::Result::Ready(_)),
@@ -95,6 +111,54 @@ impl AgentNodeClient {
             stream_heartbeat,
         )
         .await
+    }
+    async fn websocket_execution_stream(
+        &self,
+        mut output: mpsc::Receiver<pb::NodeToControlFrame>,
+        stop: CancellationToken,
+    ) -> TalosResult<ControlStream> {
+        use futures_util::SinkExt;
+        use prost::Message;
+        let (mut sink, input) = self.open_websocket("connect").await?.split();
+        let writer_stop = stop.clone();
+        tokio::spawn(async move {
+            loop {
+                let frame = tokio::select! {
+                    _ = writer_stop.cancelled() => break,
+                    frame = output.recv() => match frame { Some(frame) => frame, None => break },
+                };
+                if frame.encoded_len() > MAX_FRAME_BYTES {
+                    break;
+                }
+                let send = sink.send(reqwest_websocket::Message::Binary(
+                    frame.encode_to_vec().into(),
+                ));
+                if tokio::select! { _ = writer_stop.cancelled() => true, result = send => result.is_err() }
+                {
+                    break;
+                }
+            }
+            writer_stop.cancel();
+        });
+        Ok(Box::pin(input.filter_map(move |message| async move {
+            match message {
+                Ok(reqwest_websocket::Message::Binary(bytes)) => {
+                    Some(pb::ControlToNodeFrame::decode(bytes).map_err(|error| {
+                        error_pb::encode_status(&TalosError::internal_with_source(
+                            "Agent WebSocket frame is malformed",
+                            error,
+                        ))
+                    }))
+                }
+                Ok(reqwest_websocket::Message::Ping(_) | reqwest_websocket::Message::Pong(_)) => {
+                    None
+                }
+                Ok(_) => Some(Err(error_pb::encode_status(&closed()))),
+                Err(error) => Some(Err(error_pb::encode_status(&super::node::websocket_error(
+                    error,
+                )))),
+            }
+        })))
     }
 }
 

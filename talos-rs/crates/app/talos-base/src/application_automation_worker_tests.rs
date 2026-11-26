@@ -1,9 +1,7 @@
 //! Real registered Worker/Automation callback acceptance; requires the controlled upstream.
 use super::*;
 use std::{path::PathBuf, time::Duration};
-use talos_config::{
-    AgentNodeRunnerConfig, AgentNodeTransport, Config, TalosPaths, WorkerRpcTlsConfig,
-};
+use talos_config::{AgentNodeRunnerConfig, AgentNodeTransport, Config, TalosPaths};
 use talos_types::{
     AgentUserContent, AgentUserInput, AutomationTurnOrigin, GoalStatus, SessionActiveTurnRequest,
     SessionAutomationReadRequest, SessionHistoryRequest, SkillScope, SkillsListRequest,
@@ -55,16 +53,28 @@ fn address() -> std::net::SocketAddr {
 #[tokio::test]
 #[ignore = "requires controlled automation model; run 09_app_server/automation_e2e"]
 async fn automation_worker_business_direct() {
-    run(AgentNodeTransport::Direct).await;
+    run(AgentNodeTransport::Direct, Finish::Complete).await;
 }
 
 #[tokio::test]
 #[ignore = "requires controlled automation model; run 09_app_server/automation_e2e"]
 async fn automation_worker_business_outbound() {
-    run(AgentNodeTransport::Outbound).await;
+    run(AgentNodeTransport::Outbound, Finish::Complete).await;
 }
 
-async fn run(transport: AgentNodeTransport) {
+#[tokio::test]
+#[ignore = "requires controlled automation model; run 24_automation/01_session_automation"]
+async fn automation_worker_business_websocket_interrupt() {
+    run(AgentNodeTransport::Outbound, Finish::Interrupt).await;
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Finish {
+    Complete,
+    Interrupt,
+}
+
+async fn run(transport: AgentNodeTransport, finish: Finish) {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let home = tempfile::tempdir().unwrap();
     let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
@@ -77,7 +87,6 @@ async fn run(transport: AgentNodeTransport) {
         bind_address: ingress.to_string(),
         tls_certificate_file: cert.clone(),
         tls_private_key_file: key.clone(),
-        trusted_node_ca_file: Some(cert.clone()),
     };
     let mut owner_config = config(&home.path().join("owner"));
     owner_config.agent_node.control_plane = Some(control_config.clone());
@@ -133,15 +142,13 @@ async fn run(transport: AgentNodeTransport) {
     .await
     .unwrap();
     let actor = Actor::regular("user-1").with_access_token("user-1");
-    let worker_address = address();
     let node = runtime
         .node_service
         .create_node(
             &actor,
             agent_protocol::CreateNodeRequest {
                 display_name: format!("Automation {transport:?}"),
-                endpoint: (transport == AgentNodeTransport::Direct)
-                    .then(|| format!("https://{worker_address}")),
+                endpoint: None,
                 owner_user_id: None,
                 credential_expires_at: chrono::Utc::now().timestamp() + 3600,
             },
@@ -167,13 +174,6 @@ async fn run(transport: AgentNodeTransport) {
         credential_file: credential,
         trusted_ca_file: Some(cert.clone()),
     });
-    if transport == AgentNodeTransport::Direct {
-        worker_config.agent_node.worker_rpc.bind_address = worker_address.to_string();
-        worker_config.agent_node.worker_rpc.tls = Some(WorkerRpcTlsConfig {
-            certificate_file: cert,
-            private_key_file: key,
-        });
-    }
     persist(&worker_config);
     let worker = talos_worker::RegisteredWorker::start(worker_config)
         .await
@@ -270,6 +270,18 @@ async fn run(transport: AgentNodeTransport) {
         .unwrap();
     assert_eq!(record.execution_node_id, node_id);
     assert_eq!(record.user_id, actor.user_id);
+    if matches!(finish, Finish::Interrupt) {
+        runtime
+            .gateway
+            .interrupt_turn(
+                &actor,
+                talos_agent_api::InterruptTurnRequest {
+                    identity: active.active_turn.identity.clone(),
+                },
+            )
+            .await
+            .unwrap();
+    }
     std::fs::write(
         fixture_directory().join(format!("{case}.release-work-1")),
         "released",
@@ -287,10 +299,11 @@ async fn run(transport: AgentNodeTransport) {
                 )
                 .await
                 .unwrap();
-            if state
-                .goal
-                .as_ref()
-                .is_some_and(|goal| goal.status == GoalStatus::Complete)
+            if matches!(finish, Finish::Interrupt)
+                || state
+                    .goal
+                    .as_ref()
+                    .is_some_and(|goal| goal.status == GoalStatus::Complete)
             {
                 let history = runtime
                     .gateway
@@ -318,12 +331,15 @@ async fn run(transport: AgentNodeTransport) {
     })
     .await
     .expect("remote Goal Tool/Service/settlement did not complete");
-    assert!(matches!(
-        completed.result,
-        talos_agent_api::AgentRunResult::Completed(_)
-    ));
+    match (finish, &completed.result) {
+        (Finish::Complete, talos_agent_api::AgentRunResult::Completed(_)) => {}
+        (Finish::Interrupt, talos_agent_api::AgentRunResult::Failed(result)) => {
+            assert_eq!(result.failure.error.code, ErrorCode::Cancelled);
+        }
+        _ => panic!("unexpected Worker settlement: {:?}", completed.result),
+    }
     std::fs::write(
-        fixture_directory().join(format!("remote-{transport:?}-business.json")),
+        fixture_directory().join(format!("remote-{transport:?}-{finish:?}-business.json")),
         serde_json::to_vec_pretty(&completed).unwrap(),
     )
     .unwrap();

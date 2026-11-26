@@ -64,7 +64,6 @@ impl DesktopFixture {
                 bind_address: address.to_string(),
                 tls_certificate_file: cert.clone(),
                 tls_private_key_file: key,
-                trusted_node_ca_file: None,
             },
             nodes.clone(),
             gateway_auth,

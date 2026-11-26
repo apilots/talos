@@ -87,7 +87,6 @@ pub(super) async fn run_topology(scenario: TopologyScenario) {
         bind_address: rpc.to_string(),
         tls_certificate_file: cert.clone(),
         tls_private_key_file: key.clone(),
-        trusted_node_ca_file: Some(cert.clone()),
     });
     gateway_config.cloud.agent_base_url = format!("https://{rpc}");
     gateway_config.cloud.agent_trusted_ca_file = Some(cert.clone());

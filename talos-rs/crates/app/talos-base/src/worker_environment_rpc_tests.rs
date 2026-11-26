@@ -5,6 +5,15 @@ use talos_types::{FsDirectoryCreateRequest, FsDirectoryReadRequest};
 
 #[tokio::test]
 async fn embedded_direct_and_outbound_environment_share_paths_under_computer_authorization() {
+    environment_transport_scenario(talos_config::AgentNodeTransport::Direct).await;
+}
+
+#[tokio::test]
+async fn websocket_environment_shares_paths_under_computer_authorization() {
+    environment_transport_scenario(talos_config::AgentNodeTransport::Outbound).await;
+}
+
+async fn environment_transport_scenario(transport: talos_config::AgentNodeTransport) {
     let fixture = Fixture::new(None).await;
     let response = fixture
         .control
@@ -85,9 +94,17 @@ async fn embedded_direct_and_outbound_environment_share_paths_under_computer_aut
         )
         .unwrap();
     let ingress = Ingress::new(fixture.control.clone()).await;
-    let node = agent_client::AgentNodeClient::connect(&ingress.endpoint, ingress.trust.clone())
-        .await
-        .unwrap();
+    let node = match transport {
+        talos_config::AgentNodeTransport::Outbound => {
+            agent_client::AgentNodeClient::connect_websocket(
+                &ingress.endpoint,
+                ingress.trust.clone(),
+            )
+            .await
+        }
+        _ => agent_client::AgentNodeClient::connect(&ingress.endpoint, ingress.trust.clone()).await,
+    }
+    .unwrap();
     let stop = CancellationToken::new();
     let worker_auth = auth.clone();
     let worker_adapter = adapter.clone();
@@ -189,7 +206,7 @@ async fn embedded_direct_and_outbound_environment_share_paths_under_computer_aut
             .render()
             .unwrap()
         } else {
-            "node-local document".into()
+            "node-local document\n".repeat(160_000)
         };
         let written = outbound
             .write_workspace_doc(

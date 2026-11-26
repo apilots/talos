@@ -12,20 +12,39 @@ named Docker context is required. The image contains only `talos-worker`, the
 existing Linux sandbox launcher, built-in Browser MCP, managed Chromium and its
 Browser Use driver, Xvfb/Openbox/x11vnc, tint2, xterm, PCManFM, fonts and runtime
 tools; it contains no Server, WebUI, build target directory or provider secrets.
-It runs as UID/GID 10001 and uses outbound Connect by default.
+It runs as UID/GID 10001 and uses gRPC Connect with
+`agent_node.runner.transport: direct`. Personal Workers use `outbound` for WSS.
+The configured transport selects both registration and the task/event stream.
 
 Prepare an isolated, writable home with the existing YAML configuration at
 `conf/talos.yaml`, the node credential at `conf/node.credential`, and provider
 keys in `.env`. Create the user-owned node through the original Computer API and
 retain its issued UUID; configure `agent_node.runner` with that same UUID,
-`control_plane_endpoint`, `credential_file`, and `transport: outbound`. Production
-uses `https://agent.talos.love`; local TLS tests also configure `trusted_ca_file`.
+`control_plane_endpoint`, `credential_file`, and `transport: direct`. Production
+uses `https://agent.talos.love`. Local TLS tests also configure `trusted_ca_file`.
 Credential files must be private and readable by the container's chosen UID.
 Managed default configuration is upgraded from the bundled template before load,
 with a backup. Existing UUIDs, credentials and recovery state are retained.
 Explicit `TALOS_CONFIG` files remain operator-owned and are not normalized.
-Server and Worker images share `conf/talos-prod.yaml` as the packaged template;
-the Worker entrypoint starts only execution and registration capabilities.
+The Worker image starts from the complete `conf/talos-prod.yaml` schema and
+packages `build/worker/runner.yaml` as its runner defaults. The Server keeps the
+shared profile. Rust and ordinary Worker profiles default to `outbound`; only
+the Docker Worker packaged YAML supplies `direct`.
+
+Before strict loading, managed-home Upgrade fills a missing or null transport
+on an existing runner from that packaged YAML. This includes retained v0.1.18
+Talo homes. It preserves explicit `outbound` or `direct`, UUID, endpoint,
+credential path and Server CA. A null runner remains unconfigured; the template
+does not enroll another Computer or generate credentials. Explicit
+`TALOS_CONFIG` files skip Upgrade and must set `transport: direct` themselves.
+No image marker, port probe or transport fallback overrides configuration.
+
+`outbound` means authenticated Worker-initiated WSS. `direct` means an
+authenticated Worker-initiated TLS gRPC Connect bidirectional execution stream.
+Both use the Server's listening endpoint; neither requires a Worker execution
+listener or Server dialback. Registration, lease renewal and resource RPCs keep
+their own API lifecycles; one execution stream does not mean all business APIs
+share one physical TCP connection.
 
 ```bash
 docker run --name talos-worker \

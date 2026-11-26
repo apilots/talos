@@ -44,7 +44,7 @@ def start_server(stack, directory):
                             agent_trusted_ca_file='/fixture/tls.crt', web_base_url=issuer)
     profile['agent_node']['control_plane'] = {
         'bind_address': '0.0.0.0:9443', 'tls_certificate_file': '/fixture/tls.crt',
-        'tls_private_key_file': '/fixture/tls.key', 'trusted_node_ca_file': '/fixture/tls.crt',
+        'tls_private_key_file': '/fixture/tls.key',
     }
     profile['sync']['hub_endpoint'] = 'wss://127.0.0.1:9/v1/sync'
     (directory / 'talos.yaml').write_text(yaml.safe_dump(profile))
