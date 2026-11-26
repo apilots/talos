@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { createElectronAppServerClient } from "@talos/sdk-app-server/desktop";
+import { createElectronAppServerClient, type TalosRuntimeState } from "@talos/sdk-app-server/desktop";
+import { computerStatus } from "../computer-status";
 import type { AppProtocol } from "@talos/sdk-core";
 import { getTalosClient } from "@/shared/api/client";
 import { getDesktopBridge } from "@/shared/api/desktop-client";
@@ -9,6 +10,7 @@ import { useAppStore } from "@/shared/store/app-store";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { Button } from "@/shared/ui/Button";
 import { useComputer, useProductScope } from "../hooks";
+import { ComputerDirectoryError } from "../ComputerDirectoryError";
 import { ComputerDetails } from "../ComputerDetails";
 import { ComputerDesktopButton } from "../ComputerDesktop";
 import { SyncPeerDetails } from "./SyncPeerDetails";
@@ -18,6 +20,9 @@ import { computerPeers, computerLocalSyncStatus } from "./observations";
 interface Props {
   nodeId: string;
   localId?: string;
+  localNode?: AppProtocol.NodeInfo;
+  listedNode?: AppProtocol.NodeInfo;
+  localRuntime?: TalosRuntimeState;
   controlPlane: string;
   metrics?: AppProtocol.SyncMetricsResponse;
   syncStatus?: AppProtocol.SyncStatusResponse;
@@ -29,6 +34,9 @@ interface Props {
 export function ComputerInspector({
   nodeId,
   localId,
+  localNode,
+  listedNode,
+  localRuntime,
   controlPlane,
   metrics,
   syncStatus,
@@ -36,18 +44,20 @@ export function ComputerInspector({
   onDeleted,
 }: Props) {
   const { t } = useTranslation(["computers", "common"]);
-  const query = useComputer(nodeId);
-  const node = query.data;
+  const query = useComputer(nodeId, listedNode);
   const scope = useProductScope();
-  const connection = useAppStore((state) => state.connection);
   const queries = useQueryClient();
+  const local = nodeId === localId && localNode?.nodeId === nodeId;
+  const directoryNode = query.error || query.isPlaceholderData ? undefined : query.data;
+  const node = local ? { ...localNode, ...directoryNode, available: localNode.available, systemInfo: localNode.systemInfo } : query.data;
+  const connection = useAppStore((state) => state.connection);
   const [name, setName] = useState("");
   useEffect(() => {
     setName(node?.displayName ?? "");
   }, [node?.nodeId, node?.displayName]);
   const mutation = useMutation({
     mutationFn: async (action: "rename" | "status" | "recover") => {
-      if (!node) return;
+      if (!node || !directoryNode) return;
       if (action === "recover") {
         const bridge = getDesktopBridge();
         if (bridge)
@@ -68,12 +78,8 @@ export function ComputerInspector({
     },
     onSuccess: () => queries.invalidateQueries({ queryKey: ["talos", scope] }),
   });
-  if (query.error)
-    return (
-      <p role="alert" className="text-sm text-danger">
-        {userVisibleErrorMessage(query.error, t("computers:loadError"))}
-      </p>
-    );
+  if (query.error && !node)
+    return <ComputerDirectoryError error={query.error} pending={query.isFetching} onRetry={() => void query.refetch()} />;
   if (!node)
     return (
       <p role="status" className="cmp-muted">
@@ -82,8 +88,9 @@ export function ComputerInspector({
     );
   const peers = computerPeers(metrics, node.nodeId);
   const phase = node.managedWorkerPhase;
+  const status = computerStatus(node, local, localRuntime);
   const personal =
-    !phase && node.mode === "remote" && node.ownerUserId === connection.userId;
+    Boolean(directoryNode) && !phase && node.mode === "remote" && node.ownerUserId === connection.userId;
   const canRecover =
     Boolean(getDesktopBridge()) &&
     personal &&
@@ -91,17 +98,12 @@ export function ComputerInspector({
     (!localId || node.nodeId === localId);
   return (
     <>
+      {query.error ? <ComputerDirectoryError error={query.error} pending={query.isFetching} onRetry={() => void query.refetch()} /> : null}
       <div className="cmp-inspector-heading">
         <span className="cmp-eyebrow">Computer</span>
         <h2>{node.displayName}</h2>
         <p className="cmp-muted">
-          {t(
-            phase && phase !== "ready" ? `computers:talo.phase.${phase}` : node.status === "disabled"
-              ? "computers:remoteDisabled"
-              : node.available
-                ? "computers:connected"
-                : "computers:offline",
-          )}
+          {t(`computers:${status.label}`)}{status.remoteDisabled ? ` · ${t("computers:remoteDisabled")}` : ""}
         </p>
       </div>
       <Button className="w-full" title={!phase && !node.available ? t("computers:offlineHelp") : undefined} onClick={() => onOpen(node.nodeId)}>

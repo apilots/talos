@@ -223,4 +223,4 @@ describe("ChatSessionPage", () => {
   });
 });
 
-vi.mock("@/features/computers", () => ({ useManagedWorkerStatus: () => ({ status: { data: { instance: apiMocks.reserved ? { nodeId: "embedded", conversationSessionId: "sess-1", phase: "ready" } : undefined } } }), useComputers: () => ({ selectedId: apiMocks.node, select: vi.fn() }), useProductScope: () => "test-scope", useComputer: () => ({ data: { available: true } }) }));
+vi.mock("@/features/computers", () => ({ useLocalComputer: () => ({}), useManagedWorkerStatus: () => ({ status: { data: { instance: apiMocks.reserved ? { nodeId: "embedded", conversationSessionId: "sess-1", phase: "ready" } : undefined } } }), useComputers: () => ({ selectedId: apiMocks.node, select: vi.fn() }), useProductScope: () => "test-scope", useComputer: () => ({ data: { available: true } }) }));

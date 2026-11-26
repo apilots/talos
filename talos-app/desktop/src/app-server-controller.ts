@@ -1,4 +1,4 @@
-import { AppProtocol, TalosApiError, decodeApiError } from "@talos/sdk-core";
+import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 import {
   createDesktopMainAppServerBridge,
   type AppServerClientOptions,
@@ -54,6 +54,7 @@ interface SubscriptionReplayState {
 export class DesktopAppServerController {
   private bridge?: AppServerBridge;
   private initializeResponse?: AppProtocol.InitializeResponse;
+  private runtimeState?: TalosRuntimeState;
   private reconnecting?: Promise<void>;
   private closed = false;
   private subscriptionEpoch = 0;
@@ -66,6 +67,9 @@ export class DesktopAppServerController {
 
   async connect(): Promise<AppProtocol.InitializeResponse> {
     if (this.initializeResponse) {
+      // A reloaded renderer has a new listener but the same native runtime.
+      // Replay its current health, including errors, rather than inferring ready.
+      if (this.runtimeState) this.options.onRuntimeState?.(this.runtimeState);
       return this.initializeResponse;
     }
     this.closed = false;
@@ -131,7 +135,6 @@ export class DesktopAppServerController {
     if (method === "auth/session/read" && current) {
       this.retainAccountSubscriptions((result as AppProtocol.AuthSessionReadResponse).session?.user.user_id ?? null);
     }
-    if (method === "desktop/workerEnroll" && current) this.emitRuntimeState("ready", null);
     if (subscription && this.subscriptions.get(subscription.sessionId) === subscription) {
       for (const [subscriptionId, sessionId] of this.sessionsBySubscriptionId) {
         if (sessionId === subscription.sessionId) this.sessionsBySubscriptionId.delete(subscriptionId);
@@ -178,11 +181,9 @@ export class DesktopAppServerController {
         if (this.subscriptions.has(change.sessionId)) this.options.onMessageQueueChanged?.(change);
         return;
       }
-      if (notification.method === "desktop/worker/ready") { this.emitRuntimeState("ready", null); return; }
-      if (notification.method !== "desktop/worker/failed") return;
-      try {
-        this.options.onRuntimeState?.({ kind: "error", message: null, error: decodeApiError(notification.params) });
-      } catch (error) { this.handleError(error); }
+      // Worker registration describes cloud reachability, not this local
+      // process or its stdio transport. Its failures are reported by the native
+      // registration owner; neither failure nor recovery changes runtime health.
     });
     bridge.onEvent((event) => { if (this.bridge === bridge) this.handleEvent(event); });
     bridge.onSubscriptionTerminated((notification) => { if (this.bridge === bridge) this.handleSubscriptionTerminated(notification); });
@@ -225,7 +226,7 @@ export class DesktopAppServerController {
   private handleError(error: unknown): void {
     console.error("App-server transport failed:", error);
     const message = "The app-server event stream failed. Please reconnect.";
-    this.options.onRuntimeState?.({ kind: "error", message, error: error instanceof TalosApiError ? error.apiError : null });
+    this.publishRuntimeState({ kind: "error", message, error: error instanceof TalosApiError ? error.apiError : null });
     for (const subscription of [...this.subscriptions.values()]) {
       if (subscription.subscriptionId === null) { this.subscriptions.delete(subscription.sessionId); continue; }
       this.handleSubscriptionTerminated({
@@ -399,7 +400,12 @@ export class DesktopAppServerController {
   }
 
   private emitRuntimeState(kind: TalosRuntimeState["kind"], message: string | null): void {
-    this.options.onRuntimeState?.({ kind, message });
+    this.publishRuntimeState({ kind, message });
+  }
+
+  private publishRuntimeState(state: TalosRuntimeState): void {
+    this.runtimeState = state;
+    this.options.onRuntimeState?.(state);
   }
 }
 

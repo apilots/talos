@@ -14,8 +14,14 @@ import { topologyNodes } from "@/shared/test/computer-topology.fixture";
 import { TaloPanel } from "@/features/computers";
 import { ComputerHomePage } from "./ComputerHomePage";
 
-vi.mock("@/shared/api/desktop-client", () => ({ getDesktopBridge: () => undefined }));
+const desktop = vi.hoisted(() => ({ active: false }));
+vi.mock("@/shared/api/desktop-client", () => ({ getDesktopBridge: () => desktop.active ? {} : undefined }));
+vi.mock("@talos/sdk-app-server/desktop", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@talos/sdk-app-server/desktop")>(),
+  createElectronAppServerClient: () => ({ desktop: { workerIdentity: async () => ({ nodeId: "desktop-local", controlPlaneEndpoint: null, systemInfo: null }) } }),
+}));
 const list = vi.fn();
+const syncStatus = vi.fn();
 const readManagedWorker = vi.fn();
 const createManagedWorker = vi.fn();
 const startManagedWorker = vi.fn();
@@ -32,6 +38,8 @@ function show(path = "/files", content: ReactNode = <ComputerHomePage />) {
 }
 
 beforeEach(() => {
+  desktop.active = false;
+  syncStatus.mockReset().mockResolvedValue({ localComputerId: null });
   void i18n.changeLanguage("en");
   list.mockReset().mockResolvedValue({ data: topologyNodes, total: 2, nextCursor: null });
   readManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: null });
@@ -47,9 +55,9 @@ beforeEach(() => {
       list, readManagedWorker, createManagedWorker, startManagedWorker, deleteManagedWorker,
       read: async ({ nodeId }: { nodeId: string }) => nodeId === worker.nodeId
         ? { ...topologyNodes[0], nodeId, displayName: "Talo", managedWorkerPhase: "ready" }
-        : topologyNodes.find(node => node.nodeId === nodeId),
+        : topologyNodes.find(node => node.nodeId === nodeId) ?? Promise.reject(new TypeError("Directory unavailable")),
     },
-    sync: { status: async () => ({ localComputerId: null }) },
+    sync: { status: syncStatus },
   }) as unknown as TalosWebClient);
 });
 afterEach(() => { cleanup(); query.clear(); resetTalosClientFactory(); });
@@ -61,6 +69,26 @@ it("uses the existing computer rows and selects even an offline computer without
   fireEvent.click(screen.getByRole("button", { name: "Build Worker · Offline" }));
   expect(useAppStore.getState().selectedComputers[connectionScope(useAppStore.getState().connection)]).toBe("worker-b");
   expect(screen.getByLabelText("Location")).toHaveTextContent("/");
+});
+
+it.each(["starting", "restarting", "stopped", "error", "ready"] as const)("shows current Desktop runtime %s in the home picker despite stale directory availability", async (kind) => {
+  desktop.active = true;
+  list.mockResolvedValue({ data: [{ ...topologyNodes[0], nodeId: "desktop-local", available: kind !== "ready", status: "disabled" }], total: 1, nextCursor: null });
+  useAppStore.getState().setConnection({ workerRuntimeState: { kind, message: null } });
+  show();
+  const label = `Studio · ${i18n.t("computers:local")} · ${i18n.t(`computers:localRuntime.${kind}`)} · ${i18n.t("computers:remoteDisabled")}`;
+  expect(await screen.findByRole("button", { name: label })).toBeVisible();
+  act(() => useAppStore.getState().setConnection({ workerRuntimeState: { kind: "restarting", message: null } }));
+  expect(screen.getByRole("button", { name: `Studio · ${i18n.t("computers:local")} · ${i18n.t("computers:localRuntime.restarting")} · ${i18n.t("computers:remoteDisabled")}` })).toBeVisible();
+});
+
+it("keeps Web sync-local computers under Server status authority", async () => {
+  syncStatus.mockResolvedValue({ localComputerId: topologyNodes[0].nodeId });
+  useAppStore.getState().setConnection({ workerRuntimeState: { kind: "restarting", message: null } });
+  show();
+  await waitFor(() => expect(useAppStore.getState().selectedComputers[connectionScope(useAppStore.getState().connection)]).toBe(topologyNodes[0].nodeId));
+  expect(await screen.findByRole("button", { name: "Studio · Connected" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /This computer/ })).not.toBeInTheDocument();
 });
 
 it("shows connection help inline and switches the two chooser tabs by keyboard", async () => {
@@ -88,12 +116,54 @@ it("does not confuse directory loading or failure with zero registered computers
   show();
   expect(within(screen.getByRole("region", { name: "Home" })).getByRole("status")).toHaveTextContent("Loading");
   expect(screen.queryByRole("heading", { name: "Connect a personal computer" })).not.toBeInTheDocument();
+  await waitFor(() => expect(list).toHaveBeenCalled());
   await act(async () => reject(new TalosApiError({ code: AppProtocol.ErrorCode.ServiceUnavailable, message: "Directory unavailable.", localization: null })));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Directory unavailable.");
+  expect(await screen.findByRole("alert")).toHaveTextContent(i18n.t("computers:networkError"));
+  expect(screen.getByRole("alert")).toHaveClass("text-danger");
   expect(screen.queryByRole("heading", { name: "Connect a personal computer" })).not.toBeInTheDocument();
   list.mockResolvedValue({ data: [], total: 0, nextCursor: null });
   fireEvent.click(screen.getByRole("button", { name: "Retry now" }));
   expect(await screen.findByRole("heading", { name: "Connect a personal computer" })).toBeVisible();
+});
+
+it.each([false, true])("hides cached remotes after directory failure while preserving the local Desktop (Desktop=%s)", async (native) => {
+  desktop.active = native;
+  useAppStore.getState().setConnection({ workerRuntimeState: { kind: "ready", message: null } });
+  show();
+  await screen.findByRole("button", { name: "Studio · Connected" });
+  const scope = connectionScope(useAppStore.getState().connection);
+  list.mockRejectedValue(new TypeError("Offline"));
+  await act(async () => { await query.refetchQueries({ queryKey: ["talos", scope, "computers"] }); });
+  expect(await screen.findByRole("alert")).toHaveTextContent(i18n.t("computers:networkError"));
+  expect(screen.queryByRole("button", { name: /Studio|Build Worker/ })).not.toBeInTheDocument();
+  expect(useAppStore.getState().selectedComputers[scope]).not.toBe(topologyNodes[0].nodeId);
+  if (native) {
+    const local = screen.getByRole("button", { name: "This computer · This computer · Ready" });
+    expect(local).toBeEnabled();
+    fireEvent.click(local);
+    expect(useAppStore.getState().selectedComputers[scope]).toBe("desktop-local");
+  }
+  list.mockResolvedValue({ data: topologyNodes, total: 2, nextCursor: null });
+  fireEvent.click(screen.getByRole("button", { name: i18n.t("common:retryNow") }));
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  expect(screen.getByRole("button", { name: "Studio · Connected" })).toBeEnabled();
+});
+
+it.each([false, true])("keeps this Desktop selectable when an empty cloud directory fails (cached=%s)", async (cached) => {
+  desktop.active = true;
+  useAppStore.getState().setConnection({ workerRuntimeState: { kind: "starting", message: null } });
+  list.mockImplementation(() => cached ? Promise.resolve({ data: [], total: 0, nextCursor: null }) : Promise.reject(new TypeError("Offline")));
+  show();
+  if (cached) {
+    await screen.findByRole("button", { name: /This computer.*Starting/ });
+    list.mockRejectedValue(new TypeError("Offline"));
+    await act(async () => { await query.refetchQueries({ queryKey: ["talos", connectionScope(useAppStore.getState().connection), "computers"] }); });
+  }
+  expect(await screen.findByRole("alert")).toHaveTextContent(i18n.t("computers:networkError"));
+  const local = await screen.findByRole("button", { name: /This computer · This computer · Starting…/ });
+  expect(screen.queryByRole("button", { name: "Studio · Connected" })).not.toBeInTheDocument();
+  fireEvent.click(local);
+  expect(useAppStore.getState().selectedComputers[connectionScope(useAppStore.getState().connection)]).toBe("desktop-local");
 });
 
 it("searches beyond the initial computer list without treating no matches as an unregistered account", async () => {
@@ -105,7 +175,7 @@ it("searches beyond the initial computer list without treating no matches as an 
   const search = await screen.findByRole("searchbox", { name: "Search personal computers" });
   expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
   fireEvent.change(search, { target: { value: "office" } });
-  await waitFor(() => expect(list).toHaveBeenCalledWith(expect.objectContaining({ query: "office" })));
+  await waitFor(() => expect(list).toHaveBeenCalledWith(expect.objectContaining({ query: "office" }), expect.any(AbortSignal)));
   expect(await screen.findByRole("button", { name: "Remote office · Connected" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Studio · Connected" })).not.toBeInTheDocument();
   fireEvent.change(search, { target: { value: "no-match" } });

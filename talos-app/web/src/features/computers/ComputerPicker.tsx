@@ -1,18 +1,20 @@
 import { useState } from "react";
+import type { TalosRuntimeState } from "@talos/sdk-app-server/desktop";
 import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
-import { Button } from "@/shared/ui/Button";
+import { ComputerDirectoryError } from "./ComputerDirectoryError";
 import { ComputerItem } from "./ComputerItem";
+import type { AppProtocol } from "@talos/sdk-core";
 import { useComputerList } from "./hooks";
 
-export function ComputerPicker({ total, localId, onSelect }: {
-  total: number; localId?: string; onSelect: (id: string) => void;
+export function ComputerPicker({ total, localNode, localRuntime, onSelect }: {
+  total: number; localNode?: AppProtocol.NodeInfo; localRuntime?: TalosRuntimeState; onSelect: (id: string) => void;
 }) {
   const { t } = useTranslation(["computers", "common"]);
   const [search, setSearch] = useState("");
   const list = useComputerList(search.trim());
-  const nodes = list.data?.pages.flatMap((page) => page.data).filter(node => node.managedWorkerPhase == null) ?? [];
+  const directory = list.data?.pages.flatMap((page) => page.data).filter(node => node.managedWorkerPhase == null) ?? [];
+  const nodes = localNode ? [localNode, ...directory.filter(node => node.nodeId !== localNode.nodeId)] : directory;
   const searchLabel = t("computers:home.searchPersonal");
 
   return (
@@ -24,14 +26,12 @@ export function ComputerPicker({ total, localId, onSelect }: {
           className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted" />
       </label> : null}
       <div className="max-h-64 space-y-1 overflow-y-auto">
-        {list.isPending ? <p role="status" className="p-3 text-center text-sm text-muted">{t("common:loading")}</p>
-          : list.isError ? <div className="p-3 text-center">
-            <p role="alert" className="text-sm text-danger">{userVisibleErrorMessage(list.error, t("computers:loadError"))}</p>
-            <Button variant="ghost" onClick={() => void list.refetch()}>{t("common:retryNow")}</Button>
-          </div> : <>
-            {nodes.map((node) => <ComputerItem key={node.nodeId} node={node} local={node.nodeId === localId} onSelect={() => onSelect(node.nodeId)} />)}
-            {nodes.length === 0 ? <p role="status" className="p-3 text-center text-sm text-muted">{t("computers:home.emptyPersonal")}</p> : null}
-          </>}
+        {list.isPending ? <p role="status" className="p-3 text-center text-sm text-muted">{t("common:loading")}</p> : null}
+        {list.isError ? <div className="p-3 text-center">
+          <ComputerDirectoryError error={list.error} pending={list.isFetching} onRetry={() => void list.refetch()} />
+        </div> : null}
+        {nodes.map((node) => <ComputerItem key={node.nodeId} node={node} local={node.nodeId === localNode?.nodeId} localRuntime={localRuntime} onSelect={() => onSelect(node.nodeId)} />)}
+        {!list.isPending && !list.isError && nodes.length === 0 ? <p role="status" className="p-3 text-center text-sm text-muted">{t("computers:home.emptyPersonal")}</p> : null}
       </div>
     </div>
   );

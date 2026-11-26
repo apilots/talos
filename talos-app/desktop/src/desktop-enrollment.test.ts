@@ -78,15 +78,18 @@ describe("Desktop account lifecycle", () => {
   });
 });
 
-it("delivers an asynchronous Worker rejection without losing the authenticated host", async () => {
+it.each(["permissionDenied", "serviceUnavailable"] as const)("keeps %s Worker registration failures separate from the authenticated local runtime", async (code) => {
   const bridge = hostBridge(true);
   const states = vi.fn();
   const controller = new DesktopAppServerController({ desktopHost: true, bridgeFactory: () => bridge, onRuntimeState: states });
   try {
     await controller.connect();
-    const error: AppProtocol.ApiError = { code: "permissionDenied", message: "Worker credential was revoked.", localization: null };
+    const error: AppProtocol.ApiError = { code, message: "Worker registration failed.", localization: null };
+    const connectedStateCount = states.mock.calls.length;
     bridge.emitNotification({ jsonrpc: "2.0", method: "desktop/worker/failed", params: error });
-    expect(states.mock.calls.at(-1)).toEqual([{ kind: "error", message: null, error }]);
+    expect(states.mock.calls).toHaveLength(connectedStateCount);
+    expect(states.mock.calls.at(-1)).toEqual([{ kind: "ready", message: null }]);
+    await expect(controller.invoke("auth/session/read", {})).resolves.toMatchObject({ session: { user: { user_id: "owner" } } });
     expect(bridge.closed).toBe(false);
     expect(bridge.requests.some((request) => request.method === "auth/session/clear")).toBe(false);
     await controller.close();

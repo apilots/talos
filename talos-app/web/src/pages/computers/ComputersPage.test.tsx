@@ -1,109 +1,11 @@
 // @vitest-environment jsdom
-import "@testing-library/jest-dom/vitest";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createInstance } from "i18next";
-import { I18nextProvider } from "react-i18next";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ComputersPage } from "./ComputersPage";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import { mocks, show } from "./ComputersPage.test-support";
 import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 import { useAppStore } from "@/shared/store/app-store";
 import { computerResources } from "@/shared/i18n/computerResources";
-import {
-  topologyMetrics,
-  topologyNodes,
-} from "@/shared/test/computer-topology.fixture";
-
-const mocks = vi.hoisted(() => ({
-  select: vi.fn(),
-  list: vi.fn(),
-  next: vi.fn(),
-  metrics: vi.fn(),
-  status: vi.fn(),
-  computers: vi.fn(),
-}));
-vi.mock("@/shared/api/desktop-client", () => ({
-  getDesktopBridge: () => undefined,
-}));
-vi.mock("@/features/computers/hooks", async (original) => ({
-  ...(await original<typeof import("@/features/computers/hooks")>()),
-  useComputers: mocks.computers,
-  useComputerList: mocks.list,
-  useProductScope: () => "fixture",
-  useComputer: (id: string) => ({
-    data: topologyNodes.find((node) => node.nodeId === id),
-    error: null,
-  }),
-  useAccountSyncMetrics: mocks.metrics,
-  useSyncStatus: mocks.status,
-}));
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.computers.mockReturnValue({
-    scope: "fixture", selectedId: "manager-a", localId: "manager-a",
-    total: 9, list: { data: { pages: [{ total: 9 }] } }, select: mocks.select,
-  });
-  useAppStore.setState({
-    connection: {
-      ...useAppStore.getInitialState().connection,
-      authStatus: "authenticated",
-      userId: "alice",
-    },
-  });
-  mocks.list.mockReturnValue({
-    data: { pages: [{ data: topologyNodes, total: 3 }] },
-    hasNextPage: true,
-    fetchNextPage: mocks.next,
-  });
-  mocks.status.mockReturnValue({ data: { connection: "disabled", configuredEnabled: false, pendingChanges: 0 }, isPending: false });
-  mocks.metrics.mockReturnValue({
-    data: topologyMetrics,
-    endpoint: topologyMetrics.endpoint,
-    enabled: true,
-    isPending: false,
-    error: null,
-  });
-});
-afterEach(cleanup);
-
-async function show(locale = "en") {
-  const i18n = createInstance();
-  await i18n.init({
-    lng: locale,
-    resources: {
-      [locale]: {
-        computers: computerResources[locale as keyof typeof computerResources],
-        common: { loading: "Loading", save: "Save", showMore: "More" },
-      },
-    },
-    interpolation: { escapeValue: false },
-  });
-  const queries = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return render(
-    <QueryClientProvider client={queries}>
-      <I18nextProvider i18n={i18n}>
-        <MemoryRouter initialEntries={["/computers"]}>
-          <Routes>
-            <Route path="/computers" element={<ComputersPage />} />
-            <Route path="/" element={<p>Workspace opened</p>} />
-          </Routes>
-        </MemoryRouter>
-      </I18nextProvider>
-    </QueryClientProvider>,
-  );
-}
+import { topologyNodes } from "@/shared/test/computer-topology.fixture";
 
 it("keeps inspection across topology/list and changes execution selection only when opening", async () => {
   await show();
@@ -128,21 +30,28 @@ it("keeps inspection across topology/list and changes execution selection only w
   );
 });
 
-it("renders the Chinese management surface and hides cached sync mappings when unavailable", async () => {
-  mocks.metrics.mockReturnValue({
-    data: undefined,
-    enabled: false,
-    isPending: false,
-    error: null,
-  });
-  const { container } = await show("zh-CN");
-  expect(screen.getByRole("button", { name: "拓扑" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  expect(screen.getByText("登录后查看个人账号的同步拓扑。")).toBeVisible();
-  expect(container.querySelectorAll('[data-flow="sync"]')).toHaveLength(0);
-  expect(container.querySelectorAll('[data-flow="execution"]')).toHaveLength(2);
+it.each(["Topology", "List"])("passes a remote listed row to the pending inspector in %s view", async (view) => {
+  mocks.read.mockImplementation((_id: string, listed?: AppProtocol.NodeInfo) => ({ data: listed, isPlaceholderData: true, error: null }));
+  await show();
+  if (view === "List") fireEvent.click(screen.getByRole("button", { name: "List" }));
+  fireEvent.click(screen.getByRole("button", { name: view === "List" ? "Build Worker" : "Inspect Build Worker" }));
+  expect(mocks.read).toHaveBeenLastCalledWith("worker-b", topologyNodes[1]);
+  expect(screen.getByRole("heading", { name: "Build Worker" })).toBeVisible();
+  expect(screen.queryByText("Loading")).not.toBeInTheDocument();
+  expect(screen.queryByRole("textbox", { name: "Rename" })).not.toBeInTheDocument();
+  expect(mocks.select).not.toHaveBeenCalled();
+});
+
+it("retains loaded Computers and inspection when loading another page fails", async () => {
+  mocks.list.mockReturnValue({ data: { pages: [{ data: topologyNodes, total: 23 }] }, error: new TypeError("Network unavailable"),
+    isFetchNextPageError: true, hasNextPage: true, fetchNextPage: mocks.next });
+  await show();
+  fireEvent.click(screen.getByRole("button", { name: "List" }));
+  fireEvent.click(screen.getByRole("button", { name: "Build Worker" }));
+  expect(screen.getByRole("heading", { name: "Build Worker" })).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent(computerResources.en.networkError);
+  fireEvent.click(screen.getByRole("button", { name: /More/ }));
+  expect(mocks.next).toHaveBeenCalledOnce();
 });
 
 it("shows registration actions only to the Computer owner", async () => {
@@ -156,38 +65,6 @@ it("shows registration actions only to the Computer owner", async () => {
   });
   await waitFor(() => expect(screen.queryByRole("button", { name: "Remove registration" })).not.toBeInTheDocument());
   expect(screen.queryByRole("button", { name: "Disable" })).not.toBeInTheDocument();
-});
-
-it.each(["zh-CN", "en"])("keeps the last endpoint and one localized disconnection notice in %s without stale sync paths", async (locale) => {
-  const failure = new TalosApiError({ code: AppProtocol.ErrorCode.ServiceUnavailable, message: "The synchronization metrics service is unavailable.", localization: null });
-  mocks.status.mockReturnValue({ data: { connection: "disconnected", configuredEnabled: true, pendingChanges: 0, lastError: failure.apiError }, isPending: false });
-  mocks.metrics.mockReturnValue({
-    data: undefined,
-    endpoint: topologyMetrics.endpoint,
-    enabled: true,
-    isPending: false,
-    error: new TalosApiError({
-      code: AppProtocol.ErrorCode.ServiceUnavailable,
-      message: "The synchronization metrics service is unavailable.",
-      localization: null,
-    }),
-  });
-  const { container } = await show(locale);
-  const labels = computerResources[locale as keyof typeof computerResources];
-  expect(screen.getAllByRole("alert")).toHaveLength(1);
-  expect(screen.getByRole("alert")).toHaveTextContent(labels.syncUnavailable);
-  expect(within(screen.getByTestId("sync-control")).getByRole("status")).toHaveTextContent(labels.syncDisconnected);
-  expect(screen.queryByText("The synchronization metrics service is unavailable.")).toBeNull();
-  expect(screen.getByRole("button", { name: locale === "en" ? "Inspect Talos Sync" : "查看 Talos Sync 的详情" })).toHaveTextContent(labels.lastKnownEndpointShort);
-  fireEvent.click(screen.getByRole("button", { name: locale === "en" ? "Inspect Talos Sync" : "查看 Talos Sync 的详情" }));
-  expect(screen.getAllByText(topologyMetrics.endpoint)).toHaveLength(2);
-  expect(screen.getByText(labels.lastKnownEndpoint)).toBeVisible();
-  expect(screen.getAllByRole("alert")).toHaveLength(1);
-
-  expect(container.querySelectorAll('[data-flow="sync"]')).toHaveLength(0);
-  expect(container.querySelectorAll('[data-flow="execution"]')).toHaveLength(2);
-  fireEvent.click(screen.getByRole("button", { name: locale === "en" ? "Inspect Studio" : "查看 Studio 的详情" }));
-  expect(screen.getByRole("button", { name: locale === "en" ? "Open computer" : "进入电脑" })).toBeEnabled();
 });
 
 
@@ -240,6 +117,46 @@ it("keeps filtered pagination counts distinct from the account total", async () 
   expect(screen.getAllByText(/已加载 2 \/ 5 台 Computer/)).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "More · 已加载 2 / 5 台 Computer" }));
   expect(mocks.next).toHaveBeenCalledOnce();
+});
+
+it.for(["en", "zh-CN"])("keeps only the local Computer after an initial directory failure and filters it (%s)", async (locale, { expect }) => {
+  const retry = vi.fn();
+  const error = new TalosApiError({ code: AppProtocol.ErrorCode.Timeout, message: "Request timed out", localization: null });
+  mocks.list.mockReturnValue({ data: undefined, error, refetch: retry, hasNextPage: false });
+  mocks.computers.mockReturnValue({ scope: "fixture", localId: "manager-a", localNode: topologyNodes[0], nodes: topologyNodes.slice(0, 1), total: 1, list: { error }, select: mocks.select });
+  const { container } = await show(locale);
+  const labels = computerResources[locale as keyof typeof computerResources];
+  expect(screen.getByRole("alert")).toHaveTextContent(labels.networkError);
+  expect(screen.getByRole("alert")).toHaveClass("text-danger");
+  expect(container.querySelectorAll("[data-flow=execution]")).toHaveLength(0);
+  expect(screen.queryByRole("button", { name: locale === "en" ? "Inspect Build Worker" : "查看 Build Worker 的详情" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: locale === "en" ? "Inspect Studio" : "查看 Studio 的详情" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /More/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: locale === "en" ? "Retry" : "立即重试" }));
+  expect(retry).toHaveBeenCalledOnce();
+  expect(screen.getByRole("alert").outerHTML).toBe(`<div role="alert" class="cmp-notice text-sm text-danger"><span>${labels.networkError}</span><button type="button" class="ml-2 underline disabled:opacity-50">${locale === "en" ? "Retry" : "立即重试"}</button></div>`);
+  fireEvent.click(screen.getByRole("button", { name: locale === "en" ? "List" : "列表" }));
+  expect(screen.getByRole("button", { name: "Studio" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Build Worker" })).not.toBeInTheDocument();
+  const search = screen.getByRole("textbox", { name: labels.search });
+  fireEvent.change(search, { target: { value: "STUDIO" } });
+  expect(screen.getByRole("button", { name: "Studio" })).toBeVisible();
+  fireEvent.change(search, { target: { value: "worker" } });
+  expect(screen.queryByRole("button", { name: "Studio" })).not.toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent(labels.networkError);
+});
+
+it("drops an already inspected remote detail when the directory fails, even if its detail read succeeded", async () => {
+  await show();
+  fireEvent.click(screen.getByRole("button", { name: "Inspect Build Worker" }));
+  expect(screen.getByRole("heading", { name: "Build Worker" })).toBeVisible();
+  const error = new TypeError("Failed to fetch");
+  mocks.list.mockReturnValue({ data: undefined, error, refetch: vi.fn() });
+  mocks.computers.mockReturnValue({ scope: "fixture", localId: "manager-a", localNode: topologyNodes[0], nodes: topologyNodes.slice(0, 1), total: 1, list: { error }, select: mocks.select });
+  fireEvent.click(screen.getByRole("button", { name: "List" }));
+  expect(screen.queryByRole("heading", { name: "Build Worker" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Studio" })).toBeVisible();
+  expect(mocks.select).not.toHaveBeenCalled();
 });
 
 it("does not present cached filtered totals as a successful search after a directory failure", async () => {

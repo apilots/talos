@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { createElectronAppServerClient } from "@talos/sdk-app-server/desktop";
 import { TalosApiError, AppProtocol } from "@talos/sdk-core";
 import { getTalosClient } from "@/shared/api/client";
 import { getDesktopBridge } from "@/shared/api/desktop-client";
+import { withManagementTimeout } from "@/shared/api/desktop-product-owner";
 import { useAppStore } from "@/shared/store/app-store";
 import { connectionScope } from "@/shared/store/connection-scope";
 
@@ -39,31 +41,77 @@ export function useAccountSyncMetrics() {
 
 export function useComputerList(query = "") {
   const scope = useProductScope();
-  return useInfiniteQuery({
+  const list = useInfiniteQuery({
     queryKey: ["talos", scope, "computers", query], initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => getTalosClient().computers.list({ query: query || null, cursor: pageParam, limit: 20 }),
-    getNextPageParam: (page) => page.nextCursor ?? undefined, refetchInterval: 5_000,
+    queryFn: async ({ pageParam }) => {
+      const server = await getTalosClient({ service: "server" });
+      return withManagementTimeout((signal) => server.computers.list({ query: query || null, cursor: pageParam, limit: 20 }, signal));
+    },
+    getNextPageParam: (page) => page.nextCursor ?? undefined, refetchInterval: 5_000, retry: false,
   });
+  // Directory observations are memory-only and unusable after a failed read.
+  return { ...list, data: list.error ? undefined : list.data };
 }
-export function useComputer(nodeId: string | undefined) {
+export function isDirectoryMiss(error: unknown) {
+  return error instanceof TalosApiError && (
+    error.code === AppProtocol.ErrorCode.ResourceNotFound ||
+    error.code === AppProtocol.ErrorCode.ResourceExpired ||
+    error.code === AppProtocol.ErrorCode.PermissionDenied
+  );
+}
+
+export function useComputer(nodeId: string | undefined, listedNode?: AppProtocol.NodeInfo) {
   const scope = useProductScope();
-  return useQuery({ queryKey: ["talos", scope, "computer", nodeId],
-    queryFn: async () => (await getTalosClient({ nodeId, readOnly: true })).computers.read({ nodeId: nodeId! }), enabled: Boolean(nodeId), refetchInterval: 5_000 });
+  const listed = listedNode?.nodeId === nodeId ? listedNode : undefined;
+  const query = useQuery<AppProtocol.NodeInfo>({ queryKey: ["talos", scope, "computer", nodeId],
+    placeholderData: listed,
+    queryFn: async () => {
+      const server = await getTalosClient({ service: "server" });
+      return withManagementTimeout((signal) => server.computers.read({ nodeId: nodeId! }, signal));
+    }, enabled: Boolean(nodeId), refetchInterval: 5_000, retry: false });
+  // Placeholders only bridge the initial read; failures withdraw cached detail.
+  return { ...query, data: query.error ? undefined : query.data };
 }
+
+/** Local identity, hardware and readiness; never authoritative remote ownership or registration. */
+export function useLocalComputer() {
+  const scope = useProductScope();
+  const bridge = getDesktopBridge();
+  const runtime = useAppStore((state) => state.connection.workerRuntimeState);
+  const identity = useQuery({ queryKey: ["talos", scope, "local-computer"], enabled: Boolean(bridge),
+    queryFn: () => createElectronAppServerClient(bridge!).desktop.workerIdentity(), refetchInterval: 5_000, retry: false });
+  return { nodeId: bridge && identity.data ? identity.data.nodeId ?? "embedded" : undefined, runtime, identity };
+}
+
 export function useComputers() {
+  const { t } = useTranslation("computers");
   const scope = useProductScope();
   const selectedId = useSelectedComputerId();
   const select = useAppStore((state) => state.selectComputer);
-  const connection = useAppStore((state) => state.connection);
   const bridge = getDesktopBridge();
-  const runtime = connection.workerRuntimeState;
-  const identity = useQuery({ queryKey: ["talos", scope, "local-computer"], enabled: Boolean(bridge),
-    queryFn: () => createElectronAppServerClient(bridge!).desktop.workerIdentity(), refetchInterval: 5_000 });
+  const { nodeId: desktopId, runtime, identity } = useLocalComputer();
   const sync = useSyncStatus();
-  // Local is relative to the connected management host, for Desktop and Web alike.
-  const localId = sync.data?.localComputerId ?? (bridge && connection.authStatus === "open" ? "embedded" : undefined);
+  // Desktop identity is local process state, not a replicated Computer directory.
+  const localId = bridge ? desktopId ?? "embedded" : sync.data?.localComputerId ?? undefined;
   const list = useComputerList();
-  const nodes = list.data?.pages.flatMap((page) => page.data) ?? [];
+  // This local observation is not cached as a directory record and grants no
+  // registration/ownership rights. Hardware and readiness always come from Desktop.
+  const directoryLocal = !list.error
+    ? list.data?.pages.flatMap((page) => page.data).find((node) => node.nodeId === localId)
+    : undefined;
+  const local: AppProtocol.NodeInfo | undefined = bridge && localId ? {
+    nodeId: localId, displayName: t("local"), mode: "embedded", endpoint: null,
+    status: "enabled", health: "unknown", leaseExpiresAt: null, lastHeartbeatAt: null,
+    createdAt: 0, updatedAt: 0, ownerUserId: null,
+    credentialExpiresAt: null,
+    ...directoryLocal,
+    available: runtime?.kind === "ready",
+    systemInfo: identity.data?.systemInfo ?? null,
+  } : undefined;
+  const directoryNodes = list.data?.pages.flatMap((page) => page.data) ?? [];
+  const nodes = local
+    ? [local, ...directoryNodes.filter((node) => node.nodeId !== localId)]
+    : directoryNodes;
   useEffect(() => {
     if (selectedId === "") return;
     if (selectedId && !(selectedId === "embedded" && localId && localId !== "embedded")) return;
@@ -72,21 +120,23 @@ export function useComputers() {
     } else if (list.data?.pages[0]?.total === 1 && nodes.length === 1 && nodes[0].managedWorkerPhase == null) {
       select(scope, nodes[0].nodeId);
     }
-  }, [bridge, list.data, localId, nodes, scope, select, selectedId]);
-  const selected = useComputer(selectedId);
+  }, [list.data, localId, nodes, scope, select, selectedId]);
+  const selected = useComputer(selectedId, directoryNodes.find((node) => node.nodeId === selectedId));
   const clear = useAppStore((state) => state.clearComputer);
   useEffect(() => {
-    if (selectedId && selected.error instanceof TalosApiError &&
-      (selected.error.code === AppProtocol.ErrorCode.ResourceNotFound || selected.error.code === AppProtocol.ErrorCode.ResourceExpired || selected.error.code === AppProtocol.ErrorCode.PermissionDenied)) {
+    if (!(bridge && identity.isPending) && !list.error && selectedId && selectedId !== localId && isDirectoryMiss(selected.error)) {
       clear(scope, selectedId);
     }
-  }, [clear, scope, selected.error, selectedId]);
-  const local = useComputer(localId);
-  const quickNodes = [...new Map([local.data, selected.data, ...nodes]
-    .filter((node): node is AppProtocol.NodeInfo => Boolean(node)).map((node) => [node.nodeId, node])).values()].slice(0, 3);
-  return { scope, selectedId, selected: selected.data, localId, nodes, quickNodes,
-    total: list.data?.pages[0]?.total ?? 0, list, runtime, identity,
-    error: selected.error ?? list.error ?? identity.error, sync,
+  }, [bridge, clear, identity.isPending, list.error, localId, scope, selected.error, selectedId]);
+  const selectedNode = selectedId === localId && local
+    ? { ...local, ...(!list.error ? selected.data : undefined), available: local.available, systemInfo: local.systemInfo }
+    : list.data ? selected.data : undefined;
+  const quickNodes = [...new Map([selectedNode, ...nodes.filter((node) => node.nodeId !== selectedNode?.nodeId)]
+    .filter((node): node is AppProtocol.NodeInfo => Boolean(node)).map((node) => [node.nodeId, node])).values()]
+    .sort((a, b) => Number(b.nodeId === localId) - Number(a.nodeId === localId)).slice(0, 3);
+  return { scope, selectedId, selected: selectedNode, localId, localNode: local, nodes, quickNodes,
+    total: list.data?.pages[0]?.total ?? nodes.length, list, runtime, identity,
+    error: list.error ?? selected.error ?? identity.error, sync,
     select: (nodeId: string) => select(scope, nodeId),
   };
 }
@@ -94,8 +144,14 @@ export function useCanManageComputer() {
   const nodeId = useSelectedComputerId();
   const query = useComputer(nodeId);
   const local = useSyncStatus();
+  const desktop = useLocalComputer();
   const data = query.data;
   const connection = useAppStore((state) => state.connection);
+  // Local configuration is authorized by the Desktop process boundary, not by
+  // a synthetic directory row. All other targets still require live Server ownership.
+  if (nodeId && nodeId === desktop.nodeId) return true;
+  if (getDesktopBridge() && desktop.identity.isPending) return undefined;
+  if (isDirectoryMiss(query.error)) return false;
   if (query.isPending) return undefined;
   if (!data) return false;
   if (data.ownerUserId) return data.ownerUserId === connection.userId;

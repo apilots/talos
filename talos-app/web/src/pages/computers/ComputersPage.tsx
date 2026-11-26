@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { GitBranch, List, Plus, Search } from "lucide-react";
 import {
   ComputerGraph,
+  ComputerDirectoryError,
   ComputerConnectHelp,
   ComputerTopologyList,
   ComputerInspector,
@@ -18,11 +19,9 @@ import {
   type FlowLayer,
 } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
-import {
-  apiErrorMessage,
-  userVisibleErrorMessage,
-} from "@/shared/i18n/apiErrorMessage";
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { Button } from "@/shared/ui/Button";
+import { ComputerFlowFilter } from "./ComputerFlowFilter";
 import "./computers.css";
 
 export function ComputersPage() {
@@ -45,12 +44,23 @@ export function ComputersPage() {
   const connection = useAppStore((state) => state.connection);
   const controlPlane =
     connection.controlPlaneEndpoint || window.location.origin;
-  const nodes = list.data?.pages.flatMap((page) => page.data) ?? [];
+  const directoryNodes = list.data?.pages.flatMap((page) => page.data) ?? [];
+  const localObservation = computers.localNode;
+  const directoryLocal = directoryNodes.find((node) => node.nodeId === localObservation?.nodeId);
+  const localNode = localObservation ? { ...localObservation, ...directoryLocal,
+    available: localObservation.available, systemInfo: localObservation.systemInfo } : undefined;
+  const localMatches = localNode && (!search.trim() ||
+    localNode.displayName.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+  const nodes = localNode
+    ? [...(localMatches ? [localNode] : []), ...directoryNodes.filter((node) => node.nodeId !== localNode.nodeId)]
+    : directoryNodes;
   const current =
     inspection?.scope === computers.scope ? inspection : undefined;
+  const currentNodeId = !list.error || nodes.some((node) => node.nodeId === current?.nodeId)
+    ? current?.nodeId : undefined;
   const inspectedId = current?.service
     ? undefined
-    : (current?.nodeId ??
+    : (currentNodeId ??
       nodes.find((node) => node.nodeId === computers.localId)?.nodeId ??
       nodes[0]?.nodeId);
   const service =
@@ -187,51 +197,25 @@ export function ComputersPage() {
               </h2>
             </div>
             {view === "topology" ? (
-              <div
-                className="cmp-flow-buttons"
-                aria-label={t("computers:flowFilter")}
-              >
-                {(["all", "execution", "sync"] as const).map((value) => (
-                  <button
-                    type="button"
-                    key={value}
-                    aria-pressed={layer === value}
-                    onClick={() => setLayer(value)}
-                  >
-                    {value !== "all" ? (
-                      <i
-                        className={`cmp-flow-key ${value === "sync" ? "is-sync" : ""}`}
-                      />
-                    ) : null}
-                    {t(
-                      value === "all"
-                        ? "computers:allFlows"
-                        : value === "execution"
-                          ? "computers:executionFlow"
-                          : "computers:syncFlow",
-                    )}
-                  </button>
-                ))}
-              </div>
+              <ComputerFlowFilter layer={layer} onChange={setLayer} />
             ) : null}
           </div>
           {view === "topology" ? (
             <p className="cmp-mobile-hint">{t("computers:graphScroll")}</p>
           ) : null}
           {list.error ? (
-            <p role="alert" className="cmp-notice text-danger">
-              {userVisibleErrorMessage(
-                list.error,
-                t("computers:directoryError"),
-              )}
-            </p>
-          ) : list.isPending ? (
+            <ComputerDirectoryError error={list.error} pending={list.isFetching} onRetry={() => void list.refetch()} />
+          ) : null}
+          {list.isPending ? (
             <p role="status" className="cmp-empty">
               {t("common:loading")}
             </p>
           ) : view === "topology" ? (
             <ComputerGraph
+              directoryAvailable={!list.error}
               nodes={nodes}
+              localId={localNode?.nodeId}
+              localRuntime={computers.runtime}
               metrics={metrics.data}
               syncEndpoint={metrics.endpoint}
               syncStatus={syncStatus}
@@ -245,13 +229,15 @@ export function ComputersPage() {
           ) : (
             <ComputerTopologyList
               nodes={nodes}
+              localId={localNode?.nodeId}
+              localRuntime={computers.runtime}
               metrics={metrics.data}
               syncStatus={syncStatus}
               selectedId={inspectedId}
               onInspect={inspect}
             />
           )}
-          {list.hasNextPage ? (
+          {list.data && list.hasNextPage ? (
             <button
               type="button"
               className="cmp-load-more"
@@ -285,7 +271,10 @@ export function ComputersPage() {
             <ComputerInspector
               key={`${computers.scope}:${inspectedId}`}
               nodeId={inspectedId}
-              localId={computers.localId}
+              listedNode={directoryNodes.find((node) => node.nodeId === inspectedId)}
+              localId={localNode?.nodeId}
+              localNode={localNode}
+              localRuntime={computers.runtime}
               controlPlane={controlPlane}
               metrics={metrics.data}
               syncStatus={syncStatus}

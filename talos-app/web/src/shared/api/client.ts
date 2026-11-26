@@ -5,7 +5,7 @@ import { connectionScope } from "@/shared/store/connection-scope";
 import { bindComputerTarget } from "./computer-target";
 import { actorCredentialsFromToken, createDesktopTalosClient, getDesktopBridge } from "./desktop-client";
 import { canUseTalo } from "@/shared/types/account";
-import { desktopProductOwner, type ProductTarget } from "./desktop-product-owner";
+import { desktopProductOwner, withManagementTimeout, type ProductTarget } from "./desktop-product-owner";
 import { productQueries, type SessionDetail } from "./product-queries";
 import { resolveServerBaseUrl } from "./server-base-url";
 import { useAppStore, getConnectionSettings } from "@/shared/store/app-store";
@@ -74,15 +74,30 @@ let clientFactory: TalosClientFactory | undefined;
 export function getServerTalosClient() {
   const scope = connectionScope(getConnectionSettings());
   const desktop = getDesktopBridge();
-  return createBrowserTalosClient({
+  const client = createBrowserTalosClient({
     baseUrl: desktop ? DESKTOP_CLOUD_ORIGIN : resolveServerBaseUrl(),
-    fetch: desktop ? (input, init) => fetch(input, init) : undefined,
     getToken: () => getAuthTokenForRequests(scope),
     getUserId: () => {
       const connection = getConnectionSettings();
       return connectionScope(connection) === scope && connection.authStatus === "authenticated" ? connection.userId : undefined;
     },
   });
+  if (desktop) {
+    const directory = client.computers;
+    client.computers = {
+      ...directory,
+      list: (request, signal) => signal
+        ? directory.list(request, signal)
+        : withManagementTimeout(timeout => directory.list(request, timeout)),
+      read: (request, signal) => signal
+        ? directory.read(request, signal)
+        : withManagementTimeout(timeout => directory.read(request, timeout)),
+      readManagedWorker: signal => signal
+        ? directory.readManagedWorker(signal)
+        : withManagementTimeout(timeout => directory.readManagedWorker(timeout)),
+    };
+  }
+  return client;
 }
 
 function getAuthTokenForRequests(scope: string): string | undefined {
@@ -119,8 +134,9 @@ export function getTalosClient(target?: string | ClientTarget): TalosWebClient |
   }
 
   const token = () => getAuthTokenForRequests(scope);
-  const local = createDesktopTalosClient(bridge, token);
   const sdk = getServerTalosClient();
+  // Account directory ownership is independent of the selected execution transport.
+  const local = { ...createDesktopTalosClient(bridge, token), computers: sdk.computers };
   const cloud: TalosWebClient = {
     ...sdk,
     desktop: {

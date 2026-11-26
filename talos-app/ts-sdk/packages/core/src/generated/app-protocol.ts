@@ -3,6 +3,9 @@
 import type { AutomationMode, LoopSchedule, GoalStatus, GoalPauseReason, LoopStatus, LoopStopReason, SessionGoal, SessionLoop, AutomationTurnOrigin, AutomationInputOrigin, SessionAutomationSnapshot, SessionAutomationReadRequest, AutomationListEntry, AutomationListScope, AutomationListRequest, AutomationListResponse, AutomationChangedNotification, AutomationAction, GoalAction, LoopAction, LoopWakeDecision, AutomationRequest, AutomationEffect, AutomationControlResult, AutomationObjectRef, AutomationCommandDescriptor, AutomationCommandCatalogRequest, AutomationCommandCatalogResponse, AutomationCommand, AutomationCommandResolveRequest, AutomationCommandResolveResponse, BuiltinJobId, BuiltinJobAction, BuiltinJobOutcome, BuiltinJobInfo, BuiltinJobListRequest, BuiltinJobListResponse, BuiltinJobControlRequest } from "./automation";
 export type { AutomationMode, LoopSchedule, GoalStatus, GoalPauseReason, LoopStatus, LoopStopReason, SessionGoal, SessionLoop, AutomationTurnOrigin, AutomationInputOrigin, SessionAutomationSnapshot, SessionAutomationReadRequest, AutomationListEntry, AutomationListScope, AutomationListRequest, AutomationListResponse, AutomationChangedNotification, AutomationAction, GoalAction, LoopAction, LoopWakeDecision, AutomationRequest, AutomationEffect, AutomationControlResult, AutomationObjectRef, AutomationCommandDescriptor, AutomationCommandCatalogRequest, AutomationCommandCatalogResponse, AutomationCommand, AutomationCommandResolveRequest, AutomationCommandResolveResponse, BuiltinJobId, BuiltinJobAction, BuiltinJobOutcome, BuiltinJobInfo, BuiltinJobListRequest, BuiltinJobListResponse, BuiltinJobControlRequest };
 
+import type { DesktopMediaFrame, DesktopStreamOpen, DesktopStreamSend, DesktopStreamClose, DesktopWorkerIdentityResponse, DesktopWorkerEnrollParams, DesktopViewGrant, DesktopOpenRequest } from "./desktop";
+export type { DesktopMediaFrame, DesktopStreamOpen, DesktopStreamSend, DesktopStreamClose, DesktopWorkerIdentityResponse, DesktopWorkerEnrollParams, DesktopViewGrant, DesktopOpenRequest };
+
 export type ProtocolVersion = { major: number, minor: number, };
 
 export const PROTOCOL_VERSION = {"major":0,"minor":5} as const;
@@ -32,14 +35,6 @@ export type BrowserHostUpload = { filename: string, dataBase64: string, };
 export type BrowserHostFile = { filename: string, dataBase64: string, };
 
 export type BrowserDownloadReceipt = { filename: string, sha256: string, };
-
-export type DesktopMediaFrame = { streamId: string, dataBase64: string | null, };
-
-export type DesktopStreamOpen = { streamId: string, ticket: string, };
-
-export type DesktopStreamSend = { streamId: string, dataBase64: string, };
-
-export type DesktopStreamClose = { streamId: string, };
 
 export type AppServerErrorCode = -32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002;
 export const AppServerErrorCode = {
@@ -75,14 +70,6 @@ export type ActorCredentials = { credential: ActorCredential, };
 export type ActorCredential = { "type": "existing_session_token", token: string, };
 
 export type FileUploadParams = { request: FileUploadRequest, dataBase64: string, };
-
-export type DesktopWorkerIdentityResponse = { nodeId: string | null, controlPlaneEndpoint: string | null, controlPlaneTrustedCaPem?: string | null, };
-
-export type DesktopWorkerEnrollParams = {
-/**
- * Explicit UUID for credential recovery. Omitted/null enrolls or reuses saved identity.
- */
-nodeId?: string | null, };
 
 export type ProfileReadRequest = Record<string, never>;
 
@@ -1181,10 +1168,6 @@ export type BrowserOperation = { "kind": "read" } | { "kind": "selectTarget", ta
 export type BrowserRequest = { nodeId?: string, operation: BrowserOperation, };
 
 export type BrowserInputMode = "readOnly" | "control";
-
-export type DesktopViewGrant = { ticket: string, streamId: string, viewerId: string, generation: string, inputMode: BrowserInputMode, controllerId: string | null, inputEpoch: number | null, expiresAt: number, };
-
-export type DesktopOpenRequest = { nodeId: string, targetId: string, viewerId: string, generation: string, inputMode: BrowserInputMode, controllerId: string | null, inputEpoch: number | null, };
 
 export type McpServerListRequest = { nodeId?: string, cursor?: string, limit?: number, };
 

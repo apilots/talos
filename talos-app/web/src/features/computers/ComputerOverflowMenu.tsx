@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { TalosRuntimeState } from "@talos/sdk-app-server/desktop";
 import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { ComputerItem } from "./ComputerItem";
 import { useComputerList } from "./hooks";
 
-export function ComputerOverflowMenu({ selectedId, localId, onSelect, onClose }: {
-  selectedId?: string; localId?: string; onSelect: (id: string) => void; onClose: () => void;
+export function ComputerOverflowMenu({ selectedId, localId, localRuntime, onSelect, onClose }: {
+  selectedId?: string; localId?: string; localRuntime?: TalosRuntimeState; onSelect: (id: string) => void; onClose: () => void;
 }) {
   const { t } = useTranslation(["computers", "common"]);
   const [search, setSearch] = useState("");
@@ -39,11 +40,11 @@ export function ComputerOverflowMenu({ selectedId, localId, onSelect, onClose }:
     <div className="flex items-center justify-between px-3 py-2 text-sm font-semibold">{t("computers:title")}<span className="text-xs font-normal text-muted">{list.data?.pages[0]?.total ?? 0}</span></div>
     <label className="m-1 flex items-center gap-2 rounded-lg border border-border px-3 py-2"><Search size={15} className="text-muted" /><input autoFocus aria-label={t("computers:search")} placeholder={t("computers:search")} value={search} onChange={(event) => setSearch(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
     <div className="min-h-0 max-h-[55vh] overflow-auto py-1">
-      {list.data?.pages.flatMap((page) => page.data).map((node) => <ComputerItem key={node.nodeId} node={node} local={node.nodeId === localId} selected={node.nodeId === selectedId} onSelect={() => { onSelect(node.nodeId); onClose(); }} />)}
+      {list.data?.pages.flatMap((page) => page.data).map((node) => <ComputerItem key={node.nodeId} node={node} local={node.nodeId === localId} localRuntime={localRuntime} selected={node.nodeId === selectedId} onSelect={() => { onSelect(node.nodeId); onClose(); }} />)}
       {list.isPending ? <p className="p-3 text-sm text-muted">{t("common:loading")}</p> : null}
       {list.error ? <p role="alert" className="p-3 text-sm text-danger">{userVisibleErrorMessage(list.error, t("computers:loadError"))}</p> : null}
       {list.data?.pages[0]?.total === 0 ? <p className="p-3 text-sm text-muted">{t("computers:empty")}</p> : null}
-      {list.hasNextPage ? <button type="button" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()} className="w-full p-2 text-sm text-brand">{t("common:showMore")}</button> : null}
+      {list.data && list.hasNextPage ? <button type="button" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()} className="w-full p-2 text-sm text-brand">{t("common:showMore")}</button> : null}
     </div>
   </div>;
 }

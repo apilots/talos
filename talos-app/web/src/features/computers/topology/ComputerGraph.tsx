@@ -1,3 +1,5 @@
+import type { TalosRuntimeState } from "@talos/sdk-app-server/desktop";
+import { computerStatus } from "../computer-status";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeftRight, Layers, Laptop, Server } from "lucide-react";
@@ -17,12 +19,15 @@ import { SyncProgressSummary } from "./SyncProgressSummary";
 
 export interface ComputerGraphProps {
   nodes: AppProtocol.NodeInfo[];
+  localId?: string;
+  localRuntime?: TalosRuntimeState;
   metrics?: AppProtocol.SyncMetricsResponse;
   syncEndpoint?: string;
   syncStatus?: AppProtocol.SyncStatusResponse;
   selectedId?: string;
   selectedService?: ComputerService;
   controlPlane: string;
+  directoryAvailable?: boolean;
   layer: FlowLayer;
   onInspect: (id: string) => void;
   onService: (service: ComputerService) => void;
@@ -30,12 +35,15 @@ export interface ComputerGraphProps {
 
 export function ComputerGraph({
   nodes,
+  localId,
+  localRuntime,
   metrics,
   syncEndpoint,
   syncStatus,
   selectedId,
   selectedService,
   controlPlane,
+  directoryAvailable = true,
   layer,
   onInspect,
   onService,
@@ -90,7 +98,7 @@ export function ComputerGraph({
             const state = computerSyncState(metrics, node.nodeId, syncStatus);
             return (
               <g key={node.nodeId}>
-                {layer !== "sync" ? (
+                {directoryAvailable && layer !== "sync" ? (
                   <path
                     data-flow="execution"
                     data-computer-id={node.nodeId}
@@ -183,6 +191,7 @@ export function ComputerGraph({
         </button>
         {nodes.map((node, index) => {
           const peers = computerPeers(metrics, node.nodeId);
+          const status = computerStatus(node, node.nodeId === localId, localRuntime);
           const Icon = node.systemInfo?.os === "macOs" ? Laptop : Server;
           return (
             <button
@@ -203,17 +212,9 @@ export function ComputerGraph({
                   {computerPlatform(node) ?? t("unknown")}
                 </small>
               </span>
-              <i className={`cmp-dot ${node.available ? "is-online" : ""}`} />
+              <i className={`cmp-dot ${status.ready ? "is-online" : ""}`} />
               <footer>
-                <span>
-                  {t(
-                    node.status === "disabled"
-                      ? "remoteDisabled"
-                      : node.available
-                        ? "connected"
-                        : "offline",
-                  )}
-                </span>
+                <span>{t(status.label)}{status.remoteDisabled ? ` · ${t("remoteDisabled")}` : ""}</span>
                 <SyncProgressSummary metrics={metrics} peers={peers}
                   syncStatus={computerLocalSyncStatus(metrics, node.nodeId, syncStatus)} />
               </footer>

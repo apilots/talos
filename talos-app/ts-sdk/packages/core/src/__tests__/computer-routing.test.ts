@@ -176,3 +176,17 @@ it("routes the same account-scoped Talo lifecycle through HTTP and JSON-RPC", as
     ["computer/deleteManagedWorker", removal],
   ]);
 });
+
+it("forwards AbortSignal to HTTP Computer and Talo reads only when provided", async () => {
+  const request = vi.fn().mockResolvedValue({ enabled: true, instance: null });
+  const http = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080");
+  const controller = new AbortController();
+  await http.computers.read({ nodeId: "worker/1" });
+  await http.computers.read({ nodeId: "worker/1" }, controller.signal);
+  await http.computers.readManagedWorker(controller.signal);
+  expect(request.mock.calls).toEqual([
+    ["http://localhost:8080/v1/computers/worker%2F1"],
+    ["http://localhost:8080/v1/computers/worker%2F1", { signal: controller.signal }],
+    ["http://localhost:8080/v1/computers/managed-worker", { signal: controller.signal }],
+  ]);
+});

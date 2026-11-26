@@ -8,9 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "multi_node"))
 from fixture import Cluster, data, http, require, wait_for
 
 USERS = {name: {'user_id': 'e2e-' + name, 'email': name + '@example.test', 'username': name,
-    'role': 'user', 'type': 'free', 'status': 'active', 'email_verified': True,
+    'role': 'user', 'type': 'max' if name == 'carol' else 'free', 'status': 'active', 'email_verified': True,
     'set_password_required': False, 'disabled': False, 'created_at_ms': 1, 'updated_at_ms': 1}
-    for name in ('alice', 'bob')}
+    for name in ('alice', 'bob', 'carol')}
 TOKENS = {'e2e-' + name: user for name, user in USERS.items()}
 
 

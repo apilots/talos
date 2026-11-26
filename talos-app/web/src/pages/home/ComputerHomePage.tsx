@@ -5,12 +5,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { useCanUseTalo } from "@/features/auth";
 import { ComputerPicker, TaloPanel, useComputers } from "@/features/computers";
-import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { Button } from "@/shared/ui/Button";
 
 export function ComputerHomePage() {
   const { t } = useTranslation(["computers", "common"]);
-  const { list, nodes, total, localId, select } = useComputers();
+  const { list, nodes, total, localNode, runtime, select } = useComputers();
   const location = useLocation();
   const navigate = useNavigate();
   const [showConnectHelp, setShowConnectHelp] = useState(false);
@@ -18,7 +17,7 @@ export function ComputerHomePage() {
   const tab = canUseTalo && location.pathname === "/talo" ? "talo" : "personal";
   // A Talo remains in the Computer directory and has a separate chooser tab.
   const personalTotal = total - nodes.filter(node => node.managedWorkerPhase != null).length;
-  const empty = list.isSuccess && personalTotal === 0;
+  const empty = list.isSuccess && personalTotal === 0 && !localNode;
 
   function selectTab(next: "personal" | "talo") {
     if (next !== tab) navigate(next === "talo" ? "/talo" : "/");
@@ -51,35 +50,29 @@ export function ComputerHomePage() {
         </div>
         </> : null}
         <div id="computer-panel-personal" role={canUseTalo ? "tabpanel" : undefined} aria-labelledby={canUseTalo ? "computer-tab-personal" : undefined} hidden={tab !== "personal"} tabIndex={canUseTalo ? 0 : undefined} className="py-6">
-          {tab === "personal" ? (
-            list.isPending ? <p role="status" className="text-sm text-muted">{t("common:loading")}</p>
-              : list.isError ? <>
-                <p role="alert" className="text-sm text-danger">{userVisibleErrorMessage(list.error, t("computers:loadError"))}</p>
-                <Button type="button" variant="ghost" className="mt-3" onClick={() => void list.refetch()}>{t("common:retryNow")}</Button>
-              </> : <>
-                {empty ? (
-                  <div className="flex items-start gap-3">
-                    <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-surface text-accent">
-                      <Laptop size={22} aria-hidden="true" />
-                    </span>
-                    <div>
-                      <h2 className="text-base font-semibold text-ink">{t("computers:home.addPersonal")}</h2>
-                      <p className="mt-1 text-sm leading-6 text-muted">{t("computers:home.connectHelp")} {t("computers:home.appearsAutomatically")}</p>
-                    </div>
-                  </div>
-                ) : <>
-                  <p className="mb-3 text-sm text-muted">{t("computers:home.chooseHelp")}</p>
-                  <ComputerPicker total={personalTotal} localId={localId} onSelect={(id) => { select(id); navigate("/"); }} />
-                  <Button type="button" variant="ghost" className="mt-3 px-0 underline underline-offset-4" aria-expanded={showConnectHelp}
-                    aria-controls="computer-home-connect-help" onClick={() => setShowConnectHelp(open => !open)}>
-                    {t("computers:home.addPersonal")}
-                  </Button>
-                  <p id="computer-home-connect-help" className="mt-2 text-sm leading-6 text-muted" hidden={!showConnectHelp}>
-                    {t("computers:home.connectHelp")} {t("computers:home.appearsAutomatically")}
-                  </p>
-                </>}
-              </>
-          ) : null}
+          {tab === "personal" ? <>
+            {empty ? (
+              <div className="flex items-start gap-3">
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-surface text-accent">
+                  <Laptop size={22} aria-hidden="true" />
+                </span>
+                <div>
+                  <h2 className="text-base font-semibold text-ink">{t("computers:home.addPersonal")}</h2>
+                  <p className="mt-1 text-sm leading-6 text-muted">{t("computers:home.connectHelp")} {t("computers:home.appearsAutomatically")}</p>
+                </div>
+              </div>
+            ) : <>
+              <p className="mb-3 text-sm text-muted">{t("computers:home.chooseHelp")}</p>
+              <ComputerPicker total={personalTotal} localNode={localNode} localRuntime={runtime} onSelect={(id) => { select(id); navigate("/"); }} />
+              <Button type="button" variant="ghost" className="mt-3 px-0 underline underline-offset-4" aria-expanded={showConnectHelp}
+                aria-controls="computer-home-connect-help" onClick={() => setShowConnectHelp(open => !open)}>
+                {t("computers:home.addPersonal")}
+              </Button>
+              <p id="computer-home-connect-help" className="mt-2 text-sm leading-6 text-muted" hidden={!showConnectHelp}>
+                {t("computers:home.connectHelp")} {t("computers:home.appearsAutomatically")}
+              </p>
+            </>}
+          </> : null}
         </div>
         {canUseTalo ? <div id="computer-panel-talo" role="tabpanel" aria-labelledby="computer-tab-talo" hidden={tab !== "talo"} tabIndex={0}>
           {tab === "talo" ? <TaloPanel /> : null}

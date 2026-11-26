@@ -14,6 +14,40 @@ export type ProductTarget = {
 };
 type OwnerOptions = Pick<ProductTarget, "readOnly" | "service">;
 
+export const MANAGEMENT_LOOKUP_TIMEOUT_MS = 5_000;
+
+export function withManagementTimeout<T>(
+  run: (signal: AbortSignal) => Promise<T>,
+  timeoutMs = MANAGEMENT_LOOKUP_TIMEOUT_MS,
+): Promise<T> {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutError = () =>
+    new TalosApiError({
+      code: AppProtocol.ErrorCode.Timeout,
+      message: "The management Server did not respond in time.",
+      localization: null,
+    });
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      const error = timeoutError();
+      controller.abort(error);
+      reject(error);
+    }, timeoutMs);
+  });
+  const guarded = Promise.resolve()
+    .then(() => run(controller.signal))
+    .catch((error: unknown) => {
+      if (timedOut) throw timeoutError();
+      throw error;
+    });
+  return Promise.race([guarded, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 function isMissing(error: unknown) {
   return error instanceof TalosApiError && error.code === AppProtocol.ErrorCode.ResourceNotFound;
 }
@@ -44,7 +78,10 @@ export function desktopProductOwner(
   const managedKey = managedWorkerKey(scope);
   const knownManaged = () => queries.getQueryData<AppProtocol.ManagedWorkerResponse>(managedKey)?.instance;
   const readManaged = () => queries.fetchQuery({
-    queryKey: managedKey, queryFn: () => cloud.computers.readManagedWorker(), retry: false, staleTime: 5_000,
+    queryKey: managedKey,
+    queryFn: () => withManagementTimeout((signal) => cloud.computers.readManagedWorker(signal)),
+    retry: false,
+    staleTime: 5_000,
   });
   const forNode = async (nodeId?: string | null, { readOnly, service }: OwnerOptions = {}) => {
     if (!nodeId || nodeId === "embedded") return local;
@@ -59,7 +96,7 @@ export function desktopProductOwner(
       const directory = await queries.fetchQuery({
         queryKey: ["talos", scope, "server-computer", controlPlaneEndpoint, nodeId], retry: false, staleTime: 5_000,
         queryFn: async () => {
-          const node = await cloud.computers.read({ nodeId });
+          const node = await withManagementTimeout((signal) => cloud.computers.read({ nodeId }, signal));
           const ordinaryKey = ordinaryWorkerKey(scope, controlPlaneEndpoint, nodeId);
           if (ordinaryKey && node.nodeId === nodeId && node.managedWorkerPhase == null) {
             withWorkerStorage(storage => storage.setItem(ordinaryKey, "1"));

@@ -18,6 +18,7 @@ import {
 } from "@/features/chat";
 import {
   useComputer,
+  useLocalComputer,
   useManagedWorkerStatus,
   useProductScope,
 } from "@/features/computers";
@@ -61,8 +62,11 @@ export function ChatSessionContent({ sessionId, talo }: {
   const selectComputer = useAppStore((state) => state.selectComputer);
   const nodeId = session?.nodeId ?? reservedTalo?.nodeId;
   const { data: computer, error: computerError } = useComputer(nodeId);
-  const workerPhase = reservedTalo?.phase ?? computer?.managedWorkerPhase ?? (instance?.nodeId === nodeId ? instance?.phase : undefined);
-  const ready = workerPhase == null ? computer?.available : workerPhase === "ready";
+  const local = useLocalComputer();
+  const isLocal = Boolean(nodeId && nodeId === local.nodeId);
+  const workerPhase = isLocal ? undefined : reservedTalo?.phase ?? computer?.managedWorkerPhase ?? (instance?.nodeId === nodeId ? instance?.phase : undefined);
+  // The cloud directory describes remote availability, not the current Desktop process.
+  const ready = isLocal ? local.runtime?.kind === "ready" : workerPhase == null ? computer?.available : workerPhase === "ready";
   const canSend = Boolean((ready || workerPhase === "sleeping") &&
     ((session && !sessionQuery.error) || firstTaloTurn));
   useEffect(() => {
