@@ -37,9 +37,6 @@ agent_node:
     tls_certificate_file: /run/talos-tls/server.crt
     tls_private_key_file: /run/talos-tls/server.key
   runner: null
-  worker_rpc:
-    bind_address: 127.0.0.1:0
-    tls: null
 
 # Single-host Docker Engine runtime. Apply compose.managed-worker.yml to this Server.
 # Use a TLS Agent endpoint reachable from the managed Worker bridge networks.

@@ -40,9 +40,6 @@ agent_node:
     credential_file: /home/talos/.talos/conf/node.credential
     transport: direct
     trusted_ca_file: null
-  worker_rpc:
-    bind_address: 127.0.0.1:0
-    tls: null
 
 cloud:
   agent_base_url: https://agent.talos.love

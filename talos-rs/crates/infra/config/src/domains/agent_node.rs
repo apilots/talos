@@ -12,56 +12,6 @@ use super::network::GatewayConfig;
 pub struct AgentNodeConfig {
     pub control_plane: Option<AgentNodeControlConfig>,
     pub runner: Option<AgentNodeRunnerConfig>,
-    pub worker_rpc: WorkerRpcConfig,
-}
-
-/// The execution listener is independent of registration and Connect transport.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct WorkerRpcConfig {
-    pub bind_address: String,
-    pub tls: Option<WorkerRpcTlsConfig>,
-}
-
-impl Default for WorkerRpcConfig {
-    fn default() -> Self {
-        Self {
-            bind_address: "127.0.0.1:0".into(),
-            tls: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkerRpcTlsConfig {
-    pub certificate_file: PathBuf,
-    pub private_key_file: PathBuf,
-}
-
-impl WorkerRpcConfig {
-    /// Plain HTTP/2 is restricted to an explicit loopback socket, with NodeAuth.
-    pub fn address(&self) -> TalosResult<std::net::SocketAddr> {
-        let address: std::net::SocketAddr = self.bind_address.parse().map_err(|error| {
-            TalosError::from_source(
-                ErrorCode::InvalidRequest,
-                "Worker RPC bind address is invalid",
-                error,
-            )
-        })?;
-        if (!address.ip().is_loopback() && self.tls.is_none())
-            || self.tls.as_ref().is_some_and(|tls| {
-                tls.certificate_file.as_os_str().is_empty()
-                    || tls.private_key_file.as_os_str().is_empty()
-            })
-        {
-            return Err(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "Non-loopback Worker RPC requires a TLS identity",
-            ));
-        }
-        Ok(address)
-    }
 }
 
 /// TLS listener serving node registration and authenticated management.
@@ -110,7 +60,6 @@ impl AgentNodeRunnerConfig {
 impl AgentNodeConfig {
     /// Reject node network surfaces without authentication and TLS material.
     pub fn validate(&self, gateway: &GatewayConfig) -> TalosResult<()> {
-        self.worker_rpc.address()?;
         if let Some(control) = &self.control_plane {
             if !gateway.auth {
                 return Err(TalosError::new(

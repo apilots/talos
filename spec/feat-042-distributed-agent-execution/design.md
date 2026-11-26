@@ -56,7 +56,7 @@ Directory endpoints do not trigger Server dialback. See
 | `agent-client` | `RemoteAgentClient: AgentHarness`、节点注册 Client；封装认证、连接、流及错误转换 |
 | `talos-agent` | 现有 Harness/Provider 实现；节点侧 RPC adapter 验证请求后调用同一 Harness |
 | `talos-worker` library | 统一构造 Provider、Harness、工具、MCP 与节点本地 Workspace 运行时 |
-| `talos-worker` binary | 独立执行 Host：为同一 Worker 增加 gRPC listener、注册、租约和心跳 |
+| `talos-worker` binary | Standalone execution host: registration, leases, heartbeats and Worker-initiated Connect; no execution listener |
 | `talos-server` | 控制面；内嵌部署时注入本地 ports 并直接注册 Worker Harness |
 | Coordinator / 现有 Registry | 按 Session 绑定选择节点，并获取 `Arc<dyn AgentHarness>` |
 | Service / 现有 Store | 节点管理，以及原有 Session、Turn、事件、结果持久化 |

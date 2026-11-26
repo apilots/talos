@@ -7690,7 +7690,6 @@ dependencies = [
  "agent-pb",
  "agent-protocol",
  "async-trait",
- "rustls",
  "serde_json",
  "talos-agent",
  "talos-agent-api",

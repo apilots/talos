@@ -78,3 +78,9 @@ for the Server and Worker network paths.
 See [Worker image browser boundary](../../../build/worker/README.md#managed-browser-boundary)
 for pins, profile origin and sandbox requirements. Retain the Worker home when
 replacing the container to preserve browser login and explicit pause choices.
+
+The registered Worker does not bind an execution listener. Do not configure
+`agent_node.worker_rpc` or provision a Worker server certificate/private key.
+Keep the Server's TLS identity and the Worker's optional `runner.trusted_ca_file`
+when using a private Server CA. Managed-home upgrades remove the retired block;
+remove it explicitly from operator-owned `TALOS_CONFIG` files.

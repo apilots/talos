@@ -19,7 +19,7 @@ All listed capabilities are implemented. Transport clients preserve the existing
 | talos-base | Existing NodeRpcServer / RemoteNodePublisher extended | Accept Connect, install all advertised Harness handles, publish only after installation; revoke using the same node mutation path. Publish Harness and environment handles together |
 | agent-protocol | WorkerEnvironment | Object-safe typed methods accepting WorkerEnvironmentContext and existing business requests; return existing typed results through AgentFuture/AgentResult |
 | WorkerEnvironment / existing MCP owner | GetWorkspaceInfo / CompleteMcpAuthentication | Resolve target defaults without a Session; deliver a bound OAuth callback to the existing attempt, retaining existing WorkspaceInfo/McpAuthentication results |
-| agent-client / talos-worker | Environment client / Worker implementation | Same authenticated RPC port for loopback/direct/Connect; no upper-layer local/remote branches |
+| agent-client / talos-worker | Environment client / Worker implementation | Same authenticated adapter for embedded loopback and Worker-initiated Connect; no standalone Worker listener |
 | AgentNodeService / AgentNodeStore | Existing list/create/update/lease methods enhanced | Optional endpoint, name search/total, name-only update and shared revocation; no separate Computer Store |
 | SessionStore / ProjectStore | Existing methods enhanced | Node-scoped list, project affinity and has_nonterminal_turns(nodeId); no new execution Store |
 | SDK / Desktop host | computers.* / desktop/workerIdentity | Actor-facing product methods / safe local identity. No node credentials in renderer identity or list responses |
@@ -54,8 +54,9 @@ Electron uses the public CA bundle for connections to that control plane. An abs
 CreateNode/RotateCredential results stay inside the Rust host. Neither identity IPC nor runtime state contains node secrets.
 `desktop/workerIdentity` is also exposed as a dedicated preload IPC method.
 
-AgentNodeRunnerConfig.transport selects the registration carrier. Feature 044 separates WorkerRpcConfig from it:
-embedded/standalone hosts expose the same Worker adapter/listener; outbound Connect requires no public inbound access.
+AgentNodeRunnerConfig.transport selects the Worker-initiated execution carrier:
+Embedded and standalone hosts reuse the same Worker adapter. Standalone Workers open no RPC listener;
+both outbound WSS and direct gRPC Connect are initiated by the Worker.
 Desktop defaults to loopback and uses the same agent-client RPC SDK as remote calls. Cloud enrollment does not forbid
 the local listener. No new node table or RPC journal is added.
 

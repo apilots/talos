@@ -162,7 +162,7 @@ operator-managed Secrets. Avoid putting keys in the bootstrap ConfigMap.
 In-cluster ServiceAccount authentication is the default. To use an
 operator-managed kubeconfig, add a Secret volume mounted read-only at
 `/var/run/secrets/talos-kubernetes` in the Server container. Keep it separate
-from the Worker TLS Secret.
+from the Server TLS Secret.
 
 ```bash
 "${kube[@]}" create secret generic talos-server-kubeconfig --from-file=kubeconfig

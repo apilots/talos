@@ -11,7 +11,7 @@ from fixture import Cluster, ROOT, REPORT, data, http, require, wait_for
 
 cluster = Cluster()
 try:
-    env = cluster.config(cluster.server_home, {'worker_rpc': {'bind_address': '127.0.0.1:0'}})
+    env = cluster.config(cluster.server_home, {})
     path = Path(env['TALOS_CONFIG'])
     config = yaml.safe_load(path.read_text())
     config['gateway']['auth'] = False

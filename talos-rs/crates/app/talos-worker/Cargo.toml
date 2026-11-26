@@ -15,7 +15,6 @@ agent-client = { workspace = true }
 agent-pb = { workspace = true }
 agent-protocol = { workspace = true }
 async-trait = { workspace = true }
-rustls = { workspace = true }
 talos-agent-api = { workspace = true }
 talos-agent = { workspace = true }
 talos-agent-provider-kernel = { workspace = true }

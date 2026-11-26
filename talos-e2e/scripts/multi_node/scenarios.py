@@ -12,8 +12,6 @@ import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import grpc
-
 from fixture import Cluster, REPORT, ROOT, data, http, require, wait_for
 
 
@@ -35,14 +33,6 @@ def registration(cluster):
     denied(cluster.rpc('AgentNodeManagement', 'GetNode', {'node_id': cluster.nodes['alice-a']['node_id']}), 'UNAUTHENTICATED')
     denied(cluster.rpc('AgentNodeControl', 'Register', {
         'auth': {'node_id': cluster.nodes['alice-a']['node_id'], 'token': 'invalid-credential'}, 'params': {}}), 'UNAUTHENTICATED')
-    try:
-        cluster.rpc('AgentHarnessRpc', 'ClearSession', {
-            'auth': {'node_id': cluster.nodes['alice-a']['node_id'], 'token': 'invalid-lease'},
-            'params': {}}, channel=cluster.make_channel(cluster.nodes['alice-a']['port']))
-    except grpc.RpcError as error:
-        require(error.code() == grpc.StatusCode.UNAUTHENTICATED, 'Wrong Harness auth failure')
-    else:
-        raise AssertionError('Unauthenticated Harness request was accepted')
     passed('registration_api_owner_and_auth')
 
     before = cluster.info('alice-a')

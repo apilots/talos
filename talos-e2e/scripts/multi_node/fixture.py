@@ -217,8 +217,7 @@ class Cluster:
             runner = {'node_id': node_id, 'control_plane_endpoint': f'https://127.0.0.1:{self.rpc_port}',
                       'credential_file': str(credential), 'trusted_ca_file': str(self.cert)}
             runner['transport'] = self.worker_transport
-            worker_rpc = {'bind_address': f'127.0.0.1:{port}'}
-            env = self.config(home, {'runner': runner, 'worker_rpc': worker_rpc})
+            env = self.config(home, {'runner': runner})
             credential.write_text(response['created']['credential']['token'])
             credential.chmod(0o600)
             self.nodes[name] = dict(node_id=node_id, owner=owner, home=home, port=port, env=env, credential=credential)

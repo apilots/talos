@@ -15,7 +15,7 @@ pub struct RegisteredWorker {
     owned_worker: Option<TalosWorker>,
     shutdown: CancellationToken,
     runner: Option<tokio::task::JoinHandle<TalosResult<()>>>,
-    rpc: Arc<WorkerRpcHost>,
+    adapter: AgentHarnessRpcAdapter,
 }
 
 impl RegisteredWorker {
@@ -33,11 +33,9 @@ impl RegisteredWorker {
         let runner = config.agent_node.runner.clone().ok_or_else(|| {
             TalosError::new(ErrorCode::InvalidRequest, "Worker identity is missing")
         })?;
-        let rpc_config = config.agent_node.worker_rpc.clone();
         let (worker, adapter, node) = prepare_registered_worker(config, &runner).await?;
-        let rpc = Arc::new(WorkerRpcHost::bind(&rpc_config, adapter.clone()).await?);
         worker.activate_mcp()?;
-        Ok(Self::spawn(Some(worker), rpc, node, on_failure))
+        Ok(Self::spawn(Some(worker), adapter, node, on_failure))
     }
 
     /// Verify the protected local credential at its control plane without
@@ -71,8 +69,8 @@ impl RegisteredWorker {
             .await
     }
 
-    /// Register the host's existing Worker and listener. Detaching never stops
-    /// its local RPC credential, local executions, MCP runtime or listener.
+    /// Register the host's existing Worker. Detaching preserves local execution,
+    /// its private local RPC credential and the MCP runtime.
     pub async fn attach(
         worker: &TalosWorker,
         rpc: Arc<WorkerRpcHost>,
@@ -97,7 +95,12 @@ impl RegisteredWorker {
         )
         .await?;
         worker.use_remote_resource_rpc(resources.clone());
-        let observer = lease_observer(adapter, Some(resources), &config, credential.clone());
+        let observer = lease_observer(
+            adapter.clone(),
+            Some(resources),
+            &config,
+            credential.clone(),
+        );
         let node = AgentNodeRunner::new(
             client,
             runner.node_id.clone(),
@@ -106,16 +109,16 @@ impl RegisteredWorker {
         )
         .with_system_info(worker.system_info().clone())
         .with_lease_observer(observer);
-        Ok(Self::spawn(None, rpc, node, on_failure))
+        Ok(Self::spawn(None, adapter, node, on_failure))
     }
 
     fn spawn(
         owned_worker: Option<TalosWorker>,
-        rpc: Arc<WorkerRpcHost>,
+        adapter: AgentHarnessRpcAdapter,
         node: AgentNodeRunner,
         on_failure: Option<Arc<dyn Fn(TalosError) + Send + Sync>>,
     ) -> Self {
-        let node = node.with_execution_adapter(rpc.adapter());
+        let node = node.with_execution_adapter(adapter.clone());
         let shutdown = CancellationToken::new();
         let runner_shutdown = shutdown.clone();
         let task = tokio::spawn(async move {
@@ -130,40 +133,39 @@ impl RegisteredWorker {
             owned_worker,
             shutdown,
             runner: Some(task),
-            rpc,
+            adapter,
         }
     }
 
     /// Observe a runner failure while an independent host waits for process shutdown.
     pub async fn wait(&mut self) -> TalosResult<()> {
-        let result = tokio::select! {
-            result = self.runner.as_mut().expect("registration task") => result,
-            _ = self.rpc.stopped() => return self.rpc.shutdown().await,
-        }
-        .map_err(|error| {
-            TalosError::internal_with_source(
-                "Worker registration task failed; technical details were withheld.",
-                error,
-            )
-        })?;
+        let result = self
+            .runner
+            .as_mut()
+            .expect("registration task")
+            .await
+            .map_err(|error| {
+                TalosError::internal_with_source(
+                    "Worker registration task failed; technical details were withheld.",
+                    error,
+                )
+            })?;
         self.runner.take();
         result
     }
 
     pub fn is_finished(&self) -> bool {
-        self.rpc.is_finished()
-            || self
-                .runner
-                .as_ref()
-                .is_none_or(tokio::task::JoinHandle::is_finished)
+        self.runner
+            .as_ref()
+            .is_none_or(tokio::task::JoinHandle::is_finished)
     }
 
     pub async fn shutdown(mut self) -> TalosResult<()> {
         self.shutdown.cancel();
-        self.rpc.adapter().clear_registration();
+        self.adapter.clear_registration();
         let execution = match &self.owned_worker {
             Some(worker) => worker.shutdown().await,
-            None => self.rpc.adapter().drain_disconnected().await,
+            None => self.adapter.drain_disconnected().await,
         };
         // Keep the execution adapter alive until registration and Unregister finish.
         let registration = if let Some(runner) = self.runner.take() {
@@ -179,13 +181,7 @@ impl RegisteredWorker {
         } else {
             Ok(())
         };
-        let transport = if self.owned_worker.is_some() {
-            self.rpc.shutdown().await
-        } else {
-            Ok(())
-        };
         execution?;
-        transport?;
         match registration {
             // A revoked registration has already stopped admission. Report its
             // original failure, but do not make successful host cleanup block

@@ -47,6 +47,10 @@ The companion task owns embedded Library-direct calls.
    bidirectional execution and publication lifecycle. Managed Docker seeds and
    central Server self-publication explicitly select `direct`. Registration
    alone never publishes a callable Worker or initiates a Server dialback.
+   Registered Workers do not bind execution listeners. The retired
+   `agent_node.worker_rpc` bind/TLS configuration is removed; only the Server's
+   ingress TLS identity and the runner's optional Server CA trust remain.
+   Embedded local RPC uses an internal ephemeral loopback port.
 6. Bound binary messages to the existing gRPC default envelope limit (4 MiB),
    retaining existing per-call flow control. WSS does not fix Sync upload sizes.
 

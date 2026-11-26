@@ -39,6 +39,11 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
             serde_yaml::to_value(&credential).unwrap(),
         );
         set_path_for_test(&mut old, &["agent_node", "runner"], runner.clone());
+        set_path_for_test(
+            &mut old,
+            &["agent_node", "worker_rpc"],
+            serde_yaml::from_str("bind_address: 0.0.0.0:18801\ntls: null\n").unwrap(),
+        );
         if transport == "direct" {
             set_path_for_test(
                 &mut runner,
@@ -61,11 +66,14 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
                 YamlValue::Null,
             );
         }
-        let expected_nodes = get_path_for_test(&old, &["agent_node"]).unwrap().clone();
-        // The old document differs from the new strict schema only in retired modes.
+        // Remove retired fields before validating the current schema.
         let mut current = old.clone();
         remove_path_for_test(&mut current, &["mode"]);
         remove_path_for_test(&mut current, &["desktop"]);
+        remove_path_for_test(&mut current, &["agent_node", "worker_rpc"]);
+        let expected_nodes = get_path_for_test(&current, &["agent_node"])
+            .unwrap()
+            .clone();
         validate_config_value(&current, &RuntimeEnv::default()).unwrap();
         if central {
             set_path_for_test(
@@ -80,7 +88,7 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
         let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
         let mut removed = report.removed_paths.clone();
         removed.sort();
-        let mut expected_removed = vec!["desktop", "mode"];
+        let mut expected_removed = vec!["agent_node.worker_rpc", "desktop", "mode"];
         if central {
             expected_removed.insert(0, "agent_node.control_plane.trusted_node_ca_file");
         }

@@ -4,14 +4,13 @@ use agent_client::{AgentEnvironmentClient, AgentHarnessRpcAdapter, RemoteAgentCl
 use agent_pb as pb;
 use agent_protocol::NodeAuth;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use talos_config::WorkerRpcConfig;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use tokio::{net::TcpListener, sync::Mutex, task::JoinHandle};
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::{Identity, Server, ServerTlsConfig};
+use tonic::transport::Server;
 
-/// Bound RPC listener shared by embedded, direct and outbound hosts.
+/// Private loopback RPC listener for an embedded Worker.
 /// Owners stop execution before draining transport; dropping also stops admission.
 pub struct WorkerRpcHost {
     address: SocketAddr,
@@ -26,44 +25,11 @@ impl WorkerRpcHost {
         self.adapter.session_owner()
     }
 
-    /// Binds before returning, so registration cannot publish an unbound listener.
-    pub async fn bind(
-        config: &WorkerRpcConfig,
-        adapter: AgentHarnessRpcAdapter,
-    ) -> TalosResult<Self> {
-        let address = config.address()?;
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let mut builder = Server::builder();
-        if let Some(tls) = &config.tls {
-            let certificate = tokio::fs::read(&tls.certificate_file)
-                .await
-                .map_err(|error| {
-                    TalosError::internal_with_source(
-                        "Read Worker TLS certificate; technical details were withheld.",
-                        error,
-                    )
-                })?;
-            let key = tokio::fs::read(&tls.private_key_file)
-                .await
-                .map_err(|error| {
-                    TalosError::internal_with_source(
-                        "Read Worker TLS key; technical details were withheld.",
-                        error,
-                    )
-                })?;
-            builder = builder
-                .tls_config(ServerTlsConfig::new().identity(Identity::from_pem(certificate, key)))
-                .map_err(|error| {
-                    TalosError::internal_with_source(
-                        "Configure Worker TLS; technical details were withheld.",
-                        error,
-                    )
-                })?;
-        }
-        let listener = TcpListener::bind(address).await.map_err(|error| {
+    async fn bind_loopback(adapter: AgentHarnessRpcAdapter) -> TalosResult<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|error| {
             TalosError::from_source(
                 ErrorCode::ServiceUnavailable,
-                "Worker RPC listener is unavailable",
+                "Embedded Worker RPC listener is unavailable",
                 error,
             )
         })?;
@@ -80,7 +46,7 @@ impl WorkerRpcHost {
         let server_adapter = adapter.clone();
         let server = tokio::spawn(async move {
             let _finished = task_finished.drop_guard();
-            builder
+            Server::builder()
                 .add_service(
                     pb::worker_environment_rpc_server::WorkerEnvironmentRpcServer::new(
                         server_adapter.clone(),
@@ -201,20 +167,7 @@ impl crate::TalosWorker {
             Arc::new(move || plugins.cancel_remote_mcp_authorizations())
         });
         adapter.install_local_auth(&auth)?;
-        let config = self
-            .config()
-            .read()
-            .expect("Worker config lock poisoned")
-            .agent_node
-            .worker_rpc
-            .clone();
-        if config.tls.is_some() || !config.address()?.ip().is_loopback() {
-            return Err(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "Embedded Worker RPC requires a loopback listener",
-            ));
-        }
-        Ok((Arc::new(WorkerRpcHost::bind(&config, adapter).await?), auth))
+        Ok((Arc::new(WorkerRpcHost::bind_loopback(adapter).await?), auth))
     }
 
     pub async fn local_rpc_harnesses(
