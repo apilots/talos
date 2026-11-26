@@ -31,14 +31,14 @@ gateway:
   port: 8080
   auth: true
 
-# Outbound needs no inbound port. For direct, configure reachable Worker TLS and the node endpoint together.
+# outbound selects WSS; direct selects TLS gRPC Connect. Both connect to the Server.
 agent_node:
   control_plane: null
   runner:
     node_id: ${TALOS_WORKER_NODE_ID}
     control_plane_endpoint: https://agent.talos.love
     credential_file: /home/talos/.talos/conf/node.credential
-    transport: outbound
+    transport: direct
     trusted_ca_file: null
   worker_rpc:
     bind_address: 127.0.0.1:0

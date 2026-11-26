@@ -244,9 +244,8 @@ directive. Keep the service directory permissions and private keys restricted;
 test CA readability as the proxy's service user, not only as root.
 
 Worker/Desktop clients trust the public edge certificate using system roots;
-leave client `trusted_ca_file` null for the public endpoint. The Server's
-`trusted_node_ca_file` is for dialing direct Workers, not for authenticating the
-reverse proxy. Outbound-only nodes need no public listener or private CA rollout.
+leave client `trusted_ca_file` null for the public endpoint. Both WSS and gRPC
+Connect use the Server certificate. Workers need no public execution listener.
 The RPC listener reads its certificate at startup; certificate replacement needs
 a controlled Talos restart, followed by reconnect acceptance.
 

@@ -236,18 +236,11 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
         Arc::new(DatabaseSessionStore::new(storage).await.unwrap()),
         store,
     ));
-    let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
     let publisher = RemoteNodePublisher {
         coordinator_id: uuid::Uuid::new_v4().to_string(),
         connections: Arc::default(),
         resource_routes: ResourceRoutes::default(),
         coordinator: coordinator.clone(),
-        nodes: nodes.clone(),
-        trusted_node_ca: agent_client::AgentTlsTrust::Certificate(
-            certificate.cert.pem().into_bytes(),
-        ),
     };
     let management = NodeManagementRpc::new(nodes.clone(), Arc::new(TestAuth));
     let control = NodeControlRpc::new(nodes.clone(), publisher.clone(), CancellationToken::new());
@@ -257,7 +250,7 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
             "user-1",
             pb::CreateNodeRequest {
                 display_name: "Laptop".into(),
-                endpoint: Some(format!("https://{address}")),
+                endpoint: None,
                 owner_user_id: None,
                 credential_expires_at: chrono::Utc::now().timestamp() + 3600,
             },
@@ -303,77 +296,6 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
             if failure.error.as_ref().is_some_and(|error| error.code == pb::ErrorCode::Unauthenticated as i32)
     ));
 
-    let stop = CancellationToken::new();
-    let server_stop = stop.clone();
-    let management_service = management.clone();
-    let task = tokio::spawn(async move {
-        tonic::transport::Server::builder()
-            .tls_config(tonic::transport::ServerTlsConfig::new().identity(
-                tonic::transport::Identity::from_pem(
-                    certificate.cert.pem(),
-                    certificate.signing_key.serialize_pem(),
-                ),
-            ))
-            .unwrap()
-            .add_service(
-                pb::agent_node_management_server::AgentNodeManagementServer::new(
-                    management_service,
-                ),
-            )
-            .serve_with_incoming_shutdown(
-                tokio_stream::wrappers::TcpListenerStream::new(listener),
-                server_stop.cancelled(),
-            )
-            .await
-            .unwrap();
-    });
-    let rejected = NodeControlRpc::new(
-        nodes.clone(),
-        RemoteNodePublisher {
-            trusted_node_ca: agent_client::AgentTlsTrust::Certificate(
-                rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])
-                    .unwrap()
-                    .cert
-                    .pem()
-                    .into_bytes(),
-            ),
-            ..publisher
-        },
-        CancellationToken::new(),
-    )
-    .register(Request::new(pb::RegisterRequest {
-        auth: Some(pb::NodeAuth {
-            node_id: node_id.clone(),
-            token: credential.clone(),
-        }),
-        params: Some(pb::RegisterParams {
-            system_info: None,
-            deployments: vec![pb::Deployment {
-                agent_id: "talos".into(),
-            }],
-        }),
-    }))
-    .await
-    .unwrap()
-    .into_inner();
-    assert!(
-        matches!(rejected.result, Some(pb::register_response::Result::Failure(failure))
-        if failure.error.as_ref().is_some_and(|error| error.code == pb::ErrorCode::ServiceUnavailable as i32))
-    );
-    assert!(coordinator.ensure_agent("talos").await.is_err());
-    assert!(
-        !nodes
-            .get_node(
-                &Actor::regular("user-1"),
-                agent_protocol::GetNodeRequest {
-                    node_id: node_id.clone()
-                }
-            )
-            .await
-            .unwrap()
-            .available
-    );
-
     let registered = control
         .register(Request::new(pb::RegisterRequest {
             auth: Some(pb::NodeAuth {
@@ -394,7 +316,7 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
         pb::register_response::Result::Registered(registration) => registration.lease_token,
         _ => panic!("node registration failed"),
     };
-    coordinator.ensure_agent("talos").await.unwrap();
+    assert!(coordinator.ensure_agent("talos").await.is_err());
     let renewed = control
         .renew_lease(Request::new(pb::RenewLeaseRequest {
             auth: Some(pb::NodeAuth {
@@ -445,8 +367,6 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
         Some(pb::heartbeat_response::Result::Failure(failure))
             if failure.error.as_ref().is_some_and(|error| error.code == pb::ErrorCode::Unauthenticated as i32)
     ));
-    stop.cancel();
-    task.await.unwrap();
 }
 
 #[tokio::test]
@@ -512,7 +432,6 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
             bind_address: address.to_string(),
             tls_certificate_file: certificate_path.clone(),
             tls_private_key_file: private_key_path,
-            trusted_node_ca_file: Some(certificate_path),
         },
         nodes.clone(),
         Arc::new(TestAuth),
@@ -556,6 +475,17 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     let lease_events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let resources_for_lease = resources.clone();
     let lease_events_for_observer = lease_events.clone();
+    let worker_home = tempfile::tempdir().unwrap();
+    let adapter = agent_client::AgentHarnessRpcAdapter::new(
+        node_id.clone(),
+        Arc::new(std::sync::RwLock::new(
+            talos_config::Config::default().with_runtime_paths(
+                talos_config::TalosPaths::from_home(worker_home.path().into()),
+            ),
+        )),
+        Vec::new(),
+    );
+    let observed_adapter = adapter.clone();
     let stop_node = CancellationToken::new();
     let runner = AgentNodeRunner::new(
         client,
@@ -568,15 +498,26 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     .with_lease_observer(Arc::new(move |update| {
         let registered = update.is_some();
         if let Some(update) = update {
+            observed_adapter.install_registration(
+                agent_protocol::Registration {
+                    lease_token: update.auth.token.clone(),
+                    validity: update.validity,
+                    owner_user_id: update.owner_user_id,
+                },
+                update.deadline,
+            )?;
             resources_for_lease.update_auth(update.auth)?;
+        } else {
+            observed_adapter.clear_registration();
         }
         lease_events_for_observer.lock().unwrap().push(registered);
         Ok(())
-    }));
+    }))
+    .with_execution_adapter(adapter);
     let node_task = tokio::spawn(runner.run(stop_node.clone()));
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            if lease_events.lock().unwrap().contains(&true) {
+            if coordinator.ensure_agent("talos").await.is_ok() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;

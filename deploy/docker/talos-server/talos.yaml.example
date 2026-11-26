@@ -1,4 +1,4 @@
-# Central Server: HTTP management + TLS registration/direct RPC on 9443.
+# Central Server: HTTP management + TLS WSS/gRPC Connect on 9443.
 # The first administrator claims its embedded Worker; local calls use private loopback.
 # Install in the writable Talos home. Enrollment writes runner identity and protected credentials.
 timezone: Asia/Shanghai
@@ -36,7 +36,6 @@ agent_node:
     bind_address: 0.0.0.0:9443
     tls_certificate_file: /run/talos-tls/server.crt
     tls_private_key_file: /run/talos-tls/server.key
-    trusted_node_ca_file: null
   runner: null
   worker_rpc:
     bind_address: 127.0.0.1:0

@@ -66,21 +66,25 @@ Registration principal，其他控制 RPC 仅接受 Lease principal。
 | Heartbeat | 保存服务器接收时间和健康；返回是否需要重新 Register |
 | Unregister | 清除当前租约、摘除对应句柄；节点调用前已停止接收并清理本地执行 |
 
-控制面节点 listener 一次构造完整的注册/管理、执行句柄 publisher、Session data、
-subagent 和 tool image 服务；这些依赖均必需，不支持只登记但不发布执行的服务形态。
-Register 处理期间发布当前部署的 RemoteAgentClient 并标记登记已发布，再返回租约。
-节点 Runner 安装租约并负责续租、心跳和到期处理；健康心跳与有效租约、已发布句柄共同
-决定 available。发布句柄不等于已收到健康心跳，也不安装占位 Harness。
-注册只发布 agent_id；Provider 能力判断保留在原 Harness。当前句柄和 Client token 只在内存，AgentNodeService 不额外保存 token 原文。控制面重启后内存为空，Heartbeat 返回
-registration_required=true，节点重新 Register。若租约已经
-过期则 Renew/Heartbeat 返回 ResourceExpired，节点也走 Register。重新登记不触发 Turn 恢复。
+The control-plane listener composes node control, management, Connect publication,
+Session data, subagent and tool-image services with their original owners.
+Register issues the current lease and records advertised agent IDs. The Runner
+installs that lease and opens its configured WSS or gRPC Connect stream. Only an
+authenticated ready execution stream installs RemoteAgentClient and environment
+handles and marks the registration published. Availability also requires a valid
+lease and fresh health. Provider capability checks remain inside the Harness.
+Handles and client tokens are memory-only. After a control-plane restart,
+Heartbeat requests registration, followed by a new Connect stream. Expired leases
+also require Register. Re-registration never replays or resumes a Turn.
 
 ## 3. 凭据和租约
 
 - 控制面创建 256-bit 随机注册凭据；Register 签发独立随机租约 token。数据库只存 SHA-256
   hash；校验使用恒定时间比较。Get/List/日志/错误不返回 token 或 hash。
-- 使用 TLS 并验证对端证书。endpoint 由节点所有者或管理员设置，节点 Register 不能随意改变控制面
-  的访问目标。节点验证本地已安装的 NodeAuth，CP 验证数据库当前 hash/有效期。
+- Workers verify the Server TLS certificate for both WSS and gRPC Connect.
+  The operator configures `control_plane_endpoint`; directory `endpoint` does
+  not select a carrier or cause a Server dialback. Workers validate installed
+  NodeAuth and the control plane validates the current hash and validity.
 - 默认 90 秒租约、30 秒续租、10 秒心跳；新期限为 min(server_now + 90s, credential_expires_at)。
   本地截止时刻由请求发送的单调时间加 expires_at − server_at 得到；失败不延长期限。
 - 节点 Runner 在本地截止时刻撤销租约，拒绝新 RPC 并取消旧流，然后尝试重新注册；显式鉴权拒绝停止
@@ -184,7 +188,6 @@ agent_node:
     bind_address: "0.0.0.0:18800"
     tls_certificate_file: "/etc/talos/agent-control.crt"
     tls_private_key_file: "/etc/talos/agent-control.key"
-    trusted_node_ca_file: "/etc/talos/agent-node-ca.crt"
 ```
 
 管理调用使用 `agent-pb` 生成的 `AgentNodeManagementClient`。例如：
@@ -201,7 +204,7 @@ let channel = tonic::transport::Endpoint::from_shared(
 let mut client = agent_pb::agent_node_management_client::AgentNodeManagementClient::new(channel);
 let mut request = tonic::Request::new(agent_pb::CreateNodeRequest {
     display_name: "My laptop".into(),
-    endpoint: "https://laptop.example:18801".into(),
+    endpoint: None,
     owner_user_id: None,
     credential_expires_at: expires_at_unix_seconds,
 });
@@ -224,12 +227,13 @@ agent_node:
     node_id: "550e8400-e29b-41d4-a716-446655440000" # Use the UUID returned by CreateNode.
     control_plane_endpoint: "https://control.example:18800"
     credential_file: "/home/user/.talos/conf/node.credential"
-    bind_address: "0.0.0.0:18801"
-    tls_certificate_file: "/home/user/.talos/conf/agent-node.crt"
-    tls_private_key_file: "/home/user/.talos/conf/agent-node.key"
+    transport: direct # outbound selects WSS; direct selects gRPC Connect.
     trusted_ca_file: "/home/user/.talos/conf/control-ca.crt"
 ```
 
-`talos-worker` 通过统一 Worker library 构造真实 Kernel Harness，启动 TLS RPC listener 后注册实际
-deployments；上述监听地址、证书和私钥均为必填。注册成功后节点安装租约，资源 Client
-和 Harness RPC 的每个请求都使用当前租约；租约失效、注销或进程退出时停止接纳新调用。
+`talos-worker` builds the real Kernel Harness through the shared Worker library,
+registers its deployments, installs the lease, then initiates Connect. Both
+`outbound` and `direct` publish through this same stream lifecycle. A separate
+Worker TLS listener is optional and does not determine the carrier. Resource
+and Harness requests use the current lease. Expiry, unregister and shutdown
+stop admission through the existing owner.

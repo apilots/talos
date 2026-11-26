@@ -42,33 +42,32 @@ The companion task owns embedded Library-direct calls.
 4. Server Connect accepts a typed Stream rather than tonic-specific Streaming.
    WSS decodes into it; gRPC keeps using it. All authorization, publication,
    revocation, pending calls and cleanup remain in existing owners.
-5. Cloud managed deployment explicitly selects outbound gRPC. Existing direct
-   ingress remains for central Server self-publication, not personal computers.
+5. `agent_node.runner.transport` has two values: `outbound` selects WSS and
+   `direct` selects TLS gRPC Connect. Both use the same Worker-initiated
+   bidirectional execution and publication lifecycle. Managed Docker seeds and
+   central Server self-publication explicitly select `direct`. Registration
+   alone never publishes a callable Worker or initiates a Server dialback.
 6. Bound binary messages to the existing gRPC default envelope limit (4 MiB),
    retaining existing per-call flow control. WSS does not fix Sync upload sizes.
 
 ## Impact and compatibility
 Server and personal clients must upgrade together; reverse proxies must forward
 HTTP/1.1 Upgrade for node WSS paths while retaining HTTP/2 gRPC. Managed Docker
-configuration explicitly chooses gRPC, without transport-error fallback. The
-existing official-container packaging marker also preserves gRPC for persisted
-cloud homes written before this transport choice existed.
+configuration explicitly chooses `direct`. The transport value is applied
+without packaging overrides or failure-triggered fallback. Existing `direct`
+configs now use gRPC Connect instead of registration-triggered callback clients.
+Node identity, ownership and credentials retain their existing owners.
 Native hosts retain their independently configured local loopback API until the
-companion embedded-library task removes unnecessary local RPC; no public Worker
-listener or Server callback is needed for outbound execution.
+companion embedded-library task removes unnecessary local RPC.
 
 ## Deployment checklist
 - Personal Worker configuration keeps `control_plane_endpoint: https://host:port`;
   omitted `transport` or `transport: outbound` selects WSS with the same CA trust.
   The client derives `wss://host:port/talos/worker/connect`. It does not bind a
   public execution listener, advertise an inbound endpoint or permit Server dialback.
-- Official managed Docker seeds leave transport unset. Older Workers default to
-  gRPC, and the existing `TALOS_WORKER_PACKAGING=official-container` marker
-  selects gRPC on new Workers. Explicit `outboundGrpc` remains for
-  operator-managed configs. The Server retains the original
-  `AgentNodeControl.Connect` HTTP/2 gRPC method.
-- Central Server self-publication retains the existing direct TLS ingress. This
-  does not select a personal Worker's outbound carrier.
+- Official managed Docker seeds and deployment examples select `transport: direct`.
+  Central Server self-publication uses the same gRPC Connect carrier. Worker
+  TLS listeners and directory endpoints are independent of this choice.
 - Forward `/talos/worker/*` HTTP/1.1 WebSocket Upgrade without buffering. Lifecycle
   paths are `register`, `renew_lease`, `heartbeat`, `unregister`; each exchanges the
   corresponding existing protobuf request/response. Task/event `connect` uses

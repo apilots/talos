@@ -168,8 +168,21 @@ pub(crate) fn upgrade_default_config_from_template(
     // Align keys before validating values: unknown legacy keys must not poison
     // validation, and new defaults must not be skipped by a valid-group shortcut.
     let mut normalize_report = NormalizeReport::default();
-    let candidate =
+    let mut candidate =
         align_template_shape(&template, &original, &mut Vec::new(), &mut normalize_report)?;
+    // Optional control-plane groups have a null template, so shape alignment
+    // cannot remove this retired Server-dialback setting.
+    if candidate
+        .get_mut("agent_node")
+        .and_then(|node| node.get_mut("control_plane"))
+        .and_then(YamlValue::as_mapping_mut)
+        .and_then(|control| control.remove(YamlValue::String("trusted_node_ca_file".into())))
+        .is_some()
+    {
+        normalize_report
+            .removed_paths
+            .push("agent_node.control_plane.trusted_node_ca_file".into());
+    }
     let validation_template = build_validation_template(&template, &candidate, &runtime_env);
     let normalized = normalize_value(
         &template,
@@ -253,8 +266,7 @@ fn build_validation_template(
     runtime_env: &RuntimeEnv,
 ) -> YamlValue {
     let mut validation_template = template.clone();
-    // Direct runners depend on their TLS listener (or the central ingress),
-    // and a central ingress depends on gateway authentication. Validate these
+    // A central ingress depends on gateway authentication. Validate these
     // together so a valid identity is not rejected against empty defaults.
     if let Some(nodes) = get_path(original, &["agent_node"]) {
         let mut candidate = template.clone();

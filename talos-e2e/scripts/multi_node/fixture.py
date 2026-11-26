@@ -195,7 +195,7 @@ class Cluster:
             require('access_token' in self.users[user], 'Cloud login failed; inspect Cloud log')
         self.server_env = self.config(self.server_home, {'control_plane': {
             'bind_address': f'127.0.0.1:{self.rpc_port}', 'tls_certificate_file': str(self.cert),
-            'tls_private_key_file': str(self.key), 'trusted_node_ca_file': str(self.cert)}})
+            'tls_private_key_file': str(self.key)}})
         self.start_server()
 
     def start(self):
@@ -207,7 +207,7 @@ class Cluster:
         for name, owner in (('alice-a', 'alice'), ('alice-b', 'alice'), ('bob-a', 'bob')):
             port = free_port()
             response = self.manage(owner, 'CreateNode', {
-                'display_name': name, **({'endpoint': f'https://127.0.0.1:{port}'} if self.worker_transport == 'direct' else {}),
+                'display_name': name,
                 'credential_expires_at': int(time.time()) + 3600})
             require('created' in response, f'CreateNode failed: {response}')
             node_id = response['created']['node']['node_id']
@@ -218,8 +218,6 @@ class Cluster:
                       'credential_file': str(credential), 'trusted_ca_file': str(self.cert)}
             runner['transport'] = self.worker_transport
             worker_rpc = {'bind_address': f'127.0.0.1:{port}'}
-            if self.worker_transport == 'direct':
-                worker_rpc['tls'] = {'certificate_file': str(self.cert), 'private_key_file': str(self.key)}
             env = self.config(home, {'runner': runner, 'worker_rpc': worker_rpc})
             credential.write_text(response['created']['credential']['token'])
             credential.chmod(0o600)

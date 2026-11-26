@@ -13,20 +13,11 @@ struct Fixture {
     credential: pb::NodeCredential,
     store: Arc<DatabaseAgentNodeStore>,
     endpoint: Option<String>,
-    _direct_listener: Option<tokio_util::task::AbortOnDropHandle<()>>,
 }
 
 impl Fixture {
     async fn new(endpoint: Option<String>) -> Self {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let listener = if endpoint.is_some() {
-            Some(tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap())
-        } else {
-            None
-        };
-        let endpoint = listener
-            .as_ref()
-            .map(|listener| format!("https://{}", listener.local_addr().unwrap()));
         let storage = Arc::new(
             SqliteStorage::new_with_max_connections(":memory:", 1)
                 .await
@@ -41,9 +32,6 @@ impl Fixture {
         let store = Arc::new(DatabaseAgentNodeStore::new(&storage));
         let nodes = AgentNodeService::new(store.clone());
         let sessions = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
-        let certificate =
-            rcgen::generate_simple_self_signed(vec!["127.0.0.1".into(), "localhost".into()])
-                .unwrap();
         let publisher = RemoteNodePublisher {
             coordinator_id: uuid::Uuid::new_v4().to_string(),
             connections: Arc::default(),
@@ -53,33 +41,8 @@ impl Fixture {
                 sessions,
                 store.clone(),
             )),
-            nodes: nodes.clone(),
-            trusted_node_ca: agent_client::AgentTlsTrust::Certificate(
-                certificate.cert.pem().into_bytes(),
-            ),
         };
         let management = NodeManagementRpc::new(nodes.clone(), Arc::new(TestAuth));
-        let direct_listener = listener.map(|listener| {
-            let management = management.clone();
-            tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
-                tonic::transport::Server::builder()
-                    .tls_config(tonic::transport::ServerTlsConfig::new().identity(
-                        tonic::transport::Identity::from_pem(
-                            certificate.cert.pem(),
-                            certificate.signing_key.serialize_pem(),
-                        ),
-                    ))
-                    .unwrap()
-                    .add_service(
-                        pb::agent_node_management_server::AgentNodeManagementServer::new(
-                            management,
-                        ),
-                    )
-                    .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-                    .await
-                    .unwrap();
-            }))
-        });
         let control = NodeControlRpc::new(nodes, publisher.clone(), CancellationToken::new());
         let created = management
             .create_node(management_request(
@@ -104,8 +67,44 @@ impl Fixture {
             credential: created.credential.unwrap(),
             store,
             endpoint,
-            _direct_listener: direct_listener,
         }
+    }
+
+    async fn connect(
+        &self,
+        token: &str,
+    ) -> (
+        tokio::sync::mpsc::Sender<pb::NodeToControlFrame>,
+        impl futures_util::Stream<Item = Result<pb::ControlToNodeFrame, Status>>,
+    ) {
+        use futures_util::StreamExt;
+        let (sender, receiver) = tokio::sync::mpsc::channel(8);
+        sender
+            .send(pb::NodeToControlFrame {
+                body: Some(pb::node_to_control_frame::Body::Connect(
+                    pb::ConnectNodeRequest {
+                        auth: Some(pb::NodeAuth {
+                            node_id: self.credential.node_id.clone(),
+                            token: token.to_owned(),
+                        }),
+                        params: Some(pb::Empty {}),
+                        stream_heartbeat: false,
+                    },
+                )),
+            })
+            .await
+            .unwrap();
+        let mut stream = self
+            .control
+            .accept_connection(tokio_stream::wrappers::ReceiverStream::new(receiver).map(Ok))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap().body,
+            Some(pb::control_to_node_frame::Body::Connected(_))
+        ));
+        (sender, stream)
     }
 
     fn registration(&self, agent_ids: &[&str]) -> Request<pb::RegisterRequest> {
@@ -220,7 +219,6 @@ async fn outbound_registration_renews_without_publishing_and_preserves_uuid_on_r
         coordinator_id: uuid::Uuid::new_v4().to_string(),
         connections: Arc::default(),
         resource_routes: ResourceRoutes::default(),
-        nodes: restarted_nodes.clone(),
         ..fixture.publisher.clone()
     };
     let restarted_control = NodeControlRpc::new(
@@ -304,6 +302,7 @@ async fn rename_before_first_heartbeat_keeps_identity_and_executable_registratio
     };
     assert_eq!(info.node_id, fixture.credential.node_id);
     assert!(!info.available);
+    let _connection = fixture.connect(&lease).await;
     fixture.heartbeat(lease).await;
     fixture
         .publisher
@@ -313,7 +312,7 @@ async fn rename_before_first_heartbeat_keeps_identity_and_executable_registratio
         .unwrap();
     assert!(
         fixture
-            .publisher
+            .control
             .nodes
             .get_node(
                 &Actor::regular("user-1"),
@@ -361,6 +360,7 @@ async fn rename_before_first_heartbeat_keeps_identity_and_executable_registratio
             .unwrap()
             .into_inner(),
     );
+    let _connection = fixture.connect(&lease).await;
     fixture.heartbeat(lease).await;
     fixture
         .publisher
@@ -381,6 +381,7 @@ async fn product_status_and_rename_share_registration_revocation_without_replaci
             .unwrap()
             .into_inner(),
     );
+    let _connection = fixture.connect(&lease).await;
     fixture.heartbeat(lease.clone()).await;
     let owner = Actor::regular("user-1");
     let node_id = fixture.credential.node_id.clone();
@@ -391,14 +392,14 @@ async fn product_status_and_rename_share_registration_revocation_without_replaci
         .await
         .unwrap();
     let (renamed, disabled) = tokio::join!(
-        fixture.publisher.nodes.rename_computer(
+        fixture.control.nodes.rename_computer(
             &owner,
             talos_types::RenameComputerRequest {
                 node_id: node_id.clone(),
                 display_name: "New laptop name".into(),
             }
         ),
-        fixture.publisher.nodes.set_computer_status(
+        fixture.control.nodes.set_computer_status(
             &owner,
             talos_types::SetComputerStatusRequest {
                 node_id: node_id.clone(),
@@ -409,7 +410,7 @@ async fn product_status_and_rename_share_registration_revocation_without_replaci
     renamed.unwrap();
     disabled.unwrap();
     let info = fixture
-        .publisher
+        .control
         .nodes
         .read_computer(
             &owner,
@@ -431,7 +432,7 @@ async fn product_status_and_rename_share_registration_revocation_without_replaci
         .await
         .is_err());
     assert!(fixture
-        .publisher
+        .control
         .nodes
         .authenticate_lease(&NodeAuth {
             node_id: node_id.clone(),
@@ -440,7 +441,7 @@ async fn product_status_and_rename_share_registration_revocation_without_replaci
         .await
         .is_err());
     let enabled = fixture
-        .publisher
+        .control
         .nodes
         .set_computer_status(
             &owner,
@@ -467,7 +468,7 @@ async fn overlapping_unregister_and_register_keep_the_new_registration() {
             .into_inner(),
     );
     let guard = fixture
-        .publisher
+        .control
         .nodes
         .lock_lifecycle(&fixture.credential.node_id)
         .await;
@@ -485,7 +486,7 @@ async fn overlapping_unregister_and_register_keep_the_new_registration() {
     assert!(futures_util::poll!(&mut unregister).is_pending());
     assert!(futures_util::poll!(&mut register).is_pending());
     fixture
-        .publisher
+        .control
         .nodes
         .authenticate_lease(&NodeAuth {
             node_id: fixture.credential.node_id.clone(),
@@ -499,9 +500,9 @@ async fn overlapping_unregister_and_register_keep_the_new_registration() {
         removed.unwrap().into_inner().result,
         Some(pb::unregister_response::Result::Completed(_))
     ));
-    fixture
-        .heartbeat(registered(added.unwrap().into_inner()))
-        .await;
+    let lease = registered(added.unwrap().into_inner());
+    let _connection = fixture.connect(&lease).await;
+    fixture.heartbeat(lease).await;
     fixture
         .publisher
         .coordinator

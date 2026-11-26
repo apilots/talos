@@ -271,7 +271,7 @@ cadence explicitly; controlled responses do not prove general language inference
 own app-server to distinguish durable definitions from the original memory queue.
 The script explicitly runs the ignored `automation_worker_business` tests with
 `just test -p talos-base --run-ignored only -E 'test(automation_worker_business)'`
-for real Direct/WSS/outbound-gRPC registered Workers, including in-flight WSS
+for real `direct` gRPC Connect and `outbound` WSS registered Workers, including in-flight WSS
 interruption with the original typed cancellation settlement. Default ignored status is not
 acceptance evidence. No provider credentials, private source or business API mocks
 are used; unrelated MCP tools are disabled. Browser input/rendering remains a

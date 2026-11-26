@@ -53,7 +53,7 @@ class ContractAuthCluster(Cluster):
         wait_for(lambda: http(self.cloud_url + '/v1/auth/config'), 'Auth contract fixture')
         self.server_env = self.config(self.server_home, {'control_plane': {
             'bind_address': f'127.0.0.1:{self.rpc_port}', 'tls_certificate_file': str(self.cert),
-            'tls_private_key_file': str(self.key), 'trusted_node_ca_file': str(self.cert)}})
+            'tls_private_key_file': str(self.key)}})
         self.start_server()
         # Match the product login/bootstrap boundary. Tokens alone are not a
         # verified local context, and data APIs must never introspect on demand.

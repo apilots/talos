@@ -26,8 +26,8 @@ execution and synchronization use public APIs, original SDKs and WSS/TLS.
   Computer and Session remain absent from Alice's Desktop databases while G
   retains both accounts.
 
-- `05_resource_interactions`: failed Direct registrations with an unreachable
-  endpoint or invalid TLS hostname never advertise Connected; an actual B
+- `05_resource_interactions`: registration with an absent or unreachable endpoint
+  succeeds but never advertises Connected before an execution stream exists; an actual B
   Coordinator Connect receives paused admission and disconnects before commit,
   restoring the complete original Worker marker. With B and H stopped, A still
   continues the same Session without an abandoned tool side effect or history.

@@ -5,7 +5,7 @@ use talos_types::{FsDirectoryCreateRequest, FsDirectoryReadRequest};
 
 #[tokio::test]
 async fn embedded_direct_and_outbound_environment_share_paths_under_computer_authorization() {
-    environment_transport_scenario(talos_config::AgentNodeTransport::OutboundGrpc).await;
+    environment_transport_scenario(talos_config::AgentNodeTransport::Direct).await;
 }
 
 #[tokio::test]

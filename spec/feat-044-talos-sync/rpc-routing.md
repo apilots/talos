@@ -16,11 +16,14 @@ Status: Implemented（阶段1–3）— 2026-10-12。统一载体、共享事实
 | 目标 | agent-client的执行路径 | 回调路径 |
 | --- | --- | --- |
 | 本机内嵌Worker | 本机Coordinator -> loopback AgentHarnessRpc/WorkerEnvironmentRpc | Worker -> 本机管理端资源RPC -> 当前Service/Store；不经过公网。 |
-| 公网可达且已授权Worker | 当前Coordinator -> 目标Worker标准gRPC | 直达已验证当前资源端，或Worker -> agent Gateway -> 当前协调者主动连接。 |
-| NAT后的个人电脑Worker | 当前Coordinator -> agent Gateway -> Worker主动Connect | 结果沿同一Connect反向返回；资源RPC经Gateway再转到当前协调者。 |
+| Registered Worker | Current Coordinator -> agent Gateway -> Worker-initiated Connect | Results return through Connect; resources route to the authenticated current Coordinator |
 
-公网可达不等于免鉴权；direct只在原RPC授权、endpoint及当前调用者回调条件满足时使用，否则选择已授权Connect路径。
-不为优化直连新建凭据交换/授权表/打洞系统；所有传输仍由agent-client/node client隐藏，业务只用AgentHarness。
+`agent_node.runner.transport` selects `outbound` WSS or `direct` TLS gRPC
+Connect. Both use the same authenticated Worker-initiated task/event stream,
+publication and current-Coordinator resource callbacks. Directory endpoints
+never trigger Server dialback or automatic transport fallback. The SDK hides
+carrier details behind the existing AgentHarness interface. See
+[Worker transport](../feat-062-worker-outbound-websocket/design.md).
 
 ## 2. A、B都在NAT后的完整链
 

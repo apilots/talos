@@ -147,7 +147,6 @@ def server_files(files, gateway, rpc_port, model_port, worker_image):
         "bind_address": "0.0.0.0:9443",
         "tls_certificate_file": "/fixture/server.crt",
         "tls_private_key_file": "/fixture/server.key",
-        "trusted_node_ca_file": "/fixture/server.crt",
     }}
     profile["cloud"].update(agent_base_url="https://127.0.0.1:9443", agent_trusted_ca_file="/fixture/server.crt")
     profile["talos"] = {

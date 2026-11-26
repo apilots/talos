@@ -53,7 +53,7 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
             set_path_for_test(&mut old, &["agent_node", "worker_rpc", "tls"], tls);
         }
         if central {
-            let control: YamlValue = serde_yaml::from_str("bind_address: 127.0.0.1:18800\ntls_certificate_file: /private/server.crt\ntls_private_key_file: /private/server.key\ntrusted_node_ca_file: /private/ca.crt\n").unwrap();
+            let control: YamlValue = serde_yaml::from_str("bind_address: 127.0.0.1:18800\ntls_certificate_file: /private/server.crt\ntls_private_key_file: /private/server.key\n").unwrap();
             set_path_for_test(&mut old, &["agent_node", "control_plane"], control);
             set_path_for_test(
                 &mut old,
@@ -67,13 +67,24 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
         remove_path_for_test(&mut current, &["mode"]);
         remove_path_for_test(&mut current, &["desktop"]);
         validate_config_value(&current, &RuntimeEnv::default()).unwrap();
+        if central {
+            set_path_for_test(
+                &mut old,
+                &["agent_node", "control_plane", "trusted_node_ca_file"],
+                YamlValue::String("/private/retired-worker-ca.crt".into()),
+            );
+        }
         write_existing(&paths, &old);
         std::fs::write(&credential, "existing-registration-credential").unwrap();
 
         let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
         let mut removed = report.removed_paths.clone();
         removed.sort();
-        assert_eq!(removed, vec!["desktop", "mode"]);
+        let mut expected_removed = vec!["desktop", "mode"];
+        if central {
+            expected_removed.insert(0, "agent_node.control_plane.trusted_node_ca_file");
+        }
+        assert_eq!(removed, expected_removed);
         assert_eq!(
             read_yaml_file(report.backup_path.as_ref().unwrap()).unwrap(),
             old
@@ -423,18 +434,18 @@ fn managed_profiles_preserve_complete_valid_operator_config() {
 }
 
 #[test]
-fn upgrade_refuses_to_erase_worker_identity_when_tls_is_missing() {
+fn upgrade_refuses_to_erase_worker_identity_when_control_endpoint_is_insecure() {
     let dir = tempfile::tempdir().unwrap();
     let paths = TalosPaths::from_home(dir.path().join(".talos"));
     let template_path = write_template(dir.path());
     let mut old = template_yaml();
     set_path_for_test(&mut old, &["mode"], YamlValue::String("local".into()));
-    let runner = serde_yaml::from_str("node_id: a03f484f-dfb3-4bf8-8796-35c6ce239d31\ncontrol_plane_endpoint: https://agent.example\ncredential_file: /private/node.credential\ntransport: direct\n").unwrap();
+    let runner = serde_yaml::from_str("node_id: a03f484f-dfb3-4bf8-8796-35c6ce239d31\ncontrol_plane_endpoint: http://agent.example\ncredential_file: /private/node.credential\ntransport: direct\n").unwrap();
     set_path_for_test(&mut old, &["agent_node", "runner"], runner);
     write_existing(&paths, &old);
     let original = std::fs::read(&paths.config_file).unwrap();
 
-    // A damaged listener must require repair, never silently reset enrollment.
+    // Invalid control-plane TLS must require repair without resetting enrollment.
     let error = upgrade_default_config_from_template(&paths, &template_path).unwrap_err();
     assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
     assert_eq!(std::fs::read(&paths.config_file).unwrap(), original);
@@ -609,7 +620,6 @@ fn upgrade_preserves_configured_agent_node_listener() {
 bind_address: 127.0.0.1:18800
 tls_certificate_file: /tmp/control.crt
 tls_private_key_file: /tmp/control.key
-trusted_node_ca_file: /tmp/node-ca.crt
 "#,
         )
         .expect("Agent node listener should encode"),

@@ -34,7 +34,6 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
         bind_address: "127.0.0.1:0".into(),
         tls_certificate_file: home.path().join("unused.crt"),
         tls_private_key_file: home.path().join("unused.key"),
-        trusted_node_ca_file: None,
     });
     let mut persisted = serde_json::to_value(&config).unwrap();
     persisted["logging"].as_object_mut().unwrap().remove("file");

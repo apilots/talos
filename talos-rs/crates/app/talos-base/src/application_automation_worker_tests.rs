@@ -1,9 +1,7 @@
 //! Real registered Worker/Automation callback acceptance; requires the controlled upstream.
 use super::*;
 use std::{path::PathBuf, time::Duration};
-use talos_config::{
-    AgentNodeRunnerConfig, AgentNodeTransport, Config, TalosPaths, WorkerRpcTlsConfig,
-};
+use talos_config::{AgentNodeRunnerConfig, AgentNodeTransport, Config, TalosPaths};
 use talos_types::{
     AgentUserContent, AgentUserInput, AutomationTurnOrigin, GoalStatus, SessionActiveTurnRequest,
     SessionAutomationReadRequest, SessionHistoryRequest, SkillScope, SkillsListRequest,
@@ -66,12 +64,6 @@ async fn automation_worker_business_outbound() {
 
 #[tokio::test]
 #[ignore = "requires controlled automation model; run 24_automation/01_session_automation"]
-async fn automation_worker_business_outbound_grpc() {
-    run(AgentNodeTransport::OutboundGrpc, Finish::Complete).await;
-}
-
-#[tokio::test]
-#[ignore = "requires controlled automation model; run 24_automation/01_session_automation"]
 async fn automation_worker_business_websocket_interrupt() {
     run(AgentNodeTransport::Outbound, Finish::Interrupt).await;
 }
@@ -95,7 +87,6 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
         bind_address: ingress.to_string(),
         tls_certificate_file: cert.clone(),
         tls_private_key_file: key.clone(),
-        trusted_node_ca_file: Some(cert.clone()),
     };
     let mut owner_config = config(&home.path().join("owner"));
     owner_config.agent_node.control_plane = Some(control_config.clone());
@@ -151,15 +142,13 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
     .await
     .unwrap();
     let actor = Actor::regular("user-1").with_access_token("user-1");
-    let worker_address = address();
     let node = runtime
         .node_service
         .create_node(
             &actor,
             agent_protocol::CreateNodeRequest {
                 display_name: format!("Automation {transport:?}"),
-                endpoint: (transport == AgentNodeTransport::Direct)
-                    .then(|| format!("https://{worker_address}")),
+                endpoint: None,
                 owner_user_id: None,
                 credential_expires_at: chrono::Utc::now().timestamp() + 3600,
             },
@@ -185,13 +174,6 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
         credential_file: credential,
         trusted_ca_file: Some(cert.clone()),
     });
-    if transport == AgentNodeTransport::Direct {
-        worker_config.agent_node.worker_rpc.bind_address = worker_address.to_string();
-        worker_config.agent_node.worker_rpc.tls = Some(WorkerRpcTlsConfig {
-            certificate_file: cert,
-            private_key_file: key,
-        });
-    }
     persist(&worker_config);
     let worker = talos_worker::RegisteredWorker::start(worker_config)
         .await

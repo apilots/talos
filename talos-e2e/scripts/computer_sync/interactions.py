@@ -29,26 +29,23 @@ def shared(cluster, session):
         wait_for(lambda host=host: bool(cluster.history(host, session)['data']), host + ' shared Session')
 
 
-def failed_direct_registration(cluster):
-    mac_config = yaml.safe_load((cluster.nodes['Mac-Worker']['home'] / 'conf/talos.yaml').read_text())
-    mac_port = mac_config['agent_node']['worker_rpc']['bind_address'].rsplit(':', 1)[1]
+def registration_requires_execution_stream(cluster):
     deployments = cluster.manage('alice', 'GetDeployments', {'node_id': cluster.nodes['Mac-Worker']['node_id']})['deployments']['deployments']
-    # The real Mac listener's certificate covers 127.0.0.1, not localhost.
-    for endpoint in (f'https://127.0.0.1:{free_port()}', f'https://localhost:{mac_port}'):
+    # Directory endpoints never trigger Server dialback or make registration executable.
+    for endpoint in (None, f'https://127.0.0.1:{free_port()}'):
         created = cluster.manage('alice', 'CreateNode', {
-            'display_name': 'Rejected Direct', 'endpoint': endpoint,
+            'display_name': 'Unconnected Worker', 'endpoint': endpoint,
             'credential_expires_at': int(time.time()) + 3600})['created']
         node = created['node']['node_id']
         result = cluster.rpc('AgentNodeControl', 'Register', {
             'auth': {'node_id': node, 'token': created['credential']['token']},
             'params': {'deployments': deployments}
         })
-        require(result.get('failure', {}).get('error', {}).get('code') == 'ERROR_CODE_SERVICE_UNAVAILABLE',
-                'Invalid Direct endpoint was published instead of rejecting registration')
+        require('registered' in result, 'Registration incorrectly required Worker endpoint reachability')
         require(not cluster.manage('alice', 'GetNode', {'node_id': node})['node'].get('available', False),
-                'Failed Direct registration advertised Connected')
+                'Registration without an execution stream advertised Connected')
         cluster.manage('alice', 'SetComputerStatus', {'node_id': node, 'status': 'NODE_STATUS_DISABLED'})
-    print('CASE sync_direct_registration_requires_reverse_tls_reachability PASS', flush=True)
+    print('CASE sync_registration_requires_execution_stream PASS', flush=True)
 
 
 def abandoned_cross_coordinator_admission(cluster, node, session):

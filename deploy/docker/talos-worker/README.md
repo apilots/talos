@@ -2,7 +2,7 @@
 
 This example starts only the published `talos-worker` image. It has no WebUI,
 management HTTP listener or Sync client. Dispatch and callbacks use outbound
-gRPC Connect to Talos Server with the published image's `transport: outbound`
+gRPC Connect to Talos Server with the explicit `transport: direct`
 configuration. The Worker needs no inbound port or public domain.
 
 ## Prepare one owned Computer
@@ -36,8 +36,9 @@ public `https://agent.talos.love` endpoint uses system trust.
 The example lists the shared configuration fields. Its required `gateway` section
 does not start HTTP in `talos-worker`; management, channel and Sync sections are
 not consumed by this process. Execution tools, model settings and workspace paths
-apply to this Worker. For direct transport, configure reachable Worker RPC TLS
-and the Computer endpoint together; outbound requires no inbound listener.
+apply to this Worker. `direct` opens a TLS gRPC bidirectional stream to the
+Server. `outbound` opens WSS. Both use `control_plane_endpoint` and require
+no Server dialback to a Worker listener.
 
 ## Validate and start on the chosen Worker host
 

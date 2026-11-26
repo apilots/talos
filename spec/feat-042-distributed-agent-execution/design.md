@@ -33,13 +33,19 @@ talos-server -> Service / Coordinator -> AgentHarness
 `talos-worker` 是唯一执行运行时组装边界，负责 Provider、Harness、工具、MCP 和节点本地
 Workspace 能力。它只通过现有 typed ports 使用上层资源，不调用 Coordinator、NodeStore、
 SessionStore，也不打开控制面数据库。
-`talos-server` 在内嵌模式注入本地实现并直接安装 Harness；独立 `talos-worker` binary 注入
-RPC Client 实现，启动 Harness gRPC listener 后注册到控制面。两种形态不产生两套业务实现。
+`talos-server` injects local implementations for its embedded Harness. The
+standalone `talos-worker` binary injects RPC clients and registers its existing
+deployments with the control plane. Both hosts reuse the same Worker implementation.
 
 远程节点是一名用户独占的电脑或 Pod；一个用户可以有多个节点，一个节点只属于一个用户。
 注册只管理节点身份、所属用户、地址、租约和在线情况，不参与 Turn 结算。
-首版要求控制面可通过 TLS 访问节点 gRPC 地址；节点也可访问控制面注册地址。
-部署通过集群网络或已有代理满足可达性，Harness 协议直接使用标准 gRPC 方法和流。
+The Worker initiates both registration and a bidirectional task/event stream to
+its configured HTTPS control-plane origin. `agent_node.runner.transport` selects
+`outbound` for WSS or `direct` for TLS gRPC Connect. Both carriers reuse the
+existing typed envelopes, authorization and lifecycle. Registration issues a
+lease; only an authenticated ready execution stream publishes callable clients.
+Directory endpoints do not trigger Server dialback. See
+[Worker transport](../feat-062-worker-outbound-websocket/design.md).
 
 ## 2. 分层与包
 

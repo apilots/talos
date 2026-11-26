@@ -1,5 +1,7 @@
 //! Controlled TLS ingress regression, using the real directory and publication owner.
 use super::*;
+use agent_client::AgentTlsTrust;
+use agent_protocol::Deployment;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Channel, ClientTlsConfig};
@@ -250,7 +252,7 @@ async fn ready(stream: &mut tonic::Streaming<pb::ControlToNodeFrame>) {
 
 #[tokio::test]
 async fn worker_reconnect_retains_lease_and_replacement_stops_old_runner() {
-    worker_reconnect_scenario(talos_config::AgentNodeTransport::OutboundGrpc).await;
+    worker_reconnect_scenario(talos_config::AgentNodeTransport::Direct).await;
 }
 
 #[tokio::test]
@@ -358,7 +360,6 @@ async fn worker_reconnect_scenario(transport: talos_config::AgentNodeTransport) 
     // publication. The existing heartbeat explicitly requests registration.
     let nodes = AgentNodeService::new(fixture.store.clone());
     let publisher = RemoteNodePublisher {
-        nodes: nodes.clone(),
         connections: Arc::default(),
         ..fixture.publisher.clone()
     };
@@ -453,7 +454,7 @@ async fn connect_replaces_only_the_live_stream_and_disable_revokes_it() {
     // Give the superseded stream's cleanup task the lifecycle lock before checking publication.
     tokio::task::yield_now().await;
     {
-        let _lifecycle = fixture.publisher.nodes.lock_lifecycle(&auth.node_id).await;
+        let _lifecycle = fixture.control.nodes.lock_lifecycle(&auth.node_id).await;
         fixture
             .publisher
             .coordinator
@@ -462,7 +463,7 @@ async fn connect_replaces_only_the_live_stream_and_disable_revokes_it() {
             .unwrap();
         assert!(
             fixture
-                .publisher
+                .control
                 .nodes
                 .get_node(
                     &Actor::regular("user-1"),
@@ -476,7 +477,7 @@ async fn connect_replaces_only_the_live_stream_and_disable_revokes_it() {
         );
     }
     fixture
-        .publisher
+        .control
         .nodes
         .set_computer_status(
             &Actor::regular("user-1"),
@@ -733,7 +734,7 @@ async fn websocket_lifecycle_preserves_auth_revocation_and_tls_validation() {
         .await
         .is_err());
     fixture
-        .publisher
+        .control
         .nodes
         .set_computer_status(
             &Actor::regular("user-1"),
@@ -842,7 +843,7 @@ async fn websocket_oversized_frame_closes_publication() {
     .expect("oversized carrier must unpublish the Worker");
     assert!(
         !fixture
-            .publisher
+            .control
             .nodes
             .get_node(
                 &Actor::regular("user-1"),
@@ -862,7 +863,7 @@ async fn grpc_register_honors_client_timeout_while_lifecycle_lock_is_held() {
     let fixture = Fixture::new(/* endpoint */ None).await;
     let ingress = Ingress::new(fixture.control.clone()).await;
     let _lifecycle = fixture
-        .publisher
+        .control
         .nodes
         .lock_lifecycle(&fixture.credential.node_id)
         .await;

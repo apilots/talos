@@ -274,10 +274,10 @@ ownership and protocol 0.4 migration are defined by [Error contract](ERROR_MODEL
 
 Desktop and Web settings follow ownership of the selected Computer. The central
 Server's embedded Worker is claimed by its first administrator as a personal
-Computer, using direct RPC; it is not a shared Computer. A competing claim must
+Computer, using `direct` gRPC Connect. A competing claim must
 preserve the current owner's registration and runtime status. Registration
 uses the same UUID/credential contract for embedded and standalone Workers;
-`direct`/`outbound` selects transport independently of ownership. See
+`direct` selects gRPC Connect and `outbound` selects WSS, independently of ownership. See
 [deployment and authorization](../../deploy/README.md#computer-identity-transport-and-configuration-access).
 
 The embedded and registered Docker Workers use the same owner-authorized desktop

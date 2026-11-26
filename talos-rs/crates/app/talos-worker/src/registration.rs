@@ -37,13 +37,7 @@ impl RegisteredWorker {
         let (worker, adapter, node) = prepare_registered_worker(config, &runner).await?;
         let rpc = Arc::new(WorkerRpcHost::bind(&rpc_config, adapter.clone()).await?);
         worker.activate_mcp()?;
-        Ok(Self::spawn(
-            Some(worker),
-            rpc,
-            node,
-            runner.transport(),
-            on_failure,
-        ))
+        Ok(Self::spawn(Some(worker), rpc, node, on_failure))
     }
 
     /// Verify the protected local credential at its control plane without
@@ -112,22 +106,16 @@ impl RegisteredWorker {
         )
         .with_system_info(worker.system_info().clone())
         .with_lease_observer(observer);
-        Ok(Self::spawn(None, rpc, node, runner.transport(), on_failure))
+        Ok(Self::spawn(None, rpc, node, on_failure))
     }
 
     fn spawn(
         owned_worker: Option<TalosWorker>,
         rpc: Arc<WorkerRpcHost>,
         node: AgentNodeRunner,
-        transport: AgentNodeTransport,
         on_failure: Option<Arc<dyn Fn(TalosError) + Send + Sync>>,
     ) -> Self {
-        let node = match transport {
-            AgentNodeTransport::Outbound | AgentNodeTransport::OutboundGrpc => {
-                node.with_execution_adapter(rpc.adapter())
-            }
-            AgentNodeTransport::Direct => node,
-        };
+        let node = node.with_execution_adapter(rpc.adapter());
         let shutdown = CancellationToken::new();
         let runner_shutdown = shutdown.clone();
         let task = tokio::spawn(async move {
@@ -177,8 +165,7 @@ impl RegisteredWorker {
             Some(worker) => worker.shutdown().await,
             None => self.rpc.adapter().drain_disconnected().await,
         };
-        // Register may still be publishing Direct clients back to this listener.
-        // Keep transport alive until its bounded response and Unregister finish.
+        // Keep the execution adapter alive until registration and Unregister finish.
         let registration = if let Some(runner) = self.runner.take() {
             runner
                 .await
@@ -325,8 +312,7 @@ async fn registration_client(
     let mut node_config = config.agent_node.clone();
     node_config.runner = Some(runner.clone());
     node_config.validate(&config.gateway)?;
-    let packaging = std::env::var_os("TALOS_WORKER_PACKAGING");
-    match runner.transport_for_packaging(packaging.as_deref()) {
+    match runner.transport() {
         AgentNodeTransport::Outbound => {
             AgentNodeClient::connect_websocket(
                 &runner.control_plane_endpoint,
@@ -334,7 +320,7 @@ async fn registration_client(
             )
             .await
         }
-        AgentNodeTransport::OutboundGrpc | AgentNodeTransport::Direct => {
+        AgentNodeTransport::Direct => {
             AgentNodeClient::connect(&runner.control_plane_endpoint, registration_trust(runner)?)
                 .await
         }

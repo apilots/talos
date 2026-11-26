@@ -28,7 +28,9 @@ All listed capabilities are implemented. Transport clients preserve the existing
 | agent-client | AgentTlsTrust::SystemRoots / Certificate | One trust input for node, resource and direct Harness clients; custom CA is optional, hostname verification remains enabled |
 
 CreateNodeRequest.endpoint and UpdateNodeRequest.endpoint become optional across domain/PB/product transports.
-An absent endpoint denotes outbound access; a present endpoint denotes the supported direct deployment.
+`agent_node.runner.transport` alone selects `outbound` (WSS, default) or
+`direct` (TLS gRPC Connect). Both are Worker-initiated bidirectional streams.
+The optional directory endpoint is metadata and cannot select or publish a carrier.
 The legacy endpoint field number is preserved with protobuf presence. Name-only edits use RenameComputerRequest,
 not read-modify-write of the full UpdateNodeRequest. Domain owners and generated callers change together.
 
@@ -89,8 +91,8 @@ service AgentNodeControl {
 
 The first Worker frame is exactly one ConnectNodeRequest with the current lease. The control plane validates
 node status, lease and ownership, installs advertised clients, then returns ConnectNodeResponse.ready.
-Register records identity/lease/deployments but does not independently make an outbound Worker executable.
-Heartbeats and lease renewal remain ordinary outbound gRPC calls owned by registration; they do not prove Connect-stream liveness. A typed `stream_heartbeat` request/Ready opt-in enables one nonce-bearing Ping owner per physical stream: the Worker control plane or Coordinator client. Probing starts fifteen seconds after Ready, allows at most one outstanding Ping, and requires its matching Pong within thirty seconds. The shared carrier only echoes; business/unary traffic cannot extend that deadline and resource callbacks use the same owner. Timeout reuses connection close, cancellation and existing task/route cleanup; no additional TCP/HTTP2 keepalive is added. If either endpoint omits the capability neither sends new frames, so stream-level detection requires both endpoints upgraded.
+Register records identity/lease/deployments but does not independently make a Worker executable.
+Heartbeats and lease renewal use the configured WSS or gRPC carrier owned by registration; they do not prove Connect-stream liveness. A typed `stream_heartbeat` request/Ready opt-in enables one nonce-bearing Ping owner per physical stream: the Worker control plane or Coordinator client. Probing starts fifteen seconds after Ready, allows at most one outstanding Ping, and requires its matching Pong within thirty seconds. The shared carrier only echoes; business/unary traffic cannot extend that deadline and resource callbacks use the same owner. Timeout reuses connection close, cancellation and existing task/route cleanup; no additional TCP/HTTP2 keepalive is added. If either endpoint omits the capability neither sends new frames, so stream-level detection requires both endpoints upgraded.
 Registration credentials are only valid at Register, never at execution or resource ingress. Each finite RPC deadline
 is enforced by both the control-side client and the Worker. A stopped or unreachable Worker cannot postpone a client
 Timeout indefinitely; expiry cancels only that invocation through the existing call cancellation path.

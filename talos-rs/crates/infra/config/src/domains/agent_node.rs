@@ -71,9 +71,6 @@ pub struct AgentNodeControlConfig {
     pub bind_address: String,
     pub tls_certificate_file: PathBuf,
     pub tls_private_key_file: PathBuf,
-    /// Optional private CA for direct Harness listeners; omitted uses system roots.
-    #[serde(default)]
-    pub trusted_node_ca_file: Option<PathBuf>,
 }
 
 /// Stable identity and TLS endpoints for a standalone Agent node.
@@ -83,7 +80,7 @@ pub struct AgentNodeControlConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentNodeRunnerConfig {
-    /// Omitted uses outbound WSS, or gRPC with official-container packaging.
+    /// Omitted uses outbound WSS. Direct explicitly selects gRPC Connect.
     /// Listener settings never select transport.
     #[serde(default)]
     pub transport: Option<AgentNodeTransport>,
@@ -100,31 +97,13 @@ pub struct AgentNodeRunnerConfig {
 pub enum AgentNodeTransport {
     /// Personal computers: outbound authenticated WSS task/event stream.
     Outbound,
-    /// Cloud Docker Workers on the Server network: outbound gRPC stream.
-    OutboundGrpc,
+    /// Authenticated gRPC bidirectional task/event stream to the Server.
     Direct,
 }
 
 impl AgentNodeRunnerConfig {
     pub fn transport(&self) -> AgentNodeTransport {
         self.transport.unwrap_or(AgentNodeTransport::Outbound)
-    }
-
-    /// Official cloud container packaging keeps its existing gRPC carrier, even
-    /// when a persisted home predates the explicit outboundGrpc configuration.
-    /// Native packaging uses WSS. This is a deployment selection, never fallback.
-    pub fn transport_for_packaging(
-        &self,
-        packaging: Option<&std::ffi::OsStr>,
-    ) -> AgentNodeTransport {
-        match self.transport() {
-            AgentNodeTransport::Outbound
-                if packaging.is_some_and(|value| value == "official-container") =>
-            {
-                AgentNodeTransport::OutboundGrpc
-            }
-            transport => transport,
-        }
     }
 }
 
@@ -142,10 +121,6 @@ impl AgentNodeConfig {
             if control.bind_address.trim().is_empty()
                 || control.tls_certificate_file.as_os_str().is_empty()
                 || control.tls_private_key_file.as_os_str().is_empty()
-                || control
-                    .trusted_node_ca_file
-                    .as_ref()
-                    .is_some_and(|path| path.as_os_str().is_empty())
             {
                 return Err(TalosError::new(
                     ErrorCode::InvalidRequest,
@@ -158,9 +133,6 @@ impl AgentNodeConfig {
                 || runner.node_id == "embedded"
                 || !runner.control_plane_endpoint.starts_with("https://")
                 || runner.credential_file.as_os_str().is_empty()
-                || (runner.transport() == AgentNodeTransport::Direct
-                    && self.worker_rpc.tls.is_none()
-                    && self.control_plane.is_none())
                 || runner
                     .trusted_ca_file
                     .as_ref()
@@ -168,7 +140,7 @@ impl AgentNodeConfig {
             {
                 return Err(TalosError::new(
                     ErrorCode::InvalidRequest,
-                    "Agent node runner requires a node ID, HTTPS control endpoint, credential file, and TLS for direct access",
+                    "Agent node runner requires a node ID, HTTPS control endpoint, credential file",
                 ));
             }
         }
