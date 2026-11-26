@@ -1,0 +1,8 @@
+# Docker image defaults for the existing runner configuration.
+# Enrollment supplies the real UUID and credential; no identity is generated here.
+  runner:
+    transport: direct
+    node_id: ${TALOS_WORKER_NODE_ID}
+    control_plane_endpoint: https://agent.talos.love
+    credential_file: /home/talos/.talos/conf/node.credential
+    trusted_ca_file: null

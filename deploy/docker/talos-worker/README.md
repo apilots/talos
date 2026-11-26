@@ -84,3 +84,10 @@ The registered Worker does not bind an execution listener. Do not configure
 Keep the Server's TLS identity and the Worker's optional `runner.trusted_ca_file`
 when using a private Server CA. Managed-home upgrades remove the retired block;
 remove it explicitly from operator-owned `TALOS_CONFIG` files.
+
+The generic omitted/null transport defaults to `outbound` (WSS). The Docker
+image packages `direct` in its runner YAML defaults. Startup Upgrade applies
+that default to an existing managed-home runner only when transport is missing
+or null, including retained v0.1.18 Talo homes. Explicit transports and identity
+settings are preserved. An explicit `TALOS_CONFIG` file remains operator-owned
+and must choose `direct` itself; runtime image markers never choose a carrier.

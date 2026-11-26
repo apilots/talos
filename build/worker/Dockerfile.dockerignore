@@ -11,6 +11,7 @@
 !talos/build/plugins/
 !talos/build/plugins/**
 !talos/build/worker/
+!talos/build/worker/runner.yaml
 !talos/build/worker/browser/
 !talos/build/worker/browser/**
 !talos/deploy/

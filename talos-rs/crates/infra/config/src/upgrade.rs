@@ -352,6 +352,16 @@ fn align_template_shape(
     if is_dynamic_map_path(path) {
         return Ok(original.clone());
     }
+    // A null transport means no selection, just like an omitted field. Only
+    // an existing runner inherits the packaged YAML default; its identity and
+    // explicit carrier stay untouched. Shared profiles keep runner: null.
+    if path == ["agent_node", "runner", "transport"].as_slice()
+        && original.is_null()
+        && !template.is_null()
+    {
+        report.defaulted_paths.push(format_path(path));
+        return Ok(template.clone());
+    }
     if path == RESERVED_OUTPUT_POLICY_PATH {
         // This schema-owned sum type has variant-specific fields. Deserialize it
         // atomically instead of using the template's one variant as a key list.

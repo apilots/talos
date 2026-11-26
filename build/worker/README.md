@@ -26,8 +26,25 @@ Credential files must be private and readable by the container's chosen UID.
 Managed default configuration is upgraded from the bundled template before load,
 with a backup. Existing UUIDs, credentials and recovery state are retained.
 Explicit `TALOS_CONFIG` files remain operator-owned and are not normalized.
-Server and Worker images share `conf/talos-prod.yaml` as the packaged template;
-the Worker entrypoint starts only execution and registration capabilities.
+The Worker image starts from the complete `conf/talos-prod.yaml` schema and
+packages `build/worker/runner.yaml` as its runner defaults. The Server keeps the
+shared profile. Rust and ordinary Worker profiles default to `outbound`; only
+the Docker Worker packaged YAML supplies `direct`.
+
+Before strict loading, managed-home Upgrade fills a missing or null transport
+on an existing runner from that packaged YAML. This includes retained v0.1.18
+Talo homes. It preserves explicit `outbound` or `direct`, UUID, endpoint,
+credential path and Server CA. A null runner remains unconfigured; the template
+does not enroll another Computer or generate credentials. Explicit
+`TALOS_CONFIG` files skip Upgrade and must set `transport: direct` themselves.
+No image marker, port probe or transport fallback overrides configuration.
+
+`outbound` means authenticated Worker-initiated WSS. `direct` means an
+authenticated Worker-initiated TLS gRPC Connect bidirectional execution stream.
+Both use the Server's listening endpoint; neither requires a Worker execution
+listener or Server dialback. Registration, lease renewal and resource RPCs keep
+their own API lifecycles; one execution stream does not mean all business APIs
+share one physical TCP connection.
 
 ```bash
 docker run --name talos-worker \

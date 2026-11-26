@@ -51,6 +51,13 @@ The companion task owns embedded Library-direct calls.
    `agent_node.worker_rpc` bind/TLS configuration is removed; only the Server's
    ingress TLS identity and the runner's optional Server CA trust remain.
    Embedded local RPC uses an internal ephemeral loopback port.
+   Omitted/null transport has the shared `outbound` default. Only Docker Worker
+   packaging supplies a `direct` runner default in YAML. Startup managed-home
+   Upgrade fills missing/null transport from that packaged template for an
+   existing runner, preserving explicit values, UUID, endpoint, credential and
+   Server CA. An unconfigured runner stays null. Operator-owned `TALOS_CONFIG`
+   files skip Upgrade and must select `direct` explicitly. No image marker or
+   runtime override chooses transport.
 6. Bound binary messages to the existing gRPC default envelope limit (4 MiB),
    retaining existing per-call flow control. WSS does not fix Sync upload sizes.
 

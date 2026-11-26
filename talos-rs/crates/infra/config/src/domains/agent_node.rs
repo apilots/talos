@@ -30,8 +30,9 @@ pub struct AgentNodeControlConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentNodeRunnerConfig {
-    /// Omitted uses outbound WSS. Direct explicitly selects gRPC Connect.
-    /// Listener settings never select transport.
+    /// Omitted/null uses outbound WSS unless managed-home Upgrade fills an
+    /// explicit packaged YAML default (Docker: direct gRPC Connect).
+    /// Explicit values win; listener settings and image markers never select it.
     #[serde(default)]
     pub transport: Option<AgentNodeTransport>,
     pub node_id: String,

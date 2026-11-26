@@ -118,6 +118,85 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
 }
 
 #[test]
+fn packaged_worker_transport_default_upgrades_existing_identity() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let docker_defaults = read_yaml_file(&repo.join("build/worker/runner.yaml")).unwrap();
+    for docker in [false, true] {
+        for saved_transport in [None, Some("null"), Some("outbound"), Some("direct")] {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = TalosPaths::from_home(dir.path().join("home"));
+            let mut template = template_yaml();
+            if docker {
+                set_path_for_test(
+                    &mut template,
+                    &["agent_node", "runner"],
+                    docker_defaults["runner"].clone(),
+                );
+            }
+            let template_path = dir.path().join("template.yaml");
+            std::fs::write(&template_path, serde_yaml::to_string(&template).unwrap()).unwrap();
+            if docker && saved_transport.is_none() {
+                write_existing(&paths, &template_yaml());
+                upgrade_default_config_from_template(&paths, &template_path).unwrap();
+                let unconfigured = read_yaml_file(&paths.config_file).unwrap();
+                assert_eq!(
+                    get_path_for_test(&unconfigured, &["agent_node", "runner"]),
+                    Some(&YamlValue::Null)
+                );
+            }
+            let mut original = template_yaml();
+            let mut runner: YamlValue = serde_yaml::from_str("node_id: a03f484f-dfb3-4bf8-8796-35c6ce239d31\ncontrol_plane_endpoint: https://private-server.example\ncredential_file: /private/worker.credential\ntrusted_ca_file: /private/server-ca.crt\n").unwrap();
+            if let Some(transport) = saved_transport {
+                set_path_for_test(
+                    &mut runner,
+                    &["transport"],
+                    serde_yaml::from_str(transport).unwrap(),
+                );
+            }
+            set_path_for_test(&mut original, &["agent_node", "runner"], runner.clone());
+            write_existing(&paths, &original);
+            let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
+            let normalized = read_yaml_file(&paths.config_file).unwrap();
+            let mut expected = runner;
+            if docker && matches!(saved_transport, None | Some("null")) {
+                set_path_for_test(
+                    &mut expected,
+                    &["transport"],
+                    YamlValue::String("direct".into()),
+                );
+            }
+            assert_eq!(
+                get_path_for_test(&normalized, &["agent_node", "runner"]),
+                Some(&expected)
+            );
+            let config: Config = serde_yaml::from_value(normalized).unwrap();
+            let expected_transport = if saved_transport == Some("direct")
+                || (docker && matches!(saved_transport, None | Some("null")))
+            {
+                crate::AgentNodeTransport::Direct
+            } else {
+                crate::AgentNodeTransport::Outbound
+            };
+            assert_eq!(
+                config.agent_node.runner.unwrap().transport(),
+                expected_transport
+            );
+            if report.changed {
+                assert_eq!(
+                    read_yaml_file(report.backup_path.as_ref().unwrap()).unwrap(),
+                    original
+                );
+            }
+            assert!(
+                !upgrade_default_config_from_template(&paths, &template_path)
+                    .unwrap()
+                    .changed
+            );
+        }
+    }
+}
+
+#[test]
 fn managed_upgrade_adds_default_path_prepend() {
     let dir = tempfile::tempdir().unwrap();
     let paths = TalosPaths::from_home(dir.path().join("home"));
