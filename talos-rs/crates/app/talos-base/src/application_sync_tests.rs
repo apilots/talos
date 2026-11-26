@@ -176,7 +176,7 @@ async fn close(runtime: TalosApplicationRuntime) {
         worker.shutdown().await.unwrap();
     }
     runtime.worker_rpc.shutdown().await.unwrap();
-    runtime.resource_rpc.shutdown().await.unwrap();
+    runtime.resource_stop.cancel();
     runtime.automation.shutdown().await.unwrap();
     runtime.worker.shutdown().await.unwrap();
 }

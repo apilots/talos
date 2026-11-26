@@ -33,6 +33,7 @@ impl AgentHarnessRpcAdapter {
             .map_err(status_from_error)?;
         let resource_guard = self
             .bind_resources(&auth, &context, first.caller.as_ref())
+            .await
             .map_err(status_from_error)?;
         let adapter = self.clone();
         let (tx, rx) = mpsc::channel(2);

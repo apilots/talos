@@ -5,13 +5,28 @@ use agent_protocol::NodeAuth;
 #[derive(Clone)]
 pub(super) enum ResourceAuthority {
     Lease,
+    #[cfg(test)]
     Host(NodeAuth),
     Invocation {
         computer_id: String,
-        caller: pb::CoordinatorCallContext,
+        caller: Box<pb::CoordinatorCallContext>,
     },
 }
 impl NodeSessionDataRpc {
+    pub(crate) async fn authorize_local_session(
+        &self,
+        context: &agent_protocol::AgentSessionContext,
+    ) -> TalosResult<SessionRecord> {
+        let caller = pb::CoordinatorCallContext {
+            session: Some(agent_protocol::harness_pb::encode_session_context(
+                context.clone(),
+            )),
+            ..Default::default()
+        };
+        self.authorize_scope("embedded", &caller, &context.session_id)
+            .await
+    }
+
     pub(super) async fn authorize_agent_caller(
         &self,
         auth: Option<pb::NodeAuth>,
@@ -21,8 +36,10 @@ impl NodeSessionDataRpc {
         self.authorize(auth, &caller.session_id, supplied_scope)
             .await?;
         let scope = match &self.authority {
-            ResourceAuthority::Invocation { caller, .. } => Some(caller),
-            ResourceAuthority::Host(_) | ResourceAuthority::Lease => supplied_scope,
+            ResourceAuthority::Invocation { caller, .. } => Some(caller.as_ref()),
+            #[cfg(test)]
+            ResourceAuthority::Host(_) => supplied_scope,
+            ResourceAuthority::Lease => supplied_scope,
         };
         if let Some(scope) = scope {
             let session = scope.session.as_ref().ok_or_else(denied)?;
@@ -49,6 +66,7 @@ impl NodeSessionDataRpc {
         self.routes = Some(routes);
         self
     }
+    #[cfg(test)]
     pub(crate) fn with_host_auth(mut self, auth: NodeAuth) -> Self {
         self.authority = ResourceAuthority::Host(auth);
         self.routes = None;
@@ -62,7 +80,7 @@ impl NodeSessionDataRpc {
         let mut data = self.clone();
         data.authority = ResourceAuthority::Invocation {
             computer_id,
-            caller,
+            caller: Box::new(caller),
         };
         data.routes = None;
         data
@@ -71,7 +89,7 @@ impl NodeSessionDataRpc {
         &self,
         auth: Option<pb::NodeAuth>,
         session_id: &str,
-        caller: Option<&pb::CoordinatorCallContext>,
+        _caller: Option<&pb::CoordinatorCallContext>,
     ) -> TalosResult<SessionRecord> {
         let auth = node_pb::decode_auth(auth)?;
         match &self.authority {
@@ -81,6 +99,7 @@ impl NodeSessionDataRpc {
                 self.nodes.authorize_session_lease(&auth, &session).await?;
                 Ok(session)
             }
+            #[cfg(test)]
             ResourceAuthority::Host(expected) => {
                 use sha2::{Digest, Sha256};
                 use subtle::ConstantTimeEq;
@@ -91,7 +110,7 @@ impl NodeSessionDataRpc {
                 {
                     return Err(denied());
                 }
-                self.authorize_scope(&auth.node_id, caller.ok_or_else(denied)?, session_id)
+                self.authorize_scope(&auth.node_id, _caller.ok_or_else(denied)?, session_id)
                     .await
             }
             ResourceAuthority::Invocation {
@@ -109,7 +128,7 @@ impl NodeSessionDataRpc {
             return self.nodes.authorize_lease_owner(auth).await;
         }
         let caller = match &self.authority {
-            ResourceAuthority::Invocation { caller, .. } => caller,
+            ResourceAuthority::Invocation { caller, .. } => caller.as_ref(),
             _ => supplied.ok_or_else(denied)?,
         };
         let session_id = &caller.session.as_ref().ok_or_else(denied)?.session_id;

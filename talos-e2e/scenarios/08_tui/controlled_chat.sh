@@ -56,12 +56,16 @@ requests=[json.loads(line) for line in (root/'requests.jsonl').read_text().split
 assert len(requests)==2 and [r['followup'] for r in requests]==[False,True], requests
 with sqlite3.connect(sys.argv[2]) as db:
     payloads=[json.loads(row[0]) for row in db.execute('SELECT payload_json FROM agent_events WHERE sequence IS NOT NULL')]
+    captures=[json.loads(row[0]) for row in db.execute('SELECT execution_capture_json FROM agent_events WHERE execution_capture_json IS NOT NULL')]
     events=json.dumps(payloads)
 results=[block['content']['data'] for event in payloads if event['type']=='messageCompleted'
          for block in event['data']['blocks'] if block['content']['type']=='toolResult']
 assert results, 'Tool result not persisted'
 assert all(r['metrics']['finishedAtMs'] is not None and r['metrics']['executionDurationMs'] is not None for r in results), results
 assert any(event['type']=='turnCompleted' for event in payloads), 'Turn not completed'
+segments=[segment for capture in captures for segment in capture.get('clockSegments', [])]
+assert segments and all(segment['sourceNodeId']=='embedded' for segment in segments), segments
+print('Clock provenance:', json.dumps(segments))
 assert 'PROTOCOL_OK:call_chat-protocol-default_on' in events, 'Completed answer not persisted'
 assert 'TOOL_chat-protocol-default_on' in events, 'Bash result not persisted'
 PY

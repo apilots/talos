@@ -1,4 +1,4 @@
-//! Protected loopback callback listener for the same management resource owners.
+//! Compatibility fixture for the former protected loopback resource listener.
 use crate::agent_node_rpc::{
     NodeAutomationControlRpc, NodeResourceServices, NodeSubagentControlRpc,
 };
@@ -15,10 +15,6 @@ pub(crate) struct LocalResourceRpc {
     task: Mutex<Option<JoinHandle<TalosResult<()>>>>,
 }
 impl LocalResourceRpc {
-    pub(crate) fn cancellation_token(&self) -> CancellationToken {
-        self.stop.clone()
-    }
-
     pub(crate) async fn start(
         auth: NodeAuth,
         resources: NodeResourceServices,

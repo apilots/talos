@@ -1,5 +1,21 @@
 //! Authenticated environment ingress shares the Harness lease and connection lifecycle.
 use super::*;
+use std::path::PathBuf;
+
+use talos_types::{
+    FsDirectoryCreateRequest, FsDirectoryCreateResponse, FsDirectoryReadRequest,
+    FsDirectorySnapshot, MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest,
+    MemoryFileReadResponse, MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest,
+    MemoryGetResponse, MemorySearchRequest, MemorySearchResponse, ModelListResponse, ProjectStatus,
+    SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsReadResponse,
+    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
+    SkillsSuggestResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoResponse,
+};
+
+use agent_protocol::{AgentFuture, AgentResult, WorkerWorktreeRequest};
+
 use agent_protocol::{environment_pb as wire, WorkerEnvironment, WorkerEnvironmentContext};
 impl AgentHarnessRpcAdapter {
     #[must_use]
@@ -630,4 +646,84 @@ impl pb::worker_environment_rpc_server::WorkerEnvironmentRpc for AgentHarnessRpc
             }),
         }))
     }
+}
+
+// Local callers use the existing environment owner and the same configuration
+// reservation as RPC. Nothing below encodes requests or starts a listener.
+struct LocalEnvironment {
+    adapter: AgentHarnessRpcAdapter,
+    auth: NodeAuth,
+}
+impl AgentHarnessRpcAdapter {
+    pub fn local_environment(&self, auth: NodeAuth) -> TalosResult<Arc<dyn WorkerEnvironment>> {
+        if self.authorize(&auth)?.owner != AuthorizationOwner::Host {
+            return Err(unauthenticated());
+        }
+        Ok(Arc::new(LocalEnvironment {
+            adapter: self.clone(),
+            auth,
+        }))
+    }
+}
+macro_rules! local_environment {
+    ($method:ident, ($($param:ident: $ty:ty)?), $result:ty, $reserve:expr) => {
+        fn $method(&self, context: WorkerEnvironmentContext, $($param: $ty)?) -> AgentFuture<'_, AgentResult<$result>> {
+            Box::pin(async move {
+                let lease = self.adapter.authorize(&self.auth)?;
+                if context.user_id.trim().is_empty() || context.workspace_id.as_ref().is_some_and(|id| id.trim().is_empty()) { return Err(invalid_request()); }
+                let _configuration = if $reserve { Some(self.adapter.session_gate.reserve_configuration()?) } else { None };
+                let environment = self.adapter.environment.as_ref().ok_or_else(|| TalosError::new(ErrorCode::ServiceUnavailable, "Worker environment is unavailable"))?;
+                tokio::select! { biased; _ = lease.ended() => Err(unauthenticated()), result = environment.$method(context, $($param)?) => result }
+            })
+        }
+    };
+}
+impl WorkerEnvironment for LocalEnvironment {
+    local_environment!(desktop_open, (params: talos_types::WorkerDesktopOpen), (), false);
+    local_environment!(browser, (params: talos_types::BrowserRequest), talos_types::BrowserSnapshot, false);
+    local_environment!(list_plugin_sources, (params: talos_types::PluginSourceListRequest), talos_types::PluginSourceListResponse, false);
+    local_environment!(add_plugin_source, (params: talos_types::PluginSourceAddRequest), talos_types::PluginSourceAddResponse, false);
+    local_environment!(refresh_plugin_source, (params: talos_types::PluginSourceRefreshRequest), talos_types::PluginSourceRefreshResponse, false);
+    local_environment!(remove_plugin_source, (params: talos_types::PluginSourceRemoveRequest), talos_types::PluginSourceRemoveResponse, false);
+    local_environment!(search_plugins, (params: talos_types::PluginSearchRequest), talos_types::PluginSearchResponse, false);
+    local_environment!(list_plugins, (params: talos_types::PluginListRequest), talos_types::PluginListResponse, false);
+    local_environment!(read_plugin, (params: talos_types::PluginReadRequest), talos_types::PluginReadResponse, false);
+    local_environment!(install_plugin, (params: agent_protocol::WorkerPluginInstall), talos_types::PluginInstallResponse, false);
+    local_environment!(update_plugin, (params: agent_protocol::WorkerPluginUpdate), talos_types::PluginUpdateResponse, false);
+    local_environment!(prepare_plugin_change, (params: agent_protocol::WorkerPluginChange), agent_protocol::WorkerPluginPrepared, false);
+    local_environment!(cancel_plugin_change, (params: agent_protocol::WorkerPluginPrepared), (), false);
+    local_environment!(uninstall_plugin, (params: talos_types::PluginUninstallRequest), talos_types::PluginUninstallResponse, false);
+    local_environment!(enable_plugin, (params: talos_types::PluginEnableRequest), talos_types::PluginEnableResponse, false);
+    local_environment!(disable_plugin, (params: talos_types::PluginDisableRequest), talos_types::PluginDisableResponse, false);
+    local_environment!(list_mcp_servers, (params: talos_types::McpServerListRequest), talos_types::McpServerListResponse, false);
+    local_environment!(read_mcp_authentication, (params: talos_types::McpAuthenticationReadRequest), talos_types::McpAuthenticationResponse, false);
+    local_environment!(update_mcp_credentials, (params: talos_types::McpCredentialsUpdateRequest), talos_types::McpAuthenticationResponse, false);
+    local_environment!(import_mcp_server, (params: talos_types::McpServerImportRequest), talos_types::PluginInstallResponse, false);
+    local_environment!(start_mcp_authentication, (params: agent_protocol::McpAuthenticationStartParams), talos_types::McpAuthenticationStartResponse, false);
+    local_environment!(complete_mcp_authentication, (params: agent_protocol::McpAuthenticationCallbackParams), talos_types::McpAuthenticationResponse, false);
+    local_environment!(get_config, (params: talos_types::ConfigGetRequest), talos_types::ConfigResponse, false);
+    local_environment!(update_config, (params: talos_types::ConfigUpdateRequest), talos_types::ConfigResponse, params.value.requires_runtime_reload());
+    local_environment!(delete_config, (params: talos_types::ConfigDeleteRequest), talos_types::ConfigDeleteResponse, true);
+    local_environment!(reload_config, (params: talos_types::ConfigReloadRequest), talos_types::ConfigReloadResponse, true);
+    local_environment!(list_memory_files, (params: MemoryFileListRequest), MemoryFileListResponse, false);
+    local_environment!(read_memory_file, (params: MemoryFileReadRequest), MemoryFileReadResponse, false);
+    local_environment!(write_memory_file, (params: MemoryFileWriteRequest), MemoryFileWriteResponse, false);
+    local_environment!(search_memory, (params: MemorySearchRequest), MemorySearchResponse, false);
+    local_environment!(get_memory, (params: MemoryGetRequest), MemoryGetResponse, false);
+    local_environment!(list_skills, (params: SkillsListRequest), SkillsListResponse, false);
+    local_environment!(refresh_skills, (params: SkillsRefreshRequest), SkillsListResponse, false);
+    local_environment!(suggest_skills, (params: SkillsSuggestRequest), SkillsSuggestResponse, false);
+    local_environment!(read_skill, (params: SkillsReadRequest), SkillsReadResponse, false);
+    local_environment!(resolve_skills, (params: SkillsResolveRequest), SkillsResolveResponse, false);
+    local_environment!(list_workspace_docs, (params: WorkspaceDocListRequest), WorkspaceDocListResponse, false);
+    local_environment!(read_workspace_doc, (params: WorkspaceDocReadRequest), WorkspaceDocReadResponse, false);
+    local_environment!(write_workspace_doc, (params: WorkspaceDocWriteRequest), WorkspaceDocWriteResponse, false);
+    local_environment!(workspace_info, (), WorkspaceInfoResponse, false);
+    local_environment!(list_models, (), ModelListResponse, false);
+    local_environment!(preview_resource, (params: talos_types::WorkerPreviewRequest), talos_types::WorkerPreviewResponse, false);
+    local_environment!(read_directory, (params: FsDirectoryReadRequest), FsDirectorySnapshot, false);
+    local_environment!(create_directory, (params: FsDirectoryCreateRequest), FsDirectoryCreateResponse, false);
+    local_environment!(session_worktree, (request: WorkerWorktreeRequest), talos_types::SessionWorktreeBinding, false);
+    local_environment!(project_status, (directory: PathBuf), ProjectStatus, false);
+    local_environment!(validate_project_directory, (directory: PathBuf), PathBuf, false);
 }

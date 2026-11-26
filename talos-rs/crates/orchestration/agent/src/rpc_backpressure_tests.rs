@@ -97,11 +97,10 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
         let identity = AgentTurnRef::new("session", "turn");
         let (_settle, settlement) = oneshot::channel();
         let (accepted, did_accept) = oneshot::channel();
-        let response = adapter.serve_run(
-            Box::pin(async { Ok(()) }),
+        let execution = adapter.guard_run(
             lease.clone(),
             harness,
-            Ok(AgentRunExecution {
+            AgentRunExecution {
                 admission: AgentAdmission {
                     events: vec![],
                     permit: AgentAdmissionPermit::new(async move {
@@ -111,7 +110,7 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
                 },
                 events: AgentProgressEventReceiver::new(receiver),
                 settlement: AgentRunSettlementReceiver::new(settlement),
-            }),
+            },
             talos_types::AgentCaller {
                 session_id: identity.session_id.clone(),
                 turn_id: identity.turn_id.clone(),
@@ -141,6 +140,7 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
                     .unwrap(),
             ),
         );
+        let response = adapter.serve_run(Box::pin(async { Ok(()) }), lease.clone(), Ok(execution));
         did_accept.await.unwrap();
         // Keep the response alive without reading. Admission + accepted + 30
         // progress frames fill the real adapter queue. Frame 31 blocks send.
@@ -234,11 +234,10 @@ async fn assert_disconnected_cleanup(finished: bool) {
     let identity = AgentTurnRef::new("session", "turn");
     let peer = uuid::Uuid::new_v4().to_string();
     let (accepted, did_accept) = oneshot::channel();
-    let response = adapter.serve_run(
-        Box::pin(async { Ok(()) }),
-        lease,
+    let execution = adapter.guard_run(
+        lease.clone(),
         harness,
-        Ok(AgentRunExecution {
+        AgentRunExecution {
             admission: AgentAdmission {
                 events: vec![],
                 permit: AgentAdmissionPermit::new(async move {
@@ -248,7 +247,7 @@ async fn assert_disconnected_cleanup(finished: bool) {
             },
             events: AgentProgressEventReceiver::new(receiver),
             settlement: AgentRunSettlementReceiver::new(settlement),
-        }),
+        },
         talos_types::AgentCaller {
             session_id: "session".into(),
             turn_id: "turn".into(),
@@ -278,6 +277,7 @@ async fn assert_disconnected_cleanup(finished: bool) {
                 .unwrap(),
         ),
     );
+    let response = adapter.serve_run(Box::pin(async { Ok(()) }), lease.clone(), Ok(execution));
     did_accept.await.unwrap();
     if finished {
         settle

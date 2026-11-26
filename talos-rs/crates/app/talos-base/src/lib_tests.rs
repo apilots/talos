@@ -202,7 +202,9 @@ async fn spawn_json_server(body: impl Into<String>) -> (String, oneshot::Receive
 
 #[tokio::test]
 async fn application_runtime_builds_when_model_key_is_missing() {
+    let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mut config = Config::default();
+    config.agent_node.worker_rpc.bind_address = occupied.local_addr().unwrap().to_string();
     let workspace = isolate_runtime_workspace(&mut config, "runtime-missing-key");
     config.gateway.auth = false;
     config.storage.connection_string = ":memory:".to_string();
@@ -214,6 +216,7 @@ async fn application_runtime_builds_when_model_key_is_missing() {
         .expect("runtime should start before model setup is complete");
 
     assert_eq!(runtime.config.llm.provider, "anthropic");
+    assert_eq!(runtime.worker_rpc.address(), None);
     runtime.shutdown().await.unwrap();
     let _ = fs::remove_dir_all(workspace);
 }

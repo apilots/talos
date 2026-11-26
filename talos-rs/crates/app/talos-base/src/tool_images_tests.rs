@@ -58,4 +58,24 @@ async fn screenshots_use_owned_files_and_preserve_completed_uploads_on_later_fai
         "completed files remain manageable after a later MIME mismatch"
     );
     assert!(listed.data.iter().all(|file| file.mime_type == "image/png"));
+    let scoped = InvocationFiles {
+        owner_user_id: "owner".into(),
+        attachments: service.clone(),
+        images: Arc::new(ToolImages(service.clone())),
+    };
+    let scoped_images = ToolImageStore::read(&scoped, "workspace-namespace", &ids)
+        .await
+        .unwrap();
+    assert_eq!(scoped_images.len(), 1);
+    let files = AttachmentReader::read(
+        &scoped,
+        &TurnFileScope {
+            owner_user_id: "workspace-namespace".into(),
+            project_id: None,
+        },
+        &ids,
+    )
+    .await
+    .unwrap();
+    assert_eq!(files[0].file_id, ids[0]);
 }

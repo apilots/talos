@@ -1,6 +1,6 @@
 //! Transport lifecycle for an existing Worker; it never builds a second runtime.
 
-use agent_client::{AgentEnvironmentClient, AgentHarnessRpcAdapter, RemoteAgentClient};
+use agent_client::AgentHarnessRpcAdapter;
 use agent_pb as pb;
 use agent_protocol::NodeAuth;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -11,10 +11,10 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
-/// Bound RPC listener shared by embedded, direct and outbound hosts.
+/// Worker boundary lifecycle; only network hosts bind an RPC listener.
 /// Owners stop execution before draining transport; dropping also stops admission.
 pub struct WorkerRpcHost {
-    address: SocketAddr,
+    address: Option<SocketAddr>,
     adapter: AgentHarnessRpcAdapter,
     shutdown: CancellationToken,
     finished: CancellationToken,
@@ -103,7 +103,7 @@ impl WorkerRpcHost {
         });
         tracing::info!(%address, "Worker RPC listener ready");
         Ok(Self {
-            address,
+            address: Some(address),
             adapter,
             shutdown,
             finished,
@@ -111,7 +111,7 @@ impl WorkerRpcHost {
         })
     }
 
-    pub fn address(&self) -> SocketAddr {
+    pub fn address(&self) -> Option<SocketAddr> {
         self.address
     }
 
@@ -120,7 +120,7 @@ impl WorkerRpcHost {
         self.adapter.clone()
     }
 
-    /// Wait for transport failure without consuming its eventual shutdown result.
+    /// Wait for transport failure or local shutdown without consuming the result.
     pub async fn stopped(&self) {
         self.finished.cancelled().await;
     }
@@ -134,6 +134,7 @@ impl WorkerRpcHost {
         self.adapter.clear_registration();
         self.shutdown.cancel();
         let Some(mut task) = self.server.lock().await.take() else {
+            self.finished.cancel();
             return Ok(());
         };
         match tokio::time::timeout(Duration::from_secs(5), &mut task).await {
@@ -173,9 +174,9 @@ impl Drop for WorkerRpcHost {
 }
 
 impl crate::TalosWorker {
-    /// Builds one protected loopback entry to these exact Harness instances.
+    /// Builds a listener-free library entry to these exact Harness instances.
     /// The private process credential is not a cloud lease or a public grant.
-    pub async fn start_local_rpc(
+    pub async fn start_local(
         &self,
         session_kind: talos_error::SessionOwnerKind,
         session_hold: talos_agent::SessionHold,
@@ -201,52 +202,42 @@ impl crate::TalosWorker {
             Arc::new(move || plugins.cancel_remote_mcp_authorizations())
         });
         adapter.install_local_auth(&auth)?;
-        let config = self
-            .config()
-            .read()
-            .expect("Worker config lock poisoned")
-            .agent_node
-            .worker_rpc
-            .clone();
-        if config.tls.is_some() || !config.address()?.ip().is_loopback() {
-            return Err(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "Embedded Worker RPC requires a loopback listener",
-            ));
-        }
-        Ok((Arc::new(WorkerRpcHost::bind(&config, adapter).await?), auth))
+        Ok((
+            Arc::new(WorkerRpcHost {
+                address: None,
+                adapter,
+                shutdown: CancellationToken::new(),
+                finished: CancellationToken::new(),
+                server: Mutex::new(None),
+            }),
+            auth,
+        ))
     }
 
-    pub async fn local_rpc_harnesses(
+    pub fn local_harnesses(
         &self,
         host: &WorkerRpcHost,
         auth: &NodeAuth,
         coordinator_id: &str,
     ) -> TalosResult<Vec<(String, Arc<dyn agent_protocol::AgentHarness>)>> {
-        let mut harnesses = Vec::new();
-        for deployment in self.deployments() {
-            let client = RemoteAgentClient::connect_loopback(
-                host.address(),
-                deployment.agent_id.clone(),
-                auth.clone(),
-            )
-            .await?
-            .with_coordinator_id(coordinator_id.to_owned())?;
-            harnesses.push((
-                deployment.agent_id,
-                Arc::new(client) as Arc<dyn agent_protocol::AgentHarness>,
-            ));
-        }
-        Ok(harnesses)
+        self.deployments()
+            .into_iter()
+            .map(|deployment| {
+                let harness = host.adapter.local_harness(
+                    deployment.agent_id.clone(),
+                    auth.clone(),
+                    coordinator_id.to_owned(),
+                )?;
+                Ok((deployment.agent_id, harness))
+            })
+            .collect()
     }
 
-    pub async fn local_rpc_environment(
+    pub fn local_environment(
         &self,
         host: &WorkerRpcHost,
         auth: NodeAuth,
     ) -> TalosResult<Arc<dyn agent_protocol::WorkerEnvironment>> {
-        Ok(Arc::new(
-            AgentEnvironmentClient::connect_loopback(host.address(), auth).await?,
-        ))
+        host.adapter.local_environment(auth)
     }
 }

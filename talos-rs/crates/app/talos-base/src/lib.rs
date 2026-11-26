@@ -28,6 +28,7 @@ const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 mod agent_node_rpc;
 mod application_automation_control;
 mod application_native_jobs;
+#[cfg(test)]
 mod local_resource_rpc;
 pub use agent_node_rpc::{
     NodeResourceServices, NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc,
@@ -113,7 +114,7 @@ pub struct TalosServerRuntime {
     plugins: PluginManagerService,
     browser: Arc<talos_browser::BrowserRuntime>,
     worker_rpc: Arc<talos_worker::WorkerRpcHost>,
-    resource_rpc: Arc<local_resource_rpc::LocalResourceRpc>,
+    resource_stop: tokio_util::sync::CancellationToken,
     worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
 }
 
@@ -132,7 +133,7 @@ pub struct TalosApplicationRuntime {
     pub(crate) sync: Arc<talos_sync::TalosSync>,
     pub(crate) worker: talos_worker::TalosWorker,
     pub(crate) worker_rpc: Arc<talos_worker::WorkerRpcHost>,
-    pub(crate) resource_rpc: Arc<local_resource_rpc::LocalResourceRpc>,
+    pub(crate) resource_stop: tokio_util::sync::CancellationToken,
     pub(crate) worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
     pub(crate) worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     pub config: Config,
@@ -506,7 +507,7 @@ impl TalosServerRuntime {
             plugins,
             browser,
             worker_rpc,
-            resource_rpc,
+            resource_stop,
             worker_registration,
             _native_job_host,
         } = self;
@@ -582,7 +583,10 @@ impl TalosServerRuntime {
         let result = application_automation::combine(result, shutdown_result);
         let result = application_automation::combine(result, worker_rpc.shutdown().await);
         auth_service.shutdown().await;
-        application_automation::combine(result, resource_rpc.shutdown().await)
+        {
+            resource_stop.cancel();
+            result
+        }
     }
 }
 
@@ -695,7 +699,7 @@ async fn start_server_after_startup(
         plugins: runtime.worker.plugin_manager(),
         browser: runtime.worker.browser(),
         worker_rpc: runtime.worker_rpc,
-        resource_rpc: runtime.resource_rpc,
+        resource_stop: runtime.resource_stop,
         worker_registration: runtime.worker_registration,
         http_server,
         channel_server,
@@ -798,7 +802,10 @@ async fn run_json_rpc_stdio_after_startup(
     let result = application_automation::combine(result, worker_rpc.shutdown().await);
     let result = application_automation::combine(result, runtime.shutdown_sync().await);
     runtime.auth_service.shutdown().await;
-    application_automation::combine(result, runtime.resource_rpc.shutdown().await)
+    {
+        runtime.resource_stop.cancel();
+        result
+    }
 }
 
 async fn build_application_runtime_after_startup(
