@@ -484,8 +484,11 @@ export class TalosClient {
   }
 
   computers = {
-    readManagedWorker: (): Promise<ManagedWorkerResponse> =>
-      this.http.request<ManagedWorkerResponse>(this.url("/v1/computers/managed-worker")).then(decodeManagedWorkerResponse),
+    readManagedWorker: (signal?: AbortSignal): Promise<ManagedWorkerResponse> =>
+      (signal
+        ? this.http.request<ManagedWorkerResponse>(this.url("/v1/computers/managed-worker"), { signal })
+        : this.http.request<ManagedWorkerResponse>(this.url("/v1/computers/managed-worker"))
+      ).then(decodeManagedWorkerResponse),
     createManagedWorker: (): Promise<ManagedWorkerResponse> =>
       this.http.request<ManagedWorkerResponse>(this.url("/v1/computers/managed-worker"), { method: "POST", body: "{}" }).then(decodeManagedWorkerResponse),
     startManagedWorker: (request: ManagedWorkerActionRequest): Promise<ManagedWorkerResponse> =>
@@ -498,16 +501,19 @@ export class TalosClient {
       this.managedWorkerAction("delete", request),
     delete: (request: DeleteComputerRequest): Promise<DeleteComputerResponse> =>
       this.http.request<DeleteComputerResponse>(this.url(`/v1/computers/${encodeURIComponent(request.nodeId)}`), { method: "DELETE" }),
-    list: (request: ComputerListRequest = {}): Promise<ComputerListResponse> => {
+    list: (request: ComputerListRequest = {}, signal?: AbortSignal): Promise<ComputerListResponse> => {
       const query = new URLSearchParams();
       if (request.query != null) query.set("query", request.query);
       if (request.cursor != null) query.set("cursor", request.cursor);
       if (request.limit != null) query.set("limit", String(request.limit));
       const suffix = query.size ? `?${query}` : "";
-      return this.http.request<ComputerListResponse>(this.url(`/v1/computers${suffix}`));
+      const url = this.url(`/v1/computers${suffix}`);
+      return signal ? this.http.request<ComputerListResponse>(url, { signal }) : this.http.request<ComputerListResponse>(url);
     },
-    read: (request: GetNodeRequest): Promise<NodeInfo> =>
-      this.http.request<NodeInfo>(this.url(`/v1/computers/${encodeURIComponent(request.nodeId)}`)),
+    read: (request: GetNodeRequest, signal?: AbortSignal): Promise<NodeInfo> => {
+      const url = this.url(`/v1/computers/${encodeURIComponent(request.nodeId)}`);
+      return signal ? this.http.request<NodeInfo>(url, { signal }) : this.http.request<NodeInfo>(url);
+    },
     create: (request: CreateNodeRequest): Promise<CreatedNode> =>
       this.http.request<CreatedNode>(this.url("/v1/computers"), { method: "POST", body: JSON.stringify(request) }),
     rename: (request: RenameComputerRequest): Promise<NodeInfo> =>

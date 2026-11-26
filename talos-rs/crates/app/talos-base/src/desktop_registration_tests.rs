@@ -223,6 +223,43 @@ fn persist_desktop_config(config: &Config) {
 mod ownership;
 
 #[tokio::test]
+async fn desktop_worker_identity_returns_local_system_info_without_server_or_enrollment() {
+    use talos_app_server::AppServerApplication;
+
+    let fixture = DesktopFixture::new().await;
+    let host = fixture.host("Offline laptop");
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+    assert!(host.worker.lock().await.is_none());
+    let expected = talos_types::DesktopWorkerIdentityResponse {
+        system_info: fixture.runtime.worker.system_info().clone(),
+        node_id: Some("embedded".into()),
+        control_plane_endpoint: Some(fixture.config.cloud.agent_base_url.clone()),
+        control_plane_trusted_ca_pem: crate::desktop_worker::control_plane_trusted_ca_pem(
+            &fixture.config.cloud,
+        )
+        .unwrap(),
+    };
+    let reply = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        host.dispatch(
+            &Actor::regular("anonymous"),
+            talos_app_protocol::requests::ClientRequest::decode("desktop/workerIdentity", None)
+                .unwrap(),
+        ),
+    )
+    .await
+    .expect("local identity must not wait for the disconnected Server")
+    .unwrap();
+    assert_eq!(reply.body, serde_json::to_value(&expected).unwrap());
+    assert_eq!(
+        serde_json::from_value::<talos_types::DesktopWorkerIdentityResponse>(reply.body).unwrap(),
+        expected
+    );
+    fixture.runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentials() {
     let fixture = DesktopFixture::new().await;
     // A role or proximity alone never makes an authenticated user the Computer owner.
@@ -251,6 +288,7 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .is_code(ErrorCode::Unauthenticated));
     fixture.login("user-1");
     let identity = host.enroll_worker(None, None).await.unwrap();
+    assert_eq!(&identity.system_info, fixture.runtime.worker.system_info());
     let trust = fixture
         .config
         .cloud
@@ -290,6 +328,7 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .await;
     assert!(matches!(denied, Err(error) if error.code == ErrorCode::Unauthenticated));
     let info = fixture.registered(&node_id).await;
+    assert_eq!(info.system_info.as_ref(), Some(&identity.system_info));
     assert_eq!(info.display_name, "Original laptop");
     assert_eq!(info.endpoint, None);
     assert!(info.available);

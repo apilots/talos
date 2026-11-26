@@ -119,6 +119,7 @@ impl DesktopApplication {
 
     async fn worker_identity(&self) -> TalosResult<DesktopWorkerIdentityResponse> {
         Ok(DesktopWorkerIdentityResponse {
+            system_info: self.execution.system_info().clone(),
             node_id: Some(self.sync_host.local_computer_id().await?),
             control_plane_endpoint: Some(self.config.cloud.agent_base_url.clone()),
             control_plane_trusted_ca_pem: crate::desktop_worker::control_plane_trusted_ca_pem(

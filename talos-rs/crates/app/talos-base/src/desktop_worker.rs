@@ -178,6 +178,7 @@ impl WorkerEnrollment<'_> {
         }
         let runner = config.agent_node.runner.expect("prepared identity");
         Ok(DesktopWorkerIdentityResponse {
+            system_info: self.execution.system_info().clone(),
             node_id: Some(runner.node_id),
             control_plane_endpoint: Some(runner.control_plane_endpoint),
             control_plane_trusted_ca_pem: control_plane_trusted_ca_pem(&config.cloud)?,

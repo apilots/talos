@@ -7,6 +7,8 @@ use ts_rs::TS;
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct DesktopWorkerIdentityResponse {
+    /// Static metadata collected by the local Worker at startup, independent of Server connectivity.
+    pub system_info: crate::NodeSystemInfo,
     pub node_id: Option<String>,
     pub control_plane_endpoint: Option<String>,
     #[schemars(

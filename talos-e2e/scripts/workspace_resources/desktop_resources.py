@@ -94,7 +94,7 @@ def native_pages(page):
     return [target for context in page.context.browser.contexts for target in context.pages]
 
 
-def exercise(page, token, destination, markdown, endpoint):
+def exercise(page, token, destination, markdown, endpoint, *, disconnect_directory):
     # The production main must initialize its native app-server and restore Auth
     # before the lazy Files route mounts. Match the existing native startup budget.
     expect(page.get_by_role('button', name='Upload', exact=True)).to_be_visible(timeout=45_000)
@@ -106,8 +106,12 @@ def exercise(page, token, destination, markdown, endpoint):
     local = page.locator('[data-computer-id=' + json.dumps(node_id) + '][aria-pressed=true]')
     expect(local).to_be_visible(timeout=45_000)
     expect(local).to_have_attribute('aria-label', re.compile('This computer'))
-    snapshot = invoke(page, token, 'browser/operate', {'nodeId': node_id, 'operation': {'kind': 'read'}})
-    require(snapshot['enabled'] and snapshot['host'] == 'desktop', 'Native Computer did not use the actual Desktop host')
+    def native_browser():
+        snapshot = invoke(page, token, 'browser/operate', {'nodeId': node_id, 'operation': {'kind': 'read'}})
+        return snapshot if snapshot['enabled'] and snapshot['host'] == 'desktop' else None
+
+    # Browser bootstrap is asynchronous even after the File service is ready.
+    snapshot = wait_for(native_browser, 'Native Desktop browser bootstrap')
     require(snapshot['display'] == {'kind': 'unavailable', 'reason': 'nativeHost'}, 'Native Computer advertised remote desktop media')
     expect(page.get_by_role('button', name='Your computer', exact=True)).to_have_count(0)
     expect(page.locator('#talos-right-workspace')).to_have_count(0)
@@ -223,23 +227,154 @@ def exercise(page, token, destination, markdown, endpoint):
     expect(page.get_by_role('button', name='Your computer', exact=True)).to_have_count(0)
     settle_workspace(workspace)
     page.screenshot(path=str(REPORT / 'desktop-resource-markdown-retained.png'), full_page=True)
+
+    directory = exercise_computer_directory(page, token, node_id, disconnect_directory)
     return {'nodeId': node_id, 'nativeBrowserHost': snapshot['host'], 'nativeDisplay': snapshot['display'],
             'fileId': uploaded['fileId'], 'fileSha256': hashlib.sha256(MARKDOWN).hexdigest(),
             'twoSameUrlNativeTabs': True, 'switchAndHideRetainForms': True, 'closeDestroysNativeTarget': True, 'nativeGeometryResponsive': True, 'hostCloseRecoversFocus': True,
-            'nativeRemoteDesktopEntryAbsent': True, 'trustedBridgeAbsentInPreview': True}
+            'nativeRemoteDesktopEntryAbsent': True, 'trustedBridgeAbsentInPreview': True, **directory}
 
 
-def run(cluster, exercise_resources=exercise):
+def exercise_computer_directory(page, token, node_id, disconnect_directory):
+    # Read existing production Desktop observations, never host probes or fixtures.
+    identity = data(page.evaluate('async () => window.talos.workerIdentity()'))
+    require(identity['nodeId'] == node_id, 'Desktop local identity changed before directory acceptance')
+    system_info = identity.get('systemInfo')
+    require(isinstance(system_info, dict), 'Production Desktop identity omitted systemInfo; rebuild app-server')
+    for field in ('os', 'architecture', 'hostname', 'logicalCpuCount', 'memoryBytes', 'workerVersion'):
+        require(bool(system_info.get(field)), 'Production Desktop systemInfo omitted ' + field)
+    platform = system_info.get('osVersion') or {'macOs': 'macOS', 'linux': 'Linux'}[system_info['os']]
+
+    def verify_local_observations():
+        current = data(page.evaluate('async () => window.talos.workerIdentity()'))
+        require(current['nodeId'] == node_id, 'Directory availability changed the native Desktop identity')
+        require(current.get('systemInfo') == system_info, 'Directory availability changed native Desktop systemInfo')
+        local_row = table.locator('tbody tr').filter(has=page.get_by_text(node_id, exact=True))
+        expect(local_row.locator('td').nth(1)).to_have_text(platform)
+        expect(local_row.locator('td').nth(2)).to_have_text('Ready')
+        expect(local_row.locator('.cmp-dot.is-online')).to_be_visible()
+        expect(selected_local).to_be_visible()
+        expect(inspector.get_by_role('heading', name=local_row.get_by_role('button').inner_text(), exact=True)).to_be_visible()
+        expect(inspector.locator('.cmp-inspector-heading p')).to_have_text('Ready')
+        expect(inspector.get_by_role('button', name='Open computer', exact=True)).to_be_enabled()
+        memory = page.evaluate('bytes => (bytes / 1024 ** 3).toLocaleString("en", {maximumFractionDigits: 1}) + " GiB"', system_info['memoryBytes'])
+        rows = {
+            'Operating system': platform, 'Architecture': system_info['architecture'],
+            'Host name': system_info['hostname'], 'Processor': system_info.get('cpuModel') or 'N/A',
+            'Logical CPUs': str(system_info['logicalCpuCount']), 'Memory': memory,
+            'Mainboard': system_info.get('boardModel') or 'N/A',
+            'Graphics': ', '.join(system_info['graphics']) or 'N/A',
+            'Worker version': system_info['workerVersion'], 'Node ID': node_id,
+        }
+        for label, value in rows.items():
+            row = inspector.locator('dl > div').filter(has=page.locator('dt').filter(has_text=re.compile('^' + re.escape(label) + '$')))
+            expect(row.locator('dd')).to_have_text(value)
+        networks = system_info['networkInterfaces']
+        details = inspector.locator('details').filter(has=page.locator('summary').filter(has_text='Network interfaces'))
+        expect(details.locator('summary')).to_have_text(f'Network interfaces ({len(networks)})')
+        if details.get_attribute('open') is None:
+            details.locator('summary').click()
+        for network in networks:
+            row = details.locator('dl > div').filter(has=page.locator('dt').filter(has_text=re.compile('^' + re.escape(network['name']) + '$')))
+            expect(row.locator('dd')).to_have_text(network['macAddress'])
+
+    # Directory list/read belongs to the cloud Server, not native discovery or
+    # a cached list-row placeholder. Inspection must not change execution selection.
+    remote = data(page.evaluate('''async ({token}) => {
+        const response = await fetch('talos-cloud://server/v1/computers', {
+            method: 'POST',
+            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            body: JSON.stringify({displayName: 'Remote Build Worker', credentialExpiresAt: 2000000000}),
+        });
+        return response.json();
+    }''', {'token': token}))['node']
+    remote_id = remote['nodeId']
+    directory_url = 'talos-cloud://server/v1/computers'
+    directory_gets = []
+    def record_request(req):
+        if req.url.startswith(directory_url) and req.method == 'GET':
+            directory_gets.append(req.url.split('?', 1)[0])
+    page.on('request', record_request)
+    try:
+        base_url = page.url.split('#', 1)[0]
+        page.goto(base_url + '#/computers')
+        page.get_by_role('button', name='List', exact=True).click()
+        table = page.locator('.cmp-table')
+        remote_row = table.get_by_role('button', name='Remote Build Worker', exact=True)
+        expect(remote_row).to_be_visible(timeout=20_000)
+        inspector = page.locator('.cmp-inspector')
+        rail = page.get_by_role('complementary', name='Computers', exact=True)
+        selected_local = rail.locator('[data-computer-id=' + json.dumps(node_id) + '][aria-pressed=true]')
+        table.locator('tbody tr').filter(has=page.get_by_text(node_id, exact=True)).get_by_role('button').click()
+        verify_local_observations()
+        page.screenshot(path=str(REPORT / 'desktop-computers-local-inspector.png'), full_page=True)
+        remote_row.click()
+        expect(remote_row).to_have_attribute('aria-pressed', 'true')
+        expect(inspector.get_by_role('heading', name='Remote Build Worker', exact=True)).to_be_visible(timeout=20_000)
+        expect(inspector).to_contain_text(remote_id)
+        expect(inspector).to_contain_text('Offline')
+        expect(inspector).to_contain_text('N/A')
+        expect(selected_local).to_be_visible()
+        require(directory_url in directory_gets, 'Computer list did not read the cloud directory')
+        require(directory_url + '/' + remote_id in directory_gets, 'Inspector did not read the cloud Computer')
+        page.screenshot(path=str(REPORT / 'desktop-computers-nonlocal-inspector.png'), full_page=True)
+
+        # Stop only the owned TLS ingress: native Desktop/app-server remain up.
+        # Polling must discard successful cached cloud data, not fall back to
+        # native discovery; the only surviving row is the local Desktop identity.
+        disconnect_directory()
+        network_tip = 'Unable to connect to the server. Check your network connection and retry.'
+        directory_alert = page.locator('.cmp-content > .cmp-panel').first.get_by_role('alert')
+        rail_alert = rail.get_by_role('alert')
+        for alert in (directory_alert, rail_alert):
+            expect(alert).to_have_text(re.compile(re.escape(network_tip)), timeout=30_000)
+            expect(alert).to_have_class(re.compile(r'\btext-danger\b'))
+        expect(inspector.get_by_role('heading', name='Remote Build Worker', exact=True)).to_have_count(0)
+        verify_local_observations()
+        expect(table.locator('tbody tr')).to_have_count(1)
+        expect(table.get_by_role('button', name='This computer', exact=True)).to_be_visible()
+        expect(table).not_to_contain_text(remote_id)
+        expect(rail.locator('[data-computer-id]')).to_have_count(1)
+        expect(selected_local).to_be_visible()
+        expect(page.locator('.cmp-overview > span').first.locator('strong')).to_have_text('—')
+        expect(directory_alert.get_by_role('button', name='Retry now', exact=True)).to_be_enabled()
+        page.screenshot(path=str(REPORT / 'desktop-computers-directory-offline.png'), full_page=True)
+
+        # A fresh offline renderer must also expose only process-local identity,
+        # without reviving the remote account directory or "not found" details.
+        page.reload()
+        page.get_by_role('button', name='List', exact=True).click()
+        expect(directory_alert).to_contain_text(network_tip, timeout=45_000)
+        expect(table.locator('tbody tr')).to_have_count(1)
+        expect(table.get_by_role('button', name='This computer', exact=True)).to_be_visible()
+        expect(rail.locator('[data-computer-id]')).to_have_count(1)
+        expect(selected_local).to_be_visible()
+        expect(inspector.get_by_role('heading', name='Remote Build Worker', exact=True)).to_have_count(0)
+        verify_local_observations()
+        page.screenshot(path=str(REPORT / 'desktop-computers-directory-offline-reload.png'), full_page=True)
+    finally:
+        page.remove_listener('request', record_request)
+
+    return {'remoteInspectedNodeId': remote_id, 'cloudDirectoryListAndRead': True, 'staleDirectoryHidden': True,
+            'offlineLocalIdentityOnly': True, 'networkTipsDanger': True, 'offlineReloadLocalOnly': True,
+            'nativeSystemInfoPresent': True, 'localHardwareAndRuntimeSurviveDirectoryOffline': True,
+            'localInspectorSurvivesOfflineReload': True, 'localHardwareMatchesNativeIdentity': True}
+
+
+def run(cluster, exercise_resources=None, user='alice'):
     cluster.start_control_plane()
     start_ingress(cluster)
+    ingress = cluster.processes[-1]
+    if exercise_resources is None:
+        exercise_resources = lambda *args: exercise(*args, disconnect_directory=lambda: cluster.stop(ingress))
     home = configure_desktop(cluster, 'desktop-resources')
     home.chmod(0o700)
     now = int(time.time() * 1000)
     auth = home / 'auth/cloud-session.json'
     auth.parent.mkdir(mode=0o700, exist_ok=True)
     auth.write_text(json.dumps({'schema_version': 2, 'cloud_api_base_url': cluster.cloud_url,
-        'access_token': cluster.users['alice']['access_token'], 'token_type': 'Bearer',
-        'expires_at_ms': now + 3_600_000, 'last_used_at_ms': now, 'user': cluster.users['alice']['user']}))
+        'access_token': cluster.users[user]['access_token'], 'token_type': 'Bearer',
+        'expires_at_ms': now + 3_600_000, 'last_used_at_ms': now, 'user': cluster.users[user]['user']}))
     auth.chmod(0o600)
     renderer = prepare_renderer(home)
     entry = prepare_entry(home)
@@ -282,7 +417,7 @@ def run(cluster, exercise_resources=exercise):
             try:
                 page.wait_for_url(re.compile('^' + re.escape(renderer.as_uri())))
                 page.goto(renderer.as_uri() + '#/files')
-                evidence = exercise_resources(page, cluster.users['alice']['access_token'],
+                evidence = exercise_resources(page, cluster.users[user]['access_token'],
                     f'http://127.0.0.1:{preview.server_port}/', markdown, endpoint)
                 require(not errors, 'Unexpected production Desktop renderer errors: ' + repr(errors))
                 evidence.setdefault('createdTurn', False)
@@ -316,6 +451,6 @@ def run(cluster, exercise_resources=exercise):
 if __name__ == '__main__':
     cluster = ContractAuthCluster()
     try:
-        run(cluster)
+        run(cluster, user='carol')
     finally:
         cluster.close()

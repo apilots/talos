@@ -6956,8 +6956,19 @@
             "string",
             "null"
           ]
+        },
+        "systemInfo": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NodeSystemInfo"
+            }
+          ],
+          "description": "Static metadata collected by the local Worker at startup, independent of Server connectivity."
         }
       },
+      "required": [
+        "systemInfo"
+      ],
       "type": "object"
     },
     "DynamicToolResult": {

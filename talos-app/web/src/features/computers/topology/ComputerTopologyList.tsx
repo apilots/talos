@@ -1,3 +1,5 @@
+import type { TalosRuntimeState } from "@talos/sdk-app-server/desktop";
+import { computerStatus } from "../computer-status";
 import { useTranslation } from "react-i18next";
 import type { AppProtocol } from "@talos/sdk-core";
 import { observationsFresh } from "./sync-state";
@@ -6,6 +8,8 @@ import { computerPeers, computerPlatform, computerLocalSyncStatus } from "./obse
 
 interface Props {
   nodes: AppProtocol.NodeInfo[];
+  localId?: string;
+  localRuntime?: TalosRuntimeState;
   metrics?: AppProtocol.SyncMetricsResponse;
   syncStatus?: AppProtocol.SyncStatusResponse;
   selectedId?: string;
@@ -14,6 +18,8 @@ interface Props {
 
 export function ComputerTopologyList({
   nodes,
+  localId,
+  localRuntime,
   metrics,
   syncStatus,
   selectedId,
@@ -35,6 +41,7 @@ export function ComputerTopologyList({
         <tbody>
           {nodes.map((node) => {
             const peers = computerPeers(metrics, node.nodeId);
+            const status = computerStatus(node, node.nodeId === localId, localRuntime);
             const activity = (observationsFresh(metrics) ? peers : []).flatMap((peer) =>
               peer.lastActivityAt === null ? [] : [peer.lastActivityAt],
             );
@@ -61,15 +68,9 @@ export function ComputerTopologyList({
                 <td>
                   <span className="cmp-inline-status">
                     <i
-                      className={`cmp-dot ${node.available ? "is-online" : ""}`}
+                      className={`cmp-dot ${status.ready ? "is-online" : ""}`}
                     />
-                    {t(
-                      node.status === "disabled"
-                        ? "remoteDisabled"
-                        : node.available
-                          ? "connected"
-                          : "offline",
-                    )}
+                    {t(status.label)}{status.remoteDisabled ? ` · ${t("remoteDisabled")}` : ""}
                   </span>
                 </td>
                 <td><SyncProgressSummary metrics={metrics} peers={peers}

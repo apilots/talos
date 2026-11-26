@@ -3,7 +3,7 @@ import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 import { describe, expect, it, vi } from "vitest";
 
 import type { TalosWebClient } from "./client";
-import { desktopProductOwner } from "./desktop-product-owner";
+import { desktopProductOwner, MANAGEMENT_LOOKUP_TIMEOUT_MS } from "./desktop-product-owner";
 import { managedWorkerKey, sessionDetailKey } from "./product-queries";
 
 const instance = { nodeId: "managed-node", conversationSessionId: "canonical" };
@@ -92,5 +92,42 @@ describe("Desktop session ownership", () => {
     await expect(owner.resolve({ nodeId: instance.nodeId })).resolves.toBe(cloud);
     await expect(owner.resolve({ sessionId: "ordinary" })).resolves.toBe(local);
     await expect(owner.resolve({ sessionId: instance.conversationSessionId })).resolves.toBe(cloud);
+  });
+
+  it("does not treat an unverified local Computer cache entry with null phase as proof of ordinary ownership", async () => {
+    const { owner, cloud, queries } = setup();
+    queries.setQueryData(["talos", "alice", "computer", instance.nodeId], {
+      nodeId: instance.nodeId,
+      managedWorkerPhase: null,
+    });
+    await expect(owner.resolve({ nodeId: instance.nodeId })).resolves.toBe(cloud);
+    expect(cloud.computers.read).toHaveBeenCalledWith({ nodeId: instance.nodeId }, expect.any(AbortSignal));
+  });
+
+  it("bounds stalled management Server Computer classification with a typed timeout and aborts the request", async () => {
+    vi.useFakeTimers();
+    try {
+      const { owner, local, cloud } = setup();
+      const signals: AbortSignal[] = [];
+      cloud.computers.read.mockImplementation((_req: { nodeId: string }, signal?: AbortSignal) => {
+        if (signal) signals.push(signal);
+        return new Promise(() => {});
+      });
+
+      const readOnlyRoute = owner.resolve({ nodeId: "stalled-read-only", readOnly: true });
+      await vi.advanceTimersByTimeAsync(MANAGEMENT_LOOKUP_TIMEOUT_MS);
+      await expect(readOnlyRoute).resolves.toBe(local);
+      expect(signals[0]?.aborted).toBe(true);
+
+      const executionRoute = owner.resolve({ nodeId: "stalled-execution" });
+      const rejection = expect(executionRoute).rejects.toMatchObject({
+        code: AppProtocol.ErrorCode.Timeout,
+      });
+      await vi.advanceTimersByTimeAsync(MANAGEMENT_LOOKUP_TIMEOUT_MS);
+      await rejection;
+      expect(signals[1]?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
