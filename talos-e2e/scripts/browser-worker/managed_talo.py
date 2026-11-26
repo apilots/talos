@@ -244,12 +244,23 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
     assert http(base + f"/v1/computers/{node}", token=bob)["status"] != "success"
     assert action("stop", ready, token=bob)["status"] != "success"
     assert action("delete", ready, confirmDataLoss=False)["status"] != "success"
-    print("PASS create -> outbound TLS registration -> Ready; instance is account-scoped", flush=True)
+    print("PASS create -> Worker-initiated TLS gRPC registration -> Ready; instance is account-scoped", flush=True)
 
     worker = observed.compute(instance)
     volume = observed.home(instance)
     first_id = observed.identity(worker)
     observed.execute(worker, "/bin/bash", "-ec", 'umask 077; printf t > "$TALOS_HOME/e2e-retain"')
+    # Reproduce a retained v0.1.18 Home before the existing stop/start check.
+    credential_hash = observed.execute(worker, "python3", "-c", r"""
+from pathlib import Path
+import hashlib, os
+home = Path(os.environ['TALOS_HOME'])
+config = home / 'conf/talos.yaml'
+source = config.read_text()
+assert source.count('    transport: direct\n') == 1
+config.write_text(source.replace('    transport: direct\n', '    transport: null\n'))
+print(hashlib.sha256((home / 'conf/node.credential').read_bytes()).hexdigest())
+""")
     data(action("stop", ready))
     stopped = wait(lambda: phase(base, "stopped"), "manual stop")
     assert observed.stopped(instance, worker)
@@ -258,6 +269,16 @@ def exercise(base, instances, worker_model, faults, observed, before_delete=None
     ready = wait(lambda: phase(base, "ready"), "same Worker start and registration")
     started_id = observed.identity(observed.compute(instance))
     assert (started_id == first_id) == observed.start_reuses_compute
+    upgraded_hash = observed.execute(observed.compute(instance), "python3", "-c", r"""
+from pathlib import Path
+import hashlib, os
+home = Path(os.environ['TALOS_HOME'])
+assert '    transport: direct\n' in (home / 'conf/talos.yaml').read_text()
+print(hashlib.sha256((home / 'conf/node.credential').read_bytes()).hexdigest())
+""")
+    assert upgraded_hash == credential_hash
+    assert ready['nodeId'] == node
+    print("PASS retained v0.1.18 transport:null upgrades to packaged direct with the same identity", flush=True)
     data(action("reset", ready))
     ready = wait(lambda: phase(base, "ready"), "replacement Worker registration")
     replacement = observed.compute(instance)

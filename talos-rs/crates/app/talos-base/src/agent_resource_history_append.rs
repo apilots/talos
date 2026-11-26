@@ -67,8 +67,7 @@ impl NodeSessionDataRpc {
             {
                 return Err(invalid_resource_request());
             }
-            self.authorize(first.auth.clone(), &id.session_id, first.caller.as_ref())
-                .await?;
+            self.authorize(first.auth.clone(), &id.session_id).await?;
             static BUFFER_BUDGET: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
                 std::sync::OnceLock::new();
             let budget = BUFFER_BUDGET

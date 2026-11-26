@@ -418,13 +418,15 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     let session_data = NodeSessionDataRpc::new(
         nodes.clone(),
         sessions.clone(),
-        Arc::new(EmptyHistory),
+        Arc::new(talos_service::SessionHistoryService::new(Arc::new(
+            talos_service::TimelineEventService::new(sessions.clone()),
+        ))),
         Arc::new(TestAttachments),
         memory_progress,
     );
     let coordinator = Arc::new(CoordinatorImpl::new(
         Arc::new(talos_router::RouterImpl::new()),
-        sessions,
+        sessions.clone(),
         store.clone(),
     ));
     let server = NodeRpcServer::new(
@@ -598,6 +600,13 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     .await
     .unwrap();
     assert_eq!(files[0].file_id, "image-1");
+    resources::assert_large_history_supplement_round_trip(
+        &storage,
+        &sessions,
+        &resources,
+        &session.id,
+    )
+    .await;
     stop_node.cancel();
     node_task.await.unwrap().unwrap();
     assert_eq!(*lease_events.lock().unwrap(), vec![true, false]);

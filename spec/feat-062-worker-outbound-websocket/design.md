@@ -50,7 +50,7 @@ The companion task owns embedded Library-direct calls.
    Registered Workers do not bind execution listeners. The retired
    `agent_node.worker_rpc` bind/TLS configuration is removed; only the Server's
    ingress TLS identity and the runner's optional Server CA trust remain.
-   Embedded local RPC uses an internal ephemeral loopback port.
+   Embedded execution uses the existing typed library boundary with no listener.
    Omitted/null transport has the shared `outbound` default. Only Docker Worker
    packaging supplies a `direct` runner default in YAML. Startup managed-home
    Upgrade fills missing/null transport from that packaged template for an

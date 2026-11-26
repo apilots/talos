@@ -37,7 +37,7 @@ pub trait AgentHarness: Send + Sync {
         Box::pin(async { Ok(None) })
     }
     /// Publish a committed terminal boundary. In-process Provider hosts have no
-    /// transport gate; the product always uses the Worker RPC implementation.
+    /// transport gate; product hosts use the gated Worker library or RPC handle.
     fn commit_session_execution_state(
         &self,
         _params: crate::CommitSessionExecutionStateParams,

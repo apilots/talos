@@ -267,7 +267,7 @@ impl Connected {
         let scope = caller_scope.clone();
         let adapter = adapter.with_resource_binder(Arc::new(move |_, _, caller| {
             *scope.write().unwrap() = caller.cloned();
-            Ok(Box::new(()))
+            Box::pin(async { Ok(Box::new(()) as Box<dyn Send>) })
         }));
         adapter
             .install_registration(

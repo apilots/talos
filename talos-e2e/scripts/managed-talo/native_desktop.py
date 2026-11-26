@@ -3,7 +3,6 @@
 import json
 import os
 from pathlib import Path
-import signal
 import socket
 import subprocess
 import sys
@@ -15,6 +14,8 @@ from playwright.sync_api import Error, expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[3]
 DESKTOP = ROOT / 'talos-app/desktop'
+sys.path.insert(0, str(ROOT / 'talos-e2e/scripts'))
+from lifecycle import stop_group
 
 
 def port():
@@ -271,17 +272,19 @@ def main():
             str(electron()), str(DESKTOP), '--lang=en-US', f'--remote-debugging-port={debug_port}', f'--user-data-dir={home}',
         ], env=env,
             stdout=log, stderr=log, start_new_session=True)
+        owned_group = {
+            'value': str(process.pid),
+            'started': subprocess.run(['ps', '-p', str(process.pid), '-o', 'lstart='],
+                                      capture_output=True, text=True, check=False).stdout.strip(),
+        }
         try:
             with sync_playwright() as playwright:
                 capture(playwright, process, f'http://127.0.0.1:{debug_port}', base, node_id, report, stage)
         finally:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
+            # Electron exiting does not prove its app-server child has stopped.
+            # Drain the owned group before either temporary Home is removed.
+            stop_group(owned_group)
+            process.wait(timeout=5)
 
 
 if __name__ == '__main__':

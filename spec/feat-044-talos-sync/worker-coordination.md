@@ -11,30 +11,29 @@ Status: Implemented（阶段1–3）。统一RPC、当前协调者回传、Sessi
 
 | Deployment | Management endpoint | Worker execution |
 | --- | --- | --- |
-| Desktop app-server + embedded Worker | Existing local HTTP or stdio management surface | Private authenticated loopback gRPC on `127.0.0.1:0`; sharing attaches Connect to the same adapter. |
-| talos-server + embedded Worker | Product HTTP and TLS node registration/Connect ingress | Same private loopback path for local execution; remote registration uses Connect. |
+| Desktop app-server + embedded Worker | Existing local HTTP or stdio management surface | Typed in-process Harness/Environment ports; sharing attaches Connect to the same adapter. |
+| talos-server + embedded Worker | Product HTTP and TLS node registration/Connect ingress | Same typed in-process ports for local execution; remote registration uses Connect. |
 | standalone talos-worker | No management HTTP or business database | No Worker RPC listener. The Worker initiates WSS (`outbound`) or TLS gRPC Connect (`direct`) to the Server. |
 | talos-sync | Independent WSS synchronization endpoint | No Worker scheduling or execution listener. |
 
-There is no `agent_node.worker_rpc` configuration. Embedded loopback binding is
-private and always uses an ephemeral loopback port. It has no configurable TLS
-identity or public bind address. The Server's `agent_node.control_plane` ingress
+There is no `agent_node.worker_rpc` configuration. Embedded execution uses typed library ports without a local
+execution or resource RPC listener. The Server's `agent_node.control_plane` ingress
 and TLS identity remain configured; the runner retains identity, transport,
 control-plane endpoint, credential and optional Server CA trust.
 
-`TalosWorker::start_local_rpc()` creates the private embedded host and its local
+`TalosWorker::start_local()` creates the listener-free embedded boundary and its local
 credential. `RegisteredWorker::start(Config)` builds one Worker and attaches its
 adapter directly to Connect without binding a listener. `RegisteredWorker::attach`
 reuses a management host's existing adapter without owning its local lifecycle.
 No second Worker runtime or parallel execution implementation is created.
 
-Embedded startup binds the local socket before connecting its local clients and
+Embedded startup registers typed local Harness and Environment handles before
 publishing management readiness. Standalone startup publishes execution only
 after authenticated Connect readiness. Neither path waits for Sync or Cloud
 login to make independent local execution available.
 
 Shutdown stops admission, cancels and drains executions, and joins the Connect
-runner. Embedded hosts additionally drain their private listener. Local
+runner. Embedded hosts revoke their private local admission. Local
 credentials remain process-private and are separate from Cloud registration and
 leases. Revoking remote registration must not revoke local admission or cancel
 local calls. Both remote carriers reuse the existing authenticated
@@ -81,7 +80,7 @@ CoordinatorCallContext和SessionHistoryCursor的PB位于已有agent-pb；历史�
 
 resource request/response oneof逐项引用ReadSessionHistory、ResolveAttachments、Read/AdvanceMemoryProgress、
 SaveToolImage及Spawn/Send/Wait/Interrupt/FollowUp/ListSubagent的现有PB对象；闭合枚举，不用任意method/JSON/bytes替代业务结构。
-管理Gateway为这些原RPC增加可选caller PB对象；direct loopback回调与reverse carrier解码都进入同一资源handler。本机回调使用内部临时loopback listener，复用原管理资源owner与私有host NodeAuth；不新增公网端口或用户配置。
+Management Gateway decodes the existing typed caller RPCs into the original resource handlers. Embedded callbacks bind the original typed product ports in-process after the persisted Session scope check; they do not open a loopback resource listener.
 新的ConnectCoordinator帧只属于agent-pb/protocol/client；同步库/独立sync服务不处理它。
 鉴权与资源业务handler分开：本机回调验证本机NodeAuth；reverse回调的Worker凭据先由注册Gateway验证，
 当前B只接受自己已认证管理连接上的frame，并核对Computer/active identity/账号及本端实际invocation，再进入原业务端口。
@@ -91,7 +90,7 @@ connection_id由Gateway为每条已认证管理流生成随机UUID，不能由�
 
 history、attachments、memory progress、tool images、subagent、Dream 回调按当前 invocation 选数据端。
 NAT下原AgentSessionDataClient仍以agent入口为网络端点，附invocation context，由Gateway路由到当前协调者；“注册端点不变”不等于“业务owner不变”。
-使用既有 AgentSessionDataRpc/AgentSubagentControlRpc/AgentToolImageRpc 对象；本机同样走 RPC，允许管理 listener 的资源服务接收回调。
+Network callbacks retain AgentSessionDataRpc/AgentSubagentControlRpc/AgentToolImageRpc. Local callbacks use the existing typed history, memory, attachment and control ports without network encoding.
 只增加必要的caller对象/现有Connect载体覆盖，不能复制业务 DTO 或在 Worker 保存 Session DB。
 并发 Session A/B 属于不同协调者时必须隔离 callback handle；禁止修改一个全局 client.endpoint。
 缓存的 AgentSessionContext 保留 Computer/Agent/Workspace 身份，当前回调上下文按每个 Turn 绑定，不因换协调者重建 Workspace。
@@ -105,7 +104,7 @@ NAT下原AgentSessionDataClient仍以agent入口为网络端点，附invocation 
 | `RemoteAgentClient::from_connection(connection, agent_id, auth)` / environment connection client | 同一原Harness/WorkerEnvironment API隐藏Connect。 |
 | `TalosApplicationRuntime::coordinator_resource_handler(computer_id)` | SDK回调owner，组合原History/Memory/Attachment/File/AgentControl；SDK先校验活跃scope，原handler再校验持久Session绑定与业务权限。 |
 | `AgentSessionDataClient::for_invocation(auth, session, caller)` | 固定本次调用凭据和资源关联，不修改共享client endpoint。 |
-| `TalosWorker::use_local_resource_rpc(client)` | 完整管理组装在开放API前装受保护loopback资源端口；Kernel只依赖原端口resolver，不依赖上层Service。 |
+| Embedded resource binding | Management composition supplies the original typed product resource ports before API readiness; the resolver checks the persisted Session scope. |
 | `AgentNodeClient::read_peer_file(token, source_peer_id, FileReadRequest, max_bytes)` | 返回原`FileInfo`和`Bytes`，走源FileService；不要求active Turn。 |
 | `update_peer_file(..., FileUpdateRequest)` / `delete_peer_file(..., FileDeleteRequest)` | 原response/错误；tags/metadata保留None与显式空值区别，不导入本端假objectKey。 |
 
@@ -174,11 +173,11 @@ HTTP Idempotency-Key 与 body clientRequestId 按原规则归一；跨端请求�
 断连/超时不自动重放，不宣称 exactly-once 或工具回滚；查询稳定 Turn/command facts 确认是否已经接受。
 尚未准入的队列留当前内存 owner，不跨控制面自动转移、拼接或冒充重启可恢复。
 
-中心注册与双向同步：共享Worker只向G=agent.talos.love（现有talos-server）注册、续租和Connect；A/B/C管理实例按同账号双向同步Computer目录与业务事实到各自原DB，不复制凭据/租约或重复注册。每个实例的协调者通过统一Harness/RPC SDK选择自身loopback或G远端路由；内嵌Worker与独立Worker的业务与准入行为一致。
+中心注册与双向同步：共享Worker只向G=agent.talos.love（现有talos-server）注册、续租和Connect；A/B/C管理实例按同账号双向同步Computer目录与业务事实到各自原DB，不复制凭据/租约或重复注册。Each Coordinator selects its typed local Harness or authenticated remote Gateway route；内嵌Worker与独立Worker的业务与准入行为一致。
 
 阶段3接入字段：AgentContext.history_cursor引用唯一SessionHistoryCursor domain（PB field 9）；SessionRequest/SubmitInputRequest/InterruptRequest的caller引用统一CoordinatorCallContext。Read/Commit请求携带caller；Commit.identity可空仅用于原clear后的generation递增。原sessions.history_generation在同一clear/import事务维护；不新增执行账本。Worker鉴权授予个人Computer完整访问，workspace_user_id为不可变文件命名空间，不作为另一账号授权。所有业务账号/Computer/Session权限仍在G和原Service校验。
 
-共享管理宿主也建立到G的Coordinator.Connect资源连接（绑定自己的已注册Computer），供另一端访问其FileService和当前Turn产品API。本机Harness仍使用loopback，不能把自己的管理回传连接替换为远端执行客户端。纯Worker只建立Node.Connect，不提供管理端业务handler。
+共享管理宿主也建立到G的Coordinator.Connect资源连接（绑定自己的已注册Computer），供另一端访问其FileService和当前Turn产品API。Local Harness calls use the typed library boundary; the management resource connection must not replace the remote execution client.纯Worker只建立Node.Connect，不提供管理端业务handler。
 
 
 阶段5准入/实时反馈自审：当前协调者可以从原progress receiver立即取最多64个已到达的连续事件，复用原Store事务一次提交并逐条发布。事件identity/sequence、CAS tail、业务与outbox共提交、Input必须跟在前序事实之后及terminal单独结算均不变；不等待凑满批次、不合并或丢弃事件、不增加RPC协议/状态表/超时。目的仅是消除逐事件事务积压造成的Input和子Agent终态回传延迟。模型目录查询必须传递原ModelListRequest.nodeId，与目标Worker配置接口指向同一环境。

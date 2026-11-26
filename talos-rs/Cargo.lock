@@ -6750,7 +6750,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "subtle",
  "talos-agent",
  "talos-agent-api",
  "talos-agent-provider-kernel",
@@ -7719,9 +7718,7 @@ dependencies = [
  "talos-upgrade",
  "tempfile",
  "tokio",
- "tokio-stream",
  "tokio-util",
- "tonic",
  "tracing",
  "uuid",
 ]

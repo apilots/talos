@@ -5,24 +5,37 @@ use agent_protocol::NodeAuth;
 #[derive(Clone)]
 pub(super) enum ResourceAuthority {
     Lease,
-    Host(NodeAuth),
     Invocation {
         computer_id: String,
-        caller: pb::CoordinatorCallContext,
+        caller: Box<pb::CoordinatorCallContext>,
     },
 }
 impl NodeSessionDataRpc {
+    pub(crate) async fn authorize_local_session(
+        &self,
+        context: &agent_protocol::AgentSessionContext,
+    ) -> TalosResult<SessionRecord> {
+        self.authorize_scope(
+            "embedded",
+            &context.session_id,
+            &context.session_id,
+            &context.agent_id,
+            &context.workspace.workspace_id,
+            &context.workspace.user_id,
+        )
+        .await
+    }
+
     pub(super) async fn authorize_agent_caller(
         &self,
         auth: Option<pb::NodeAuth>,
         caller: &talos_types::AgentCaller,
         supplied_scope: Option<&pb::CoordinatorCallContext>,
     ) -> TalosResult<()> {
-        self.authorize(auth, &caller.session_id, supplied_scope)
-            .await?;
+        self.authorize(auth, &caller.session_id).await?;
         let scope = match &self.authority {
-            ResourceAuthority::Invocation { caller, .. } => Some(caller),
-            ResourceAuthority::Host(_) | ResourceAuthority::Lease => supplied_scope,
+            ResourceAuthority::Invocation { caller, .. } => Some(caller.as_ref()),
+            ResourceAuthority::Lease => supplied_scope,
         };
         if let Some(scope) = scope {
             let session = scope.session.as_ref().ok_or_else(denied)?;
@@ -49,11 +62,6 @@ impl NodeSessionDataRpc {
         self.routes = Some(routes);
         self
     }
-    pub(crate) fn with_host_auth(mut self, auth: NodeAuth) -> Self {
-        self.authority = ResourceAuthority::Host(auth);
-        self.routes = None;
-        self
-    }
     pub(crate) fn for_invocation(
         &self,
         computer_id: String,
@@ -62,7 +70,7 @@ impl NodeSessionDataRpc {
         let mut data = self.clone();
         data.authority = ResourceAuthority::Invocation {
             computer_id,
-            caller,
+            caller: Box::new(caller),
         };
         data.routes = None;
         data
@@ -71,7 +79,6 @@ impl NodeSessionDataRpc {
         &self,
         auth: Option<pb::NodeAuth>,
         session_id: &str,
-        caller: Option<&pb::CoordinatorCallContext>,
     ) -> TalosResult<SessionRecord> {
         let auth = node_pb::decode_auth(auth)?;
         match &self.authority {
@@ -81,46 +88,34 @@ impl NodeSessionDataRpc {
                 self.nodes.authorize_session_lease(&auth, &session).await?;
                 Ok(session)
             }
-            ResourceAuthority::Host(expected) => {
-                use sha2::{Digest, Sha256};
-                use subtle::ConstantTimeEq;
-                let expected_hash: [u8; 32] = Sha256::digest(expected.token.as_bytes()).into();
-                let supplied_hash: [u8; 32] = Sha256::digest(auth.token.as_bytes()).into();
-                if expected.node_id != auth.node_id
-                    || !bool::from(expected_hash.ct_eq(&supplied_hash))
-                {
-                    return Err(denied());
-                }
-                self.authorize_scope(&auth.node_id, caller.ok_or_else(denied)?, session_id)
-                    .await
-            }
             ResourceAuthority::Invocation {
                 computer_id,
                 caller,
-            } => self.authorize_scope(computer_id, caller, session_id).await,
+            } => {
+                let scope = caller.session.as_ref().ok_or_else(denied)?;
+                self.authorize_scope(
+                    computer_id,
+                    session_id,
+                    &scope.session_id,
+                    &scope.agent_id,
+                    &scope.workspace_id,
+                    &scope.user_id,
+                )
+                .await
+            }
         }
     }
-    pub(super) async fn authorize_owner(
-        &self,
-        auth: &NodeAuth,
-        supplied: Option<&pb::CoordinatorCallContext>,
-    ) -> TalosResult<String> {
-        if matches!(self.authority, ResourceAuthority::Lease) {
-            return self.nodes.authorize_lease_owner(auth).await;
+    pub(super) async fn authorize_owner(&self, auth: &NodeAuth) -> TalosResult<String> {
+        match &self.authority {
+            ResourceAuthority::Lease => self.nodes.authorize_lease_owner(auth).await,
+            ResourceAuthority::Invocation { caller, .. } => {
+                let session_id = &caller.session.as_ref().ok_or_else(denied)?.session_id;
+                Ok(self
+                    .authorize(Some(node_pb::encode_auth(auth.clone())), session_id)
+                    .await?
+                    .user_id)
+            }
         }
-        let caller = match &self.authority {
-            ResourceAuthority::Invocation { caller, .. } => caller,
-            _ => supplied.ok_or_else(denied)?,
-        };
-        let session_id = &caller.session.as_ref().ok_or_else(denied)?.session_id;
-        Ok(self
-            .authorize(
-                Some(node_pb::encode_auth(auth.clone())),
-                session_id,
-                Some(caller),
-            )
-            .await?
-            .user_id)
     }
     async fn session(&self, session_id: &str) -> TalosResult<SessionRecord> {
         self.sessions
@@ -131,20 +126,22 @@ impl NodeSessionDataRpc {
     async fn authorize_scope(
         &self,
         computer_id: &str,
-        caller: &pb::CoordinatorCallContext,
         session_id: &str,
+        scope_session_id: &str,
+        agent_id: &str,
+        workspace_id: &str,
+        user_id: &str,
     ) -> TalosResult<SessionRecord> {
-        let scope = caller.session.as_ref().ok_or_else(denied)?;
         let session = self.session(session_id).await?;
         let namespace = self
             .sessions
             .get_workspace_user_id(session_id)
             .await?
             .unwrap_or_else(|| session.user_id.clone());
-        if scope.session_id != session_id
-            || scope.agent_id != session.agent_id
-            || scope.user_id != namespace
-            || scope.workspace_id != session.workspace_id
+        if scope_session_id != session_id
+            || agent_id != session.agent_id
+            || user_id != namespace
+            || workspace_id != session.workspace_id
             || computer_id != session.execution_node_id
         {
             return Err(denied());

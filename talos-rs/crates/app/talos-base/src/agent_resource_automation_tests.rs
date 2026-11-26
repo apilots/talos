@@ -1,4 +1,4 @@
-//! Exercise the real protected callback listener and reverse invocation boundary.
+//! Exercise automation authorization at the reverse invocation boundary.
 use super::*;
 use agent_protocol::{automation_pb, harness_pb, node_pb, NodeAuth};
 use pb::agent_automation_control_rpc_server::AgentAutomationControlRpc;
@@ -31,7 +31,7 @@ impl AutomationControl for RecordedAutomation {
 }
 
 #[tokio::test]
-async fn automation_uses_original_host_auth_and_exact_reverse_invocation() {
+async fn automation_requires_the_exact_reverse_invocation() {
     let storage = Arc::new(
         SqliteStorage::new_with_max_connections(":memory:", 1)
             .await
@@ -49,7 +49,7 @@ async fn automation_uses_original_host_auth_and_exact_reverse_invocation() {
     let record = session_record();
     sessions.insert_session_record(&record).await.unwrap();
     let data = NodeSessionDataRpc::new(
-        nodes.clone(),
+        nodes,
         sessions,
         Arc::new(EmptyHistory),
         Arc::new(TestAttachments),
@@ -57,20 +57,9 @@ async fn automation_uses_original_host_auth_and_exact_reverse_invocation() {
     );
     let auth = NodeAuth {
         node_id: record.execution_node_id.clone(),
-        token: "private-automation-host-token".into(),
+        token: "foreign-lease".into(),
     };
     let control = Arc::new(RecordedAutomation::default());
-    let (host, client) = crate::local_resource_rpc::LocalResourceRpc::start(
-        auth.clone(),
-        NodeResourceServices {
-            session_data: data.clone(),
-            agent_control: Arc::new(TestAgentControl),
-            automation_control: control.clone(),
-            tool_images: NodeToolImageRpc::new(nodes, Arc::new(TestToolImages), 1024),
-        },
-    )
-    .await
-    .unwrap();
     let session = agent_protocol::AgentSessionContext {
         agent_id: record.agent_id.clone(),
         session_id: record.id.clone(),
@@ -78,9 +67,6 @@ async fn automation_uses_original_host_auth_and_exact_reverse_invocation() {
             .resolve_workspace("default", "user-1")
             .unwrap(),
     };
-    // The original local binder supplies a Session scope without a Turn. The
-    // authenticated Service still owns canonical active-Turn validation.
-    let client = client.for_invocation(auth.clone(), &session, None).unwrap();
     let params = AutomationModelRequest {
         caller: talos_types::AgentCaller {
             session_id: record.id.clone(),
@@ -92,16 +78,6 @@ async fn automation_uses_original_host_auth_and_exact_reverse_invocation() {
             action: LoopAction::List {},
         },
     };
-    assert_eq!(
-        client.execute(params.clone()).await.unwrap().snapshot,
-        SessionAutomationSnapshot {
-            session_id: record.id.clone(),
-            goal: None,
-            loops: Vec::new(),
-        }
-    );
-    assert_eq!(*control.0.lock().unwrap(), vec![params.clone()]);
-
     let scope = pb::CoordinatorCallContext {
         coordinator_id: "original-coordinator".into(),
         connection_id: "original-connection".into(),
@@ -134,20 +110,24 @@ async fn automation_uses_original_host_auth_and_exact_reverse_invocation() {
             .unwrap_err()
             .is_code(ErrorCode::PermissionDenied));
     }
-    client
-        .update_auth(NodeAuth {
-            node_id: record.execution_node_id,
-            token: "wrong-host-token".into(),
-        })
-        .unwrap();
-    assert!(client
-        .execute(params.clone())
+    let accepted = reverse
+        .execute_automation(Request::new(pb::ExecuteAutomationRequest {
+            auth: Some(node_pb::encode_auth(auth)),
+            caller: Some(scope),
+            params: Some(automation_pb::encode_model_params(params.clone()).unwrap()),
+        }))
         .await
-        .unwrap_err()
-        .is_code(ErrorCode::PermissionDenied));
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        automation_pb::decode_response(accepted).unwrap().snapshot,
+        SessionAutomationSnapshot {
+            session_id: record.id,
+            goal: None,
+            loops: Vec::new(),
+        }
+    );
     assert_eq!(*control.0.lock().unwrap(), vec![params]);
-    drop(client);
-    host.shutdown().await.unwrap();
     drop(reverse);
     drop(data);
     pool.close().await;

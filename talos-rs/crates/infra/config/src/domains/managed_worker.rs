@@ -242,7 +242,7 @@ impl WorkerConnectionConfig {
     }
 }
 
-/// Render the existing outbound Runner config with only the required shared loader
+/// Render the registered Worker config with only the required shared loader
 /// sections. Provider setup and all future edits are local to the Worker Home.
 pub fn managed_worker_seed_config(runner: AgentNodeRunnerConfig) -> TalosResult<Vec<u8>> {
     #[derive(Serialize)]

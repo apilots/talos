@@ -48,7 +48,7 @@ pub type AgentInvocationResourceBinder = Arc<
             &NodeAuth,
             &agent_protocol::AgentSessionContext,
             Option<&pb::CoordinatorCallContext>,
-        ) -> TalosResult<Box<dyn Send>>
+        ) -> crate::AgentFuture<'static, TalosResult<Box<dyn Send>>>
         + Send
         + Sync,
 >;
@@ -61,6 +61,11 @@ pub type ManagedDesktopAdmission = Arc<
         + Send
         + Sync,
 >;
+
+struct ActiveInterrupt {
+    harness: Arc<dyn AgentHarness>,
+    cleanup_confirmed: bool,
+}
 
 #[derive(Clone, PartialEq, Eq)]
 enum AuthorizationOwner {
@@ -129,6 +134,28 @@ pub struct AgentHarnessRpcAdapter {
 }
 
 impl AgentHarnessRpcAdapter {
+    /// Bind the existing typed Harness API to this host's authorization and
+    /// causal gate. Shares state with remote ingress; never opens a listener.
+    pub fn local_harness(
+        &self,
+        agent_id: String,
+        auth: NodeAuth,
+        coordinator_id: String,
+    ) -> TalosResult<Arc<dyn AgentHarness>> {
+        if self.authorize(&auth)?.owner != AuthorizationOwner::Host
+            || uuid::Uuid::parse_str(&coordinator_id).is_err()
+        {
+            return Err(unauthenticated());
+        }
+        self.harness(&agent_id)?;
+        Ok(Arc::new(execution_state::LocalAgentHarness {
+            adapter: self.clone(),
+            agent_id,
+            auth,
+            coordinator_id,
+        }))
+    }
+
     pub fn new(
         node_id: String,
         config: Arc<std::sync::RwLock<Config>>,
@@ -186,7 +213,7 @@ impl AgentHarnessRpcAdapter {
         self.resource_binder = Some(binder);
         self
     }
-    fn bind_resources(
+    async fn bind_resources(
         &self,
         auth: &NodeAuth,
         context: &agent_protocol::AgentSessionContext,
@@ -196,7 +223,7 @@ impl AgentHarnessRpcAdapter {
         // Loopback keeps the original private resource client; G supplies a route.
         let route = caller.filter(|caller| !caller.connection_id.is_empty());
         if let Some(binder) = &self.resource_binder {
-            return binder(auth, context, route);
+            return binder(auth, context, route).await;
         }
         if route.is_some() {
             return Err(TalosError::new(
@@ -205,115 +232,6 @@ impl AgentHarnessRpcAdapter {
             ));
         }
         Ok(Box::new(()))
-    }
-
-    /// Renew the same lease in place, or replace a registration and cancel its
-    /// old streams. Renewal must not change the execution's lease identity.
-    pub fn install_registration(
-        &self,
-        registration: Registration,
-        deadline: Instant,
-    ) -> TalosResult<()> {
-        self.install_node_registration(&self.node_id, registration, deadline)
-    }
-
-    /// Attach the control plane's verified UUID to this same execution runtime.
-    /// The host alias and its private credential retain their independent lifetime.
-    pub fn install_node_registration(
-        &self,
-        node_id: &str,
-        registration: Registration,
-        deadline: Instant,
-    ) -> TalosResult<()> {
-        if deadline <= Instant::now()
-            || node_id.trim().is_empty()
-            || registration.lease_token.is_empty()
-            || registration.owner_user_id.is_empty()
-        {
-            return Err(invalid_request());
-        }
-        let lease = Lease {
-            node_id: node_id.into(),
-            token_hash: Sha256::digest(registration.lease_token.as_bytes()).into(),
-            owner: AuthorizationOwner::User(registration.owner_user_id),
-            deadline: watch::channel(deadline).0,
-            revoked: CancellationToken::new(),
-        };
-        let mut current = self.lease.lock().expect("Agent lease lock poisoned");
-        if let Some(previous) = current.as_ref() {
-            if previous.node_id == lease.node_id
-                && previous.token_hash == lease.token_hash
-                && previous.owner == lease.owner
-            {
-                previous.deadline.send_replace(deadline);
-                return Ok(());
-            }
-        }
-        if let Some(previous) = current.replace(lease) {
-            previous.revoked.cancel();
-            if let Some(revoked) = &self.registration_revoked {
-                revoked();
-            }
-        }
-        Ok(())
-    }
-
-    /// Attach the Worker desktop check to the existing registration fence.
-    #[must_use]
-    pub fn with_managed_desktop_admission(mut self, admission: ManagedDesktopAdmission) -> Self {
-        self.managed_desktop_admission = Some(admission);
-        self
-    }
-
-    /// Hosts attach node-local authorization cancellation to the existing lease lifecycle.
-    #[must_use]
-    pub fn with_registration_revocation_hook(mut self, hook: Arc<dyn Fn() + Send + Sync>) -> Self {
-        self.registration_revoked = Some(hook);
-        self
-    }
-
-    pub fn clear_registration(&self) {
-        if let Some(previous) = self.lease.lock().expect("Agent lease lock poisoned").take() {
-            previous.revoked.cancel();
-            if let Some(revoked) = &self.registration_revoked {
-                revoked();
-            }
-        }
-    }
-
-    /// A protected host credential permits the host's already-authorized users.
-    /// It is never advertised or sent through the cloud registration connection.
-    pub fn install_local_auth(&self, auth: &NodeAuth) -> TalosResult<()> {
-        if auth.node_id != self.node_id || auth.token.is_empty() {
-            return Err(invalid_request());
-        }
-        let lease = Lease {
-            node_id: auth.node_id.clone(),
-            token_hash: Sha256::digest(auth.token.as_bytes()).into(),
-            owner: AuthorizationOwner::Host,
-            deadline: watch::channel(Instant::now()).0,
-            revoked: CancellationToken::new(),
-        };
-        if let Some(previous) = self
-            .local_auth
-            .lock()
-            .expect("Local authorization lock poisoned")
-            .replace(lease)
-        {
-            previous.revoked.cancel();
-        }
-        Ok(())
-    }
-
-    pub fn clear_local_auth(&self) {
-        if let Some(previous) = self
-            .local_auth
-            .lock()
-            .expect("Local authorization lock poisoned")
-            .take()
-        {
-            previous.revoked.cancel();
-        }
     }
 
     fn authorize(&self, auth: &NodeAuth) -> TalosResult<Lease> {
@@ -368,6 +286,113 @@ impl AgentHarnessRpcAdapter {
                     "Agent Harness is not registered",
                 )
             })
+    }
+
+    fn prepare_maintenance(
+        &self,
+        session: &agent_protocol::AgentSessionContext,
+        peer: &str,
+        expected: &talos_types::SessionHistoryCursor,
+    ) -> TalosResult<(
+        crate::SessionLease,
+        session_gate::Reservation,
+        Arc<dyn AgentHarness>,
+    )> {
+        let ownership = self.session_owner.pin(&session.session_id)?;
+        let reservation = self.session_gate.maintenance(session, peer, expected)?;
+        let harness = self.harness(&session.agent_id)?;
+        Ok((ownership, reservation, harness))
+    }
+
+    fn prepare_interrupt(
+        &self,
+        auth: &NodeAuth,
+        params: &AgentInterruptParams,
+        peer: &str,
+    ) -> TalosResult<Option<ActiveInterrupt>> {
+        self.authorize(auth)?;
+        let local = self
+            .active
+            .lock()
+            .expect("Agent active lock poisoned")
+            .contains_key(&(
+                params.agent_id.clone(),
+                params.identity.session_id.clone(),
+                params.identity.turn_id.clone(),
+            ));
+        if local {
+            let cleanup_confirmed =
+                self.session_gate
+                    .authorize_active(&params.agent_id, &params.identity, peer)?;
+            Ok(Some(ActiveInterrupt {
+                harness: self.harness(&params.agent_id)?,
+                cleanup_confirmed,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn interrupt_typed(
+        &self,
+        auth: &NodeAuth,
+        params: AgentInterruptParams,
+        peer: &str,
+    ) -> TalosResult<talos_agent_api::AgentInterruptOutcome> {
+        let prepared = self.prepare_interrupt(auth, &params, peer)?;
+        self.finish_interrupt(params, peer, prepared).await
+    }
+
+    async fn finish_interrupt(
+        &self,
+        params: AgentInterruptParams,
+        peer: &str,
+        prepared: Option<ActiveInterrupt>,
+    ) -> TalosResult<talos_agent_api::AgentInterruptOutcome> {
+        if let Some(prepared) = prepared {
+            prepared.harness.interrupt(params).await.map_err(|error| {
+                if !prepared.cleanup_confirmed && error.is_code(ErrorCode::ResourceNotFound) {
+                    TalosError::from_source(
+                        ErrorCode::RunCleanupUnconfirmed,
+                        "Agent Turn cleanup is not confirmed by this node instance",
+                        error,
+                    )
+                } else {
+                    error
+                }
+            })
+        } else {
+            (|| {
+                let ownership = self.session_owner.pin(&params.identity.session_id)?;
+                self.session_gate.confirm_orphan_cleanup(
+                    &params.agent_id,
+                    &params.identity,
+                    peer,
+                    || !self.session_owner.holds_turn(&params.identity),
+                )?;
+                ownership.retain_turn(&params.identity.turn_id);
+                Ok(talos_agent_api::AgentInterruptOutcome::Cancelled)
+            })()
+        }
+    }
+
+    async fn shutdown_harness(
+        &self,
+        agent_id: &str,
+        harness: Arc<dyn AgentHarness>,
+        timeout: Duration,
+    ) -> TalosResult<()> {
+        let result = harness.shutdown(timeout).await;
+        if result.is_ok() {
+            let mut harnesses = self.harnesses.lock().expect("Agent harness lock poisoned");
+            if harnesses
+                .get(agent_id)
+                .is_some_and(|current| Arc::ptr_eq(current, &harness))
+            {
+                harnesses.remove(agent_id);
+            }
+        }
+        result
     }
 
     fn memory_context(
@@ -468,48 +493,10 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
             .as_ref()
             .map(|caller| caller.coordinator_id.as_str())
             .ok_or_else(|| status_from_error(invalid_request()))?;
-        let local = self
-            .active
-            .lock()
-            .expect("Agent active lock poisoned")
-            .contains_key(&(
-                params.agent_id.clone(),
-                params.identity.session_id.clone(),
-                params.identity.turn_id.clone(),
-            ));
-        let result = if local {
-            let cleanup_confirmed = self
-                .session_gate
-                .authorize_active(&params.agent_id, &params.identity, peer)
-                .map_err(status_from_error)?;
-            self.harness(&params.agent_id)
-                .map_err(status_from_error)?
-                .interrupt(params)
-                .await
-                .map_err(|error| {
-                    if !cleanup_confirmed && error.is_code(ErrorCode::ResourceNotFound) {
-                        TalosError::from_source(
-                            ErrorCode::RunCleanupUnconfirmed,
-                            "Agent Turn cleanup is not confirmed by this node instance",
-                            error,
-                        )
-                    } else {
-                        error
-                    }
-                })
-        } else {
-            (|| {
-                let ownership = self.session_owner.pin(&params.identity.session_id)?;
-                self.session_gate.confirm_orphan_cleanup(
-                    &params.agent_id,
-                    &params.identity,
-                    peer,
-                    || !self.session_owner.holds_turn(&params.identity),
-                )?;
-                ownership.retain_turn(&params.identity.turn_id);
-                Ok(talos_agent_api::AgentInterruptOutcome::Cancelled)
-            })()
-        };
+        let prepared = self
+            .prepare_interrupt(&auth, &params, peer)
+            .map_err(status_from_error)?;
+        let result = self.finish_interrupt(params, peer, prepared).await;
         Ok(Response::new(pb::InterruptResponse {
             result: Some(match result {
                 Ok(value) => pb::interrupt_response::Result::Interrupted(
@@ -544,19 +531,10 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
             })?,
         )
         .map_err(status_from_error)?;
-        let _ownership = self
-            .session_owner
-            .pin(&params.session_id)
+        let (_ownership, _reservation, harness) = self
+            .prepare_maintenance(&params, peer, &expected_history_cursor)
             .map_err(status_from_error)?;
-        let _reservation = self
-            .session_gate
-            .maintenance(&params, peer, &expected_history_cursor)
-            .map_err(status_from_error)?;
-        let result = self
-            .harness(&params.agent_id)
-            .map_err(status_from_error)?
-            .clear_session(params, expected_history_cursor)
-            .await;
+        let result = harness.clear_session(params, expected_history_cursor).await;
         Ok(Response::new(empty_response(result)))
     }
 
@@ -584,19 +562,10 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
             })?,
         )
         .map_err(status_from_error)?;
-        let _ownership = self
-            .session_owner
-            .pin(&params.session_id)
+        let (_ownership, _reservation, harness) = self
+            .prepare_maintenance(&params, peer, &expected_history_cursor)
             .map_err(status_from_error)?;
-        let _reservation = self
-            .session_gate
-            .maintenance(&params, peer, &expected_history_cursor)
-            .map_err(status_from_error)?;
-        let result = self
-            .harness(&params.agent_id)
-            .map_err(status_from_error)?
-            .close_session(params, expected_history_cursor)
-            .await;
+        let result = harness.close_session(params, expected_history_cursor).await;
         Ok(Response::new(empty_response(result)))
     }
 
@@ -671,18 +640,13 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
             ))
         })?;
         let harness = self.harness(&params.agent_id).map_err(status_from_error)?;
-        let result = harness
-            .shutdown(Duration::from_millis(params.timeout_ms))
+        let result = self
+            .shutdown_harness(
+                &params.agent_id,
+                harness,
+                Duration::from_millis(params.timeout_ms),
+            )
             .await;
-        if result.is_ok() {
-            let mut harnesses = self.harnesses.lock().expect("Agent harness lock poisoned");
-            if harnesses
-                .get(&params.agent_id)
-                .is_some_and(|current| Arc::ptr_eq(current, &harness))
-            {
-                harnesses.remove(&params.agent_id);
-            }
-        }
         Ok(Response::new(empty_response(result)))
     }
 }

@@ -63,7 +63,10 @@ impl TalosApplicationRuntime {
         let result = combine(result, self.worker.browser().shutdown().await);
         let result = combine(result, self.worker.plugin_manager().shutdown_mcp().await);
         let result = combine(result, self.worker_rpc.shutdown().await);
-        combine(result, self.resource_rpc.shutdown().await)
+        {
+            self.resource_stop.cancel();
+            result
+        }
     }
 }
 

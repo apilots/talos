@@ -16,7 +16,8 @@ def prepare_context(repo, destination):
                 and not path.is_relative_to('build/container')
                 and not path.is_relative_to('build/plugins')
                 and str(path) not in ('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES',
-                                      'deploy/docker/talos-worker/chromium-seccomp.json')):
+                                      'deploy/docker/talos-worker/chromium-seccomp.json',
+                                      'build/worker/runner.yaml')):
             continue
         source, target = repo / path, destination / path
         if source.is_file():

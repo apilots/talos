@@ -234,7 +234,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     .expect("changed credentials must resume the original supervisor promptly");
     runtime.shutdown_sync().await.unwrap();
     runtime.worker_rpc.shutdown().await.unwrap();
-    runtime.resource_rpc.shutdown().await.unwrap();
+    runtime.resource_stop.cancel();
     runtime.automation.shutdown().await.unwrap();
     runtime.worker.shutdown().await.unwrap();
     runtime.auth_service.shutdown().await;
@@ -398,7 +398,7 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
     drop(retirement);
     drop(lifecycle);
     runtime.worker_rpc.shutdown().await.unwrap();
-    runtime.resource_rpc.shutdown().await.unwrap();
+    runtime.resource_stop.cancel();
     runtime.automation.shutdown().await.unwrap();
     runtime.worker.shutdown().await.unwrap();
     drop(desktop);
@@ -439,7 +439,7 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
         .contains_key(&actor.user_id));
     restarted.shutdown_sync().await.unwrap();
     restarted.worker_rpc.shutdown().await.unwrap();
-    restarted.resource_rpc.shutdown().await.unwrap();
+    restarted.resource_stop.cancel();
     restarted.automation.shutdown().await.unwrap();
     restarted.worker.shutdown().await.unwrap();
 }
@@ -545,7 +545,7 @@ async fn document_transport_starts_while_worker_gateway_is_stalled(binding: Docu
 
     runtime.shutdown_sync().await.unwrap();
     runtime.worker_rpc.shutdown().await.unwrap();
-    runtime.resource_rpc.shutdown().await.unwrap();
+    runtime.resource_stop.cancel();
     runtime.automation.shutdown().await.unwrap();
     runtime.worker.shutdown().await.unwrap();
     auth.abort();
