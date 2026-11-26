@@ -188,7 +188,13 @@ def commands(cluster):
     require(interrupted['identity'] == identity and interrupted['outcome']['type'] == 'cancelled', 'Exact Turn cancellation did not return to current coordinator')
     wait_for(lambda: cluster.desktop('Desktop-B', 'session/active_turn', {'sessionId': session})['activeTurn'] is None, 'Current coordinator cleanup settled')
     require(not list(home.rglob(forbidden)), 'Cancelled remote tool produced its delayed side effect')
-    wait_for(lambda: cluster.history('Desktop-A', session)['data'] == cluster.history('Desktop-B', session)['data'], 'Cancellation facts synchronized')
+    try:
+        wait_for(lambda: cluster.history('Desktop-A', session)['data'] == cluster.history('Desktop-B', session)['data'], 'Cancellation facts synchronized')
+    except AssertionError:
+        (REPORT / 'cancellation-history.json').write_text(json.dumps({
+            host: cluster.history(host, session) for host in ('Desktop-A', 'Desktop-B')
+        }, indent=2))
+        raise
     print('CASE sync_current_coordinator_input_queue_interrupt_exclusion_and_idempotency PASS', flush=True)
 
 
