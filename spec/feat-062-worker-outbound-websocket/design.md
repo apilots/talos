@@ -62,10 +62,13 @@ listener or Server callback is needed for outbound execution.
   omitted `transport` or `transport: outbound` selects WSS with the same CA trust.
   The client derives `wss://host:port/talos/worker/connect`. It does not bind a
   public execution listener, advertise an inbound endpoint or permit Server dialback.
-- Managed Docker seeds explicitly write `transport: outboundGrpc`; the Server
-  retains the original `AgentNodeControl.Connect` HTTP/2 gRPC method. Existing
-  `TALOS_WORKER_PACKAGING=official-container` images keep gRPC for old persisted
-  homes; this is explicit deployment selection, not failure-triggered fallback.
+- Official managed Docker seeds keep writing `transport: outbound` so a
+  Server-first upgrade can provision a fresh home against the already-pinned
+  Worker image. The existing `TALOS_WORKER_PACKAGING=official-container` marker
+  makes the new Worker use gRPC, and the old Worker already treats `outbound`
+  as gRPC. Explicit `outboundGrpc` remains for operator-managed configs. The
+  Server retains the original `AgentNodeControl.Connect` HTTP/2 gRPC method.
+  This is explicit deployment selection, not failure-triggered fallback.
 - Central Server self-publication retains the existing direct TLS ingress. This
   does not select a personal Worker's outbound carrier.
 - Forward `/talos/worker/*` HTTP/1.1 WebSocket Upgrade without buffering. Lifecycle

@@ -92,6 +92,7 @@ the same protocol routing:
 | Request path | Server upstream |
 | --- | --- |
 | `/talos.agent.v1.*` | TLS Agent port `9443` with HTTP/2 and verified upstream TLS. Keep the original path. |
+| `/talos/worker/*` | The same TLS Agent port `9443` with HTTP/1.1 WebSocket Upgrade and verified upstream TLS. Leave the HTTP/2 gRPC route intact. |
 | `/v1/sessions/*/events` | HTTP port `8080` with SSE buffering and compression disabled. |
 | `/v1/desktop/stream` | HTTP port `8080` with WebSocket upgrade and the original Host and Origin. |
 | Other Web and API routes | HTTP port `8080`. |
@@ -207,7 +208,9 @@ The runtime derives SQLite paths from `TALOS_HOME`; do not add
 The public origin is `https://agent.talos.love:443`. Route
 `/talos.agent.v1.*` to `https://127.0.0.1:9443` without stripping paths; this covers
 NodeControl, NodeManagement, Coordinator, peer files and resource callbacks.
-Web and API requests go to 8080. Preserve the original Host and Origin on
+Route `/talos/worker/*` to the same verified TLS listener over HTTP/1.1 Upgrade
+for personal Worker WSS registration and Connect, without changing the HTTP/2
+gRPC route. Web and API requests go to 8080. Preserve the original Host and Origin on
 the desktop WebSocket, flush SSE without buffering or compression, and preserve
 authentication metadata and bidirectional HTTP/2 streams. The host proxy samples assume a proxy on the host, not in a
 separate container where loopback points elsewhere.
@@ -230,7 +233,8 @@ HTTP transport block:
 tls_trusted_ca_certs /opt/talos-server/tls/ca.crt
 ```
 
-Keep `versions 2` and `tls_server_name talos-agent.internal` in either case.
+Keep `versions 2` and `tls_server_name talos-agent.internal` on the gRPC handle.
+The `/talos/worker/*` handle uses the same name and CA with `versions 1.1`.
 Validate with the installed binary before reloading; upgrading a shared proxy
 is a separate operation.
 

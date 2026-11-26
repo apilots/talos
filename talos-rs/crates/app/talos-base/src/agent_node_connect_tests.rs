@@ -79,19 +79,20 @@ impl Ingress {
         );
         let task = tokio::spawn(async move {
             let websocket = control.clone().websocket_routes();
-            let routes = tonic::service::Routes::new(
-                pb::agent_node_control_server::AgentNodeControlServer::new(control),
-            )
-            .add_service(
-                pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(
-                    liveness_tests::CoordinatorOutputRpc {
-                        inner: coordinators,
-                        output,
-                    },
+            let routes = super::super::super::node_control_router(
+                tonic::service::Routes::new(
+                    pb::agent_node_control_server::AgentNodeControlServer::new(control),
+                )
+                .add_service(
+                    pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(
+                        liveness_tests::CoordinatorOutputRpc {
+                            inner: coordinators,
+                            output,
+                        },
+                    ),
                 ),
-            )
-            .into_axum_router()
-            .merge(websocket);
+                websocket,
+            );
             let handle = axum_server::Handle::new();
             let signal = handle.clone();
             let server = axum_server::from_tcp_rustls(listener.into_std().unwrap(), identity)
@@ -853,5 +854,32 @@ async fn websocket_oversized_frame_closes_publication() {
             .unwrap()
             .available
     );
+    ingress.close().await;
+}
+
+#[tokio::test]
+async fn grpc_register_honors_client_timeout_while_lifecycle_lock_is_held() {
+    let fixture = Fixture::new(/* endpoint */ None).await;
+    let ingress = Ingress::new(fixture.control.clone()).await;
+    let _lifecycle = fixture
+        .publisher
+        .nodes
+        .lock_lifecycle(&fixture.credential.node_id)
+        .await;
+    let mut request = fixture.registration(&["talos"]);
+    request
+        .metadata_mut()
+        .insert("grpc-timeout", "200m".parse().unwrap());
+    let started = std::time::Instant::now();
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        ingress.client.clone().register(request),
+    )
+    .await
+    .expect("server should stop the blocked Register using the grpc-timeout")
+    .expect_err("blocked Register should not succeed");
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    assert_eq!(error.code(), tonic::Code::Cancelled);
+    assert_eq!(error.message(), "Timeout expired");
     ingress.close().await;
 }

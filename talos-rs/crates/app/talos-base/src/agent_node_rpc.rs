@@ -213,7 +213,7 @@ impl NodeRpcServer {
                     adapter,
                 ));
         }
-        let router = routes.into_axum_router().merge(websocket);
+        let router = node_control_router(routes, websocket);
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem(self.identity.0, self.identity.1)
             .await
             .map_err(|error| {
@@ -242,6 +242,50 @@ impl NodeRpcServer {
             )
         })
     }
+}
+
+fn node_control_router(
+    routes: tonic::service::Routes,
+    websocket: axum_ws::Router,
+) -> axum_ws::Router {
+    routes
+        .into_axum_router()
+        .layer(axum_ws::middleware::from_fn(honor_grpc_timeout))
+        .merge(websocket)
+}
+
+async fn honor_grpc_timeout(
+    request: axum_ws::extract::Request,
+    next: axum_ws::middleware::Next,
+) -> axum_ws::response::Response {
+    match grpc_timeout(request.headers()) {
+        Some(deadline) => match tokio::time::timeout(deadline, next.run(request)).await {
+            Ok(response) => response,
+            Err(_) => Status::cancelled("Timeout expired").into_http(),
+        },
+        None => next.run(request).await,
+    }
+}
+
+fn grpc_timeout(headers: &axum_ws::http::HeaderMap) -> Option<std::time::Duration> {
+    let value = headers.get("grpc-timeout")?.to_str().ok()?;
+    if value.is_empty() {
+        return None;
+    }
+    let (amount, unit) = value.split_at(value.len() - 1);
+    if amount.is_empty() || amount.len() > 8 {
+        return None;
+    }
+    let amount = amount.parse().ok()?;
+    Some(match unit {
+        "H" => std::time::Duration::from_secs(amount * 60 * 60),
+        "M" => std::time::Duration::from_secs(amount * 60),
+        "S" => std::time::Duration::from_secs(amount),
+        "m" => std::time::Duration::from_millis(amount),
+        "u" => std::time::Duration::from_micros(amount),
+        "n" => std::time::Duration::from_nanos(amount),
+        _ => return None,
+    })
 }
 
 #[derive(Clone)]

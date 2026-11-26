@@ -605,6 +605,16 @@ def start_ingress(stack, directory, ingress, web, rpc_port, cert, key):
             }}
         }}
     }}
+    @worker path /talos/worker/*
+    handle @worker {{
+        reverse_proxy https://127.0.0.1:{rpc_port} {{
+            flush_interval -1
+            transport http {{
+                versions 1.1
+                tls_trusted_ca_certs {cert}
+            }}
+        }}
+    }}
     handle {{
         reverse_proxy {web}
     }}

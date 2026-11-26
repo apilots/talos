@@ -13,6 +13,18 @@ agent.talos.love {
 		}
 	}
 
+	@worker path /talos/worker/*
+	handle @worker {
+		reverse_proxy https://127.0.0.1:9443 {
+			flush_interval -1
+			transport http {
+				versions 1.1
+				tls_server_name talos-agent.internal
+				tls_trust_pool file /opt/talos-server/tls/ca.crt
+			}
+		}
+	}
+
 	@sse path /v1/sessions/*/events
 
 	handle @sse {
