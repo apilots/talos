@@ -3,19 +3,31 @@ import { createPortal } from "react-dom";
 
 type TipPosition = { top: number; left: number; ready: boolean };
 
-/** Minimalist portal tooltip that floats clear of overflow-clipped scroll containers. */
+/** Minimalist portal tooltip that floats clear of the console card with hover delay. */
 export function TaloHoverTip({
   content,
+  delayMs = 150,
   children,
 }: {
   content: string;
+  delayMs?: number;
   children: ReactElement<Record<string, unknown>>;
 }) {
   const tipId = useId();
   const [open, setOpen] = useState(false);
   const anchorElRef = useRef<HTMLElement | null>(null);
   const tipRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<number | null>(null);
   const [pos, setPos] = useState<TipPosition>({ top: 0, left: 0, ready: false });
+
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  useEffect(() => clearTimer, []);
 
   useLayoutEffect(() => {
     if (!open || !anchorElRef.current || !tipRef.current) {
@@ -24,10 +36,12 @@ export function TaloHoverTip({
     }
     const anchor = anchorElRef.current.getBoundingClientRect();
     const tip = tipRef.current.getBoundingClientRect();
+    const panel = anchorElRef.current.closest("#talo-floating-console");
+    const leftEdge = panel ? panel.getBoundingClientRect().left : anchor.left;
     const gap = 8;
-    const fitsLeft = anchor.left - gap - tip.width >= 8;
+    const fitsLeft = leftEdge - gap - tip.width >= 8;
     const rawLeft = fitsLeft
-      ? anchor.left - gap - tip.width
+      ? leftEdge - gap - tip.width
       : Math.max(8, Math.min(window.innerWidth - tip.width - 8, anchor.right - tip.width));
     const rawTop = fitsLeft
       ? anchor.top + (anchor.height - tip.height) / 2
@@ -40,7 +54,10 @@ export function TaloHoverTip({
 
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
+    const close = () => {
+      clearTimer();
+      setOpen(false);
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
     };
@@ -64,19 +81,28 @@ export function TaloHoverTip({
     "aria-describedby": describedBy,
     onMouseEnter: (event: MouseEvent) => {
       anchorElRef.current = event.currentTarget as HTMLElement;
-      setOpen(true);
+      clearTimer();
+      timerRef.current = window.setTimeout(() => setOpen(true), delayMs);
       (childProps.onMouseEnter as ((e: MouseEvent) => void) | undefined)?.(event);
     },
     onMouseLeave: (event: MouseEvent) => {
+      clearTimer();
       setOpen(false);
       (childProps.onMouseLeave as ((e: MouseEvent) => void) | undefined)?.(event);
     },
+    onPointerDown: (event: PointerEvent) => {
+      clearTimer();
+      setOpen(false);
+      (childProps.onPointerDown as ((e: PointerEvent) => void) | undefined)?.(event);
+    },
     onFocus: (event: FocusEvent) => {
+      clearTimer();
       anchorElRef.current = event.currentTarget as HTMLElement;
       setOpen(true);
       (childProps.onFocus as ((e: FocusEvent) => void) | undefined)?.(event);
     },
     onBlur: (event: FocusEvent) => {
+      clearTimer();
       setOpen(false);
       (childProps.onBlur as ((e: FocusEvent) => void) | undefined)?.(event);
     },

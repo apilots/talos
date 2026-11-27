@@ -217,22 +217,23 @@ it("shows hover tips on action rows, configured idle sleep badge, automation cou
   const panel = await screen.findByRole("complementary", { name: "Manage Talo" });
 
   // Without backend duration, falls back cleanly without hardcoding 15m
-  const sleepTrigger = within(panel).getByRole("button", { name: "Auto-sleep" });
+  expect(within(panel).getByText("Auto-sleep")).toBeVisible();
   expect(panel).not.toHaveTextContent(/15m|15 分钟/);
   expect(await within(panel).findByText("2 running")).toBeVisible();
 
+  // Hovering the action button itself does not pop a tooltip; hovering the ? trigger does
   fireEvent.mouseEnter(within(panel).getByRole("button", { name: "Reset runtime" }));
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  const resetTipBtn = within(panel).getByRole("button", { name: "About Reset runtime" });
+  fireEvent.mouseEnter(resetTipBtn);
   expect(await screen.findByRole("tooltip")).toHaveTextContent("Replaces Talo’s runtime while keeping Home files and settings.");
-  fireEvent.mouseLeave(within(panel).getByRole("button", { name: "Reset runtime" }));
+  fireEvent.mouseLeave(resetTipBtn);
 
   // Update with configured idleTimeoutSeconds=600 -> shows 10m dynamically
   readManagedWorker.mockResolvedValue({ enabled: true, instance: taloInstance });
-  fireEvent.mouseEnter(sleepTrigger);
-  await act(async () => {
-    await query.invalidateQueries({ queryKey: ["talos"] });
-  });
-  expect(await within(panel).findByRole("button", { name: "Sleep after 10m idle" })).toBeVisible();
-  fireEvent.focus(within(panel).getByRole("button", { name: "Sleep after 10m idle" }));
+  await act(async () => { await query.invalidateQueries({ queryKey: ["talos"] }); });
+  expect(await within(panel).findByText("Sleep after 10m idle")).toBeVisible();
+  fireEvent.focus(within(panel).getByRole("button", { name: "Auto-sleep details" }));
   expect(await screen.findByRole("tooltip")).toHaveTextContent("Automatically sleeps after 10m without chat or desktop input");
 
   // Files tab supports cursor pagination
