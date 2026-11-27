@@ -142,7 +142,89 @@ describe("Sidebar pinned sessions", () => {
     });
   });
 
-  it("restores focus to the moved pin button after keyboard toggle", async () => {
+  it("restores focus across intermediate pending renders for non-active and running sessions", async () => {
+    for (const [status, currentPath] of [
+      ["done", "/"],
+      ["running", "/sessions/chat-1"],
+    ] as const) {
+      const chat: SidebarSessionItem = {
+        ...session("chat-1", "Compare JSON-GRPC and WebSocket", null, false),
+        status,
+      };
+      let resolvePin!: () => void;
+      const onTogglePinSession = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolvePin = resolve;
+          }),
+      );
+      const baseProps = {
+        connection: {
+          authStatus: "authenticated" as const,
+          authRole: "user" as const,
+          accountType: "Pro" as const,
+          authUsername: "user",
+          userId: "user-1",
+        },
+        currentPath,
+        onCreateProjectThread: vi.fn(),
+        onCreateThread: vi.fn(),
+        onDeleteSession: vi.fn(),
+        onLogout: vi.fn(),
+        onRemoveProject: vi.fn(),
+        onRenameProject: vi.fn(),
+        onSelectThread: vi.fn(),
+        onTogglePinSession,
+        projectGroups: [],
+      };
+      const { rerender } = render(
+        <MemoryRouter initialEntries={[currentPath]}>
+          <Sidebar {...baseProps} chats={[chat]} pinnedSessions={[]} />
+        </MemoryRouter>,
+      );
+
+      const pinButton = screen.getByRole("button", { name: "Pin Compare JSON-GRPC and WebSocket" });
+      pinButton.focus();
+      fireEvent.click(pinButton);
+
+      // Simulate SidebarContainer setting pendingPinSessionIds and recreating arrays before optimistic move.
+      rerender(
+        <MemoryRouter initialEntries={[currentPath]}>
+          <Sidebar
+            {...baseProps}
+            chats={[{ ...chat }]}
+            pendingPinSessionIds={new Set(["chat-1"])}
+            pinnedSessions={[]}
+          />
+        </MemoryRouter>,
+      );
+      expect(document.activeElement).toBe(pinButton);
+
+      rerender(
+        <MemoryRouter initialEntries={[currentPath]}>
+          <Sidebar
+            {...baseProps}
+            chats={[]}
+            pendingPinSessionIds={new Set(["chat-1"])}
+            pinnedSessions={[{ ...chat, pinned: true }]}
+          />
+        </MemoryRouter>,
+      );
+
+      resolvePin();
+      await waitFor(() => {
+        const movedButton = screen.getByRole("button", {
+          name: "Unpin Compare JSON-GRPC and WebSocket",
+        });
+        expect(document.activeElement).toBe(movedButton);
+        expect(movedButton.parentElement?.classList.contains("flex")).toBe(true);
+        expect(movedButton.parentElement?.classList.contains("hidden")).toBe(false);
+      });
+      cleanup();
+    }
+  });
+
+  it("does not steal focus if the user moved focus elsewhere before the session moves", async () => {
     const chat = session("chat-1", "Compare JSON-GRPC and WebSocket", null, false);
     let resolvePin!: () => void;
     const onTogglePinSession = vi.fn(
@@ -181,6 +263,9 @@ describe("Sidebar pinned sessions", () => {
     pinButton.focus();
     fireEvent.click(pinButton);
 
+    const newChatButton = screen.getByRole("button", { name: "New chat" });
+    newChatButton.focus();
+
     rerender(
       <MemoryRouter initialEntries={["/"]}>
         <Sidebar
@@ -209,10 +294,7 @@ describe("Sidebar pinned sessions", () => {
 
     resolvePin();
     await waitFor(() => {
-      const movedButton = screen.getByRole("button", {
-        name: "Unpin Compare JSON-GRPC and WebSocket",
-      });
-      expect(document.activeElement).toBe(movedButton);
+      expect(document.activeElement).toBe(newChatButton);
     });
   });
 });

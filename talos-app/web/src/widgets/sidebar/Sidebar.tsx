@@ -68,55 +68,66 @@ export function Sidebar({
   const [sessionPendingDelete, setSessionPendingDelete] = useState<SidebarSessionItem | null>(null);
   const [pinError, setPinError] = useState<ReturnType<typeof userVisibleError> | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
-  const pendingPinFocusRef = useRef<string | null>(null);
+  const pendingPinFocusRef = useRef<{
+    sessionId: string;
+    sourceButton: HTMLButtonElement;
+  } | null>(null);
 
   useEffect(() => {
-    const sessionId = pendingPinFocusRef.current;
-    if (!sessionId) {
+    const pending = pendingPinFocusRef.current;
+    if (!pending) {
       return;
     }
     const activeElement = document.activeElement;
-    const focusLost =
-      !activeElement ||
-      activeElement === document.body ||
-      !sidebarRef.current?.contains(activeElement);
-    if (!focusLost) {
-      pendingPinFocusRef.current = null;
+    if (pending.sourceButton.isConnected) {
+      // Retain the recovery target during intermediate renders (e.g. pending state)
+      // while focus remains on the original pin button; clear it if focus moved away.
+      if (activeElement !== pending.sourceButton) {
+        pendingPinFocusRef.current = null;
+      }
       return;
     }
-    const escapedId = typeof CSS !== "undefined" && typeof CSS.escape === "function"
-      ? CSS.escape(sessionId)
-      : sessionId.replaceAll('"', '\\"');
+    // Original button unmounted (session row moved across sections).
+    pendingPinFocusRef.current = null;
+    const focusDroppedToBody =
+      !activeElement ||
+      activeElement === document.body ||
+      activeElement === document.documentElement;
+    if (!focusDroppedToBody) {
+      return;
+    }
+    const escapedId =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(pending.sessionId)
+        : pending.sessionId.replaceAll('"', '\\"');
     const targetButton = sidebarRef.current?.querySelector<HTMLButtonElement>(
       `[data-sidebar-pin-button="${escapedId}"]`,
     );
-    if (targetButton) {
-      targetButton.focus();
-      pendingPinFocusRef.current = null;
-      return;
-    }
-    // Session moved into a collapsed project group; keep focus from jumping to body
-    // only if it was already dropped, without forcing the project open.
-    pendingPinFocusRef.current = null;
-  }, [pinnedSessions, chats, projectGroups]);
+    targetButton?.focus();
+  }, [pinnedSessions, chats, projectGroups, pendingPinSessionIds]);
 
   async function handleTogglePinSession(sessionId: string, pinned: boolean) {
     if (!onTogglePinSession || pendingPinSessionIds?.has(sessionId)) {
       return;
     }
     const active = document.activeElement;
-    if (
-      active instanceof Element &&
+    const sourceButton =
+      active instanceof HTMLButtonElement &&
       active.getAttribute("data-sidebar-pin-button") === sessionId
-    ) {
-      pendingPinFocusRef.current = sessionId;
-    } else {
-      pendingPinFocusRef.current = null;
-    }
+        ? active
+        : null;
+    pendingPinFocusRef.current = sourceButton ? { sessionId, sourceButton } : null;
     setPinError(null);
     try {
       await onTogglePinSession(sessionId, pinned);
     } catch (error) {
+      if (
+        sourceButton &&
+        pendingPinFocusRef.current?.sourceButton === sourceButton &&
+        sourceButton.isConnected
+      ) {
+        pendingPinFocusRef.current = null;
+      }
       setPinError(userVisibleError(error, t("sidebar:pinSessionFailed")));
     }
   }
