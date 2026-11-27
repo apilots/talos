@@ -695,11 +695,47 @@ fn test_product_configs_include_configured_provider_models() {
                 .map(|model| (model.id.as_str(), model.context_window))
                 .collect::<Vec<_>>(),
             vec![
-                ("deepseek-v4-pro", 1_000_000),
-                ("deepseek-v4-flash", 1_000_000),
-                ("deepseek-v4-flash-vision-exp", 1_000_000),
+                ("deepseek-flash", 1_048_576),
+                ("deepseek-v4-pro", 1_048_576),
+                ("deepseek-v4-flash", 1_048_576),
+                ("deepseek-v4-flash-vision-exp", 1_048_576),
             ]
         );
+        for provider in ["openai", "anthropic", "deepseek", "openrouter"] {
+            for model in &config.provider_config(provider).unwrap().models {
+                if model
+                    .reasoning_efforts
+                    .as_ref()
+                    .is_some_and(|efforts| efforts.contains(&ReasoningEffort::Max))
+                {
+                    model
+                        .validate_reasoning_effort(Some(ReasoningEffort::Max))
+                        .unwrap();
+                    assert!(model
+                        .selection_capabilities()
+                        .reasoning_efforts
+                        .contains(&ReasoningEffort::Max));
+                }
+            }
+        }
+        let qwen4 = config
+            .llm
+            .bailian
+            .models
+            .iter()
+            .find(|model| model.id == "qwen4-max")
+            .unwrap();
+        assert_eq!(
+            qwen4.selection_capabilities().reasoning_efforts,
+            vec![
+                ReasoningEffort::Light,
+                ReasoningEffort::High,
+                ReasoningEffort::XHigh
+            ]
+        );
+        assert!(qwen4
+            .validate_reasoning_effort(Some(ReasoningEffort::Max))
+            .is_err());
         let openrouter_models = config
             .llm
             .openrouter
@@ -726,6 +762,7 @@ fn test_product_configs_include_configured_provider_models() {
                 })
                 .collect::<Vec<_>>(),
             vec![
+                ("qwen3.8:27b", 262_144, true, ReasoningEffort::Medium),
                 ("qwen3:8b", 40_960, true, ReasoningEffort::Medium),
                 ("deepseek-r1:8b", 131_072, true, ReasoningEffort::Medium),
                 ("gpt-oss:20b", 131_072, true, ReasoningEffort::Medium),

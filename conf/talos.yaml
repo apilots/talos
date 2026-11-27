@@ -279,14 +279,95 @@ llm:
     api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
     base_url: "https://api.anthropic.com/v1"
     protocol: "messages"
+    # https://platform.claude.com/docs/en/models/overview
+    # Adaptive thinking uses output_config.effort; max remains distinct from xhigh.
     models:
+      - id: "claude-fable-5-2"
+        name: "Claude Fable 5.2"
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: "high"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
+        speed: "standard"
+        input: ["text", "image", "file"]
+        request_parameters:
+          thinking:
+            type: "adaptive"
+        cost:
+          input: 8
+          output: 40
+          cache_read: 0.2
+          cache_write: 10
+      - id: "claude-opus-5-5"
+        name: "Claude Opus 5.5"
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
+        speed: "standard"
+        input: ["text", "image", "file"]
+        request_parameters:
+          thinking:
+            type: "adaptive"
+        cost:
+          input: 4
+          output: 20
+          cache_read: 0.2
+          cache_write: 5
+      - id: "claude-opus-5"
+        name: "Claude Opus 5"
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: "high"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
+        speed: "standard"
+        input: ["text", "image", "file"]
+        request_parameters:
+          thinking:
+            type: "adaptive"
+        cost:
+          input: 5
+          output: 25
+          cache_read: 0.5
+          cache_write: 6.25
+      - id: "claude-sonnet-5-5"
+        name: "Claude Sonnet 5.5"
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: "high"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
+        speed: "standard"
+        input: ["text", "image", "file"]
+        request_parameters:
+          thinking:
+            type: "adaptive"
+        cost:
+          input: 2
+          output: 10
+          cache_read: 0.1
+          cache_write: 2.5
+      - id: "claude-haiku-5-5"
+        name: "Claude Haiku 5.5"
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
+        speed: "standard"
+        input: ["text", "image", "file"]
+        request_parameters:
+          thinking:
+            type: "adaptive"
       - id: "claude-opus-4-8"
         name: "Claude Opus 4.8"
         context_window: 1000000
         reasoning: true
         reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
         speed: "standard"
         input: ["text", "image", "file"]
+        request_parameters:
+          thinking:
+            type: "adaptive"
         cost:
           input: 0
           output: 0
@@ -297,8 +378,12 @@ llm:
         context_window: 1000000
         reasoning: true
         reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "max"]
         speed: "standard"
         input: ["text", "image", "file"]
+        request_parameters:
+          thinking:
+            type: "adaptive"
         cost:
           input: 0
           output: 0
@@ -329,12 +414,14 @@ llm:
     api_key: ${TALOS_LLM_OPENAI_API_KEY}
     base_url: "https://api.openai.com/v1"
     protocol: "responses"
+    # https://developers.openai.com/api/docs/models/all
     models:
       - id: "gpt-6.2-astra"
         name: "GPT-6.2 Astra"
         context_window: 1050000
         reasoning: true
         reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
         speed: "standard"
         input: ["text", "image", "file"]
         cost:
@@ -347,6 +434,7 @@ llm:
         context_window: 1050000
         reasoning: true
         reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
         speed: "standard"
         input: ["text", "image", "file"]
         cost:
@@ -359,6 +447,7 @@ llm:
         context_window: 1050000
         reasoning: true
         reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
         speed: "standard"
         input: ["text", "image", "file"]
         cost:
@@ -371,6 +460,7 @@ llm:
         context_window: 1050000
         reasoning: true
         reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
         speed: "standard"
         input: ["text", "image", "file"]
         cost:
@@ -378,12 +468,61 @@ llm:
           output: 0.5
           cache_read: 0.01
           cache_write: 0.125
+      - id: "gpt-6.1-sol"
+        name: "GPT-6.1 Sol"
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
+        speed: "standard"
+        input: ["text", "image", "file"]
+        cost:
+          input: 2
+          output: 10
+          cache_read: 0.1
+          cache_write: 2.5
+      - id: "gpt-6-astra"
+        name: "GPT-6 Astra"
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
+        speed: "standard"
+        input: ["text", "image", "file"]
+        cost:
+          input: 10
+          output: 50
+          cache_read: 1
+          cache_write: 12.5
+      - id: "gpt-6-sol"
+        name: "GPT-6 Sol"
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
+        speed: "standard"
+        input: ["text", "image", "file"]
+        cost:
+          input: 2
+          output: 10
+          cache_read: 0.2
+          cache_write: 2.5
   bailian:
     http_timeouts: null
     api_key: ${TALOS_LLM_BAILIAN_API_KEY}
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
     protocol: "chat"
+    # https://help.aliyun.com/zh/model-studio/text-generation-model/
+    # Qwen4 max is an xhigh compatibility alias, not a separate advertised level.
     models:
+      - id: "qwen4-max"
+        name: "Qwen4 Max"
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: "high"
+        reasoning_efforts: ["light", "high", "xhigh"]
+        speed: "standard"
+        input: ["text", "image"]
       - id: "qwen3.8-max"
         name: "Qwen 3.8 Max"
         context_window: 1000000
@@ -402,7 +541,7 @@ llm:
         input: ["text", "image"]
       - id: "qwen3.7-plus"
         name: "Qwen 3.7 Plus"
-        context_window: 991000
+        context_window: 1000000
         reasoning: true
         reasoning_effort: "medium"
         speed: "standard"
@@ -422,7 +561,7 @@ llm:
         input: ["text", "image"]
       - id: "qwen3.7-max"
         name: "Qwen 3.7 Max"
-        context_window: 991000
+        context_window: 1000000
         reasoning: true
         reasoning_effort: "medium"
         speed: "standard"
@@ -457,12 +596,22 @@ llm:
     api_key: ${TALOS_LLM_DEEPSEEK_API_KEY}
     base_url: "https://api.deepseek.com"
     protocol: "chat"
+    # https://api-docs.deepseek.com/quick_start/pricing/
     models:
-      - id: "deepseek-v4-pro"
-        name: "DeepSeek V4 Pro"
-        context_window: 1000000
+      - id: "deepseek-flash"
+        name: "DeepSeek V4.1 Flash"
+        context_window: 1048576
         reasoning: true
         reasoning_effort: "high"
+        reasoning_efforts: ["light", "high", "max"]
+        speed: "standard"
+        input: ["text", "image"]
+      - id: "deepseek-v4-pro"
+        name: "DeepSeek V4 Pro 0813"
+        context_window: 1048576
+        reasoning: true
+        reasoning_effort: "high"
+        reasoning_efforts: ["light", "high", "max"]
         speed: "standard"
         input: ["text"]
         cost:
@@ -470,23 +619,26 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
+      # Legacy Flash IDs remain accepted aliases for DeepSeek V4.1 Flash.
       - id: "deepseek-v4-flash"
-        name: "DeepSeek V4 Flash"
-        context_window: 1000000
+        name: "DeepSeek V4.1 Flash (Legacy V4 ID)"
+        context_window: 1048576
         reasoning: true
         reasoning_effort: "high"
+        reasoning_efforts: ["light", "high", "max"]
         speed: "standard"
-        input: ["text"]
+        input: ["text", "image"]
         cost:
           input: 0
           output: 0
           cache_read: 0
           cache_write: 0
       - id: "deepseek-v4-flash-vision-exp"
-        name: "DeepSeek V4 Flash Vision (Experimental)"
-        context_window: 1000000
+        name: "DeepSeek V4.1 Flash (Legacy Vision ID)"
+        context_window: 1048576
         reasoning: true
         reasoning_effort: "high"
+        reasoning_efforts: ["light", "high", "max"]
         speed: "standard"
         input: ["text", "image"]
         cost:
@@ -499,7 +651,35 @@ llm:
     api_key: ${TALOS_LLM_OPENROUTER_API_KEY}
     base_url: "https://openrouter.ai/api/v1"
     protocol: "chat"
+    # https://openrouter.ai/api/v1/models
+    # Legacy free routes require an availability check before selection.
     models:
+      - id: "openai/gpt-6.2-astra"
+        name: "GPT-6.2 Astra"
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
+        speed: "standard"
+        input: ["text", "image", "file"]
+        cost:
+          input: 8
+          output: 40
+          cache_read: 0.4
+          cache_write: 10
+      - id: "openai/gpt-6.2-sol"
+        name: "GPT-6.2 Sol"
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: "medium"
+        reasoning_efforts: ["light", "medium", "high", "xhigh", "max"]
+        speed: "standard"
+        input: ["text", "image", "file"]
+        cost:
+          input: 2
+          output: 10
+          cache_read: 0.1
+          cache_write: 2.5
       - id: "openai/gpt-oss-120b:free"
         name: "GPT OSS 120B Free"
         context_window: 131072
@@ -520,9 +700,9 @@ llm:
         speed: "standard"
         input: ["text"]
         cost:
-          input: 0.029
-          output: 0.14
-          cache_read: 0
+          input: 0.03
+          output: 0.13
+          cache_read: 0.03
           cache_write: 0
       - id: "tencent/hy3:free"
         name: "Tencent HY3 Free"
@@ -544,9 +724,9 @@ llm:
         speed: "standard"
         input: ["text"]
         cost:
-          input: 0
-          output: 0
-          cache_read: 0
+          input: 0.59
+          output: 0.79
+          cache_read: 0.295
           cache_write: 0
       - id: "meta-llama/llama-3.3-70b-instruct:free"
         name: "Llama 3.3 70B Instruct Free"
@@ -564,7 +744,16 @@ llm:
     http_timeouts: null
     base_url: "http://localhost:11434"
     protocol: "chat"
+    # https://ollama.com/library/qwen3.8
     models:
+      - id: "qwen3.8:27b"
+        name: "Qwen3.8 27B"
+        context_window: 262144
+        reasoning: true
+        reasoning_effort: "medium"
+        reasoning_efforts: []
+        speed: "standard"
+        input: ["text", "image"]
       - id: "qwen3:8b"
         name: "Qwen3 8B"
         context_window: 40960
