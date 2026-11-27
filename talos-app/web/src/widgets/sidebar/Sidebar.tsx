@@ -82,12 +82,15 @@ export function Sidebar({
     if (pending.sourceButton.isConnected) {
       // Retain the recovery target during intermediate renders (e.g. pending state)
       // while focus remains on the original pin button; clear it if focus moved away.
-      if (activeElement !== pending.sourceButton) {
+      if (
+        activeElement !== pending.sourceButton ||
+        (pendingPinSessionIds && !pendingPinSessionIds.has(pending.sessionId))
+      ) {
         pendingPinFocusRef.current = null;
       }
       return;
     }
-    // Original button unmounted (session row moved across sections).
+    // Keep tracking a moved button until settlement so rollback can restore focus again.
     pendingPinFocusRef.current = null;
     const focusDroppedToBody =
       !activeElement ||
@@ -100,10 +103,28 @@ export function Sidebar({
       typeof CSS !== "undefined" && typeof CSS.escape === "function"
         ? CSS.escape(pending.sessionId)
         : pending.sessionId.replaceAll('"', '\\"');
-    const targetButton = sidebarRef.current?.querySelector<HTMLButtonElement>(
+    const pinButton = sidebarRef.current?.querySelector<HTMLButtonElement>(
       `[data-sidebar-pin-button="${escapedId}"]`,
     );
+    const project = projectGroups.find((group) =>
+      group.sessions.some((session) => session.id === pending.sessionId),
+    );
+    const projectButton = project &&
+      Array.from(
+        sidebarRef.current?.querySelectorAll<HTMLButtonElement>("[data-sidebar-project-id]") ?? [],
+      ).find((button) => button.dataset.sidebarProjectId === project.project.id);
+    const section = project
+      ? "projects"
+      : chats.some((session) => session.id === pending.sessionId) ? "chats" : null;
+    // A collapsed destination has no Session button. Recover to its visible parent.
+    const targetButton = pinButton || projectButton ||
+      (section
+        ? sidebarRef.current?.querySelector<HTMLButtonElement>(`[data-sidebar-section="${section}"] > button`)
+        : null);
     targetButton?.focus();
+    if (targetButton && pendingPinSessionIds?.has(pending.sessionId)) {
+      pendingPinFocusRef.current = { sessionId: pending.sessionId, sourceButton: targetButton };
+    }
   }, [pinnedSessions, chats, projectGroups, pendingPinSessionIds]);
 
   async function handleTogglePinSession(sessionId: string, pinned: boolean) {

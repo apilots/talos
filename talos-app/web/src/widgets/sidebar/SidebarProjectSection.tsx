@@ -86,7 +86,7 @@ export function SidebarProjectSection({
   }
 
   return (
-    <section className="mt-1">
+    <section className="mt-1" data-sidebar-section="projects">
       <SidebarSectionHeader label={t("projects")} onToggle={() => setOpen((value) => !value)} open={open} />
       {open ? (
         <div className="mt-1 space-y-1">
@@ -198,6 +198,7 @@ function ProjectGroup({
       >
         <button
           className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+          data-sidebar-project-id={group.project.id}
           onClick={onToggleProject}
           type="button"
         >

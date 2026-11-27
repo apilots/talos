@@ -362,6 +362,7 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                           'talos-e2e/scenarios/24_automation/01_session_automation.sh'):
                 result.targets['server'].add(AUTOMATION_TARGET)
             elif path in ('talos-e2e/scripts/automation_web.py',
+                          'talos-e2e/scripts/session_pinning.py',
                           'talos-e2e/scenarios/24_automation/02_web_entry.sh'):
                 result.targets['webui'].add(AUTOMATION_WEB_TARGET)
             elif path in ('talos-e2e/scripts/automation_tui.py',

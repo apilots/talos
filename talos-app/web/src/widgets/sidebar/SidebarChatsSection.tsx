@@ -27,7 +27,7 @@ export function SidebarChatsSection({
   const visibleSessions = expanded ? sessions : sessions.slice(0, 10);
 
   return (
-    <section className="mt-6">
+    <section className="mt-6" data-sidebar-section="chats">
       <SidebarSectionHeader label={t("threads")} onToggle={() => setOpen((value) => !value)} open={open} />
       {open ? (
         <div className="mt-1 space-y-1">

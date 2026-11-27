@@ -18,6 +18,7 @@ import yaml
 from playwright.sync_api import expect, sync_playwright
 
 from automation_model_fixture import assert_selection, prepare
+from session_pinning import verify_session_pinning
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.environ['TALOS_SCENARIO_REPORT_DIR'])
@@ -140,12 +141,15 @@ def home_retry(page, origin, database, fixture, project):
         page.get_by_role('button', name='Send', exact=True).click()
         page.wait_for_url('**/sessions/' + submissions[0][1]['sessionId'])
         assert len(submissions) == 2 and submissions[0] == submissions[1], submissions
+        pinning = verify_session_pinning(
+            page, origin, database, submissions[0][1]['sessionId'], project['name'], REPORT,
+        )
         (fixture / f'{marker}.release-busy').touch()
         expect(page.get_by_text('Ordinary User Turn finished', exact=True)).to_be_visible(timeout=30000)
         assert len(user_inputs(database, submissions[0][1]['sessionId'])) == 1
         page.screenshot(path=str(REPORT / 'home-http-restored-retry.png'), full_page=True)
         print('CASE home_http_restored_retry PASS origin=HTTP response=lost reload=settings metadata=partialFailure,retry retry=sameRequest admitted=once')
-        return {'sessionId': submissions[0][1]['sessionId'], 'submissions': 2, 'admitted': 1, 'restoredFiles': 2, 'partialMetadataRecovery': True}
+        return {'sessionId': submissions[0][1]['sessionId'], 'submissions': 2, 'admitted': 1, 'restoredFiles': 2, 'partialMetadataRecovery': True, 'pinning': pinning}
     finally:
         (fixture / f'{marker}.release-busy').touch()
         page.unroute('**/v1/turns/start', admit)
