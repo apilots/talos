@@ -236,6 +236,13 @@ it reuses their harness. LibreOffice and CJK fonts are installed only for scenar
 that declare `soffice`, rather than every Web/Desktop job. Unknown shared
 infrastructure remains conservative.
 
+Local document-preview acceptance also requires CJK fonts visible to the actual
+headless converter. On macOS, a Fontconfig override alone does not configure
+LibreOffice's native font loader; install an appropriate CJK font through the
+OS or in a task-private LibreOffice bundle's `Contents/Resources/fonts/truetype`.
+Check the exported PDF's actual glyphs as well as extracted text: `/ActualText`
+can hide missing glyphs in some extractors. Keep the exact Chinese assertions.
+
 Computer live media teardown is covered separately by the Browser Worker
 acceptance and the owning ComputerDesktop component tests; this lightweight case
 does not claim a live remote desktop connection.

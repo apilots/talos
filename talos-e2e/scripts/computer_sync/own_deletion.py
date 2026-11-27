@@ -2,7 +2,7 @@
 import json
 import uuid
 from cluster import Desktop, REPORT, data, http, require, wait_for
-from turn_helpers import submit, settled
+from turn_helpers import submit, settled, comparable_history
 
 
 def run(cluster):
@@ -11,7 +11,7 @@ def run(cluster):
     before = str(uuid.uuid4())
     first = submit(cluster, 'Desktop-A', old, before, 'Reply exactly BEFORE_OWN_REGISTRATION_REMOVAL.')
     before_history = wait_for(lambda: settled(cluster, 'Desktop-A', before, first['turnId']), 'Own Desktop pre-removal task', seconds=180)
-    wait_for(lambda: cluster.history('Desktop-B', before)['data'] == before_history, 'Own Desktop historical binding shared')
+    wait_for(lambda: comparable_history(cluster.history('Desktop-B', before)['data']) == comparable_history(before_history), 'Own Desktop historical binding shared')
 
     cluster.desktop('Desktop-A', 'computer/delete', {'nodeId': old})
     # Read private state before any UI/identity/status request can repair it.
@@ -46,17 +46,17 @@ def run(cluster):
     require(fresh not in (old, 'embedded'), 'Explicit reconnect reused a removed UUID')
     a['node'] = fresh
     cluster.desktop('Desktop-A', 'sync/status')
-    wait_for(lambda: cluster.history('Desktop-B', after)['data'] == after_history, 'New local work shared only after fresh enrollment')
+    wait_for(lambda: comparable_history(cluster.history('Desktop-B', after)['data']) == comparable_history(after_history), 'New local work shared only after fresh enrollment')
     for host in ('Desktop-A', 'Desktop-B', 'Desktop-C'):
         wait_for(lambda host=host: bool(cluster.history(host, before)['data']), host + ' old history retained')
         require(cluster.desktop(host, 'session/get', {'sessionId': before})['session']['nodeId'] == old, host + ' rewrote historical Computer binding')
-        wait_for(lambda host=host: cluster.history(host, after)['data'] == after_history, host + ' fresh history received')
+        wait_for(lambda host=host: comparable_history(cluster.history(host, after)['data']) == comparable_history(after_history), host + ' fresh history received')
         require(cluster.desktop(host, 'session/get', {'sessionId': after})['session']['nodeId'] == fresh, host + ' new work bound to removed UUID')
         require(cluster.desktop(host, 'project/read', {'project_id': project['project_id']})['project']['nodeId'] == fresh, host + ' new Project bound to removed UUID')
     print('CASE sync_own_deletion_new_work_uses_fresh_uuid_and_keeps_old_history_binding PASS', flush=True)
 
-    # Now delete A from B and do not poll A. Its Sync subscription must persist
-    # removal independently, including when the tombstone arrived before UI reads.
+    # Delete A from B without polling A. Background directory maintenance must
+    # persist removal independently of UI reads and preserve document Sync.
     cluster.desktop('Desktop-B', 'computer/delete', {'nodeId': fresh})
     wait_for(lambda: cluster.database(a['home'], 'SELECT finalized FROM local_computer_retirements WHERE node_id = ?', (fresh,)) == [(1,)],
              'Own imported deletion retired without source UI polling')
@@ -71,8 +71,8 @@ def run(cluster):
     for host in ('Desktop-A', 'Desktop-B', 'Desktop-C'):
         ids = {node['nodeId'] for node in cluster.desktop(host, 'computer/list', {'limit': 100})['data']}
         require(not {old, fresh}.intersection(ids), host + ' resurrected own removed registration')
-        require(cluster.history(host, before)['data'] == before_history, host + ' lost original local history')
-        require(cluster.history(host, after)['data'] == after_history, host + ' lost post-removal history')
+        require(comparable_history(cluster.history(host, before)['data']) == comparable_history(before_history), host + ' lost original local history')
+        require(comparable_history(cluster.history(host, after)['data']) == comparable_history(after_history), host + ' lost post-removal history')
     (REPORT / 'own-deletion-summary.json').write_text(json.dumps({'oldUuid': old, 'freshUuid': fresh,
         'sdkRemovalPersistedBeforePolling': True, 'newLocalExecutionRetained': True,
         'newWorkBoundOnlyToFreshEnrollment': True, 'importedOwnDeletionWithoutPolling': True,

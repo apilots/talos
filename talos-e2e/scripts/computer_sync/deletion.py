@@ -6,7 +6,7 @@ import uuid
 import yaml
 
 from cluster import Desktop, REPORT, ROOT, data, http, require, wait_for
-from turn_helpers import submit, settled
+from turn_helpers import submit, settled, comparable_history
 
 
 def run(cluster):
@@ -26,14 +26,14 @@ def run(cluster):
     history = wait_for(lambda: settled(cluster, 'Desktop-A', session, first['turnId']),
                        'Real task settled before registration deletion', seconds=180)
     for host in ('Desktop-B', 'G'):
-        wait_for(lambda host=host: cluster.history(host, session)['data'] == history,
+        wait_for(lambda host=host: comparable_history(cluster.history(host, session)['data']) == comparable_history(history),
                  host + ' identical pre-deletion history')
     files = list(worker['home'].rglob(filename))
     require(len(files) == 1 and files[0].read_text().strip() == marker, 'Real Worker proof file missing')
     old_credential = (worker['home'] / 'conf/node.credential').read_text().strip()
     print('CASE sync_deletion_real_project_session_and_worker_file PASS', flush=True)
 
-    # Leave B with its real pre-deletion CRDT/database state, then remove through A.
+    # Disable document Sync on B; its account directory must still track Server deletion.
     cluster.desktop('Desktop-B', 'sync/disable')
     b = cluster.desktops['Desktop-B']
     require(cluster.database(b['home'], 'SELECT node_id FROM agent_nodes WHERE node_id = ?', (node,)),
@@ -44,24 +44,26 @@ def run(cluster):
     removed = cluster.desktop('Desktop-A', 'computer/delete', {'nodeId': node})
     require(removed == {'nodeId': node}, 'Forwarded deletion returned another identity')
 
-    def removed_from(home):
-        tombstone = cluster.database(home, 'SELECT owner_user_id FROM computer_deletions WHERE node_id = ?', (node,))
-        registered = cluster.database(home, 'SELECT node_id FROM agent_nodes WHERE node_id = ?', (node,))
+    def authoritative_removed():
+        tombstone = cluster.database(cluster.server_home,
+            'SELECT owner_user_id FROM computer_deletions WHERE node_id = ?', (node,))
+        registered = cluster.database(cluster.server_home,
+            'SELECT node_id FROM agent_nodes WHERE node_id = ?', (node,))
         return tombstone == [(cluster.users['alice']['user']['user_id'],)] and not registered
 
-    a = cluster.desktops['Desktop-A']
-    wait_for(lambda: removed_from(cluster.server_home), 'Authoritative owned deletion')
-    # Observe the database before calling computer/list: list must not reconcile
-    # against G and accidentally stand in for actual Sync materialization.
-    wait_for(lambda: removed_from(a['home']), 'Deletion imported by A over WSS')
-    require(cluster.database(b['home'], 'SELECT node_id FROM agent_nodes WHERE node_id = ?', (node,)),
-            'Disabled B unexpectedly lost its stale registration before Sync resumed')
+    def directory_removed(host):
+        return node not in {entry['nodeId'] for entry in
+            cluster.desktop(host, 'computer/list', {'limit': 100})['data']}
+
+    wait_for(authoritative_removed, 'Authoritative owned deletion')
+    for host in ('Desktop-A', 'Desktop-B'):
+        wait_for(lambda host=host: directory_removed(host),
+                 host + ' account directory converged independently of document Sync')
     cluster.desktop('Desktop-B', 'sync/enable', {'claimLocalHistory': False})
-    wait_for(lambda: removed_from(b['home']), 'Stale B converged through WSS deletion')
-    print('CASE sync_deletion_offline_replica_catches_up_without_resurrection PASS', flush=True)
+    print('CASE deletion_directory_converges_with_document_sync_disabled PASS', flush=True)
 
     def assert_retained(host):
-        require(cluster.history(host, session)['data'] == history, host + ' lost or rewrote Session history')
+        require(comparable_history(cluster.history(host, session)['data']) == comparable_history(history), host + ' lost or rewrote Session history')
         identity = cluster.desktop(host, 'session/get', {'sessionId': session})['session']
         require(identity['nodeId'] == node and identity['projectId'] == project['project_id'],
                 host + ' reassigned an immutable historical binding')
@@ -91,12 +93,12 @@ def run(cluster):
         }, desktop['token'])
         require('result' not in denied_turn and denied_turn.get('error', {}).get('code') == 'resourceExpired',
                 f'{host} removed Worker execution returned {denied_turn!r}')
-        require(cluster.history(host, session)['data'] == history,
+        require(comparable_history(cluster.history(host, session)['data']) == comparable_history(history),
                 host + ' rejected execution changed retained Session history')
 
     for host in ('Desktop-A', 'Desktop-B'):
         assert_retained(host)
-    require(cluster.history('G', session)['data'] == history, 'G lost history after registration deletion')
+    require(comparable_history(cluster.history('G', session)['data']) == comparable_history(history), 'G lost history after registration deletion')
     require(files[0].read_text().strip() == marker, 'Deletion removed Workspace data')
 
     # Restart using exactly the original UUID/config/credential, never a fabricated
@@ -122,14 +124,13 @@ def run(cluster):
     for host, desktop in cluster.desktops.items():
         wait_for(lambda host=host: cluster.desktop(host, 'sync/status')['connection'] == 'connected',
                  host + ' WSS reconnected after restart')
-        require(removed_from(desktop['home']), host + ' resurrected registration after restart')
+        require(directory_removed(host), host + ' resurrected registration after restart')
         assert_retained(host)
-    require(removed_from(cluster.server_home), 'G resurrected the removed registration')
-    require(cluster.history('G', session)['data'] == history, 'G lost history after hub restart')
+    require(authoritative_removed(), 'G resurrected the removed registration')
+    require(comparable_history(cluster.history('G', session)['data']) == comparable_history(history), 'G lost history after hub restart')
     print('CASE sync_deletion_management_and_hub_restart_preserve_history PASS', flush=True)
 
-    # A new database must import retained history even though its Computer is
-    # already a tombstone. This proves dependency resolution on a late joiner.
+    # A fresh host imports historical documents without recreating their deleted Computer.
     home = cluster.root / 'Desktop-C'
     cluster.config(home, {})
     path = home / 'conf/talos.yaml'
@@ -142,8 +143,8 @@ def run(cluster):
     cluster.desktops['Desktop-C'] = {'host': cold, 'home': home, 'token': None, 'node': None}
     token = cold.login('alice')['access_token']
     cluster.desktops['Desktop-C'].update(token=token, node=cluster.call(cold, token, 'sync/status')['localComputerId'])
-    wait_for(lambda: removed_from(home), 'Fresh management host imported tombstone')
-    wait_for(lambda: cluster.history('Desktop-C', session)['data'] == history,
+    wait_for(lambda: directory_removed('Desktop-C'), 'Fresh management directory excludes deleted Computer')
+    wait_for(lambda: comparable_history(cluster.history('Desktop-C', session)['data']) == comparable_history(history),
              'Fresh host imported historical Session after Computer deletion')
     assert_retained('Desktop-C')
     require(files[0].read_text().strip() == marker, 'Restart or late import removed Workspace data')
@@ -151,7 +152,7 @@ def run(cluster):
     (REPORT / 'deletion-summary.json').write_text(json.dumps({
         'removedComputerId': node, 'sessionId': session, 'projectId': project['project_id'],
         'managementHosts': ['G', *cluster.desktops], 'historyEntries': len(history),
-        'staleReplicaCatchup': True, 'oldCredentialRejected': True, 'workerRestartRejected': True,
+        'directoryConvergedWithSyncDisabled': True, 'oldCredentialRejected': True, 'workerRestartRejected': True,
         'hubAndManagementRestart': True, 'freshHostHistoricalImport': True,
         'workspaceFileRetained': True}, indent=2))
     print('CASE sync_deletion_late_joiner_imports_history_without_old_computer PASS', flush=True)
