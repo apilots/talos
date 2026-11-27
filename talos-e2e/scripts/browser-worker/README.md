@@ -141,7 +141,7 @@ last, after local regression checks, independent review repairs and final visual
 acceptance. Follow the real-model selection contract in
 `spec/feat-047-browser-computer-desktop/design.md`, section 11: choose the configured
 image-capable DeepSeek model and the lowest supported reasoning setting in the
-normal product model selector (`deepseek-v4-flash-vision-exp`, `light`; verify its
+normal product model selector (`deepseek-flash`, `light`; verify its
 provider mapping is `low`). Record both the execution Worker's selection and the
 management Server's independent `agent.inner_model` selection; changing the
 Session model does not change the auxiliary title/memory model. Keep synthetic

@@ -22,6 +22,27 @@ echo "CASE health_check PASS status=${status}"
 models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
 log_case_json "models_list" "{}" "${models_json}"
 models_data_json="$(api_data_json "${models_json}")"
+MODELS_DATA_JSON="${models_data_json}" CONFIG_PATH="${TALOS_HOME}/conf/talos.yaml" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+import yaml
+
+payload = json.loads(os.environ["MODELS_DATA_JSON"])
+config = yaml.safe_load(Path(os.environ["CONFIG_PATH"]).read_text())
+models = payload["models"]
+expected = {"provider": config["llm"]["provider"], "id": config["llm"]["model"]}
+assert payload["defaultModelSelection"]["modelRef"] == expected, payload
+assert any(model["provider"] == expected["provider"] and model["id"] == expected["id"] for model in models), expected
+inner = config["agent"]["inner_model"]
+if inner is not None:
+    assert any(model["provider"] == inner["provider"] and model["id"] == inner["id"] for model in models), inner
+assert {model["id"] for model in models if model["provider"] == "deepseek"} == {
+    model["id"] for model in config["llm"]["deepseek"]["models"]
+}, models
+print(f"CASE default_model_selection PASS provider={expected['provider']} model={expected['id']} inner_model={inner['id'] if inner else None}")
+PY
 model_count="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", []); print(len(data))' <<< "${models_data_json}")"
 first_model_name="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", []); print((data[0].get("name") if data else ""))' <<< "${models_data_json}")"
 first_model_context_window="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", []); print((data[0].get("context_window") if data else 0))' <<< "${models_data_json}")"

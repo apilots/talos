@@ -315,7 +315,7 @@ def lease_expiry(cluster):
 def parity(cluster):
     token = cluster.users['alice']['access_token']
     models = data(http(cluster.url + '/v1/models?nodeId=' + cluster.nodes['alice-a']['node_id'], token=token))['models']
-    image_model = os.environ.get('TALOS_E2E_IMAGE_MODEL', 'deepseek-v4-flash-vision-exp')
+    image_model = os.environ.get('TALOS_E2E_IMAGE_MODEL', 'deepseek-flash')
     cluster.model = next(model for model in models if model['id'] == image_model)
     marker = 'attached_' + uuid.uuid4().hex
     attachment = ROOT / 'talos-e2e/fixtures/multi-node-parity-blue.png'

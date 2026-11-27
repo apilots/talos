@@ -304,8 +304,11 @@ remains in force when the selection is None/Off; those profiles use the provider
 default effort rather than disabling thinking. Qwen4 exposes `light`, `high`, and `xhigh`;
 its documented `max` compatibility alias is not advertised as another level.
 Ollama Qwen3.8 uses provider-default thinking until local model metadata confirms
-its accepted effort names. Legacy DeepSeek Flash IDs remain accepted aliases
-for DeepSeek V4.1 Flash; the selected default is preserved. OpenRouter free routes
+its accepted effort names. Bundled DeepSeek catalogs list `deepseek-flash`
+(V4.1 Flash) and `deepseek-v4-pro` (V4 Pro), with Flash selected for both the
+main and inner model. Managed upgrades preserve operator-owned saved catalogs
+and selections, including the legacy Flash aliases still accepted upstream;
+they do not forcibly migrate or prune those entries. OpenRouter free routes
 may change availability independently of the bundled catalog; check the provider
 model list before selecting a legacy route.
 

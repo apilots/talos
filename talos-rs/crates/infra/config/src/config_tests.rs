@@ -697,10 +697,20 @@ fn test_product_configs_include_configured_provider_models() {
             vec![
                 ("deepseek-flash", 1_048_576),
                 ("deepseek-v4-pro", 1_048_576),
-                ("deepseek-v4-flash", 1_048_576),
-                ("deepseek-v4-flash-vision-exp", 1_048_576),
             ]
         );
+        assert_eq!(config.llm.model, "deepseek-flash", "{name}");
+        assert_eq!(
+            config.agent.inner_model,
+            Some(ModelRef {
+                provider: "deepseek".to_owned(),
+                id: "deepseek-flash".to_owned()
+            }),
+            "{name}"
+        );
+        config
+            .validate_runtime()
+            .expect("bundled selections must resolve in their catalog");
         for provider in ["openai", "anthropic", "deepseek", "openrouter"] {
             for model in &config.provider_config(provider).unwrap().models {
                 if model

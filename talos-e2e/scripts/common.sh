@@ -96,7 +96,7 @@ load_env() {
 
 select_e2e_model_from_json() {
   local models_json="$1"
-  local preferred_models="${TALOS_E2E_PREFERRED_MODELS:-deepseek-v4-flash}"
+  local preferred_models="${TALOS_E2E_PREFERRED_MODELS:-deepseek-flash}"
 
   MODELS_JSON="${models_json}" PREFERRED_MODELS="${preferred_models}" python3 - <<'PY'
 import json
@@ -166,7 +166,7 @@ PY
 
 select_e2e_model_from_cli_json() {
   local models_json="$1"
-  local preferred_models="${TALOS_E2E_PREFERRED_MODELS:-deepseek-v4-flash}"
+  local preferred_models="${TALOS_E2E_PREFERRED_MODELS:-deepseek-flash}"
 
   MODELS_JSON="${models_json}" PREFERRED_MODELS="${preferred_models}" python3 - <<'PY'
 import json

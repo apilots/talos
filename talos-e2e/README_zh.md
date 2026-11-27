@@ -101,7 +101,7 @@ python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
 使用独立 HOME 和端口。通过 `TALOS_CLOUD_SERVER_BIN` 指定 fixture 可执行文件，或将
 `cloud-server` 放入 `PATH`；不需要 Cloud 源码仓库。还需要 `protoc`、Python `grpcio` /
 `protobuf` / `PyYAML`；执行场景还需要 `.env` 中的真实模型密钥。
-附件场景默认使用 `deepseek-v4-flash-vision-exp`，可用 `TALOS_E2E_IMAGE_MODEL` 指定已配置、可访问的视觉模型。
+附件场景默认使用 `deepseek-flash`，可用 `TALOS_E2E_IMAGE_MODEL` 指定已配置、可访问的视觉模型。
 节点创建和状态修改走公开 RPC，数据库仅用于只读验收。具体场景见
 [多节点验收说明](scenarios/17_multi_node/README.md)。已知缺陷也必须报告 FAIL，不能跳过。
 

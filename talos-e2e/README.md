@@ -393,7 +393,7 @@ and three Talos Workers in isolated homes. Set `TALOS_CLOUD_SERVER_BIN` to the
 fixture executable or make `cloud-server` available on `PATH`; no Cloud source
 checkout is required. It also needs `protoc`, Python `grpcio`, `protobuf` and
 `PyYAML`. Execution scenarios also require a real provider key in `.env`. The attachment
-scenario uses `deepseek-v4-flash-vision-exp` by default; `TALOS_E2E_IMAGE_MODEL`
+scenario uses `deepseek-flash` by default; `TALOS_E2E_IMAGE_MODEL`
 can select another configured, accessible vision model.
 Management uses the existing protobuf descriptors and public RPCs; SQLite is
 opened read-only for persistence assertions. No fake Provider or direct database
@@ -515,7 +515,7 @@ under `scenarios/12_files/.tmp/`; the scenario EXIT trap stops the process and
 removes the directory, including on failure. No Docker or MinIO client is needed.
 
 `06_tools/public_deepseek_recovery` uses the dev YAML and the real public
-`https://api.deepseek.com` `deepseek-v4-flash` model. It requires
+`https://api.deepseek.com` `deepseek-flash` model. It requires
 `TALOS_LLM_DEEPSEEK_API_KEY`, performs a successful Bash call, a deliberate Read
 failure, and a recovery Bash write, then continues the same Session with another
 tool call. It checks streamed events, canonical call/result identities, terminal

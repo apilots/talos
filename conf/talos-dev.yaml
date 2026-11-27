@@ -54,7 +54,7 @@ agent:
   name: talos
   inner_model:
     provider: deepseek
-    id: deepseek-v4-flash
+    id: deepseek-flash
   kernel:
     tool_parallelism: 3
     tool_result_max_bytes: 65536
@@ -236,7 +236,7 @@ channels:
     token: null
 llm:
   provider: deepseek
-  model: deepseek-v4-flash
+  model: deepseek-flash
   # Optional custom Provider example. Comments only; this endpoint is not usable.
   # Keep llm.provider, llm.model and agent.inner_model unchanged until configured.
   # custom_providers:
@@ -754,42 +754,6 @@ llm:
       speed: standard
       input:
       - text
-      cost:
-        input: 0
-        output: 0
-        cache_read: 0
-        cache_write: 0
-    - id: deepseek-v4-flash
-      name: DeepSeek V4.1 Flash (Legacy V4 ID)
-      context_window: 1048576
-      reasoning: true
-      reasoning_effort: high
-      reasoning_efforts:
-      - light
-      - high
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      cost:
-        input: 0
-        output: 0
-        cache_read: 0
-        cache_write: 0
-    - id: deepseek-v4-flash-vision-exp
-      name: DeepSeek V4.1 Flash (Legacy Vision ID)
-      context_window: 1048576
-      reasoning: true
-      reasoning_effort: high
-      reasoning_efforts:
-      - light
-      - high
-      - max
-      speed: standard
-      input:
-      - text
-      - image
       cost:
         input: 0
         output: 0
