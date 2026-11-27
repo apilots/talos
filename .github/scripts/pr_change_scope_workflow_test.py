@@ -303,7 +303,10 @@ class WorkflowTests(unittest.TestCase):
 
     def test_harness_uses_existing_owner_import_path(self):
         ci_run.execute(dict(kind='harness'), self.root / 'cache')
-        self.assertEqual(len(self.calls), 3)
+        commands = [command for command, _ in self.calls]
+        self.assertIn((ci_run.sys.executable, '-m', 'unittest', 'discover', '-s',
+                       'talos-bench/runtime', '-p', 'test_*.py', '-v'), commands)
+        self.assertIn((ci_run.sys.executable, 'talos-bench/runtime/arena_smoke.py'), commands)
         for _, kwargs in self.calls:
             self.assertEqual(kwargs['env']['PYTHONPATH'].split(os.pathsep)[0],
                              str(self.root / 'talos-e2e/scripts'))

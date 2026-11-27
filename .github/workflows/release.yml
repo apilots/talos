@@ -246,6 +246,10 @@ jobs:
       - validate-source
       - quality
     runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container_image }}
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 45
     env:
       VALIDATED_LOCK_SHA256: ${{ needs.quality.outputs.lock_sha256 }}
@@ -278,6 +282,7 @@ jobs:
             install_arch: amd64
             artifact_name: talos-tui-linux-amd64
             runner: ubuntu-24.04
+            container_image: rust:bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6
             build_target: tui
             product_subdir: tui
           - name: TUI linux-arm64
@@ -285,6 +290,7 @@ jobs:
             install_arch: arm64
             artifact_name: talos-tui-linux-arm64
             runner: ubuntu-24.04-arm
+            container_image: rust:bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6
             build_target: tui
             product_subdir: tui
           - name: TUI macOS ARM64
@@ -311,10 +317,13 @@ jobs:
       - name: Restore the validated Cargo lockfile
         run: cp .release-source/Cargo.lock talos-rs/Cargo.lock
 
-      - name: Install Protocol Buffer compiler
+      - name: Install native build dependencies
         run: |
           if [ "${RUNNER_OS}" = "macOS" ]; then
             brew install protobuf
+          elif [ "$(id -u)" = 0 ]; then
+            apt-get update
+            apt-get install -y --no-install-recommends protobuf-compiler python3 pkg-config libssl-dev
           else
             sudo apt-get update
             sudo apt-get install -y protobuf-compiler
@@ -331,6 +340,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: talos-rs
+          key: ${{ matrix.container_image }}
 
       - name: Install pnpm
         if: ${{ matrix.build_target != 'tui' }}

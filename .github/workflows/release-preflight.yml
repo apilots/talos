@@ -42,10 +42,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {platform: linux, arch: amd64, runner: ubuntu-24.04}
-          - {platform: linux, arch: arm64, runner: ubuntu-24.04-arm}
+          - {platform: linux, arch: amd64, runner: ubuntu-24.04, container_image: 'rust:bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6'}
+          - {platform: linux, arch: arm64, runner: ubuntu-24.04-arm, container_image: 'rust:bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6'}
           - {platform: macos, arch: arm64, runner: macos-26}
     runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container_image }}
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -59,15 +63,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RELEASE_RUST_VERSION }}
-      - name: Install Protocol Buffer compiler
+      - name: Install native build dependencies
         run: |
-          if [ "$RUNNER_OS" = macOS ]; then brew install protobuf; else
+          if [ "$RUNNER_OS" = macOS ]; then brew install protobuf;
+          elif [ "$(id -u)" = 0 ]; then
+            apt-get update
+            apt-get install -y --no-install-recommends protobuf-compiler python3 pkg-config libssl-dev
+          else
             sudo apt-get update
             sudo apt-get install -y protobuf-compiler
           fi
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: talos-rs
+          key: ${{ matrix.container_image }}
       - name: Fetch the committed dependency graph
         run: cargo fetch --locked --manifest-path talos-rs/Cargo.toml
       - name: Build the preflight TUI product once

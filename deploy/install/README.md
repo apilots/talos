@@ -6,6 +6,19 @@ Current TUI releases support Linux AMD64/ARM64 and macOS Apple Silicon (ARM64).
 macOS Intel builds and native CI installation are disabled. The installer can
 select older Intel bundles by explicit version when those assets exist.
 
+Portable Linux TUI/CLI builds use one package per architecture, with a Debian 12
+equivalent userspace baseline: glibc 2.36, OpenSSL 3.0 ABI (`libssl.so.3` and
+`libcrypto.so.3`), and `libgcc_s.so.1`. AMD64 uses generic x86-64/SSE2; ARM64 uses
+ARMv8-A/NEON. They are not separate distribution-specific packages. See the
+[release compatibility contract](../../docs/development/RELEASE.md) for build and
+same-package runtime acceptance. Older releases retain their original library
+requirements. The installer does not upgrade the system libc or OpenSSL.
+
+Linux sandboxing additionally requires the existing system bubblewrap and kernel
+namespace/seccomp capabilities permitted by the host. Capability failures remain
+explicit; the userspace baseline does not imply that every kernel or container
+security policy supports sandboxing. Acceptance records the actual host kernel.
+
 The installer selects the TUI release bundle for the current supported CPU target,
 verifies its release checksum, installs immutable product resources, and activates a stable
 launcher.

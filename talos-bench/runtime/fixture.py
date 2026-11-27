@@ -16,6 +16,9 @@ def tool_responses(request):
 def model_config(model, respond):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
+            if self.headers.get("Authorization") != "Bearer fixture":
+                self.send_error(401, "Unexpected fixture credential")
+                return
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             if self.path != "/v1/chat/completions" or body.get("model") != model:
                 self.send_error(400, "Unexpected fixture endpoint or model")
