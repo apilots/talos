@@ -40,6 +40,8 @@ pub struct SessionRecord {
     pub current_directory: Option<PathBuf>,
     #[serde(default)]
     pub worktree_binding: Option<talos_types::SessionWorktreeBinding>,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl SessionRecord {
@@ -99,7 +101,9 @@ pub enum SessionRecordPatch {
     Settings {
         conf: SessionConf,
         current_directory: Option<PathBuf>,
+        pinned: Option<bool>,
     },
+    Pinned(bool),
     Worktree(talos_types::SessionWorktreeBinding),
 }
 

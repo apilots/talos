@@ -45,6 +45,7 @@ class ChangeScopeTests(unittest.TestCase):
     def test_automation_entries_and_shared_fixture_select_their_original_carriers(self):
         for path, category, target in [
             ('talos-e2e/scripts/automation_web.py', 'webui', AUTOMATION_WEB_TARGET),
+            ('talos-e2e/scripts/session_pinning.py', 'webui', AUTOMATION_WEB_TARGET),
             ('talos-e2e/scenarios/24_automation/02_web_entry.sh', 'webui', AUTOMATION_WEB_TARGET),
             ('talos-e2e/scripts/automation_tui.py', 'tui', AUTOMATION_TUI_TARGET),
             ('talos-e2e/scenarios/24_automation/03_tui_entry.sh', 'tui', AUTOMATION_TUI_TARGET),

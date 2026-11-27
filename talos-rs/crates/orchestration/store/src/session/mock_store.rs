@@ -68,6 +68,7 @@ impl SessionStore for MockSessionStore {
             project_id: None,
             worktree_binding: None,
             current_directory: None,
+            pinned: false,
         }))
     }
 
@@ -116,13 +117,23 @@ impl SessionStore for MockSessionStore {
             SessionRecordPatch::Settings {
                 conf,
                 current_directory,
+                pinned,
             } => {
                 record.conf = conf;
                 record.current_directory = current_directory;
+                if let Some(pinned) = pinned {
+                    record.pinned = pinned;
+                }
+                record.last_activity = params.last_activity;
             }
-            SessionRecordPatch::Worktree(binding) => record.worktree_binding = Some(binding),
+            SessionRecordPatch::Pinned(pinned) => {
+                record.pinned = pinned;
+            }
+            SessionRecordPatch::Worktree(binding) => {
+                record.worktree_binding = Some(binding);
+                record.last_activity = params.last_activity;
+            }
         }
-        record.last_activity = params.last_activity;
         Ok(Some(record))
     }
 

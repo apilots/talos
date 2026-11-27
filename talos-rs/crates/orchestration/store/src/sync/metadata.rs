@@ -165,6 +165,7 @@ pub(super) async fn project_session(
         None => (adapter.session_projection)(&record)?,
     };
     info.session_kind = record.session_kind;
+    info.pinned = record.pinned;
     info.title = record.title.clone();
     info.last_activity = record.last_activity;
     info.message_count = record.message_count;

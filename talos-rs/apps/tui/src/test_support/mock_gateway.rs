@@ -116,6 +116,7 @@ impl MockGatewayState {
             },
             project_id: None,
             current_directory: self.current_project_root.clone(),
+            pinned: false,
         }
     }
 

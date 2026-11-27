@@ -647,6 +647,7 @@ fn session_record() -> SessionRecord {
         project_id: None,
         worktree_binding: None,
         current_directory: None,
+        pinned: false,
     }
 }
 

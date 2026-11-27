@@ -161,13 +161,23 @@ impl SessionStore for RecordingSessionStore {
             SessionRecordPatch::Settings {
                 conf,
                 current_directory,
+                pinned,
             } => {
                 stored.conf = conf;
                 stored.current_directory = current_directory;
+                if let Some(pinned) = pinned {
+                    stored.pinned = pinned;
+                }
+                stored.last_activity = params.last_activity;
             }
-            SessionRecordPatch::Worktree(binding) => stored.worktree_binding = Some(binding),
+            SessionRecordPatch::Pinned(pinned) => {
+                stored.pinned = pinned;
+            }
+            SessionRecordPatch::Worktree(binding) => {
+                stored.worktree_binding = Some(binding);
+                stored.last_activity = params.last_activity;
+            }
         }
-        stored.last_activity = params.last_activity;
         Ok(Some(stored.clone()))
     }
 

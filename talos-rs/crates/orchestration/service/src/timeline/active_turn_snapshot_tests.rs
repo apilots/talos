@@ -82,6 +82,7 @@ impl Fixture {
                 project_id: None,
                 worktree_binding: None,
                 current_directory: None,
+                pinned: false,
             })
             .await
             .unwrap();

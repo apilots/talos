@@ -15,9 +15,12 @@ const mocks = vi.hoisted(() => ({
   deleteProject: vi.fn(),
   updateProjectName: vi.fn(),
   deleteSession: vi.fn(),
+  toggleSessionPin: vi.fn(),
+  pinPending: false,
   deleteSessionAlias: vi.fn(),
   resetStream: vi.fn(),
   setSessionStatus: vi.fn(),
+  pinnedIds: new Set<string>(),
 }));
 
 vi.mock("@/widgets/sidebar/Sidebar", () => ({
@@ -25,6 +28,14 @@ vi.mock("@/widgets/sidebar/Sidebar", () => ({
     mocks.sidebarProps = props;
     return <div data-testid="sidebar" />;
   },
+}));
+
+vi.mock("../hooks/useToggleSessionPinMutation", () => ({
+  useToggleSessionPinMutation: () => ({
+    isPending: mocks.pinPending,
+    variables: undefined,
+    mutateAsync: mocks.toggleSessionPin,
+  }),
 }));
 
 vi.mock("../hooks/useChatQueries", () => ({
@@ -57,6 +68,7 @@ vi.mock("../hooks/useChatQueries", () => ({
         hasActiveTurn: mocks.hasActiveTurn,
         title: "Known project session",
         projectId: "project-known",
+        pinned: mocks.pinnedIds.has("session-known-project"),
         modelSelection: {
           modelRef: { provider: "mock", id: "model-1" },
           reasoningEffort: null,
@@ -68,6 +80,7 @@ vi.mock("../hooks/useChatQueries", () => ({
         id: "session-missing-project",
         title: "Missing project session",
         projectId: "project-missing",
+        pinned: mocks.pinnedIds.has("session-missing-project"),
         modelSelection: {
           modelRef: { provider: "mock", id: "model-1" },
           reasoningEffort: null,
@@ -79,6 +92,7 @@ vi.mock("../hooks/useChatQueries", () => ({
         id: "session-chat",
         title: "Chat session",
         projectId: null,
+        pinned: mocks.pinnedIds.has("session-chat"),
         modelSelection: {
           modelRef: { provider: "mock", id: "model-1" },
           reasoningEffort: null,
@@ -130,6 +144,8 @@ describe("SidebarContainer", () => {
     cleanup();
     mocks.sidebarProps = undefined;
     mocks.hasActiveTurn = true;
+    mocks.pinnedIds = new Set<string>();
+    mocks.toggleSessionPin.mockReset();
   });
 
   it("keeps sessions visible when their project is missing from the project list", () => {
@@ -183,5 +199,30 @@ describe("SidebarContainer", () => {
       expect(mocks.resetStream).toHaveBeenCalledWith("session-chat");
       expect(mocks.setSessionStatus).toHaveBeenCalledWith("session-chat", undefined);
     });
+  });
+
+  it("moves pinned sessions out of projects and chats into pinnedSessions and toggles pin", async () => {
+    mocks.pinnedIds = new Set(["session-known-project", "session-chat"]);
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <SidebarContainer />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.sidebarProps?.pinnedSessions?.map((session) => session.id)).toEqual([
+      "session-known-project",
+      "session-chat",
+    ]);
+    expect(mocks.sidebarProps?.projectGroups[0]?.sessions).toEqual([]);
+    expect(mocks.sidebarProps?.chats.map((session) => session.id)).toEqual([
+      "session-missing-project",
+    ]);
+
+    await mocks.sidebarProps?.onTogglePinSession?.("session-chat", false);
+    expect(mocks.toggleSessionPin).toHaveBeenCalledWith({
+      sessionId: "session-chat",
+      pinned: false,
+    });
+    expect(mocks.sidebarProps?.pendingPinSessionIds?.size).toBe(0);
   });
 });

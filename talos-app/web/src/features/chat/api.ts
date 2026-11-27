@@ -180,6 +180,17 @@ export async function updateSessionPermissionMode(
   return response.session;
 }
 
+export async function updateSessionPinned(sessionId: string, pinned: boolean) {
+  const request: SessionPatchRequest = {
+    sessionId,
+    conf: null,
+    currentDirectory: null,
+    pinned,
+  };
+  const response = await (await getTalosClient({ sessionId })).sessions.patch(request);
+  return response.session;
+}
+
 export async function submitTurnInput(
   request: SubmitTurnInputRequest,
 ): Promise<SubmitTurnInputResponse> {

@@ -530,6 +530,7 @@ fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> Sessio
         project_id: None,
         worktree_binding: None,
         current_directory: None,
+        pinned: false,
     }
 }
 

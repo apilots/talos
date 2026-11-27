@@ -522,6 +522,7 @@ fn test_session_patch_roundtrip_with_current_directory() {
         current_directory: Some(OptionalCurrentDirectoryPatch::Set {
             path: std::path::PathBuf::from("/repo"),
         }),
+        pinned: Some(true),
     };
 
     let encoded = serde_json::to_string(&patch).unwrap();
@@ -533,6 +534,13 @@ fn test_session_patch_roundtrip_with_current_directory() {
             path: std::path::PathBuf::from("/repo"),
         })
     );
+    assert_eq!(decoded.pinned, Some(true));
+    assert!(!decoded.is_pin_only());
+    assert!(SessionPatch {
+        pinned: Some(false),
+        ..SessionPatch::default()
+    }
+    .is_pin_only());
 }
 
 #[test]

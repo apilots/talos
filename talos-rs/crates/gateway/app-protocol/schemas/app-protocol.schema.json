@@ -12969,6 +12969,10 @@
         "nodeId": {
           "type": "string"
         },
+        "pinned": {
+          "default": false,
+          "type": "boolean"
+        },
         "projectId": {
           "default": null,
           "type": [
@@ -13078,6 +13082,10 @@
         },
         "nodeId": {
           "type": "string"
+        },
+        "pinned": {
+          "default": false,
+          "type": "boolean"
         },
         "projectId": {
           "default": null,
@@ -13307,6 +13315,13 @@
             }
           ],
           "default": null
+        },
+        "pinned": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "sessionId": {
           "default": "",

@@ -928,3 +928,54 @@ async fn execution_details_upgrade_preserves_main_history_with_null_details() {
         2
     );
 }
+
+#[tokio::test]
+async fn migration_adds_session_pinned_column_defaulting_to_false() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+    let migration_dir = test_migrations_dir();
+    let all_migrations = sqlx::migrate::Migrator::new(migration_dir.clone())
+        .await
+        .unwrap();
+    let prior_migrations = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            all_migrations
+                .iter()
+                .filter(|migration| migration.version < 202611270001)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    prior_migrations.run(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO sessions (
+            session_key, user_id, source_type, source_provider, agent_id,
+            execution_node_id, workspace_id, created_at, last_activity,
+            environment_json, conf_json, usage_json, session_kind
+        ) VALUES (
+            'session-legacy', 'user-1', 'desktop', 'sdk', 'agent-1',
+            'embedded', 'workspace-1', 1, 2, 'null',
+            '{"modelSelection":null,"userPermissionMode":null}',
+            '{"tokens":{"input_tokens":0,"output_tokens":0,"total_tokens":0},"context":null}',
+            'standard'
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    run_migrations(&pool, &migration_dir).await.unwrap();
+
+    let pinned = sqlx::query_scalar::<_, i64>(
+        "SELECT pinned FROM sessions WHERE session_key = 'session-legacy'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pinned, 0);
+}

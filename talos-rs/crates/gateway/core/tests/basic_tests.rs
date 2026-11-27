@@ -440,6 +440,7 @@ async fn gateway_patch_session_rejects_missing_session_id() {
                 session_id: String::new(),
                 conf: None,
                 current_directory: None,
+                pinned: None,
             },
         )
         .await;

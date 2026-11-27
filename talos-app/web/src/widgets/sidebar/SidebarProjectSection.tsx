@@ -21,6 +21,8 @@ interface SidebarProjectSectionProps {
   groups: SidebarProjectGroup[];
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (session: SidebarSessionItem) => void;
+  onTogglePinSession?: (sessionId: string, pinned: boolean) => Promise<void> | void;
+  pendingPinSessionIds?: ReadonlySet<string>;
   onCreateProjectThread: (projectId: string) => void;
   onRemoveProject: (projectId: string) => Promise<void> | void;
   onRenameProject: (projectId: string, name: string) => Promise<void> | void;
@@ -32,6 +34,8 @@ export function SidebarProjectSection({
   groups,
   onSelectSession,
   onDeleteSession,
+  onTogglePinSession,
+  pendingPinSessionIds,
   onCreateProjectThread,
   onRemoveProject,
   onRenameProject,
@@ -82,7 +86,7 @@ export function SidebarProjectSection({
   }
 
   return (
-    <section className="mt-1">
+    <section className="mt-1" data-sidebar-section="projects">
       <SidebarSectionHeader label={t("projects")} onToggle={() => setOpen((value) => !value)} open={open} />
       {open ? (
         <div className="mt-1 space-y-1">
@@ -109,6 +113,8 @@ export function SidebarProjectSection({
                 }}
                 onDeleteSession={onDeleteSession}
                 onSelectSession={onSelectSession}
+                onTogglePinSession={onTogglePinSession}
+                pendingPinSessionIds={pendingPinSessionIds}
                 onToggleProject={() => toggleProject(group.project.id)}
                 open={projectOpen}
                 sessionsExpanded={expandedSessionProjectIds.has(group.project.id)}
@@ -155,6 +161,8 @@ function ProjectGroup({
   onShowMoreSessions,
   onDeleteSession,
   onSelectSession,
+  onTogglePinSession,
+  pendingPinSessionIds,
   onToggleProject,
   open,
   sessionsExpanded,
@@ -170,6 +178,8 @@ function ProjectGroup({
   onShowMoreSessions: () => void;
   onDeleteSession: (session: SidebarSessionItem) => void;
   onSelectSession: (sessionId: string) => void;
+  onTogglePinSession?: (sessionId: string, pinned: boolean) => Promise<void> | void;
+  pendingPinSessionIds?: ReadonlySet<string>;
   onToggleProject: () => void;
   open: boolean;
   sessionsExpanded: boolean;
@@ -188,6 +198,7 @@ function ProjectGroup({
       >
         <button
           className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+          data-sidebar-project-id={group.project.id}
           onClick={onToggleProject}
           type="button"
         >
@@ -250,6 +261,8 @@ function ProjectGroup({
               key={session.id}
               onDeleteSession={onDeleteSession}
               onSelectSession={onSelectSession}
+              onTogglePinSession={onTogglePinSession}
+              pinPending={pendingPinSessionIds?.has(session.id) ?? false}
               session={session}
             />
           ))}

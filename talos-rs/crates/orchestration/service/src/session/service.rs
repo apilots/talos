@@ -180,6 +180,7 @@ impl SessionService {
                 .as_ref()
                 .map(|binding| binding.checkout_root.clone())
                 .or_else(|| record.current_directory.clone()),
+            pinned: record.pinned,
         })
     }
 
@@ -473,6 +474,18 @@ impl SessionService {
         record: SessionRecord,
         patch: SessionPatch,
     ) -> TalosResult<Option<SessionRecord>> {
+        if patch.is_pin_only() {
+            return self
+                .session_store
+                .patch_session(PatchSessionParams {
+                    session_id: record.id,
+                    change: SessionRecordPatch::Pinned(
+                        patch.pinned.expect("pin-only patch includes pinned"),
+                    ),
+                    last_activity: record.last_activity,
+                })
+                .await;
+        }
         self.validate_persisted_model_selection(&record).await?;
         let patch = self.normalize_session_patch(&record, patch).await?;
         self.apply_session_patch(record, patch).await
@@ -646,6 +659,7 @@ impl SessionService {
             project_id: params.project_id,
             worktree_binding,
             current_directory: params.current_directory,
+            pinned: false,
         };
         Ok(record)
     }
@@ -685,6 +699,7 @@ impl SessionService {
                 change: SessionRecordPatch::Settings {
                     conf: record.conf,
                     current_directory: record.current_directory,
+                    pinned: patch.pinned,
                 },
                 last_activity,
             })

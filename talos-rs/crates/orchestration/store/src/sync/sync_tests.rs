@@ -57,6 +57,7 @@ fn projection(record: &SessionRecord) -> TalosResult<SessionInfo> {
         usage: record.usage.clone(),
         project_id: record.project_id.clone(),
         current_directory: record.current_directory.clone(),
+        pinned: record.pinned,
     })
 }
 async fn peer(local: bool) -> Peer {
@@ -180,6 +181,7 @@ fn record(id: &str) -> SessionRecord {
         project_id: None,
         worktree_binding: None,
         current_directory: Some("/worker/custom".into()),
+        pinned: false,
     }
 }
 fn event(id: &str, turn: &str, sequence: u64, payload: AgentEventPayload) -> AgentEvent {
@@ -388,6 +390,7 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
     assert_eq!(imported_project.session_count, 0);
     let mut talo = record("session-1");
     talo.session_kind = SessionKind::Talo;
+    talo.pinned = true;
     talo.worktree_binding = Some(talos_types::SessionWorktreeBinding {
         checkout_root: "/worker/feature".into(),
         git_directory: "/worker/repository/.git/worktrees/feature".into(),
@@ -416,6 +419,7 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
         .unwrap()
         .unwrap();
     assert_eq!(imported.session_kind, SessionKind::Talo);
+    assert!(imported.pinned);
     assert_eq!(imported.worktree_binding, talo.worktree_binding);
     assert_eq!(imported.conf, record("session-1").conf);
     assert_eq!(
