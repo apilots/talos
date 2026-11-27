@@ -156,7 +156,12 @@ backend and shared catalog fixture changes select both cases.
 `15_tui_install` runs in release and manual `release-preflight.yml` only. Native
 Linux AMD64/ARM64 and macOS ARM64 acceptance installs the product already built
 on that runner. Linux Docker acceptance requires `TUI_INSTALL_PRODUCT_DIR` pointing
-to that run's product directory; it never compiles a replacement. Container failure
+to that run's product directory; it never compiles a replacement. Release and
+preflight run both architectures against independent Debian 12 and Ubuntu 24.04
+runtime containers. `TUI_INSTALL_DOCKERFILE` selects the fixed runtime Dockerfile;
+the default remains Ubuntu 24.04. Each environment installs the same checksummed
+architecture package. See the [Linux release baseline](../docs/development/RELEASE.md)
+for libc, OpenSSL and CPU requirements. Container failure
 blocks image publication and the GitHub Release. PR/main select only lightweight
 installation contracts, while related Docker Worker and platform business E2E
 remain module gates. PR jobs receive no repository secrets and check out no private

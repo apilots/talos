@@ -92,6 +92,10 @@ run_installed_tui_acceptance() {
   platform="$(normalize_tui_install_platform "$(uname -s)")"
   architecture="$(normalize_tui_install_arch "$(uname -m)")"
   verify_tui_install_runner "${platform}" "${architecture}"
+  if [[ "${platform}" == "linux" ]]; then
+    echo "Runtime kernel: $(uname -sr)"
+    echo "Runtime libc: $(getconf GNU_LIBC_VERSION)"
+  fi
 
   mkdir -p "${isolated_home}"
   build_tui_release_fixture "${scenario_root}"
@@ -217,7 +221,7 @@ run_installed_tui_acceptance() {
 }
 
 run_linux_docker_tui_install() {
-  local dockerfile="${TALOS_E2E_DIR}/docker/tui-install-ubuntu-24.04.Dockerfile"
+  local dockerfile="${TUI_INSTALL_DOCKERFILE:-${TALOS_E2E_DIR}/docker/tui-install-ubuntu-24.04.Dockerfile}"
   local container_report_dir
   local product_dir
   local expected_arch
