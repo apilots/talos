@@ -265,3 +265,90 @@ async fn cancelled_call_notifies_server_and_keeps_connection_usable() {
     service.cancel().await.unwrap();
     task.await.unwrap();
 }
+
+#[tokio::test(start_paused = true)]
+async fn late_discovery_rejection_preserves_legacy_initialization_and_tool_calls() {
+    use rmcp::model::{
+        ClientJsonRpcMessage, ErrorData, InitializeResult, ServerCapabilities, ServerJsonRpcMessage,
+    };
+    use rmcp::transport::{IntoTransport, Transport};
+
+    let (server_io, client_io) = tokio::io::duplex(8192);
+    let task = tokio::spawn(async move {
+        let mut transport = IntoTransport::<rmcp::RoleServer, _, _>::into_transport(server_io);
+        let Some(ClientJsonRpcMessage::Request(probe)) = transport.receive().await else {
+            panic!("expected discovery request");
+        };
+        assert!(matches!(probe.request, ClientRequest::DiscoverRequest(_)));
+        // The paused clock advances to the SDK's own fallback deadline while
+        // this slow server leaves discovery unanswered.
+        let Some(ClientJsonRpcMessage::Request(initialize)) = transport.receive().await else {
+            panic!("expected legacy initialization after discovery timeout");
+        };
+        assert!(matches!(
+            initialize.request,
+            ClientRequest::InitializeRequest(_)
+        ));
+        transport
+            .send(ServerJsonRpcMessage::error(
+                ErrorData::method_not_found::<rmcp::model::DiscoverRequestMethod>(),
+                Some(probe.id),
+            ))
+            .await
+            .unwrap();
+        transport
+            .send(ServerJsonRpcMessage::response(
+                ServerResult::InitializeResult(
+                    InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+                        .with_protocol_version(ProtocolVersion::V_2025_11_25),
+                ),
+                initialize.id,
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(
+            transport.receive().await,
+            Some(ClientJsonRpcMessage::Notification(_))
+        ));
+        let Some(ClientJsonRpcMessage::Request(call)) = transport.receive().await else {
+            panic!("expected tool call after initialization");
+        };
+        assert!(matches!(call.request, ClientRequest::CallToolRequest(_)));
+        transport
+            .send(ServerJsonRpcMessage::response(
+                ServerResult::CallToolResult(rmcp::model::CallToolResult::success(vec![
+                    rmcp::model::ContentBlock::text("legacy tool completed"),
+                ])),
+                call.id,
+            ))
+            .await
+            .unwrap();
+        while transport.receive().await.is_some() {}
+    });
+    let session = initialize_service(client_io, &std::sync::Arc::default())
+        .await
+        .unwrap();
+    let (service, _) = session.into_parts();
+    let client = McpClient {
+        peer: service.peer().clone(),
+    };
+    let result = client
+        .call_tool(
+            McpCallToolRequest {
+                server_name: "slow-legacy".into(),
+                tool_name: "echo".into(),
+                arguments: Value::Null,
+            },
+            std::future::pending(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        result.content,
+        vec![McpContent::Text {
+            text: "legacy tool completed".into()
+        }]
+    );
+    service.cancel().await.unwrap();
+    task.await.unwrap();
+}

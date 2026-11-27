@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rmcp::model::{
-    CallToolRequest, CallToolRequestParams, ClientCapabilities, ClientInfo, ClientRequest,
+    CallToolRequest, CallToolRequestParams, ClientCapabilities, ClientConfig, ClientRequest,
     Implementation, ProtocolVersion, ReadResourceRequest, ReadResourceRequestParams, ServerResult,
 };
 use rmcp::service::{RunningService, ServiceError};
@@ -234,8 +234,8 @@ impl ClientHandler for TalosMcpClientHandler {
     async fn on_tool_list_changed(&self, _: rmcp::service::NotificationContext<RoleClient>) {
         self.tools_changed.notify_one();
     }
-    fn get_info(&self) -> ClientInfo {
-        ClientInfo::new(
+    fn get_info(&self) -> ClientConfig {
+        ClientConfig::new(
             ClientCapabilities::default(),
             Implementation::new("talos-mcp", env!("CARGO_PKG_VERSION")),
         )
