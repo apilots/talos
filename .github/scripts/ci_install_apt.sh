@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-apt_options=(-o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15)
+# CI prerequisites come from Ubuntu; unrelated preinstalled repositories must not block them.
+apt_options=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+  -o Dir::Etc::sourceparts=-
+  -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15)
 
 install_packages() {
   timeout --kill-after=10s 180s sudo apt-get "${apt_options[@]}" update --error-on=any &&
