@@ -233,6 +233,9 @@ def execute(task: dict, directory: Path) -> None:
                           'talos-e2e/scripts/browser-worker'):
             run(sys.executable, '-m', 'unittest', 'discover', '-s', directory,
                 '-p', '*_test.py', '-v', env=env)
+        run(sys.executable, '-m', 'unittest', 'discover', '-s', 'talos-bench/runtime',
+            '-p', 'test_*.py', '-v', env=env)
+        run(sys.executable, 'talos-bench/runtime/arena_smoke.py', env=env)
     elif task['kind'] == 'mcp':
         run('just', 'test', '--locked', '-p', 'talos-mcp')
     else:

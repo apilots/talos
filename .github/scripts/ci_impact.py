@@ -385,8 +385,10 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 # Shared runner/fixtures and provider-backed scenario edits retain the
                 # public representative suites instead of silently skipping behavior.
                 result.full(rust, frontend, frontend_checks=False)
+        elif path.startswith('talos-bench/runtime/'):
+            result.harness = True
         elif path.startswith('talos-bench/'):
-            # Native benchmark trials are local acceptance; exec has a hosted E2E case.
+            # Full benchmark trials remain local acceptance.
             continue
         elif path.startswith(('conf/', 'talos-rs/.cargo/')) or path in ('justfile', '.github/release-toolchain.env', '.github/ci-toolchain.env', '.github/sandbox-base.env'):
             result.full(rust, frontend, frontend_checks=path == '.github/release-toolchain.env')

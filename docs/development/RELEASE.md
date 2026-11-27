@@ -133,7 +133,7 @@ is pushed, or when a maintainer manually retries an existing tag:
    Verify the build preserved that graph. Check the actual packages before upload;
    each TUI's native acceptance checks and installs that same built bundle through
    `TUI_INSTALL_PRODUCT_DIR`. No second development package is made for verification.
-4. Download the same run's Linux AMD64 TUI product and run Ubuntu container
+4. Download the same run's Linux AMD64 and ARM64 TUI products and run Debian 12 and Ubuntu 24.04 container
    installation through `release-install.yml`. The container has no Rust toolchain
    or build volume; missing products and failed installation block image publication
    and release publication.
@@ -153,8 +153,8 @@ is pushed, or when a maintainer manually retries an existing tag:
 PR/main run lightweight installer shell/archive contracts only. Platform business
 E2E remains in affected module gates. For an unpublished installation preflight,
 dispatch `release-preflight.yml` with `source_ref`: it resolves one immutable SHA,
-builds and installs the three native TUI targets, then reuses its Linux AMD64
-product for container acceptance without publishing anything.
+builds and installs the three native TUI targets, then reuses each Linux
+product for Debian 12 and Ubuntu container acceptance without publishing anything.
 
 All release jobs use GitHub-hosted runners with bounded durations. There is no
 skip-gate input, unvalidated-result fallback or automatic tag repair. To retry an
@@ -187,6 +187,32 @@ source suite once and formal publication reuses its validated result.
 Keep local verification output in ignored `output/release-<version>/`; record
 unavailable external-account scenarios as unverified. Never infer their success
 from unit tests or artifact builds.
+
+Linux TUI releases publish one general-purpose package per CPU architecture,
+AMD64 and ARM64. They do not publish separate Ubuntu or glibc variants. The
+minimum supported Linux userspace is Debian 12 equivalent: glibc 2.36, OpenSSL
+3.0 ABI (`libssl.so.3` and `libcrypto.so.3`), and `libgcc_s.so.1`. AMD64 uses the
+generic x86-64/SSE2 baseline; ARM64 uses ARMv8-A/NEON. Do not enable host-specific
+CPU flags such as `target-cpu=native` or `-march=native` for published packages.
+Optional accelerated routines must retain runtime feature detection.
+
+Linux TUI packages are built and natively exercised in the pinned Debian 12
+(bookworm) Rust container on both AMD64 and ARM64 hosted runners. Their cache
+keys include that image so binaries from a newer host libc cannot be reused.
+The same build environment is used by installation preflight. For each
+architecture, independent minimal Debian 12 and Ubuntu 24.04 runtime containers
+install that same product, without rebuilding it. Publication requires all four
+architecture/runtime combinations, including sandbox probes and normal CLI
+startup. The runtime containers have no Rust toolchain or build output volume. This keeps userspace compatibility independent of the hosted
+runner's newer kernel and libc; other product targets retain their existing
+runtime environments.
+
+This is a general Linux TUI/CLI contract, not a Runta-specific package. Linux
+sandboxing retains its existing system bubblewrap, namespace and seccomp
+requirements and probes. Container OS coverage alone is not evidence of multiple
+kernel versions: acceptance records the actual shared host kernel. Use native
+local, GitHub CI and Runta execution evidence for release readiness, and do not
+claim untested kernel versions from distribution names.
 
 ## Supported release targets
 

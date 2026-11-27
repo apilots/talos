@@ -15,8 +15,16 @@ permissions:
   actions: read
 jobs:
   container-install:
-    name: Install release product · Ubuntu amd64
-    runs-on: ubuntu-24.04
+    name: Install release product · ${{ matrix.runtime }} ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runtime: debian-12, runner: ubuntu-24.04}
+          - {arch: amd64, runtime: ubuntu-24.04, runner: ubuntu-24.04}
+          - {arch: arm64, runtime: debian-12, runner: ubuntu-24.04-arm}
+          - {arch: arm64, runtime: ubuntu-24.04, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
@@ -28,19 +36,20 @@ jobs:
       - name: Download this run's Linux TUI product
         uses: actions/download-artifact@v4
         with:
-          name: talos-tui-linux-amd64
+          name: talos-tui-linux-${{ matrix.arch }}
           path: dist/products/release/tui
-      - name: Install and exercise the release product in Ubuntu
+      - name: Install and exercise the same release product
         env:
           TUI_INSTALL_PRODUCT_DIR: ${{ github.workspace }}/dist/products/release
           TUI_INSTALL_E2E_VERSION: ${{ inputs.version }}
-          TUI_INSTALL_EXPECTED_ARCH: amd64
+          TUI_INSTALL_EXPECTED_ARCH: ${{ matrix.arch }}
+          TUI_INSTALL_DOCKERFILE: ${{ github.workspace }}/talos-e2e/docker/tui-install-${{ matrix.runtime }}.Dockerfile
         run: just e2e-case 15_tui_install/02_linux_docker
       - name: Upload container installation evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: release-container-installation
+          name: release-container-installation-${{ matrix.runtime }}-${{ matrix.arch }}
           path: |
             talos-e2e/reports/e2e_report_*.md
             talos-e2e/reports/15_tui_install/02_linux_docker/

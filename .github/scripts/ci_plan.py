@@ -119,7 +119,7 @@ def task_roots(task: dict, root: Path = ROOT) -> set[str]:
     if task.get('tests'):
         roots.add('talos-rs')  # Test fixtures may reference other workspace members.
     if task['kind'] == 'harness':
-        roots.update({'talos-e2e', 'talos-rs', 'talos-app'})
+        roots.update({'talos-e2e', 'talos-rs', 'talos-app', 'talos-bench/runtime'})
     if task['kind'] == 'e2e':
         roots.update({'talos-e2e/run_e2e.sh', 'talos-e2e/scripts', 'talos-e2e/fixtures', 'talos-e2e/docker'})
         roots.update('talos-e2e/scenarios/' + case for case in task['cases'])
