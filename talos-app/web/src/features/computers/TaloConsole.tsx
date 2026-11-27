@@ -20,7 +20,6 @@ import { useTranslation } from "react-i18next";
 
 import { useCanUseTalo } from "@/features/auth";
 import { snapshotTasks } from "@/features/automation/model";
-import { SettingsModelsSection } from "@/features/settings";
 import { getTalosClient } from "@/shared/api/client";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/Button";
@@ -31,6 +30,7 @@ import { useProductScope } from "./hooks";
 import { TaloConsoleFilesTab } from "./TaloConsoleFilesTab";
 import { TaloDesktopDialog } from "./TaloDesktopDialog";
 import { TaloHoverTip } from "./TaloHoverTip";
+import { TaloModelConfigDialog } from "./TaloModelConfigDialog";
 import {
   TaloConfirmationDialog,
   TaloEmblem,
@@ -67,19 +67,21 @@ function TaloActionRow({
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
-    <div className="group flex items-center hover:bg-hover">
+    <div className={cn("group flex items-center transition-colors", danger ? "bg-danger/[0.025] hover:bg-danger/5" : "hover:bg-hover")}>
       <button
         ref={actionRef}
         type="button"
         disabled={disabled}
         onClick={onClick}
         className={cn(
-          "flex min-w-0 flex-1 items-center gap-2.5 py-2.5 pl-3.5 pr-1 text-left font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+          "flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-1 text-left text-[13px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
           danger ? "text-danger" : "text-ink",
           rowFocusClass,
         )}
       >
-        {icon}
+        <span aria-hidden="true" className={cn("flex size-7 shrink-0 items-center justify-center rounded-lg", danger ? "bg-danger/5" : "bg-background text-muted")}>
+          {icon}
+        </span>
         <span className="truncate">{label}</span>
       </button>
       <div className="flex shrink-0 items-center gap-1 pr-3">
@@ -87,7 +89,7 @@ function TaloActionRow({
           <button
             type="button"
             aria-label={tipAriaLabel}
-            className="flex size-5 items-center justify-center rounded-full text-muted/35 transition group-hover:text-muted/80 hover:!text-ink focus-visible:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+            className="flex size-6 items-center justify-center rounded-full text-muted/60 transition group-hover:text-muted hover:!text-ink focus-visible:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
           >
             <CircleHelp size={13} aria-hidden="true" />
           </button>
@@ -96,7 +98,7 @@ function TaloActionRow({
           <ChevronRight
             size={14}
             aria-hidden="true"
-            className={cn("pointer-events-none shrink-0", danger ? "text-danger/70" : "text-muted")}
+            className={cn("pointer-events-none shrink-0 transition-transform group-hover:translate-x-0.5 motion-reduce:transform-none", danger ? "text-danger/70" : "text-muted")}
           />
         ) : null}
       </div>
@@ -395,10 +397,10 @@ function AuthorizedTaloConsole({
           ref={panelRef}
           id="talo-floating-console"
           aria-label={t("computers:talo.manage")}
-          className="absolute right-3.5 top-3 z-30 flex max-h-[calc(100%-1.5rem)] w-[min(336px,calc(100%-1.75rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card/95 shadow-panel backdrop-blur-md"
+          className="absolute right-3.5 top-3 z-30 flex max-h-[calc(100%-1.5rem)] w-[min(360px,calc(100%-1.75rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card/95 shadow-panel backdrop-blur-md"
         >
           {/* Centered Hero + Top-Right Close Button (Variant A interior) */}
-          <div className="relative flex shrink-0 flex-col items-center px-5 pb-3 pt-5 text-center">
+          <div className="relative flex shrink-0 flex-col items-center bg-surface/60 px-5 pb-4 pt-5 text-center">
             <Button
               ref={closeButtonRef}
               type="button"
@@ -410,8 +412,8 @@ function AuthorizedTaloConsole({
               <X size={16} aria-hidden="true" />
             </Button>
 
-            <TaloEmblem size={44} />
-            <h2 className="mt-2 text-lg font-bold tracking-tight text-ink">{t("computers:talo.title")}</h2>
+            <TaloEmblem size={36} />
+            <h2 className="mt-2 font-display text-xl font-semibold tracking-tight text-ink">{t("computers:talo.title")}</h2>
 
             <p
               role="status"
@@ -428,7 +430,7 @@ function AuthorizedTaloConsole({
             <div
               role="tablist"
               aria-label={t("computers:talo.manage")}
-              className="mt-3 inline-flex rounded-full border border-border bg-background p-1"
+              className="mt-4 grid w-full grid-cols-2 rounded-xl border border-border/70 bg-background/60 p-1"
               onKeyDown={(event) => {
                 if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
                 event.preventDefault();
@@ -450,8 +452,8 @@ function AuthorizedTaloConsole({
                     tabIndex={selected ? 0 : -1}
                     onClick={() => setTab(entry)}
                     className={cn(
-                      "rounded-full px-4 py-1 text-xs transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand",
-                      selected ? "bg-selected font-semibold text-ink" : "font-medium text-muted hover:text-ink",
+                      "min-h-8 rounded-lg px-4 py-1.5 text-xs transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand",
+                      selected ? "bg-card font-semibold text-ink shadow-sm ring-1 ring-border/70" : "font-medium text-muted hover:text-ink",
                     )}
                   >
                     {t(entry === "console" ? "computers:talo.consoleTab" : "computers:talo.filesTab")}
@@ -466,7 +468,7 @@ function AuthorizedTaloConsole({
               id="talo-console-panel-console"
               role="tabpanel"
               aria-labelledby="talo-console-tab-console"
-              className="min-h-0 flex-1 space-y-3 overflow-y-auto border-t border-divider px-4 pb-4 pt-3"
+              className="min-h-0 flex-1 space-y-4 overflow-y-auto border-t border-divider px-4 py-4"
             >
               {error ? (
                 <p role="alert" className="rounded-xl border border-danger/20 bg-danger/5 px-3.5 py-2.5 text-xs leading-5 text-danger">
@@ -475,15 +477,15 @@ function AuthorizedTaloConsole({
               ) : null}
 
               {/* 1. Remote Desktop Section */}
-              <section className="space-y-1.5">
-                <h3 className="px-1 text-[11px] font-semibold text-muted">{t("computers:talo.remoteDesktop")}</h3>
+              <section className="space-y-2">
+                <h3 className="px-1 text-xs font-medium text-muted">{t("computers:talo.remoteDesktop")}</h3>
                 <Panel className="overflow-hidden bg-surface/60">
                   <button
                     type="button"
                     disabled={desktopDisabled}
                     onClick={(event) => requestDesktopFrom(event.currentTarget)}
                     className={cn(
-                      "flex w-full items-center justify-between gap-3.5 p-3 text-left transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-70",
+                      "group flex w-full items-center justify-between gap-3 p-3.5 text-left transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-70",
                       rowFocusClass,
                     )}
                   >
@@ -492,13 +494,13 @@ function AuthorizedTaloConsole({
                         <span className="truncate">{t("computers:talo.desktopTitle")}</span>
                         <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-muted" />
                       </div>
-                      <p className="mt-1 truncate text-xs text-muted">{desktopSubtitle}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted">{desktopSubtitle}</p>
                     </div>
                     <span
                       aria-hidden="true"
                       className={cn(
-                        "relative flex h-11 w-[4.5rem] shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border",
-                        phase === "ready" ? "bg-[#1b2029]" : "bg-surface text-muted",
+                        "relative flex h-12 w-[4.5rem] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border",
+                        phase === "ready" ? "bg-accent/5 text-accent" : "bg-surface text-muted",
                       )}
                     >
                       {transitioning || desktopPending ? (
@@ -507,8 +509,8 @@ function AuthorizedTaloConsole({
                         <Moon size={16} className="text-warning" />
                       ) : phase === "ready" ? (
                         <>
-                          <span className="absolute inset-x-2 bottom-2.5 top-1.5 rounded-[3px] border border-white/15 bg-white/10" />
-                          <span className="absolute inset-x-4 bottom-1 h-1 rounded-full bg-emerald-400/80" />
+                          <Monitor size={24} strokeWidth={1.5} />
+                          <span className="absolute bottom-2 right-3 size-1.5 rounded-full bg-success ring-2 ring-card" />
                         </>
                       ) : (
                         <Monitor size={16} />
@@ -519,10 +521,10 @@ function AuthorizedTaloConsole({
               </section>
 
               {/* 2. Lifecycle & Controls Section (tips triggered cleanly via ? icon) */}
-              <section className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2 px-1">
-                  <h3 className="text-[11px] font-semibold text-muted">{t("computers:talo.lifecycleSection")}</h3>
-                  <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface py-0.5 pl-2 pr-1 text-[10px] font-medium text-muted">
+              <section className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                  <h3 className="text-xs font-medium text-muted">{t("computers:talo.lifecycleSection")}</h3>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background py-0.5 pl-2 pr-1 text-[11px] font-medium text-muted">
                     <Moon size={10} aria-hidden="true" />
                     <span>{sleepBadgeLabel}</span>
                     <TaloHoverTip content={sleepTipText}>
@@ -612,12 +614,12 @@ function AuthorizedTaloConsole({
               </section>
 
               {/* 3. Managed Environment Specs */}
-              <section className="space-y-1.5">
-                <h3 className="px-1 text-[11px] font-semibold text-muted">{t("computers:talo.environmentSection")}</h3>
+              <section className="space-y-2">
+                <h3 className="px-1 text-xs font-medium text-muted">{t("computers:talo.environmentSection")}</h3>
                 <Panel className="divide-y divide-divider bg-surface/60 text-xs">
                   <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
                     <span className="text-muted">{t("computers:talo.computeSpec")}</span>
-                    <span className="font-mono text-ink">
+                    <span className="font-mono text-xs tabular-nums text-ink">
                       {t("computers:talo.computeValue", { cpu: instance.cpuCores, memory: memoryGiB })}
                     </span>
                   </div>
@@ -652,30 +654,13 @@ function AuthorizedTaloConsole({
         onOpenChange={setDesktopOpen}
       />
 
-      <Dialog open={modelConfigOpen} onOpenChange={setModelConfigOpen}>
-        <DialogContent
-          aria-describedby={undefined}
-          className="max-h-[88dvh] max-w-[820px] overflow-y-auto"
-          onCloseAutoFocus={(event) => {
-            if (modelConfigTriggerRef.current?.isConnected && !modelConfigTriggerRef.current.disabled) {
-              event.preventDefault();
-              modelConfigTriggerRef.current.focus();
-            }
-          }}
-        >
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <DialogTitle className="text-base font-semibold text-ink">
-              {t("computers:talo.modelConfig")}
-            </DialogTitle>
-            <DialogClose asChild>
-              <Button type="button" variant="ghost" className="size-8 p-0" aria-label={t("computers:talo.closeModelConfig")}>
-                <X size={16} aria-hidden="true" />
-              </Button>
-            </DialogClose>
-          </div>
-          {modelConfigOpen ? <SettingsModelsSection nodeId={instance.nodeId} /> : null}
-        </DialogContent>
-      </Dialog>
+      {modelConfigOpen ? (
+        <TaloModelConfigDialog
+          nodeId={instance.nodeId}
+          fallbackFocusRef={modelConfigTriggerRef}
+          onClose={() => setModelConfigOpen(false)}
+        />
+      ) : null}
 
       <Dialog open={browserConfigOpen} onOpenChange={setBrowserConfigOpen}>
         <DialogContent

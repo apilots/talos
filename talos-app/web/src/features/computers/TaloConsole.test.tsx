@@ -1,134 +1,23 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { StrictMode } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { AppProtocol } from "@talos/sdk-core";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { i18n } from "@/shared/i18n/setup";
-import { resetTalosClientFactory, setTalosClientFactory, type TalosWebClient } from "@/shared/api/client";
 import { useAppStore } from "@/shared/store/app-store";
 import { topologyNodes } from "@/shared/test/computer-topology.fixture";
 import { SessionDesktopShortcut } from "./SessionDesktopShortcut";
-import { TaloConsole } from "./TaloConsole";
 import { TaloLifecycleMenu } from "./talo-lifecycle";
-import { useComputers } from "./hooks";
+import {
+  listComputers, listFiles, query, QuickNodesProbe, readAutomation, readManagedWorker,
+  resetManagedWorker, setupTaloConsoleTests, showConsole, startManagedWorker, taloInstance,
+} from "./TaloConsole.test-support";
 
 vi.mock("@/shared/api/desktop-client", () => ({ isDesktopRuntime: () => false, getDesktopBridge: () => undefined }));
-
-const readManagedWorker = vi.fn();
-const startManagedWorker = vi.fn();
-const stopManagedWorker = vi.fn();
-const resetManagedWorker = vi.fn();
-const deleteManagedWorker = vi.fn();
-const listComputers = vi.fn();
-const listFiles = vi.fn();
-const readAutomation = vi.fn();
-
-const taloInstance: AppProtocol.ManagedWorkerInfo = {
-  instanceId: "talo-instance",
-  nodeId: "talo-node",
-  conversationSessionId: "sess_talo",
-  generation: 2,
-  phase: "ready",
-  operation: null,
-  cpuCores: 4,
-  memoryBytes: 8 * 1024 ** 3,
-  diskQuota: "enforced",
-  idleTimeoutSeconds: 600,
-  error: null,
-};
-
-let query: QueryClient;
-
-function QuickNodesProbe() {
-  const { quickNodes, nodes, total, selectedId } = useComputers();
-  return (
-    <>
-      <output aria-label="Quick nodes">{quickNodes.map((node) => node.nodeId).join(",")}</output>
-      <output aria-label="Listed nodes">{nodes.map((node) => node.nodeId).join(",")}</output>
-      <output aria-label="Listed total">{total}</output>
-      <output aria-label="Selected node">{selectedId || "none"}</output>
-    </>
-  );
-}
-
-function showConsole(instance = taloInstance) {
-  return render(
-    <StrictMode>
-      <QueryClientProvider client={query}>
-        <MemoryRouter>
-          <div className="relative h-[640px] w-[960px]">
-            <TaloConsole initialInstance={instance} />
-          </div>
-        </MemoryRouter>
-      </QueryClientProvider>
-    </StrictMode>,
-  );
-}
-
-beforeEach(async () => {
-  query = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  await i18n.changeLanguage("en");
-  readManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: taloInstance });
-  startManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: taloInstance });
-  stopManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: { ...taloInstance, phase: "stopped" } });
-  resetManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: { ...taloInstance, phase: "resetting", operation: "reset" } });
-  deleteManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: null });
-  listComputers.mockReset().mockResolvedValue({ data: topologyNodes, total: 2, nextCursor: null });
-  listFiles.mockReset().mockResolvedValue({ data: [], nextCursor: null });
-  readAutomation.mockReset().mockResolvedValue({ goal: null, loops: [] });
-
-  useAppStore.setState({
-    selectedComputers: {},
-    workspaceWindows: [],
-    workspaceSnapshots: {},
-    workspaceOwner: null,
-    workspaceOpen: false,
-    connection: {
-      ...useAppStore.getInitialState().connection,
-      authStatus: "authenticated",
-      authRole: "user",
-      accountType: "Max",
-      userId: "alice",
-    },
-  });
-
-  setTalosClientFactory(() => ({
-    computers: {
-      list: listComputers,
-      readManagedWorker,
-      startManagedWorker,
-      stopManagedWorker,
-      resetManagedWorker,
-      deleteManagedWorker,
-      read: async ({ nodeId }: { nodeId: string }) => nodeId === taloInstance.nodeId
-        ? { ...topologyNodes[0], nodeId, displayName: "Talo", available: true, managedWorkerPhase: "ready" }
-        : topologyNodes.find((node) => node.nodeId === nodeId),
-    },
-    files: { list: listFiles },
-    automation: { read: readAutomation },
-    browser: {
-      operate: async () => ({
-        enabled: false,
-        host: "docker",
-        selectedTargetId: null,
-        targets: [],
-        display: { kind: "dockerDesktop", targetId: "managed" },
-        control: { generation: "gen-1", revision: 1, epoch: 0, owner: { kind: "idle" } },
-      }),
-    },
-    sync: { status: async () => ({ localComputerId: null }) },
-  }) as unknown as TalosWebClient);
-});
-
-afterEach(() => {
-  cleanup();
-  query.clear();
-  resetTalosClientFactory();
-});
+setupTaloConsoleTests();
 
 it("defaults collapsed without stealing focus, expands on demand, and restores focus on Escape", async () => {
   showConsole();

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { AppProtocol } from "@talos/sdk-core";
-import { ChevronRight, FileText, Image as ImageIcon } from "lucide-react";
+import { ChevronRight, FileText, FolderOpen, Image as ImageIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { fileListQueryKey } from "@/features/files/api";
@@ -99,39 +99,50 @@ export function TaloConsoleFilesTab({
         <p role="alert" className="rounded-xl border border-danger/20 bg-danger/5 px-3.5 py-2.5 text-xs leading-5 text-danger">
           {userVisibleErrorMessage(filesQuery.error, t("computers:talo.loadError"))}
         </p>
-      ) : filteredFiles.length === 0 ? (
-        <p className="py-4 text-center text-xs text-muted">{t("computers:talo.emptyFiles")}</p>
       ) : (
         <div className="space-y-2.5">
-          <Panel className="divide-y divide-divider overflow-hidden bg-surface/60 text-xs">
-            {filteredFiles.map((file) => {
-              const media = isMediaMime(file.mimeType);
-              const Icon = media ? ImageIcon : FileText;
-              return (
-                <button
-                  key={file.fileId}
-                  type="button"
-                  onClick={() =>
-                    useAppStore.getState().openWorkspaceWindow({
-                      kind: "file",
-                      fileId: file.fileId,
-                      nodeId,
-                    })
-                  }
-                  className={cn(
-                    "flex w-full items-center justify-between gap-2.5 px-3.5 py-2.5 text-left text-ink transition hover:bg-hover",
-                    rowFocusClass,
-                  )}
-                >
-                  <span className="flex min-w-0 items-center gap-2.5">
-                    <Icon size={14} aria-hidden="true" className="shrink-0 text-muted" />
-                    <span className="truncate font-medium">{file.originalFilename}</span>
-                  </span>
-                  <ChevronRight size={13} aria-hidden="true" className="shrink-0 text-muted" />
-                </button>
-              );
-            })}
-          </Panel>
+          {filteredFiles.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-surface/40 px-5 py-8 text-center">
+              <span className="flex size-11 items-center justify-center rounded-xl border border-border bg-card text-muted">
+                <FolderOpen size={20} strokeWidth={1.5} aria-hidden="true" />
+              </span>
+              <p role="status" className="text-xs leading-5 text-muted">
+                {t(fileFilter === "all" ? "computers:talo.emptyFiles" : "computers:talo.noMatchingFiles")}
+              </p>
+            </div>
+          ) : (
+            <Panel className="divide-y divide-divider overflow-hidden bg-surface/60 text-xs">
+              {filteredFiles.map((file) => {
+                const media = isMediaMime(file.mimeType);
+                const Icon = media ? ImageIcon : FileText;
+                return (
+                  <button
+                    key={file.fileId}
+                    type="button"
+                    onClick={() =>
+                      useAppStore.getState().openWorkspaceWindow({
+                        kind: "file",
+                        fileId: file.fileId,
+                        nodeId,
+                      })
+                    }
+                    className={cn(
+                      "group flex w-full items-center justify-between gap-2.5 px-3 py-3 text-left text-ink transition hover:bg-hover",
+                      rowFocusClass,
+                    )}
+                  >
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-card text-muted">
+                        <Icon size={15} aria-hidden="true" />
+                      </span>
+                      <span className="truncate text-[13px] font-medium">{file.originalFilename}</span>
+                    </span>
+                    <ChevronRight size={13} aria-hidden="true" className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5 motion-reduce:transform-none" />
+                  </button>
+                );
+              })}
+            </Panel>
+          )}
           {filesQuery.hasNextPage ? (
             <div className="flex justify-center">
               <Button
@@ -139,7 +150,7 @@ export function TaloConsoleFilesTab({
                 variant="ghost"
                 disabled={filesQuery.isFetchingNextPage}
                 onClick={() => void filesQuery.fetchNextPage()}
-                className="h-8 rounded-full px-3 text-xs text-muted hover:text-ink"
+                className="min-h-9 rounded-full border border-border bg-card px-4 text-xs text-muted hover:text-ink"
               >
                 {filesQuery.isFetchingNextPage ? t("common:loading") : t("computers:talo.loadMoreFiles")}
               </Button>
