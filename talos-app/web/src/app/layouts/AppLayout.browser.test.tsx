@@ -51,7 +51,7 @@ it("binds previews opened on a fresh Settings page to the general workspace", ()
 it("binds right tabs to sessions and Files while retaining hidden webpage instances", () => {
   show();
   act(() => { useAppStore.getState().createWorkspaceWebpage(); useAppStore.getState().navigateWorkspaceWebpage(workspaceOwnerKey(useAppStore.getState().workspaceOwner!),useAppStore.getState().workspaceActiveKey!, "https://one.test/"); });
-  const frame = screen.getByTitle("Preview content") as HTMLIFrameElement;
+  const frame = screen.getByTitle<HTMLIFrameElement>("Preview content");
   const document = frame.contentDocument!;
   document.body.innerHTML = '<input value="Retained session draft">';
   fireEvent.click(screen.getByRole("link", { name: "Second session" }));
@@ -73,8 +73,9 @@ it("binds right tabs to sessions and Files while retaining hidden webpage instan
 });
 it("scrolls a restored active tab into view without taking focus from session navigation", () => {
   let right = 400;
-  const original = HTMLElement.prototype.getBoundingClientRect;
-  const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+  const original = Object.getOwnPropertyDescriptor(Element.prototype, "getBoundingClientRect")!.value as HTMLElement["getBoundingClientRect"];
+  const bounds = vi.spyOn(Element.prototype, "getBoundingClientRect");
+  bounds.mockImplementation(function (this: HTMLElement) {
     if (this.getAttribute("role") === "tablist") return { left: 200, right } as DOMRect;
     if (this.getAttribute("role") === "tab" && this.title === "first-worker") return { left: 500, right: 600 } as DOMRect;
     return original.call(this);

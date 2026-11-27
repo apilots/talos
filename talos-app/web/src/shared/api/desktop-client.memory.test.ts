@@ -61,11 +61,11 @@ function bridgeWithResponses(
   responses: Partial<Record<AppProtocol.ClientMethod, unknown>>,
 ): DesktopRendererBridge {
   return {
-    invoke: async function <T>(method: AppProtocol.ClientMethod): Promise<AppProtocol.ApiResponse<T>> {
+    invoke:  function <T>(method: AppProtocol.ClientMethod): Promise<AppProtocol.ApiResponse<T>> {
       if (Object.prototype.hasOwnProperty.call(responses, method)) {
-        return { status: "success", data: responses[method] as T };
+        return Promise.resolve({ status: "success", data: responses[method] as T });
       }
-      throw new Error(`unexpected method: ${method}`);
+      return Promise.reject(new Error(`unexpected method: ${method}`));
     },
     onEvent: () => () => undefined,
     onSubscriptionTerminated: () => () => undefined,

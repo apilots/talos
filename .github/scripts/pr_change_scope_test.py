@@ -697,7 +697,7 @@ run_linux_docker_tui_install
         refs = f'refs/tags/fixture-base {self.base} refs/tags/fixture-base {"0" * 40}\n'
         refs += f'refs/heads/main {head} refs/heads/main {self.base}\n'
         calls = self.hook(refs)
-        self.assertIn('just check', calls)
+        self.assertIn('just clippy --locked --all-targets', calls)
         self.assertNotIn('pnpm', calls)
 
 

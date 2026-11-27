@@ -18,11 +18,11 @@ export function ChatSessionMessageActions({
 
   return (
     <>
-      <Button onClick={onOpenFiles ?? (() => navigate("/files"))} variant="secondary">{t("openFiles")}</Button>
+      <Button onClick={onOpenFiles ?? (() => void navigate("/files"))} variant="secondary">{t("openFiles")}</Button>
       {taloMode ? null : (
-        <Button onClick={() => navigate("/settings/personalization")} variant="secondary">{t("openMemory")}</Button>
+        <Button onClick={() => void navigate("/settings/personalization")} variant="secondary">{t("openMemory")}</Button>
       )}
-      <Button onClick={onOpenSettings ?? (() => navigate("/settings"))} variant="secondary">{t("openSettings")}</Button>
+      <Button onClick={onOpenSettings ?? (() => void navigate("/settings"))} variant="secondary">{t("openSettings")}</Button>
     </>
   );
 }

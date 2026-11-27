@@ -33,7 +33,7 @@ const queue = {
 const steerQueue = {
   ...queue,
   messages: [
-    queue.messages[0]!,
+    queue.messages[0],
     {
       id: "q3", source: { type: "user" as const },
       input: { content: [{ type: "text" as const, text: "Second steer message" }] },
@@ -59,7 +59,7 @@ describe("WaitingMessages", () => {
     const region = screen.getByTestId("waiting-messages");
     expect(region.className).toContain("border-b");
     expect(screen.getAllByRole("button", { name: "Steer" })).toHaveLength(1);
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete queued message" })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete queued message" })[0]);
     expect(actions.delete).toHaveBeenCalledWith("q1");
   });
 
@@ -67,7 +67,7 @@ describe("WaitingMessages", () => {
     const actions = handlers();
     render(<WaitingMessages controller={{ queue, ...actions }} />);
 
-    fireEvent.pointerDown(screen.getAllByRole("button", { name: "More message actions" })[0]!, { button: 0, ctrlKey: false });
+    fireEvent.pointerDown(screen.getAllByRole("button", { name: "More message actions" })[0], { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Edit message" }));
     const input = screen.getByDisplayValue("First waiting message");
     fireEvent.change(input, { target: { value: "Updated message" } });
@@ -81,7 +81,7 @@ describe("WaitingMessages", () => {
       });
     });
 
-    fireEvent.pointerDown(screen.getAllByRole("button", { name: "More message actions" })[0]!, { button: 0, ctrlKey: false });
+    fireEvent.pointerDown(screen.getAllByRole("button", { name: "More message actions" })[0], { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Move down" }));
     expect(actions.reorder).toHaveBeenCalledWith(["q2", "q1"]);
   });
@@ -98,9 +98,9 @@ describe("WaitingMessages", () => {
     );
 
     const steerButtons = screen.getAllByRole("button", { name: "Steer" });
-    fireEvent.click(steerButtons[0]!);
-    fireEvent.click(steerButtons[0]!);
-    fireEvent.click(steerButtons[1]!);
+    fireEvent.click(steerButtons[0]);
+    fireEvent.click(steerButtons[0]);
+    fireEvent.click(steerButtons[1]);
 
     expect(actions.steer.mock.calls).toEqual([
       ["q1", "turn-1"],

@@ -68,6 +68,60 @@ pnpm --dir talos-app check:repo
 Use `pnpm --dir talos-app --filter <package> <script>` for a scoped frontend
 check, for example `pnpm --dir talos-app --filter @talos/sdk-core typecheck`.
 
+The frontend CI gate runs typecheck, lint and repository checks before tests and
+bundling. Standalone Web and Desktop `build` commands retain type checking.
+`build:bundle` (Web) and `build:checked` (Desktop/root) are packaging steps for
+callers that have already passed the workspace typecheck. They preserve the Web
+and Desktop base-URL variants without rerunning tsc for each bundle. SDK exports
+point to TypeScript sources and their no-emit build scripts duplicate typecheck;
+CI completes that check before the consuming application bundles.
+
+### Static analysis policy
+
+The shared ESLint configuration applies `recommendedTypeChecked` across Web,
+Desktop and SDK sources, including unsafe value propagation, Promise handling
+and redundant types. Decode untrusted JSON as `unknown` and validate it at the
+owning boundary. Test doubles must follow the real interface; Vitest's method
+assertions use its framework-aware `unbound-method` rule. Its asymmetric matchers
+return `any`, so nested expected values explicitly use `unknown`.
+
+Web enforces Rules of Hooks, Effect dependencies, complete TanStack Query keys,
+stable Query clients/dependencies, and core image/ARIA checks. Include resource
+identity in cache keys; retain the intended connection lifetime when fixing
+Effect dependencies. Synchronize current event callbacks and ownership refs during the commit phase
+when their identity must not restart a stream. Rendered focus and modal lifecycle still require
+behavioral/browser acceptance. Test rules reject focused tests and unchecked
+asynchronous Testing Library calls.
+
+Handle asynchronous work with `await`, a returned Promise or an error-handling
+boundary. `void` documents intentionally detached work; it does not catch
+rejections. Router-owned navigation may discard its completion Promise because
+the data router owns navigation and route errors. Resource-menu actions and
+authentication polling retain their local error handlers. Synchronous `act`
+callbacks return void; Promise-returning callbacks preserve asynchronous flushes.
+
+`pnpm --dir talos-app check:repo` also runs `check:architecture` and `check:unused`.
+Dependency-cruiser resolves aliases and relative imports before applying layer
+boundaries: shared capabilities and widgets cannot import features, and app/pages
+use feature barrels. All shared directories are protected, including new ones,
+with explicit exceptions for store composition and test helpers. The persisted app store remains the composition point for
+feature-owned Zustand slices. Knip checks unused files, exports and dependencies
+across all pnpm workspaces. Public SDK package exports and actual external script
+or HTML entrypoints remain explicit; do not mark all source files as entries.
+
+Rust PR/main quality tasks, pre-push and release source checks run scoped
+`just clippy --locked --all-targets` and workspace-wide `just deps-check`.
+Clippy type-checks test/example targets and workspace default Clippy lints are
+errors, together with `dbg!` and `todo!`. Fix diagnostics in their owning source
+or generator. Do not enable all features or restriction lints without checking
+supported combinations. Cargo-machete rejects unused manifest dependencies;
+generated protobuf/gRPC runtime dependencies have explicit package metadata.
+`just install-tools` installs the pinned dependency checker, and CI installs it
+with Clippy and the pinned Rust toolchain.
+
+New custom rules need accepted/rejected fixtures. Preserve existing error,
+layering and metadata checks instead of introducing a second policy owner.
+
 ## Validation by delivery stage
 
 ```text

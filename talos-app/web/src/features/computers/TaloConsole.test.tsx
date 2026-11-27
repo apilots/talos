@@ -152,9 +152,9 @@ it("resolves TaloLifecycleMenu portal inside its enclosing dialog even when inst
 
   expect(screen.queryByRole("button", { name: "Manage Talo" })).not.toBeInTheDocument();
   await waitFor(() => expect(resolveWorker).toBeTypeOf("function"));
-  await act(async () => {
+  await act(() => {
     resolveWorker({ enabled: true, instance: taloInstance });
-  });
+   return Promise.resolve(); });
 
   const menuTrigger = await screen.findByRole("button", { name: "Manage Talo" });
   fireEvent.keyDown(menuTrigger, { key: "Enter" });

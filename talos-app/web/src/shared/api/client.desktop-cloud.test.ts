@@ -26,7 +26,7 @@ function desktopAccount() {
   };
   const scope = connectionScope(connection);
   useAppStore.setState({ connection, selectedComputers: { [scope]: "embedded" } });
-  const http = vi.fn().mockImplementation(async () => Response.json({ status: "success", data: { ticket: "one-use" } }));
+  const http = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(Response.json({ status: "success", data: { ticket: "one-use" } })));
   vi.stubGlobal("fetch", http);
   return { http, invoke, prepareCloud, scope };
 }
@@ -45,7 +45,7 @@ it.each([
     const client = await clientForTarget();
 
     expect(await client.computers.list({ query: "Server name", limit: 10 })).toEqual(directory);
-    http.mockImplementation(async () => Response.json({ status: "success", data: directory.data[0] }));
+    http.mockImplementation(() => Promise.resolve(Response.json({ status: "success", data: directory.data[0] })));
     expect(await client.computers.read({ nodeId: "cloud-worker" })).toEqual(directory.data[0]);
     await client.computers.rename({ nodeId: "cloud-worker", displayName: "Renamed" });
     await client.computers.setStatus({ nodeId: "cloud-worker", status: "disabled" });
@@ -59,7 +59,7 @@ it.each([
       [DESKTOP_CLOUD_ORIGIN + "/v1/computers/cloud-worker", "DELETE"],
     ]);
     for (const [, init] of http.mock.calls) {
-      expect(init.headers).toMatchObject({ Authorization: "Bearer alice-token" });
+      expect(init?.headers).toMatchObject({ Authorization: "Bearer alice-token" });
     }
     expect(invoke).not.toHaveBeenCalled();
   },
@@ -78,7 +78,7 @@ it.each(["list", "read", "readManagedWorker"] as const)(
     const rejected = expect(pending).rejects.toMatchObject({ code: AppProtocol.ErrorCode.Timeout });
     await vi.advanceTimersByTimeAsync(MANAGEMENT_LOOKUP_TIMEOUT_MS);
     await rejected;
-    expect(http.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(http.mock.calls[0][1]?.signal?.aborted).toBe(true);
     expect(invoke).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   },
@@ -115,7 +115,7 @@ it("opens the managed desktop through the authenticated Server SDK and keeps the
   });
   expect(grant.ticket).toBe("server:one-use");
   expect(http).toHaveBeenCalledWith(DESKTOP_CLOUD_ORIGIN + "/v1/desktop/open", expect.objectContaining({
-    headers: expect.objectContaining({ Authorization: "Bearer alice-token" }),
+    headers: expect.objectContaining({ Authorization: "Bearer alice-token" }) as unknown,
   }));
   await getTalosClient("embedded").models.list();
   expect(invoke).toHaveBeenCalledWith("model/list", { nodeId: "embedded" }, expect.anything());

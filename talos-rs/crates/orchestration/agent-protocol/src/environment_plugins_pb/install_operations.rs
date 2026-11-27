@@ -123,23 +123,25 @@ pub(super) fn encode_plugin_install_target(
             d::PluginInstallTarget::ManualMcpServer {
                 server,
                 credentials,
-            } => pb::plugin_install_target::Value::ManualMcpServer(
+            } => pb::plugin_install_target::Value::ManualMcpServer(Box::new(
                 pb::PluginInstallTargetManualMcpServer {
                     server: Some(encode_mcp_server_definition(*server)?),
                     credentials: credentials
                         .map(|value| -> TalosResult<_> { encode_mcp_credential_values(value) })
                         .transpose()?,
                 },
-            ),
+            )),
             d::PluginInstallTarget::Plugin {
                 plugin_id,
                 expected_source_commit,
-            } => pb::plugin_install_target::Value::Plugin(pb::PluginInstallTargetPlugin {
-                plugin_id: plugin_id.0,
-                expected_source_commit: expected_source_commit
-                    .map(|value| -> TalosResult<_> { Ok(value) })
-                    .transpose()?,
-            }),
+            } => {
+                pb::plugin_install_target::Value::Plugin(Box::new(pb::PluginInstallTargetPlugin {
+                    plugin_id: plugin_id.0,
+                    expected_source_commit: expected_source_commit
+                        .map(|value| -> TalosResult<_> { Ok(value) })
+                        .transpose()?,
+                }))
+            }
         }),
     })
 }

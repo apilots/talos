@@ -12,9 +12,9 @@ const control = { ...computer, executionInstanceId: "i1", jobId: "profileUsageRe
 
 describe("automation public clients", () => {
   it("maps both transports to the same typed operations without a local command parser", async () => {
-    const request = vi.fn().mockResolvedValue({});
-    const http = new TalosClient({ request }, { stream: vi.fn() }, "http://localhost");
-    const rpc = new AppServerClient({ request, onEvent: () => () => undefined });
+    const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue({});
+    const http = new TalosClient({ request: request as import("../adapters").HttpAdapter["request"] }, { stream: vi.fn() }, "http://localhost");
+    const rpc = new AppServerClient({ request: request as import("../app-server").AppServerTransport["request"], onEvent: () => () => undefined });
     const expectedBodies = [session, pause, list, {}, { text: "/loop 5m check CI" }, computer, control];
     for (const client of [http, rpc]) {
       await client.automation.read(session);
@@ -25,7 +25,7 @@ describe("automation public clients", () => {
       await client.builtinJobs.list(computer);
       await client.builtinJobs.control(control);
     }
-    expect(request.mock.calls.slice(0, 7).map(([url, options]) => [url, JSON.parse(String(options.body))])).toEqual(
+    expect(request.mock.calls.slice(0, 7).map(([url, options]) => [url, (JSON.parse((typeof options?.body === "string" ? options.body : "")) as unknown)])).toEqual(
       ["automation/read", "automation/execute", "automation/list", "automation/command-catalog", "automation/resolve-command", "builtin-job/list", "builtin-job/control"]
         .map((path, index) => [`http://localhost/v1/${path}`, expectedBodies[index]]),
     );
@@ -38,16 +38,16 @@ describe("automation public clients", () => {
   it("preserves a typed authorization failure instead of returning an empty list", async () => {
     const error = new TalosApiError({ code: ErrorCode.PermissionDenied, message: "Denied", localization: null });
     const request = vi.fn().mockRejectedValue(error);
-    const client = new TalosClient({ request }, { stream: vi.fn() }, "http://localhost");
+    const client = new TalosClient({ request: request as import("../adapters").HttpAdapter["request"] }, { stream: vi.fn() }, "http://localhost");
     await expect(client.builtinJobs.list(computer)).rejects.toBe(error);
   });
 
   it("dispatches automation invalidation separately from timeline execution", async () => {
     const onAutomationChanged = vi.fn();
     const onEvent = vi.fn();
-    const stream = vi.fn().mockImplementation(async (_url, _options, onMessage) => {
+    const stream = vi.fn<import("../adapters").StreamAdapter["stream"]>().mockImplementation((_url, _options, onMessage) => {
       onMessage(JSON.stringify(session), "automation/changed");
-    });
+     return Promise.resolve(); });
     const client = new TalosClient({ request: vi.fn() }, { stream }, "http://localhost");
     await client.turns.events("s1", undefined, onEvent, undefined, { onAutomationChanged });
     expect(onAutomationChanged).toHaveBeenCalledWith(session);

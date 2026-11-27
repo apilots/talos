@@ -129,7 +129,7 @@ describe("AuthPage", () => {
     expect(startCloudLoginMock).not.toHaveBeenCalled();
   });
 
-  it("does not start device login when the login page mounts", async () => {
+  it("does not start device login when the login page mounts",  () => {
     renderAuthPage("/auth/login?next=/settings");
 
     expect(screen.getByAltText("Talos")).toBeTruthy();
@@ -156,7 +156,7 @@ describe("AuthPage", () => {
     await waitFor(() => expect(startCloudLoginMock).toHaveBeenCalledTimes(1));
     expect(prepareExternalAuthWindowMock).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(redirectToExternalUrlMock).toHaveBeenCalledTimes(1));
-    const target = new URL(redirectToExternalUrlMock.mock.calls[0]?.[0] as string);
+    const target = new URL(redirectToExternalUrlMock.mock.calls[0]?.[0]);
 
     expect(redirectToExternalUrlMock).toHaveBeenCalledWith(
       "https://cloud.talos.love/device?session_id=dls_1&user_code=ABCD-EFGH",
@@ -191,7 +191,7 @@ describe("AuthPage", () => {
     expect(screen.getByText("Cloud login could not be started.")).toBeTruthy();
   });
 
-  it("shows logout success without starting device login", async () => {
+  it("shows logout success without starting device login",  () => {
     useAppStore.getState().setConnection({ authStatus: "logged_out" });
 
     renderAuthPage("/auth/logout");

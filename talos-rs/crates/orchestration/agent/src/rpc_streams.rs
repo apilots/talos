@@ -232,7 +232,7 @@ impl AgentHarnessRpcAdapter {
                 .send(
                     &tx,
                     Ok(pb::RunResponse {
-                        result: Some(pb::run_response::Result::Admission(admission)),
+                        result: Some(pb::run_response::Result::Admission(Box::new(admission))),
                     }),
                 )
                 .await
@@ -258,7 +258,7 @@ impl AgentHarnessRpcAdapter {
                 .send(
                     &tx,
                     Ok(pb::RunResponse {
-                        result: Some(pb::run_response::Result::Accepted(pb::Empty {})),
+                        result: Some(pb::run_response::Result::Accepted(Box::new(pb::Empty {}))),
                     }),
                 )
                 .await
@@ -273,7 +273,7 @@ impl AgentHarnessRpcAdapter {
                 event = execution.events.recv() => event,
             } {
                 let frame = harness_pb::encode_event(event).map(|event| pb::RunResponse {
-                    result: Some(pb::run_response::Result::Progress(event)),
+                    result: Some(pb::run_response::Result::Progress(Box::new(event))),
                 });
                 match frame {
                     Ok(frame) => {
@@ -298,7 +298,7 @@ impl AgentHarnessRpcAdapter {
             });
             let frame = match result {
                 Ok(value) => pb::RunResponse {
-                    result: Some(pb::run_response::Result::Settlement(value)),
+                    result: Some(pb::run_response::Result::Settlement(Box::new(value))),
                 },
                 Err(error) => run_failure(error),
             };
@@ -404,7 +404,7 @@ impl AgentHarnessRpcAdapter {
             )));
         };
         let params = harness_pb::decode_run_params(
-            params,
+            *params,
             &self.config.read().expect("Worker config lock poisoned"),
         )
         .map_err(status_from_error)?;
@@ -471,7 +471,7 @@ impl AgentHarnessRpcAdapter {
             )));
         };
         let context = harness_pb::decode_context(
-            Some(context),
+            Some(*context),
             &self.config.read().expect("Worker config lock poisoned"),
         )
         .map_err(status_from_error)?;

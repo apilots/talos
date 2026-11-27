@@ -26,7 +26,8 @@ function iconForFile(category: FileCategory) {
       return <FileImage size={18} />;
     case "data":
       return <FileSpreadsheet size={18} />;
-    default:
+    case "all":
+    case "document":
       return <FileText size={18} />;
   }
 }
@@ -37,6 +38,7 @@ export function FilesPage() {
   const navigationKeyRef = useRef(location.key);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const files = useFilesPage();
+  const showAllFiles = files.showAllFiles;
   const locale = i18n.resolvedLanguage ?? i18n.language;
   const categoryLabels = useMemo<Record<FileCategory, string>>(
     () => ({
@@ -54,8 +56,8 @@ export function FilesPage() {
       return;
     }
     navigationKeyRef.current = location.key;
-    files.showAllFiles();
-  }, [files.showAllFiles, location.key]);
+    showAllFiles();
+  }, [showAllFiles, location.key]);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">

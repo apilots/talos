@@ -44,7 +44,7 @@ export function ResourceOpenMenu({ resource, preview: prepared }: { resource: Pr
     setFailed(false);
     try { await action(); } catch { setFailed(true); }
   };
-  const preview = () => run(() => openResource(resource.kind !== "webpage" ? resource : { ...resource, intent: "preview" }));
+  const preview = () => { void run(() => openResource(resource.kind !== "webpage" ? resource : { ...resource, intent: "preview" })); };
   return <div className="relative shrink-0">
     <div className="flex h-8 items-center rounded-lg border border-border bg-card text-xs text-ink">
       <button type="button" className="h-full rounded-l-lg px-2.5 hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand" onClick={preview}>{t("openIn")}</button>
@@ -52,11 +52,11 @@ export function ResourceOpenMenu({ resource, preview: prepared }: { resource: Pr
         <DropdownMenuTrigger asChild><button ref={trigger} type="button" aria-label={t("openOptions")} className="flex h-full w-6 items-center justify-center rounded-r-lg border-l border-divider bg-hover/40 text-muted hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><ChevronDown aria-hidden="true" size={13} /></button></DropdownMenuTrigger>
         <DropdownMenuContent container={container} align="end" className="min-w-44" onCloseAutoFocus={event => { if (trigger.current?.closest("[hidden], [inert]")) event.preventDefault(); }}>
           <DropdownMenuItem onSelect={preview}><AppIcon alt="" className="size-4" />Talos</DropdownMenuItem>
-          {native && nativeResource ? targets.map(target => <DropdownMenuItem key={target.id} onSelect={() => run(() => native.open({ resource: nativeResource, targetId: target.id }))}>
+          {native && nativeResource ? targets.map(target => <DropdownMenuItem key={target.id} onSelect={() => void run(() => native.open({ resource: nativeResource, targetId: target.id }))}>
             {target.icon ? <img src={target.icon} alt="" className="size-4" /> : <ExternalLink aria-hidden="true" size={15} />}{target.id === "system" ? t(resource.kind === "webpage" ? "openExternal" : "openSystemApplication") : target.label}
-          </DropdownMenuItem>) : resource.kind === "webpage" ? <DropdownMenuItem onSelect={() => run(() => openResource({ ...resource, intent: "external" }))}><ExternalLink aria-hidden="true" size={15} />{t("openExternal")}</DropdownMenuItem> : null}
+          </DropdownMenuItem>) : resource.kind === "webpage" ? <DropdownMenuItem onSelect={() => void run(() => openResource({ ...resource, intent: "external" }))}><ExternalLink aria-hidden="true" size={15} />{t("openExternal")}</DropdownMenuItem> : null}
           <DropdownMenuSeparator className="my-1 h-px bg-divider" />
-          <DropdownMenuItem onSelect={() => run(() => navigator.clipboard.writeText(resourceReference(resource)))}><Link2 aria-hidden="true" size={15} />{t("copyLink")}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void run(() => navigator.clipboard.writeText(resourceReference(resource)))}><Link2 aria-hidden="true" size={15} />{t("copyLink")}</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

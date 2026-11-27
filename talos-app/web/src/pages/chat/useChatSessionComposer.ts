@@ -106,7 +106,7 @@ export function useChatSessionComposer({
     ownerRef.current = canSend ? owner : undefined;
     return () => { ownerRef.current = undefined; };
   }, [canSend, owner]);
-  const initialCommands = useQuery({ queryKey: ["talos", scope, "automation-commands"],
+  const initialCommands = useQuery({ queryKey: ["talos", scope, "automation-commands", nodeId],
     queryFn: async () => (await getTalosClient({ nodeId })).automation.commandCatalog({}),
     enabled: !session && Boolean(nodeId), staleTime: Infinity });
 

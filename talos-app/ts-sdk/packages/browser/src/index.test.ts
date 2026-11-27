@@ -49,7 +49,7 @@ describe("Browser files client", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
     const client = createBrowserTalosClient({ baseUrl: "http://localhost:8080" });
 
-    await expect(client.models.list()).rejects.toMatchObject({ code: AppProtocol.ErrorCode.InternalError, cause: expect.any(SyntaxError) });
+    await expect(client.models.list()).rejects.toMatchObject({ code: AppProtocol.ErrorCode.InternalError, cause: expect.any(SyntaxError) as unknown });
   });
 
   it("uses XHR only when upload progress is requested", async () => {
@@ -113,7 +113,7 @@ describe("Browser files client", () => {
 
     xhr.finishWith(204, "");
 
-    await expect(upload).rejects.toMatchObject({ code: AppProtocol.ErrorCode.InternalError, cause: expect.any(SyntaxError) });
+    await expect(upload).rejects.toMatchObject({ code: AppProtocol.ErrorCode.InternalError, cause: expect.any(SyntaxError) as unknown });
   });
 
   it("aborts an in-flight progress upload with the caller signal", async () => {
@@ -172,15 +172,15 @@ describe("Browser timeline client", () => {
       operation = client.files.upload({ filename: "file.txt", scope: { type: "personal" }, tags: [], metadata: {} }, new Uint8Array(), { onProgress: vi.fn() });
       xhr.finishWith(200, "SECRET_REMOTE_BODY");
     } else {
-      streamMocks.fetchEventSource.mockImplementation(async (_url: string, options: { onmessage: (event: { data: string }) => void }) => {
+      streamMocks.fetchEventSource.mockImplementation((_url: string, options: { onmessage: (event: { data: string }) => void }) => {
         options.onmessage({ data: "SECRET_REMOTE_BODY" });
-      });
+       return Promise.resolve(); });
       operation = client.turns.events("session-1", undefined, vi.fn());
     }
     await expect(operation).rejects.toMatchObject({
       code: AppProtocol.ErrorCode.InternalError,
       message: "The backend returned invalid JSON.",
-      cause: expect.any(SyntaxError),
+      cause: expect.any(SyntaxError) as unknown,
     });
   });
 

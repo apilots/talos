@@ -169,7 +169,6 @@ export function useMemoryPage() {
   });
 
   const files = listQuery.data ?? [];
-  const searchResults = searchQuery.data ?? [];
   const selectedDetail = detailQuery.data ?? buildMissingDetail(selectedDate);
   const isDirty = editorContent !== selectedDetail.content;
   const isSearchPending = normalizedQuery.length > 0 && normalizedDebouncedQuery !== normalizedQuery;
@@ -178,10 +177,10 @@ export function useMemoryPage() {
     () =>
       Array.from(
         new Map(
-          searchResults.map((result) => [result.source.date, result.source.date]),
+          (searchQuery.data ?? []).map((result) => [result.source.date, result.source.date]),
         ).values(),
       ),
-    [searchResults],
+    [searchQuery.data],
   );
 
   function selectDate(date: string) {
@@ -203,7 +202,7 @@ export function useMemoryPage() {
     query,
     setQuery,
     files,
-    searchResults,
+    searchResults: searchQuery.data ?? [],
     searchResultDates,
     selectedMemory: memoryEntryQuery.data ?? null,
     selectedDate,

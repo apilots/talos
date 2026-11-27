@@ -7,7 +7,7 @@ import "@/shared/i18n/setup";
 import { useAppStore } from "@/shared/store/app-store";
 import { DesktopBrowserPage } from "./DesktopBrowserPage";
 import { desktopBrowserRequest } from "./desktop-browser";
-vi.mock("./desktop-browser", () => ({ desktopBrowserRequest: vi.fn(async() => null) }));
+vi.mock("./desktop-browser", () => ({ desktopBrowserRequest: vi.fn(() => Promise.resolve(null)) }));
 const tab = { id: "1", title: "Page", url: "https://example.test/", back: true, forward: false, loading: false };
 beforeEach(() => {
   vi.clearAllMocks();useAppStore.setState({ desktopBrowser: { sessionId: "bound", revision: 1, error: null, tabs: [], revealTabId: null } });

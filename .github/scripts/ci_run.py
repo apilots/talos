@@ -154,7 +154,8 @@ def execute(task: dict, directory: Path) -> None:
         if task['rust']:
             args = [value for package in task['rust'] for value in ('-p', package)]
             run('just', 'fmt-check')
-            run('just', 'check', '--locked', *args)
+            run('just', 'deps-check')
+            run('just', 'clippy', '--locked', '--all-targets', *args)
             archive = os.environ.get('TALOS_TEST_ARCHIVE')
             if archive:
                 verified(Path(archive))
@@ -163,12 +164,15 @@ def execute(task: dict, directory: Path) -> None:
                 run('just', 'test', '--locked', *args)
         if task['frontend']:
             filters = [value for package in task['frontend'] for value in ('--filter', package)]
-            for script in ('lint', 'test', 'typecheck'):
+            for script in ('typecheck', 'lint'):
                 run('pnpm', '--dir', 'talos-app', '-r', *filters, script)
-            for package in task['frontend']:
-                run('pnpm', '--dir', 'talos-app', '--filter', package,
-                    'build:main' if package == 'talos-desktop' else 'build')
             run('pnpm', '--dir', 'talos-app', 'check:repo')
+            run('pnpm', '--dir', 'talos-app', '-r', *filters, 'test')
+            # SDK build scripts are no-emit typechecks already completed above.
+            for package in task['frontend']:
+                if package in ('talos-web', 'talos-desktop'):
+                    run('pnpm', '--dir', 'talos-app', '--filter', package,
+                        'build:main' if package == 'talos-desktop' else 'build:bundle')
     elif task['kind'] == 'build':
         args = [value for binary in task['binaries'] for value in
                 ('-p', BINARIES[binary][0], '--bin', BINARIES[binary][1])]

@@ -138,7 +138,7 @@ export function ChatSessionContent({ sessionId, talo }: {
   });
 
   if (!sessionId) {
-    navigate("/");
+    void navigate("/");
     return null;
   }
 

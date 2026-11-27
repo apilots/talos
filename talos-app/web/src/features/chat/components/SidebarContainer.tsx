@@ -71,12 +71,12 @@ export function SidebarContainer({ computer, computerEntry }: { computer?: impor
       chats={chats}
       connection={connection}
       currentPath={location.pathname}
-      onCreateThread={async () => {
-        navigate("/");
+      onCreateThread={() => {
+        void navigate("/");
       }}
       onCreateProjectThread={(projectId) => {
         projectsView.setActiveProjectId(projectId);
-        navigate("/");
+        void navigate("/");
       }}
       onRemoveProject={async (projectId) => {
         await deleteProject.mutateAsync(projectId);
@@ -86,12 +86,12 @@ export function SidebarContainer({ computer, computerEntry }: { computer?: impor
         deleteSessionAlias(sessionId);
         resetStream(sessionId);
         setSessionStatus(sessionId, undefined);
-        if (location.pathname === `/sessions/${sessionId}`) navigate("/");
+        if (location.pathname === `/sessions/${sessionId}`) void navigate("/");
       }}
       onRenameProject={async (projectId, name) => {
         await updateProjectName.mutateAsync({ projectId, name });
       }}
-      onSelectThread={(sessionId) => navigate(`/sessions/${sessionId}`)}
+      onSelectThread={(sessionId) => void navigate(`/sessions/${sessionId}`)}
       onLogout={handleLogout}
       projectActionPending={deleteProject.isPending || updateProjectName.isPending}
       sessionActionPending={deleteSession.isPending}

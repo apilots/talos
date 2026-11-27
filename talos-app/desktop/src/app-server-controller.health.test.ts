@@ -34,7 +34,7 @@ describe("DesktopAppServerController runtime health", () => {
   it("replays the current runtime health when a renderer reconnects to the initialized bridge", async () => {
     const bridge = new FakeBridge();
     const connect = vi.spyOn(bridge, "connect");
-    const states = vi.fn();
+    const states = vi.fn<(state: import("@talos/sdk-app-server/desktop").TalosRuntimeState) => void>();
     const controller = new DesktopAppServerController({ bridgeFactory: () => bridge, onRuntimeState: states });
     try {
       const initialized = await controller.connect();
@@ -49,7 +49,7 @@ describe("DesktopAppServerController runtime health", () => {
 
   it("does not let Worker recovery conceal a real local transport failure", async () => {
     const bridge = new FakeBridge();
-    const states = vi.fn();
+    const states = vi.fn<(state: import("@talos/sdk-app-server/desktop").TalosRuntimeState) => void>();
     const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const controller = new DesktopAppServerController({ bridgeFactory: () => bridge, onRuntimeState: states });
     try {

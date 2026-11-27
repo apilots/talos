@@ -7,7 +7,7 @@ describe("TalosClient", () => {
   it("lists the account Computer directory with unchanged filters and optional cancellation", async () => {
     const directory = { data: [{ nodeId: "worker-1" }], nextCursor: null, total: 1 };
     const request = vi.fn().mockResolvedValue(directory);
-    const client = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080/");
+    const client = new TalosClient({ request: request as HttpAdapter["request"] }, noopStreamAdapter(), "http://localhost:8080/");
     const controller = new AbortController();
 
     expect(await client.computers.list()).toEqual(directory);
@@ -21,10 +21,10 @@ describe("TalosClient", () => {
   });
 
   it("propagates cancellation of a pending Computer list to the HTTP adapter", async () => {
-    const request = vi.fn().mockImplementation((_url, options) => new Promise((_resolve, reject) => {
-      options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+    const request = vi.fn<HttpAdapter["request"]>().mockImplementation((_url, options) => new Promise((_resolve, reject) => {
+      options!.signal!.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")), { once: true });
     }));
-    const client = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080");
+    const client = new TalosClient({ request: request as HttpAdapter["request"] }, noopStreamAdapter(), "http://localhost:8080");
     const controller = new AbortController();
     const pending = client.computers.list({}, controller.signal);
     const aborted = expect(pending).rejects.toMatchObject({ name: "AbortError" });
@@ -36,7 +36,7 @@ describe("TalosClient", () => {
 
   it("reads and writes llm config through the user config route", async () => {
     const request = vi.fn().mockResolvedValue({ provider: "anthropic", model: "claude-sonnet-4" });
-    const client = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080/");
+    const client = new TalosClient({ request: request as HttpAdapter["request"] }, noopStreamAdapter(), "http://localhost:8080/");
     const config = { provider: "anthropic", model: "claude-sonnet-4" } as never;
 
     await client.llm.get();
@@ -201,10 +201,6 @@ describe("TalosClient", () => {
 
     expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/sessions?projectId=project-1");
   });
-
-
-
-
 
   it("writes workspace docs through the workspace docs route", async () => {
     const request = vi.fn().mockResolvedValue({

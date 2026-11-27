@@ -9,7 +9,7 @@
   "main": "dist/main.js",
   "scripts": {
     "dev": "pnpm build && electron .",
-    "build": "TALOS_WEB_BASE=./ VITE_TALOS_DESKTOP=1 pnpm --filter talos-web build && pnpm build:main",
+    "build": "pnpm --filter talos-web typecheck && pnpm typecheck && pnpm build:checked",
     "build:main": "vite build && vite build --config vite.preload.config.ts",
     "prepare:app-server": "node scripts/prepare-app-server.mjs",
     "package:mac": "pnpm build && TALOS_DESKTOP_APP_SERVER_PROFILE=release pnpm prepare:app-server && TALOS_DESKTOP_PACKAGE_TARGET=desktop-mac electron-builder --mac dmg --config electron-builder.config.cjs",
@@ -19,7 +19,8 @@
     "lint": "eslint src vite.config.ts vite.preload.config.ts --ext .ts",
     "test": "vitest run --passWithNoTests",
     "smoke": "pnpm build && (cd ../../talos-rs && cargo build -p app-server --bin app-server) && node scripts/desktop-smoke.mjs",
-    "check": "pnpm lint && pnpm test && pnpm typecheck && pnpm build"
+    "check": "pnpm --filter talos-web typecheck && pnpm typecheck && pnpm lint && pnpm test && pnpm build:checked",
+    "build:checked": "TALOS_WEB_BASE=./ VITE_TALOS_DESKTOP=1 pnpm --filter talos-web build:bundle && pnpm build:main"
   },
   "dependencies": {
     "@talos/sdk-app-server": "workspace:*",

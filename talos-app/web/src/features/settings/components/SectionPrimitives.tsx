@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { useTranslation } from "react-i18next";
 
 import { Panel } from "@/shared/ui/Panel";
 
@@ -55,33 +54,5 @@ export function FieldBlock({
       <label className="mb-2 block text-sm text-muted">{label}</label>
       {children}
     </div>
-  );
-}
-
-export function ToggleRow({
-  label,
-  description,
-  value,
-  onToggle,
-}: {
-  label: string;
-  description: string;
-  value: boolean;
-  onToggle: () => void;
-}) {
-  const { t } = useTranslation("settings");
-
-  return (
-    <button
-      className="rounded-[var(--radius-panel)] border border-border/80 bg-background/45 p-4 text-left transition hover:border-brand/25"
-      onClick={onToggle}
-      type="button"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-medium text-ink">{label}</div>
-        <div className={value ? "font-semibold text-ink" : "text-muted"}>{value ? t("toggleOn") : t("toggleOff")}</div>
-      </div>
-      <p className="mt-2 text-xs leading-6 text-muted">{description}</p>
-    </button>
   );
 }

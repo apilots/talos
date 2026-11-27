@@ -44,7 +44,7 @@ export type AppServerNotificationHandler = (
 
 export type AppServerRequestHandler = (
   request: AppProtocol.JsonRpcRequest,
-) => Promise<unknown> | unknown;
+) => unknown;
 
 interface PendingRequest {
   resolve: (value: unknown) => void;

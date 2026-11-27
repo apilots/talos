@@ -63,7 +63,7 @@ describe("Desktop account lifecycle", () => {
       }
       return invoke<T>(method, params);
     });
-    const states = vi.fn();
+    const states = vi.fn<(state: import("@talos/sdk-app-server/desktop").TalosRuntimeState) => void>();
     const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const controller = new DesktopAppServerController({ desktopHost: true, bridgeFactory: factory, onRuntimeState: states });
     try {
@@ -80,7 +80,7 @@ describe("Desktop account lifecycle", () => {
 
 it.each(["permissionDenied", "serviceUnavailable"] as const)("keeps %s Worker registration failures separate from the authenticated local runtime", async (code) => {
   const bridge = hostBridge(true);
-  const states = vi.fn();
+  const states = vi.fn<(state: import("@talos/sdk-app-server/desktop").TalosRuntimeState) => void>();
   const controller = new DesktopAppServerController({ desktopHost: true, bridgeFactory: () => bridge, onRuntimeState: states });
   try {
     await controller.connect();
@@ -111,7 +111,7 @@ it("serves local requests without using a pending status query for enrollment", 
     }
     return invoke<T>(method, params);
   });
-  const states = vi.fn();
+  const states = vi.fn<(state: import("@talos/sdk-app-server/desktop").TalosRuntimeState) => void>();
   const controller = new DesktopAppServerController({ desktopHost: true, bridgeFactory: () => bridge, onRuntimeState: states });
   try {
     let connected = false;

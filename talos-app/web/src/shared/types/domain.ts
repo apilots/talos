@@ -1,6 +1,6 @@
 import { i18n } from "@/shared/i18n/setup";
 import { jsonContentValue } from "@talos/sdk-browser";
-import type { SessionInfo, TalosContentItem } from "./protocol";
+import type { TalosContentItem } from "./protocol";
 import type {
   ProjectView,
   SessionUiStatus,
@@ -8,7 +8,7 @@ import type {
 } from "./ui";
 
 export const UNBOUND_PROJECT_ID = "__unbound_project__";
-export const DEFAULT_SESSION_TITLE = "Untitled Session";
+const DEFAULT_SESSION_TITLE = "Untitled Session";
 
 export function getEffectiveSessionStatus(
   transientStatus?: SessionUiStatus,
@@ -40,7 +40,7 @@ export function deriveProjectName(directory: string) {
   return normalized.split("/").filter(Boolean).at(-1) || "project";
 }
 
-export function normalizeProjectDirectory(directory?: string | null) {
+function normalizeProjectDirectory(directory?: string | null) {
   return directory?.trim() || null;
 }
 
@@ -121,8 +121,4 @@ export function outputContentToText(content: TalosContentItem[]) {
 
 function assertNeverToolContentItem(item: never): string {
   return JSON.stringify(item);
-}
-
-export function getSessionModel(session: SessionInfo) {
-  return session.modelSelection.modelRef.id;
 }

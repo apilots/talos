@@ -12,7 +12,8 @@ export function parseRequestParameters(rows: RequestParameterRow[]): {
   value: Record<string, unknown>;
   error?: "missingKey" | "duplicate" | "reserved" | "invalidJson";
 } {
-  const value: Record<string, unknown> = Object.create(null);
+  const value: Record<string, unknown> = {};
+  Object.setPrototypeOf(value, null);
   for (const row of rows) {
     const key = row.key.trim();
     if (!key && !row.value.trim()) continue;
@@ -20,7 +21,8 @@ export function parseRequestParameters(rows: RequestParameterRow[]): {
     if (Object.hasOwn(value, key)) return { value, error: "duplicate" };
     if (MANAGED_KEYS.has(key)) return { value, error: "reserved" };
     try {
-      value[key] = JSON.parse(row.value);
+      const parsed: unknown = JSON.parse(row.value);
+      value[key] = parsed;
     } catch {
       return { value, error: "invalidJson" };
     }

@@ -24,7 +24,7 @@ describe("domain helpers", () => {
     expect(describeProjectDirectory(undefined)).toBe("不绑定项目");
   });
 
-  it("creates an unbound project option by default", async () => {
+  it("creates an unbound project option by default",  () => {
     const projects = createDefaultProjects();
 
     expect(projects).toHaveLength(1);

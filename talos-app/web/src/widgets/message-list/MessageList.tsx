@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 
 import type { ChatRenderBlock } from "@/shared/types/ui";
 import { Badge } from "@/shared/ui/Badge";
-import { Button } from "@/shared/ui/Button";
 import { CopyableBlock } from "./CopyableBlock";
 import { MessageTimelineBlock } from "./MessageTimelineBlock";
 import { SystemNotice } from "./SystemNotice";
@@ -190,18 +189,4 @@ function fencedMarkdown(content: string, language = "") {
   const longestFence = Math.max(3, ...Array.from(content.matchAll(/`+/g), (match) => match[0].length + 1));
   const fence = "`".repeat(longestFence);
   return `${fence}${language}\n${content}\n${fence}`;
-}
-
-export function EmptyAction({
-  title,
-  onClick,
-}: {
-  title: string;
-  onClick: () => void;
-}) {
-  return (
-    <Button onClick={onClick} variant="secondary">
-      {title}
-    </Button>
-  );
 }

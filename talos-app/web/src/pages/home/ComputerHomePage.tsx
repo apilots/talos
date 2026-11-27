@@ -20,7 +20,7 @@ export function ComputerHomePage() {
   const empty = list.isSuccess && personalTotal === 0 && !localNode;
 
   function selectTab(next: "personal" | "talo") {
-    if (next !== tab) navigate(next === "talo" ? "/talo" : "/");
+    if (next !== tab) void navigate(next === "talo" ? "/talo" : "/");
   }
 
   return (
@@ -63,7 +63,7 @@ export function ComputerHomePage() {
               </div>
             ) : <>
               <p className="mb-3 text-sm text-muted">{t("computers:home.chooseHelp")}</p>
-              <ComputerPicker total={personalTotal} localNode={localNode} localRuntime={runtime} onSelect={(id) => { select(id); navigate("/"); }} />
+              <ComputerPicker total={personalTotal} localNode={localNode} localRuntime={runtime} onSelect={(id) => { select(id); void navigate("/"); }} />
               <Button type="button" variant="ghost" className="mt-3 px-0 underline underline-offset-4" aria-expanded={showConnectHelp}
                 aria-controls="computer-home-connect-help" onClick={() => setShowConnectHelp(open => !open)}>
                 {t("computers:home.addPersonal")}

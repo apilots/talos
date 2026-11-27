@@ -1,3 +1,4 @@
+import { restoreComposerRequest } from "@/features/chat";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import "@/shared/i18n/setup";
@@ -18,22 +19,22 @@ it.each(["unchanged", "retry", "caption", "picker", "remove"] as const)(
       scope: { type: "personal" }, tags: [], metadata: {}, createdAt: 1, updatedAt: 1,
     }));
     let serviceUp = false;
-    const read = vi.fn(async ({ fileId }: { fileId: string }) => {
-      if (fileId === "file-second" && !serviceUp) throw new Error("Metadata temporarily unavailable");
-      return { file: files.find(file => file.fileId === fileId)! };
+    const read = vi.fn(({ fileId }: { fileId: string }) => {
+      if (fileId === "file-second" && !serviceUp) return Promise.reject(new Error("Metadata temporarily unavailable"));
+      return Promise.resolve({ file: files.find(file => file.fileId === fileId)! });
     });
     const sent: Array<{ key: string | null; body: string }> = [];
     const accepted = new Set<string | null>();
-    const http = vi.fn<typeof fetch>(async (url, init) => {
-      if (!String(url).endsWith("/v1/turns/start")) return Response.json({ status: "success", data: { data: [] } });
-      const submission = { key: new Headers(init?.headers).get("idempotency-key"), body: String(init?.body) };
+    const http = vi.fn<typeof fetch>( (url, init) => {
+      if (!(url instanceof Request ? url.url : url.toString()).endsWith("/v1/turns/start")) return Promise.resolve(Response.json({ status: "success", data: { data: [] } }));
+      const submission = { key: new Headers(init?.headers).get("idempotency-key"), body: (typeof init?.body === "string" ? init.body : (() => { throw new Error("Expected a JSON request body."); })()) };
       sent.push(submission); accepted.add(submission.key);
-      if (sent.length === 1) throw new TypeError("Response lost after admission");
-      return Response.json({ status: "success", data: { turnId: "turn-1", messageId: "message-1" } });
+      if (sent.length === 1) return Promise.reject(new TypeError("Response lost after admission"));
+      return Promise.resolve(Response.json({ status: "success", data: { turnId: "turn-1", messageId: "message-1" } }));
     });
     setTalosClientFactory(() => ({ ...createBrowserTalosClient({ baseUrl: "https://server.example", fetch: http }),
       files: { read, list: vi.fn().mockResolvedValue({ data: files, nextCursor: null }),
-        upload: vi.fn(async (_request: unknown, file: File) => ({ file: files.find(item => item.originalFilename === file.name)! })) },
+        upload: vi.fn((_request: unknown, file: File) => Promise.resolve(({ file: files.find(item => item.originalFilename === file.name)! }))) },
     }) as unknown as TalosWebClient);
     const view = render(<MemoryRouter><Routes>
       <Route path="/" element={<><ChatHomePage /><Link to="/settings">Settings</Link></>} />
@@ -47,7 +48,7 @@ it.each(["unchanged", "retry", "caption", "picker", "remove"] as const)(
     await screen.findByRole("button", { name: "Remove second.png" });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByRole("alert");
-    expect(JSON.parse(sent[0].body).input.content).toEqual([
+    expect(restoreComposerRequest(sent[0].body).input.content).toEqual([
       { type: "file", fileId: "file-first" }, { type: "file", fileId: "file-second" },
     ]);
     fireEvent.click(screen.getByRole("link", { name: "Settings" }));
@@ -82,7 +83,7 @@ it.each(["unchanged", "retry", "caption", "picker", "remove"] as const)(
     expect(sent).toHaveLength(2);
     if (recovery === "caption" || recovery === "remove") {
       expect(sent[1].key).not.toBe(sent[0].key);
-      expect(JSON.parse(sent[1].body).input.content).toEqual([
+      expect(restoreComposerRequest(sent[1].body).input.content).toEqual([
         ...(recovery === "caption" ? [{ type: "text", text: "Please review both images" }] : []),
         { type: "file", fileId: "file-first" },
         ...(recovery === "caption" ? [{ type: "file", fileId: "file-second" }] : []),

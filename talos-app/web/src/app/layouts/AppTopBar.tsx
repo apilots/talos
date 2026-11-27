@@ -19,8 +19,8 @@ export function AppNavigation({ sidebarAvailable, sidebarToggleRef, sidebarVisib
   return <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
     {sidebarAvailable ? <Button ref={sidebarToggleRef} variant="ghost" className="p-2" aria-label={t(sidebarVisible ? "navigation.hideSidebar" : "navigation.showSidebar")} aria-controls="talos-sidebar" aria-expanded={sidebarVisible} onClick={onToggleSidebar}><PanelLeft aria-hidden="true" size={16} /></Button> : null}
     <div role="group" aria-label={t("navigation.history")} className="flex shrink-0 items-center gap-0.5">
-      <Button variant="ghost" className="p-2" aria-label={t("navigation.back")} onClick={() => navigate(-1)}><ArrowLeft aria-hidden="true" size={16} /></Button>
-      <Button variant="ghost" className="p-2" aria-label={t("navigation.forward")} onClick={() => navigate(1)}><ArrowRight aria-hidden="true" size={16} /></Button>
+      <Button variant="ghost" className="p-2" aria-label={t("navigation.back")} onClick={() => void navigate(-1)}><ArrowLeft aria-hidden="true" size={16} /></Button>
+      <Button variant="ghost" className="p-2" aria-label={t("navigation.forward")} onClick={() => void navigate(1)}><ArrowRight aria-hidden="true" size={16} /></Button>
       <Link to="/" aria-label={t("navigation.newChat")} className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><PencilLine aria-hidden="true" size={16} /></Link>
     </div>
 
@@ -45,7 +45,7 @@ export function AppSessionContext() {
   return <div className="flex min-w-0 flex-1 items-center gap-2">
     <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
       <FileText aria-hidden="true" size={14} className="hidden shrink-0 text-muted sm:block" />
-      {project ? <><button type="button" className="hidden max-w-40 truncate text-muted hover:text-ink sm:block" onClick={() => { setActiveProject(project.id); navigate("/"); }}>{project.name}</button><span aria-hidden="true" className="hidden text-muted/40 sm:block">/</span></> : null}
+      {project ? <><button type="button" className="hidden max-w-40 truncate text-muted hover:text-ink sm:block" onClick={() => { setActiveProject(project.id); void navigate("/"); }}>{project.name}</button><span aria-hidden="true" className="hidden text-muted/40 sm:block">/</span></> : null}
       <span className="truncate font-medium text-ink" title={title}>{title}</span>
     </div>
     {session ? <SessionDesktopShortcut nodeId={session.nodeId} /> : null}

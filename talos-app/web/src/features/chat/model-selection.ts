@@ -27,7 +27,7 @@ export function supportedAttachmentKinds(
   );
 }
 
-export function reasoningLevelToEffort(level: ReasoningLevel): ReasoningEffort | null {
+function reasoningLevelToEffort(level: ReasoningLevel): ReasoningEffort | null {
   if (level === "none") {
     return null;
   }

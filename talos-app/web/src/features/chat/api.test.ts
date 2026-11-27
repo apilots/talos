@@ -69,13 +69,13 @@ describe("chat message api", () => {
 
   it("returns the accepted message id without opening another event stream", async () => {
     const onAcceptedMessageId = vi.fn();
-    const start = vi.fn(async () => ({
+    const start = vi.fn(() => Promise.resolve(({
       requestId: "req-1",
       messageId: "msg-accepted",
       sessionId: "sess-1",
       turnId: "turn-1",
       status: "accepted",
-    }));
+    })));
     setTalosClientFactory(() => ({
       turns: {
         start,
@@ -103,13 +103,13 @@ describe("chat message api", () => {
 
   it("returns the accepted retry message id without opening another event stream", async () => {
     const onAcceptedMessageId = vi.fn();
-    const retry = vi.fn(async () => ({
+    const retry = vi.fn(() => Promise.resolve(({
       requestId: "req-1",
       messageId: "msg-retry",
       sessionId: "sess-1",
       turnId: "turn-1",
       status: "accepted",
-    }));
+    })));
     setTalosClientFactory(() => ({
       turns: {
         retry,

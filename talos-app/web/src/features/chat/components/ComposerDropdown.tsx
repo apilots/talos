@@ -5,7 +5,7 @@ import { Check, ChevronDown } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 
-export interface DropdownItem {
+interface DropdownItem {
   value: string;
   label: string;
   description?: string;

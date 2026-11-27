@@ -13,7 +13,6 @@ serde_json = { workspace = true }
 serde_yaml = "0.9"
 talos-error = { workspace = true }
 talos-types = { workspace = true }
-walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"

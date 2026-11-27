@@ -20,9 +20,9 @@ vi.hoisted(() => {
 });
 
 const mocks = vi.hoisted(() => ({
-  cancelActiveTurn: vi.fn(),
-  startTimelineTurn: vi.fn(),
-  retryTimelineTurn: vi.fn(),
+  cancelActiveTurn: vi.fn<typeof import("../api")["cancelActiveTurn"]>(),
+  startTimelineTurn: vi.fn<typeof import("../api")["startTimelineTurn"]>(),
+  retryTimelineTurn: vi.fn<typeof import("../api")["retryTimelineTurn"]>(),
   invalidateSessionQueries: vi.fn(),
 }));
 
@@ -43,9 +43,9 @@ describe("useSessionStreaming", () => {
   beforeEach(() => {
     useAppStore.setState({ streams: {}, transientStatuses: {} });
     mocks.startTimelineTurn.mockReset();
-    mocks.retryTimelineTurn.mockReset().mockImplementation(async (_request, onAccepted) => {
-      onAccepted("retry-message");
-      return "retry-message";
+    mocks.retryTimelineTurn.mockReset().mockImplementation((_request, onAccepted) => {
+      onAccepted?.("retry-message");
+      return Promise.resolve("retry-message");
     });
     mocks.cancelActiveTurn.mockReset().mockResolvedValue(undefined);
     mocks.invalidateSessionQueries.mockReset().mockResolvedValue(undefined);
@@ -54,14 +54,14 @@ describe("useSessionStreaming", () => {
   it.each(["goal", "loop"] as const)("preserves this request's %s selection through admission", async (mode) => {
     let accept!: () => void;
     mocks.startTimelineTurn.mockImplementation((_request, onAccepted) => new Promise<string>((resolve) => {
-      accept = () => { onAccepted("canonical-input"); resolve("canonical-input"); };
+      accept = () => { onAccepted?.("canonical-input"); resolve("canonical-input"); };
     }));
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
     const { result } = renderHook(() => useSessionStreaming("session-1"), { wrapper });
     const request = { sessionId: "session-1", input: { content: [{ type: "skillSelection" as const, name: mode, path: `/real/${mode}/SKILL.md` }, { type: "text" as const, text: "Original task" }] }, modelSelection: null, userPermissionMode: null, projectId: null, currentDirectory: null, clientRequestId: null };
     let sending!: Promise<void>;
-    await act(async () => { sending = result.current.sendText("Original task", request); });
+    await act(() => { sending = result.current.sendText("Original task", request);  return Promise.resolve(); });
     expect(useAppStore.getState().streams["session-1"]?.pendingInput).toMatchObject({ text: "Original task", activationMode: mode, phase: "local" });
     expect(mocks.startTimelineTurn).toHaveBeenCalledWith(request, expect.any(Function));
     await act(async () => { accept(); await sending; });
@@ -97,12 +97,12 @@ describe("useSessionStreaming", () => {
     const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client: queryClient }, children);
-    mocks.startTimelineTurn.mockImplementation(async () => {
+    mocks.startTimelineTurn.mockImplementation(() => {
       useAppStore.getState().setStreamMeta("session-1", {
         activeTurnId: "queued-turn", activeMessageId: "queued-message",
         isStreaming: true, connectionState: "streaming",
       });
-    });
+     return Promise.resolve("canonical-input"); });
     const { result } = renderHook(() => useSessionStreaming("session-1"), { wrapper });
     await act(async () => { await result.current.sendText("first question"); });
     expect(useAppStore.getState().streams["session-1"]).toMatchObject({
@@ -173,9 +173,9 @@ describe("useSessionStreaming", () => {
     const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client: queryClient }, children);
-    mocks.startTimelineTurn.mockImplementation(async (_request, onAccepted) => {
-      onAccepted("message-1");
-      return "message-1";
+    mocks.startTimelineTurn.mockImplementation((_request, onAccepted) => {
+      onAccepted?.("message-1");
+      return Promise.resolve("message-1");
     });
     const { result } = renderHook(() => useSessionStreaming("session-1"), { wrapper });
     await act(() => result.current.sendText("hello"));

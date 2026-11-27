@@ -20,7 +20,6 @@ agent-pb = { workspace = true }
 talos-error = { workspace = true }
 talos-logging = { workspace = true }
 talos-config = { workspace = true }
-thiserror = { workspace = true }
 talos-types = { workspace = true }
 talos-run-control = { workspace = true }
 sha2 = { workspace = true }

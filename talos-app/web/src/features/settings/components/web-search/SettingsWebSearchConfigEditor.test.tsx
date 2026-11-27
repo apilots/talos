@@ -8,12 +8,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "@/shared/i18n/setup";
 import { SettingsWebSearchConfigEditor } from "./SettingsWebSearchConfigEditor";
 
-const getWebSearchConfig = vi.fn();
-const updateWebSearchConfig = vi.fn();
+const getWebSearchConfig = vi.fn<typeof import("@/features/settings/api")["getWebSearchConfig"]>();
+const updateWebSearchConfig = vi.fn<typeof import("@/features/settings/api")["updateWebSearchConfig"]>();
 
 vi.mock("@/features/settings/api", () => ({
   getWebSearchConfig: () => getWebSearchConfig(),
-  updateWebSearchConfig: (config: unknown) => updateWebSearchConfig(config),
+  updateWebSearchConfig: (...args: Parameters<typeof updateWebSearchConfig>) => updateWebSearchConfig(...args),
 }));
 
 vi.mock("@/features/chat", () => ({
@@ -34,7 +34,7 @@ function createWrapper() {
   };
 }
 
-function webSearchResponse() {
+function webSearchResponse(): Awaited<ReturnType<typeof getWebSearchConfig>> {
   return {
     type: "webSearch",
     config: {

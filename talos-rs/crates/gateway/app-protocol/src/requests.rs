@@ -63,17 +63,17 @@ pub enum ClientRequestParams {
     #[serde(rename = "desktop/streamClose")]
     DesktopStreamClose(talos_types::DesktopStreamClose),
     #[serde(rename = "desktop/workerIdentity")]
-    DesktopWorkerIdentity(Option<()>),
+    DesktopWorkerIdentity(#[ts(type = "null")] Option<()>),
     #[serde(rename = "desktop/workerEnroll")]
     DesktopWorkerEnroll(talos_types::DesktopWorkerEnrollParams),
     #[serde(rename = "sync/status")]
-    SyncStatus(Option<()>),
+    SyncStatus(#[ts(type = "null")] Option<()>),
     #[serde(rename = "sync/metrics")]
-    SyncMetrics(Option<()>),
+    SyncMetrics(#[ts(type = "null")] Option<()>),
     #[serde(rename = "sync/enable")]
     SyncEnable(talos_types::SyncEnableRequest),
     #[serde(rename = "sync/disable")]
-    SyncDisable(Option<()>),
+    SyncDisable(#[ts(type = "null")] Option<()>),
     #[serde(rename = "computer/list")]
     ComputerList(talos_types::ComputerListRequest),
     #[serde(rename = "computer/read")]
@@ -103,7 +103,7 @@ pub enum ClientRequestParams {
     #[serde(rename = "profile/read")]
     ProfileRead(ProfileReadRequest),
     #[serde(rename = "trajectory/capabilities")]
-    TrajectoryCapabilities(Option<()>),
+    TrajectoryCapabilities(#[ts(type = "null")] Option<()>),
     #[serde(rename = "trajectory/readTurn")]
     TrajectoryReadTurn(talos_agent_api::trajectory::TrajectoryReadTurnRequest),
     #[serde(rename = "trajectory/readRequest")]

@@ -33,7 +33,7 @@ describe.each(["en", "zh-CN"])("quiet management rows (%s)", (language) => {
     expect(link).toHaveAttribute("href", "/sessions/technical-session-id");
     expect(link).toHaveAttribute("title", language === "en" ? "Open chat" : "回到会话");
     expect(link.textContent).toBe("");
-    act(() => vi.advanceTimersByTime(10_000));
+    act(() => { vi.advanceTimersByTime(10_000); });
     expect(within(row).getByTestId("automation-list-metadata")).toHaveTextContent("1m44s");
   });
   it("keeps a stopped Loop's reason in one metadata line and its state only once", () => {
@@ -53,9 +53,9 @@ it("reuses the original typed controls and keeps edit focus for the existing mod
   const { onAction, onEdit, row } = setup(task);
   const buttons = within(row).getAllByRole("button");
   expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Pause Goal", "Clear Goal", "Edit Goal"]);
-  fireEvent.click(buttons[0]!);
+  fireEvent.click(buttons[0]);
   expect(onAction).toHaveBeenCalledWith({ target: "goal", action: { type: "pause", goalId: task.value.id } });
-  fireEvent.click(buttons[2]!);
+  fireEvent.click(buttons[2]);
   expect(onEdit).toHaveBeenCalledWith(task);
   expect(document.activeElement).toBe(buttons[2]);
 });
@@ -69,7 +69,7 @@ it("keeps pending controls disabled and has a bounded two-line layout for narrow
   expect(within(row).getByTestId("automation-list-metadata")).toHaveTextContent("Next");
   const buttons = within(row).getAllByRole("button");
   expect(buttons.every((button) => button.hasAttribute("disabled"))).toBe(true);
-  fireEvent.click(buttons[0]!);
+  fireEvent.click(buttons[0]);
   expect(onAction).not.toHaveBeenCalled();
   expect(within(row).getByRole("link")).toBeInTheDocument();
 });
@@ -78,7 +78,7 @@ it("uses a short translated budget reason and keeps pause included in the displa
   setup(task, "zh-CN");
   const metadata = screen.getByTestId("automation-list-metadata");
   expect(metadata).toHaveTextContent("Goal · 耗时 1m40s · 已暂停 · 已达预算");
-  act(() => vi.advanceTimersByTime(2_000));
+  act(() => { vi.advanceTimersByTime(2_000); });
   expect(metadata).toHaveTextContent("1m42s");
   expect(metadata).not.toHaveTextContent("2000");
 });

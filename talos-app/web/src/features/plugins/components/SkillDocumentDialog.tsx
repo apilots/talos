@@ -1,7 +1,7 @@
 import { documentOverlayClasses } from "@/shared/ui/overlayStyles";
 import { useEnvironmentKey } from "@/features/computers";
 import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { FileText, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { PluginDocument, SkillSummary } from "@talos/sdk-browser";
@@ -18,10 +18,12 @@ interface SkillDocumentDialogProps {
 export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps) {
   const environmentKey = useEnvironmentKey();
   const { t } = useTranslation("plugins");
+  const name = skill?.name;
+  const path = skill?.path;
   const documentQuery = useQuery({
     enabled: Boolean(skill),
-    queryKey: ["talos", environmentKey, "skills", "document", skill?.path],
-    queryFn: () => readLocalSkill(skill as SkillSummary),
+    queryKey: ["talos", environmentKey, "skills", "document", path, name],
+    queryFn: name && path ? () => readLocalSkill({ name, path }) : skipToken,
   });
 
   useEffect(() => {

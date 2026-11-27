@@ -6,7 +6,7 @@ import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 
-export type SettingsProviderTabOption<TKey extends string> = {
+type SettingsProviderTabOption<TKey extends string> = {
   key: TKey;
   label: string;
 };

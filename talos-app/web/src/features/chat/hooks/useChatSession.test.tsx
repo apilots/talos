@@ -11,7 +11,6 @@ import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 import { useChatSession } from "./useChatSession";
 import { useAppStore } from "@/shared/store/app-store";
 
-
 const mocks = getChatSessionMocks();
 
 describe("useChatSession", () => {
@@ -33,7 +32,7 @@ describe("useChatSession", () => {
     expect(mocks.timeline.mock.lastCall?.[2]).toBe(false);
     expect(result.current.showReconnectControls).toBe(true);
     expect(result.current.streamError).toBe("Running Turn unavailable");
-    await act(async () => result.current.retryStream());
+    await act(() => Promise.resolve(result.current.retryStream()));
     expect(mocks.activeTurnRefetch).toHaveBeenCalledOnce();
     mocks.activeTurnError = null;
     mocks.activeTurn = { state: "running", identity: { sessionId: "session-1", turnId: "turn-1" } };
@@ -61,7 +60,7 @@ describe("useChatSession", () => {
       false,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
-      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) }),
+      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) as unknown }),
     );
 
     act(() => {
@@ -77,7 +76,7 @@ describe("useChatSession", () => {
       false,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
-      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) }),
+      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) as unknown }),
     );
 
     act(() => {
@@ -94,7 +93,7 @@ describe("useChatSession", () => {
       true,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
-      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) }),
+      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) as unknown }),
     );
   });
 
@@ -109,7 +108,7 @@ describe("useChatSession", () => {
       true,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
-      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) }),
+      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) as unknown }),
     );
   });
 
@@ -127,7 +126,7 @@ describe("useChatSession", () => {
       false,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
-      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) }),
+      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) as unknown }),
     );
   });
 
@@ -255,7 +254,5 @@ describe("useChatSession", () => {
     expect(mocks.messageQueueAdd).not.toHaveBeenCalled();
     expect(mocks.send).not.toHaveBeenCalled();
   });
-
-
 
 });

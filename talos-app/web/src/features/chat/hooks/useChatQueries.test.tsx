@@ -11,11 +11,11 @@ import { useAppStore } from "@/shared/store/app-store";
 import { chatKeys, useDeleteProjectMutation, useDeleteSessionMutation, useProjectsQuery, useSessionActions, useUpdateSessionModelMutation } from "./useChatQueries";
 
 const apiMocks = vi.hoisted(() => ({
-  compactSession: vi.fn(),
-  deleteSession: vi.fn(),
-  deleteProject: vi.fn(),
-  listProjects: vi.fn(),
-  updateSessionModel: vi.fn(),
+  compactSession: vi.fn<typeof import("../api")["compactSession"]>(),
+  deleteSession: vi.fn<typeof import("../api")["deleteSession"]>(),
+  deleteProject: vi.fn<typeof import("../api")["deleteProject"]>(),
+  listProjects: vi.fn<typeof import("../api")["listProjects"]>(),
+  updateSessionModel: vi.fn<typeof import("../api")["updateSessionModel"]>(),
 }));
 
 vi.mock("../api", async (importOriginal) => ({
@@ -210,7 +210,6 @@ describe("useSessionActions", () => {
     expect(queryClient.getQueryData(sessionKey)).toEqual({ owner: "server", session: compactedSession });
   });
 });
-
 
 describe("metadata deletion completion", () => {
   afterEach(() => {

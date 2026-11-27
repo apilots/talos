@@ -20,16 +20,16 @@ it("matches the approved thin Goal and Loop symbols without adding status text",
 });
 
 it("keeps compact controls in pause, delete, expand order with the same typed actions", () => {
-  const onAction = vi.fn().mockResolvedValue(undefined);
+  const onAction = vi.fn<(action: import("@talos/sdk-core").AppProtocol.AutomationRequest["action"]) => Promise<void>>().mockResolvedValue(undefined);
   const onEdit = vi.fn();
   const task = { type: "goal" as const, value: goal({ latestTurnId: "first-work" }) };
   render(<AutomationTaskRow task={task} onAction={onAction} onEdit={onEdit} />);
   const controls = screen.getAllByRole("button");
   expect(controls.map((button) => button.getAttribute("aria-label"))).toEqual(["Pause Goal", "Clear Goal", "Edit Goal"]);
   expect(controls.every((button) => !button.className.includes("hover:bg"))).toBe(true);
-  expect(controls[0]!.querySelector("path")).toHaveAttribute("d", "M7 5v10M13 5v10");
-  expect(controls[1]!.querySelector("svg")).toHaveAttribute("width", "14");
-  fireEvent.click(controls[0]!); fireEvent.click(controls[1]!); fireEvent.click(controls[2]!);
+  expect(controls[0].querySelector("path")).toHaveAttribute("d", "M7 5v10M13 5v10");
+  expect(controls[1].querySelector("svg")).toHaveAttribute("width", "14");
+  fireEvent.click(controls[0]); fireEvent.click(controls[1]); fireEvent.click(controls[2]);
   expect(onAction.mock.calls.map(([action]) => action)).toEqual([
     { target: "goal", action: { type: "pause", goalId: task.value.id } },
     { target: "goal", action: { type: "clear", goalId: task.value.id } },
@@ -38,7 +38,7 @@ it("keeps compact controls in pause, delete, expand order with the same typed ac
 });
 
 it("retains Stop semantics, pending guards and the stopped Loop's Clear action", () => {
-  const onAction = vi.fn().mockResolvedValue(undefined);
+  const onAction = vi.fn<(action: import("@talos/sdk-core").AppProtocol.AutomationRequest["action"]) => Promise<void>>().mockResolvedValue(undefined);
   const onEdit = vi.fn();
   const task = { type: "loop" as const, value: loop() };
   const view = render(<AutomationTaskRow task={task} onAction={onAction} onEdit={onEdit} />);

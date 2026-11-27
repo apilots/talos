@@ -58,7 +58,7 @@ describe("same-turn user input streaming", () => {
     });
 
     expect(blocks.filter((block) => block.kind === "user")).toEqual([
-      expect.objectContaining({ id: "user-turn-1-msg-input-1", text: "hello from server" }),
+      expect.objectContaining({ id: "user-turn-1-msg-input-1", text: "hello from server" }) as unknown,
     ]);
     expect(useAppStore.getState().streams["sess-1"]?.pendingInput?.phase).toBe("completed");
   });
@@ -83,7 +83,7 @@ describe("same-turn user input streaming", () => {
     });
 
     expect(blocks).toEqual([
-      expect.objectContaining({ id: "user-msg-1", kind: "user", live: true }),
+      expect.objectContaining({ id: "user-msg-1", kind: "user", live: true }) as unknown,
     ]);
   });
 
@@ -96,16 +96,16 @@ describe("same-turn user input streaming", () => {
     applyStreamEvent("sess-1", textDelta("answer-1", "after steer", 6));
 
     expect(useAppStore.getState().streams["sess-1"]?.blocks).toEqual([
-      expect.objectContaining({ id: "user-turn-1-msg-input-1", text: "initial", fileIds: [] }),
+      expect.objectContaining({ id: "user-turn-1-msg-input-1", text: "initial", fileIds: [] }) as unknown,
       expect.objectContaining({
         id: "timeline-sess-1-turn-1-msg-input-1",
-        items: [expect.objectContaining({ text: "before steer" })],
-      }),
-      expect.objectContaining({ id: "user-turn-1-msg-input-2", text: "steer", fileIds: ["file-1"] }),
+        items: [expect.objectContaining({ text: "before steer" }) as unknown],
+      }) as unknown,
+      expect.objectContaining({ id: "user-turn-1-msg-input-2", text: "steer", fileIds: ["file-1"] }) as unknown,
       expect.objectContaining({
         id: "timeline-sess-1-turn-1-msg-input-2",
-        items: [expect.objectContaining({ text: "after steer" })],
-      }),
+        items: [expect.objectContaining({ text: "after steer" }) as unknown],
+      }) as unknown,
     ]);
   });
 });

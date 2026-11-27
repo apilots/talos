@@ -28,7 +28,7 @@ describe("running Turn query to incremental subscription", () => {
     expect(apiMocks.getSessionHistory).not.toHaveBeenCalled();
     expect(apiMocks.subscribeTimelineEvents.mock.calls[0]?.[3]).toBe("ev_9");
     expect(useAppStore.getState().streams["sess-1"]).toMatchObject({ isStreaming: true, lastEventSeq: 9 });
-    act(() => apiMocks.subscribeTimelineEvents.mock.calls[0]?.[1](textDelta("answer", "tail", 10)));
+    act(() => { apiMocks.subscribeTimelineEvents.mock.calls[0]?.[1](textDelta("answer", "tail", 10)); });
     expect(useAppStore.getState().streams["sess-1"]?.lastEventId).toBe("ev_10");
   });
 
@@ -55,7 +55,7 @@ describe("running Turn query to incremental subscription", () => {
     apiMocks.getSessionHistory.mockReturnValue(new Promise<SessionHistoryResponse>((done) => { resolve = done; }));
     const hook = renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, undefined, { ...historyOptions, activeTurnState: { activeTurn: runningTurn(), lastCompletedEventSeq: 5, latestEventId: "ev_9" } }));
     hook.unmount();
-    await act(async () => { resolve({ data: [], nextCursor: null, lastStableEventId: null }); });
+    await act(() => { resolve({ data: [], nextCursor: null, lastStableEventId: null });  return Promise.resolve(); });
     expect(apiMocks.subscribeTimelineEvents).not.toHaveBeenCalled();
     expect(useAppStore.getState().streams["sess-1"]?.isStreaming).toBe(false);
   });

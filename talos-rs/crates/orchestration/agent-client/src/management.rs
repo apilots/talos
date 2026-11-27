@@ -119,9 +119,9 @@ impl AgentNodeClient {
                 .map_err(crate::decode_rpc_status)?
                 .into_inner();
         match response.result.ok_or_else(malformed)? {
-            pb::create_node_response::Result::Created(value) => node_pb::decode_created(value),
+            pb::create_node_response::Result::Created(value) => node_pb::decode_created(*value),
             pb::create_node_response::Result::Failure(value) => {
-                Err(error_pb::decode_failure(value)?)
+                Err(error_pb::decode_failure(*value)?)
             }
         }
     }
@@ -139,8 +139,8 @@ impl AgentNodeClient {
                 .map_err(crate::decode_rpc_status)?
                 .into_inner();
         match response.result.ok_or_else(malformed)? {
-            pb::get_node_response::Result::Node(value) => node_pb::decode_info(value),
-            pb::get_node_response::Result::Failure(value) => Err(error_pb::decode_failure(value)?),
+            pb::get_node_response::Result::Node(value) => node_pb::decode_info(*value),
+            pb::get_node_response::Result::Failure(value) => Err(error_pb::decode_failure(*value)?),
         }
     }
 
@@ -285,7 +285,7 @@ fn malformed() -> TalosError {
 
 fn decode_node(response: pb::GetNodeResponse) -> TalosResult<NodeInfo> {
     match response.result.ok_or_else(malformed)? {
-        pb::get_node_response::Result::Node(value) => node_pb::decode_info(value),
-        pb::get_node_response::Result::Failure(value) => Err(error_pb::decode_failure(value)?),
+        pb::get_node_response::Result::Node(value) => node_pb::decode_info(*value),
+        pb::get_node_response::Result::Failure(value) => Err(error_pb::decode_failure(*value)?),
     }
 }

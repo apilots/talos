@@ -6,9 +6,9 @@ import { BrowserWorkspace } from "./browser-workspace";
 
 function fixture() {
   const tab = { id: "1", title: "Owned page", url: "https://example.test/", back: false, forward: false, loading: false };
-  const account = { snapshot: () => [tab], attach: vi.fn(), present: vi.fn(), error: null, open: vi.fn(async() => tab), navigate: vi.fn(), remove: vi.fn() };
+  const account = { snapshot: () => [tab], attach: vi.fn(), present: vi.fn(), error: null, open: vi.fn(() => Promise.resolve(tab)), navigate: vi.fn(), remove: vi.fn() };
   const other = { ...account, snapshot: () => [{ ...tab, id: "2" }], attach: vi.fn() };
-  const contents = Object.assign(new EventEmitter(), { send: vi.fn(), isDestroyed: () => false, getZoomFactor: () => 1, getURL: vi.fn(() => "file:///product.html") });
+  const contents = Object.assign(new EventEmitter(), { send: vi.fn<(channel: string, state: import("@talos/sdk-app-server/desktop").DesktopBrowserState) => void>(), isDestroyed: () => false, getZoomFactor: () => 1, getURL: vi.fn(() => "file:///product.html") });
   const window = Object.assign(new EventEmitter(), { isDestroyed: () => false, getContentSize: () => [1000, 700] });
   const accounts = new Map([["alice", account], ["bob", other]]);
   const workspace = new BrowserWorkspace(user => accounts.get(user) as unknown as WebsiteAccount);

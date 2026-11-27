@@ -44,7 +44,7 @@ describe("useWorkspaceDocsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    getWorkspaceDoc.mockImplementation(async (kind: string) => ({
+    getWorkspaceDoc.mockImplementation((kind: string) => Promise.resolve(({
       doc: {
         kind,
         path: `${kind.toUpperCase()}.md`,
@@ -53,9 +53,9 @@ describe("useWorkspaceDocsPage", () => {
         updated_at: 1776393847462,
         version_token: `${kind}-token`,
       },
-    }));
+    })));
 
-    putWorkspaceDoc.mockImplementation(async (kind: string, request: { content: string }) => ({
+    putWorkspaceDoc.mockImplementation((kind: string, request: { content: string }) => Promise.resolve(({
       doc: {
         kind,
         path: `${kind.toUpperCase()}.md`,
@@ -64,7 +64,7 @@ describe("useWorkspaceDocsPage", () => {
         updated_at: 1776393847462,
         version_token: `${kind}-next-token`,
       },
-    }));
+    })));
   });
 
   it("loads the selected workspace document", async () => {

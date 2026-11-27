@@ -25,7 +25,6 @@ describe("useChatSession automation admission", () => {
     expect(result.current.draft).toBe("");
   });
 
-
   it("queues a Talo slash activation for Server normalization even with steering enabled", async () => {
     mocks.activeTurn = { state: "running", identity: { sessionId: "session-1", turnId: "turn-1" } };
     const { result } = renderHook(() => useChatSession("session-1", 1, "ready", "steer"));
@@ -55,7 +54,7 @@ describe("useChatSession automation admission", () => {
     await act(async () => { await expect(result.current.sendTurn({ skillSelection }, prompt)).rejects.toBe(failure); });
     expect(result.current.draft).toBe(raw);
     if (busy) expect(submit).toHaveBeenLastCalledWith({ content: [{ type: "skillSelection", ...skillSelection }, { type: "text", text: prompt }] });
-    else expect(submit).toHaveBeenLastCalledWith({ text: prompt, request: expect.objectContaining({ input: { content: [{ type: "skillSelection", ...skillSelection }, { type: "text", text: prompt }] } }) });
+    else expect(submit).toHaveBeenLastCalledWith({ text: prompt, request: expect.objectContaining({ input: { content: [{ type: "skillSelection", ...skillSelection }, { type: "text", text: prompt }] } }) as unknown });
     await act(async () => result.current.sendTurn({ skillSelection }, prompt));
     expect(result.current.draft).toBe("");
     if (!busy) expect(mocks.createInitialTurnRequest).toHaveBeenLastCalledWith("session-1", prompt, expect.objectContaining({ skillSelection }));

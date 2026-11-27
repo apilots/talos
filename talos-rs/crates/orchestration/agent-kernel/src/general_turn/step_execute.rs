@@ -185,7 +185,7 @@ pub(crate) async fn stream_round(
 
     enum StreamRoundInput {
         Model(Option<TalosResult<ModelBlockStreamEvent>>),
-        Tool(TalosResult<Option<crate::tool_execution::StreamingToolExecutionOutput>>),
+        Tool(Box<TalosResult<Option<crate::tool_execution::StreamingToolExecutionOutput>>>),
     }
 
     loop {
@@ -199,7 +199,7 @@ pub(crate) async fn stream_round(
                 .expect("scheduler must exist when it reports running tasks");
             tokio::select! {
                 event = stream.next() => StreamRoundInput::Model(event),
-                completed = scheduler.next_completed() => StreamRoundInput::Tool(completed),
+                completed = scheduler.next_completed() => StreamRoundInput::Tool(Box::new(completed)),
             }
         } else {
             StreamRoundInput::Model(stream.next().await)
@@ -207,7 +207,7 @@ pub(crate) async fn stream_round(
 
         let Some(event) = (match input {
             StreamRoundInput::Tool(completed) => {
-                if let Some(completed) = completed? {
+                if let Some(completed) = (*completed)? {
                     super::tool_batch::emit_tool_result_stream_event(stream_tx, &completed.output)
                         .await;
                     streamed_tool_outputs.push(completed.output);

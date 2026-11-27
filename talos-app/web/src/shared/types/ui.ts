@@ -1,5 +1,4 @@
 import type { ProjectStatus } from "@talos/sdk-core";
-export type { ProjectStatus, ProjectStatusState, ProjectUnavailableReason } from "@talos/sdk-core";
 import type {
   ContextCompactionMetrics,
   ContextCompactionOutcome,
@@ -34,7 +33,7 @@ export type ChatToolStatus =
   | "error"
   | "cancelled";
 
-export type StreamConnectionState =
+type StreamConnectionState =
   | "idle"
   | "awaiting"
   | "streaming"
@@ -118,7 +117,7 @@ export type ChatTimelinePhase =
   | "acting"
   | "system";
 
-export type ChatTimelineStatus =
+type ChatTimelineStatus =
   | "queued"
   | "running"
   | "waitingForInput"
@@ -126,7 +125,7 @@ export type ChatTimelineStatus =
   | "failed"
   | "cancelled";
 
-export type ChatTimelineKind =
+type ChatTimelineKind =
   | "user_input"
   | "reasoning"
   | "assistant_text"
@@ -185,7 +184,7 @@ export type ChatTimelineItem =
       completedAtMs?: number | null;
     };
 
-export type PendingInputPhase = "local" | "accepted" | "completed";
+type PendingInputPhase = "local" | "accepted" | "completed";
 
 export interface PendingInput extends ChatUserInput {
   clientMessageId: string;

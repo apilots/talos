@@ -19,7 +19,7 @@ export function createFilePreviewClient(transport: FilePreviewTransport, resourc
     if (part.offset !== request.offset || data.byteLength > request.limit || (request.limit > 0 && request.offset < part.metadata.sizeBytes && data.byteLength === 0)) throw new Error("Preview content changed during the read.");
     return { metadata: part.metadata, offset: part.offset, data };
   };
-  const stream = async (preview: FilePreviewDescriptor, path = preview.entryPath): Promise<FilePreviewStream> => {
+  const stream = async (preview: Pick<FilePreviewDescriptor, "previewId" | "entryPath">, path = preview.entryPath): Promise<FilePreviewStream> => {
     const metadata = (await readBytes({ previewId: preview.previewId, resourcePath: path, offset: 0, limit: 0 })).metadata;
     async function* chunks() {
       for (let offset = 0; offset < metadata.sizeBytes;) {
@@ -37,7 +37,7 @@ export function createFilePreviewClient(transport: FilePreviewTransport, resourc
     stream,
     resolvePath: resolvePreviewResourcePath,
     resourceUrl: (preview: FilePreviewDescriptor, path = preview.entryPath) => resourceUrl(preview, path),
-    async content(preview: FilePreviewDescriptor, path = preview.entryPath): Promise<Uint8Array> {
+    async content(preview: Pick<FilePreviewDescriptor, "previewId" | "entryPath">, path = preview.entryPath): Promise<Uint8Array> {
       const resource = await stream(preview, path);
       const bytes = new Uint8Array(resource.metadata.sizeBytes);
       let offset = 0;

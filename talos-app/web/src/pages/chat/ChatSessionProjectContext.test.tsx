@@ -11,7 +11,7 @@ import { chatKeys } from "@/features/chat";
 import { ChatSessionPage } from "./ChatSessionPage";
 import { getChatSessionPageMocks } from "./ChatSessionPage.test-support";
 
-const api = vi.hoisted(() => ({ listProjects: vi.fn() }));
+const api = vi.hoisted(() => ({ listProjects: vi.fn<typeof import("@/features/chat/api")["listProjects"]>() }));
 vi.mock("@/features/chat/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/chat/api")>()),
   listProjects: api.listProjects,
@@ -49,7 +49,7 @@ it("refreshes an externally created bound Project into the shared header cache w
   const key = chatKeys.projects(JSON.stringify(["test-scope", "session-computer"]));
   queryClient.setQueryData(key, []);
   api.listProjects.mockResolvedValue([
-    { id: "external-project", name: "External Project", directory: "/tmp/project" },
+    { id: "external-project", name: "External Project", directory: "/tmp/project", createdAt: 0, updatedAt: 0 },
   ]);
   const content = () => <QueryClientProvider client={queryClient}>
     <MemoryRouter initialEntries={["/sessions/session-1"]}>
@@ -69,7 +69,7 @@ it("refreshes an externally created bound Project into the shared header cache w
   expect(screen.getByTitle("Analyze product")).toBeTruthy();
   expect(api.listProjects).toHaveBeenCalledExactlyOnceWith("session-computer");
   expect(queryClient.getQueryData(key)).toEqual([
-    { id: "external-project", name: "External Project", directory: "/tmp/project" },
+    { id: "external-project", name: "External Project", directory: "/tmp/project", createdAt: 0, updatedAt: 0 },
   ]);
   queryClient.clear();
 });

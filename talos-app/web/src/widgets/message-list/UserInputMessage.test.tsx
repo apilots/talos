@@ -78,9 +78,9 @@ it("resets the original copied feedback after 1200ms", async () => {
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
   render(<TextMessageBlock kind="user" text="Copy feedback" />);
   act(() => screen.getByRole("group", { name: "User input" }).focus());
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy block" })); });
+  await act(() => { fireEvent.click(screen.getByRole("button", { name: "Copy block" }));  return Promise.resolve(); });
   expect(screen.getByRole("button", { name: "Copied block" })).toBeInTheDocument();
-  act(() => vi.advanceTimersByTime(1200));
+  act(() => { vi.advanceTimersByTime(1200); });
   expect(screen.getByRole("button", { name: "Copy block" })).toBeInTheDocument();
 });
 it("keeps the Input copy control focused when the original clipboard fallback is used", async () => {
@@ -93,7 +93,7 @@ it("keeps the Input copy control focused when the original clipboard fallback is
     act(() => screen.getByRole("group", { name: "User input" }).focus());
     const copy = screen.getByRole("button", { name: "Copy block" });
     act(() => copy.focus());
-    await act(async () => { fireEvent.click(copy); });
+    await act(() => { fireEvent.click(copy);  return Promise.resolve(); });
     expect(execCommand).toHaveBeenCalledWith("copy");
     expect(screen.getByRole("button", { name: "Copied block" })).toHaveFocus();
     expect(document.querySelector("textarea")).toBeNull();
@@ -102,7 +102,6 @@ it("keeps the Input copy control focused when the original clipboard fallback is
     else Reflect.deleteProperty(document, "execCommand");
   }
 });
-
 
 it.each(["goal", "loop"] as const)("shows an explicitly selected %s source before any automation binding exists", (mode) => {
   render(<MessageList blocks={[{ id: "selected", kind: "user", text: "same text", fileIds: [], activationMode: mode }, { id: "ordinary-steer", kind: "user", text: "same text", fileIds: [] }]} emptyTitle="" emptyDetail="" />);

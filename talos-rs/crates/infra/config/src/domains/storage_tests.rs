@@ -197,8 +197,10 @@ fn file_storage_accepts_suffix_and_parser_validated_mime_types() {
 
 #[test]
 fn preview_origin_requires_a_domain_origin_and_preserves_the_existing_storage_defaults() {
-    let mut config = FileStorageConfig::default();
-    config.preview_base_url = Some("https://preview.example.com:8443/".into());
+    let mut config = FileStorageConfig {
+        preview_base_url: Some("https://preview.example.com:8443/".into()),
+        ..Default::default()
+    };
     config.validate().unwrap();
     for origin in [
         "file:///workspace",

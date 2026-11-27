@@ -86,7 +86,7 @@ describe("context compaction stream state", () => {
           stage: "completed",
           outcome: "applied",
           text: "Session history compaction finished.",
-        }),
+        }) as unknown,
       ],
     });
     expect(latestContextCompaction(useAppStore.getState().streams["sess-1"])?.itemId)

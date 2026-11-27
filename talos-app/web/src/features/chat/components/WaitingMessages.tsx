@@ -44,9 +44,9 @@ export function WaitingMessages({ controller, automation }: WaitingMessagesProps
       return;
     }
     const messageIds = allMessages.map((message) => message.id);
-    const sourceIndex = messageIds.indexOf(messages[index]!.id);
-    const targetIndex = messageIds.indexOf(messages[target]!.id);
-    [messageIds[sourceIndex], messageIds[targetIndex]] = [messageIds[targetIndex]!, messageIds[sourceIndex]!];
+    const sourceIndex = messageIds.indexOf(messages[index].id);
+    const targetIndex = messageIds.indexOf(messages[target].id);
+    [messageIds[sourceIndex], messageIds[targetIndex]] = [messageIds[targetIndex], messageIds[sourceIndex]];
     setMenuMessageId(undefined);
     void controller?.reorder(messageIds).catch(() => undefined);
   };

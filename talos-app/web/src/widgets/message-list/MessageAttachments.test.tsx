@@ -8,7 +8,7 @@ import { expect, it, vi } from "vitest";
 import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { TextMessageBlock } from "./TextMessageBlock";
 
-const files = vi.hoisted(() => ({ read: vi.fn(), content: vi.fn() }));
+const files = vi.hoisted(() => ({ read: vi.fn(), content: vi.fn<import("@/shared/api/client").TalosWebClient["files"]["content"]>() }));
 vi.mock("@/shared/api/client", () => ({ getTalosClient: (owner?: { sessionId?: string }) => ({ files: owner?.sessionId === "talo-chat" ? files : {} }) }));
 
 it("replays mixed attachments, previews the selected image, and releases loaded image URLs", async () => {
@@ -23,11 +23,11 @@ it("replays mixed attachments, previews the selected image, and releases loaded 
     static createObjectURL = create;
     static revokeObjectURL = revoke;
   });
-  files.read.mockImplementation(async ({ fileId }: { fileId: string }) => {
-    if (fileId === "missing") throw new TalosApiError({ code: "internalError", message: "Attachment could not be loaded", localization: null });
-    return { file: { fileId, originalFilename: `${fileId}.${fileId === "notes" ? "txt" : "png"}`, mimeType: fileId === "notes" ? "text/plain" : "image/png" } };
+  files.read.mockImplementation(({ fileId }: { fileId: string }) => {
+    if (fileId === "missing") return Promise.reject(new TalosApiError({ code: "internalError", message: "Attachment could not be loaded", localization: null }));
+    return Promise.resolve({ file: { fileId, originalFilename: `${fileId}.${fileId === "notes" ? "txt" : "png"}`, mimeType: fileId === "notes" ? "text/plain" : "image/png" } });
   });
-  files.content.mockResolvedValue({ file: { mimeType: "image/png" }, data: new Uint8Array([1, 2, 3]) });
+  files.content.mockResolvedValue({ file: { fileId: "first", scope: { type: "personal" }, originalFilename: "first.png", mimeType: "image/png", sizeBytes: 3, tags: [], metadata: {}, createdAt: 0, updatedAt: 0 }, data: new Uint8Array([1, 2, 3]) });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(<QueryClientProvider client={queryClient}><AttachmentSessionContext.Provider value="talo-chat"><TextMessageBlock fileIds={["first", "second", "notes", "missing"]} kind="user" text="Identify the images" /></AttachmentSessionContext.Provider></QueryClientProvider>);
   try {

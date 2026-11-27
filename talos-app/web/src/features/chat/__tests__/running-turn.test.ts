@@ -68,11 +68,11 @@ describe("running Turn state and offset", () => {
       status: isError ? "failed" : "completed", completedAtMs: 10_000 };
     const items = () => useAppStore.getState().streams["sess-1"].blocks
       .flatMap((block) => block.kind === "timeline" ? block.items : []);
-    expect(items()).toEqual([expect.objectContaining(expected)]);
+    expect(items()).toEqual([expect.objectContaining(expected) as unknown]);
     applyStreamEventBatch("sess-1", [baseEvent({ type: "messageCompleted", data: {
       ...snapshot.messages[0], status: "completed", completedAt: 11, blocks: [call.data.block],
     } }, 11), turnCompleted(12)]);
-    expect(items()).toEqual([expect.objectContaining(expected)]);
+    expect(items()).toEqual([expect.objectContaining(expected) as unknown]);
   });
 
   it("updates cancellation state at an unchanged content offset", () => {

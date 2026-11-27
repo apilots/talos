@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Globe, Hand, Loader2, Monitor, Pause, Play, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { BrowserSnapshot, DesktopViewGrant } from "@talos/sdk-core";
@@ -51,6 +51,8 @@ export function ComputerDesktop({ nodeId, expanded, onExitInput }: { nodeId: str
   const query = useBrowser(nodeId);
   const managed = useComputer(nodeId).data?.managedWorkerPhase != null;
   const browser = query.data;
+  const refetchBrowser = query.refetch;
+  const latestBrowser = useRef(browser);
   const local=useComputers();
   const [configurationOpen,setConfigurationOpen]=useState(false);
   const remote=managed || browser?.display.kind==="dockerDesktop";
@@ -68,8 +70,6 @@ export function ComputerDesktop({ nodeId, expanded, onExitInput }: { nodeId: str
   const switching = useRef(false);
   const requests = useRef(0);
   const current = useRef({scope, nodeId, generation: browser?.control.generation, display:browser?.display.kind, available: false});
-  current.current = {scope, nodeId, generation: browser?.control.generation, display:browser?.display.kind,
-    available: Boolean(browser?.enabled)};
   useEffect(() => () => { requests.current++; }, []);
   const ownController = grant?.inputMode === "control" && browser?.control.owner.kind === "human"
     && browser.control.owner.controllerId === grant.controllerId && browser.control.epoch === grant.inputEpoch;
@@ -98,20 +98,32 @@ export function ComputerDesktop({ nodeId, expanded, onExitInput }: { nodeId: str
       if (isCurrent(request, snapshot)) { switching.current = false; setError(failure); }
     }
   }
+  const latestOpen = useRef(open);
+  // Only committed renders may update callbacks and grant ownership.
+  useLayoutEffect(() => {
+    latestBrowser.current = browser;
+    latestOpen.current = open;
+    current.current = { scope, nodeId, generation: browser?.control.generation,
+      display: browser?.display.kind, available: Boolean(browser?.enabled) };
+  });
+  const generation = browser?.control.generation;
+  const browserEnabled = browser?.enabled;
+  const displayKind = browser?.display.kind;
   useEffect(() => {
     requests.current++;
-    if (!browser?.enabled || browser.display.kind !== "dockerDesktop") {
+    const snapshot = latestBrowser.current;
+    if (!snapshot?.enabled || snapshot.display.kind !== "dockerDesktop") {
       initialGeneration.current = null; setGrant(null); setBusy(false); return;
     }
-    if (initialGeneration.current === browser.control.generation) return;
-    const snapshot = browser;
+    if (initialGeneration.current === snapshot.control.generation) return;
+    const retireRequest = () => { requests.current++; };
     // Effect replay must not consume a second grant or viewer slot.
     const task = setTimeout(() => {
       initialGeneration.current = snapshot.control.generation;
-      void open(snapshot);
+      void latestOpen.current(snapshot);
     }, 0);
-    return () => { requests.current++; clearTimeout(task); };
-  }, [browser?.control.generation, browser?.enabled, browser?.display.kind]);
+    return () => { retireRequest(); clearTimeout(task); };
+  }, [generation, browserEnabled, displayKind]);
 
   useEffect(() => {
     if (!grant || !screen.current) return;
@@ -135,13 +147,13 @@ export function ComputerDesktop({ nodeId, expanded, onExitInput }: { nodeId: str
         rfb.qualityLevel = 6;
         rfb.compressionLevel = 2;
         client.current = rfb;
-        rfb.addEventListener("connect", () => { if (active) { switching.current = false; setConnected(true); setError(null); setStreamFailure(null); void query.refetch(); } });
+        rfb.addEventListener("connect", () => { if (active) { switching.current = false; setConnected(true); setError(null); setStreamFailure(null); void refetchBrowser(); } });
         rfb.addEventListener("disconnect", () => {
           ended = true;
           if (active) {
             setConnected(false);
             if (!switching.current) setStreamFailure(grant.inputMode === "control" ? "controlDisconnected" : "disconnected");
-            void query.refetch();
+            void refetchBrowser();
           }
         });
       };
@@ -153,7 +165,7 @@ export function ComputerDesktop({ nodeId, expanded, onExitInput }: { nodeId: str
       };
     }).catch((failure) => { if (active) setError(failure); });
     return () => { active = false; client.current = null; if (!ended) rfb?.disconnect(); socket?.close(); };
-  }, [grant, nodeId]);
+  }, [grant, nodeId, refetchBrowser]);
   useEffect(() => {
     if (client.current) {
       client.current.viewOnly = !connected || !ownController;

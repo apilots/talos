@@ -18,18 +18,18 @@ describe("createDesktopTalosClient files", () => {
       createdAt: 1,
       updatedAt: 1,
     };
-    const bridge = bridgeWithInvoke(async function <T>(
+    const bridge = bridgeWithInvoke( function <T>(
       method: AppProtocol.ClientMethod,
       params?: unknown,
     ): Promise<T> {
       calls.push({ method, params });
       if (method === "file/upload") {
-        return { file } as T;
+        return Promise.resolve({ file } as T);
       }
       if (method === "file/list") {
-        return { data: [file], nextCursor: null } as T;
+        return Promise.resolve({ data: [file], nextCursor: null } as T);
       }
-      throw new Error(`unexpected method: ${method}`);
+      return Promise.reject(new Error(`unexpected method: ${method}`));
     });
     const client = createDesktopTalosClient(bridge);
 

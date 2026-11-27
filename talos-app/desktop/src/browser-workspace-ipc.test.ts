@@ -15,11 +15,11 @@ const event = { sender, senderFrame: sender.mainFrame };
 beforeEach(() => {
   vi.clearAllMocks();desktopWindows.clear();fixture.handlers.clear();fixture.workspace.accepts.mockReturnValue(true);fixture.workspace.contextVersion = 0;
   fixture.workspace.unbind.mockImplementation(() => { fixture.workspace.contextVersion++; });
-  fixture.workspace.bind.mockImplementation(user => ({ user }));
+  fixture.workspace.bind.mockImplementation((user: string) => ({ user }));
   vi.spyOn(console,"error").mockImplementation(() => {});
 });
 afterEach(() => {desktopWindows.clear();vi.restoreAllMocks();});
-function setup(invoke=vi.fn<() => Promise<unknown>>(async()=>({ user: { user_id: "verified-alice" } }))) {
+function setup(invoke=vi.fn<() => Promise<unknown>>(()=>Promise.resolve(({ user: { user_id: "verified-alice" } })))) {
   const setAppIcon = vi.fn();
   registerDesktopIpcHandlers({ invoke } as unknown as DesktopAppServerController, { setAppIcon });
   return { invoke, request: fixture.handlers.get(TALOS_IPC.browserRequest)!, setAppIcon };
@@ -63,7 +63,7 @@ it("withdraws a tab's native preview even when the issuing Server is offline", a
   const handler = fixture.handlers.get(TALOS_IPC.invoke)!;
   const send = (method: string, params: unknown) => handler({ ...event, sender: contents }, method, params, {});
   const descriptor = { previewId: "server-preview", expiresAt: Date.now() / 1000 + 60 };
-  invoke.mockImplementationOnce(async () => descriptor);
+  invoke.mockImplementationOnce( () => Promise.resolve(descriptor));
   expect(await send("file/preview/prepare", { source: { kind: "file", fileId: "document" } })).toMatchObject({ status: "success" });
   invoke.mockRejectedValueOnce(new Error("Server is offline"));
   expect(await send("file/preview/close", { previewId: descriptor.previewId })).toMatchObject({ status: "error" });
@@ -97,7 +97,7 @@ it("returns a typed error when Electron cannot apply the icon", async () => {
   const handler = fixture.handlers.get(TALOS_IPC.setAppIcon)!;
 
   expect(await handler(event, "portrait")).toMatchObject({
-    status: "error", error: { code: "internalError", message: expect.stringContaining("app icon") },
+    status: "error", error: { code: "internalError", message: expect.stringContaining("app icon") as unknown },
   });
   expect(console.error).toHaveBeenCalledExactlyOnceWith("Desktop IPC operation failed", failure);
 });

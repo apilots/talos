@@ -48,13 +48,13 @@ describe("apiErrorMessage", () => {
     expect(apiErrorMessage(error)).toBe(error.message);
   });
 
-  it("preserves English when a descriptor translation is absent", async () => {
+  it("preserves English when a descriptor translation is absent",  () => {
     const error: AppProtocol.ApiError = {
       code: AppProtocol.ErrorCode.AttachmentLimitExceeded,
       message: "This request contains 5 attachments; the limit is 3.",
       localization: { type: "attachmentCountExceeded", limit: 3, actual: 5 },
     };
-    const translations = i18n.getResourceBundle("en", "errors");
+    const translations: unknown = i18n.getResourceBundle("en", "errors");
     i18n.removeResourceBundle("en", "errors");
     try {
       expect(apiErrorMessage(error)).toBe(error.message);

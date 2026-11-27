@@ -6,12 +6,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "pnpm typecheck && pnpm build:bundle",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint src --ext .ts,.tsx",
     "test": "vitest run",
-    "check": "pnpm lint && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build:bundle",
+    "build:bundle": "vite build"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

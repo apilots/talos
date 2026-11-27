@@ -6,11 +6,11 @@ import { createUuid } from "@/shared/lib/uuid";
 import type { DesktopBrowserState } from "@talos/sdk-app-server/desktop";
 import { DEFAULT_APP_ICON_ID, type AppIconId } from "@/shared/app-icons/catalog";
 
-export type UiTheme = "dark" | "light";
-export type Locale = "en" | "zh-CN";
+type UiTheme = "dark" | "light";
+type Locale = "en" | "zh-CN";
 export const SIDEBAR_WIDTH = { initial: 296, min: 224, max: 480 } as const;
 export const WORKSPACE_WIDTH = { initial: 480, min: 360, max: 1040 } as const;
-export type ResizingPane = "sidebar" | "workspace" | null;
+type ResizingPane = "sidebar" | "workspace" | null;
 
 export interface UiSlice {
   desktopBrowser: DesktopBrowserState | null;
@@ -53,7 +53,7 @@ export interface UiSlice {
 
 export type UiSliceSetter = (updater: (state: UiSlice) => Partial<UiSlice>) => void;
 
-export const defaultProjects = createDefaultProjects();
+const defaultProjects = createDefaultProjects();
 
 export function normalizeProjects(projects?: ProjectView[]) {
   const normalized = new Map<string, ProjectView>();

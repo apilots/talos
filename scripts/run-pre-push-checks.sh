@@ -83,5 +83,6 @@ if [[ "${rust_changed}" == true ]]; then
     just fmt-check
     python3 scripts/check_error_contract_tests.py
     python3 scripts/check_error_contract.py
-    just check
+    just deps-check
+    just clippy --locked --all-targets
 fi

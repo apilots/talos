@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "@/shared/i18n/setup";
 import { SettingsPage } from "./SettingsPage";
 
-const useSettingsPageMock = vi.fn();
-const managementPermission = vi.fn();
+const useSettingsPageMock = vi.fn<typeof buildSettingsState>();
+const managementPermission = vi.fn<() => boolean>();
 
 vi.mock("@/features/settings", async () => {
   const actual = await vi.importActual<typeof import("@/features/settings")>("@/features/settings");

@@ -9,8 +9,14 @@ export interface WorkspaceSnapshot {
 }
 export const emptyWorkspace: WorkspaceSnapshot = { workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false };
 export const workspaceOwnerKey = ({ scope, context }: WorkspaceOwner) => JSON.stringify([scope, context.kind, context.kind === "session" ? context.sessionId : null]);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function isArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
 export function workspaceBelongsToScope(key: string, scope: string): boolean {
-  try { return JSON.parse(key)[0] === scope; } catch { return false; }
+  try { const identity: unknown = JSON.parse(key); return isArray(identity) && identity[0] === scope; } catch { return false; }
 }
 export function workspaceContextForPath(path: string): WorkspaceContext {
   const session = /^\/sessions\/([^/]+)\/?$/.exec(path);
@@ -25,18 +31,18 @@ export function snapshotWorkspace(state: WorkspaceSnapshot): WorkspaceSnapshot {
 
 /** Restore descriptors only. Runtime objects, credentials and modal state never enter storage. */
 export function restoreWorkspaces(value: unknown): Record<string, WorkspaceSnapshot> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  if (!isRecord(value)) return {};
   const restored: Record<string, WorkspaceSnapshot> = {};
   for (const [owner, data] of Object.entries(value)) {
     let identity: unknown;
     try { identity = JSON.parse(owner); } catch { continue; }
-    if (!Array.isArray(identity) || identity.length !== 3 || typeof identity[0] !== "string"
-      || !["session", "files", "general"].includes(identity[1])
+    if (!isArray(identity) || identity.length !== 3 || typeof identity[0] !== "string"
+      || (identity[1] !== "session" && identity[1] !== "files" && identity[1] !== "general")
       || (identity[1] === "session" ? typeof identity[2] !== "string" : identity[2] !== null)) continue;
-    if (!data || typeof data !== "object" || !Array.isArray(data.workspaceWindows)) continue;
+    if (!isRecord(data) || !isArray(data.workspaceWindows)) continue;
     const windows: WorkspaceWindow[] = [];
     for (const item of data.workspaceWindows) {
-      if (!item || typeof item !== "object") continue;
+      if (!isRecord(item)) continue;
       let window: WorkspaceWindow | null = null;
       if (item.kind === "computer" && typeof item.nodeId === "string" && item.nodeId) window = { kind: "computer", nodeId: item.nodeId };
       if (item.kind === "file" && typeof item.fileId === "string" && item.fileId) window = { kind: "file", fileId: item.fileId, nodeId: typeof item.nodeId === "string" ? item.nodeId : undefined };
@@ -46,8 +52,8 @@ export function restoreWorkspaces(value: unknown): Record<string, WorkspaceSnaps
       if (window && (window.kind === "file" || window.kind === "sessionFile")) window.position = restoreFilePreviewPosition(item.position);
       if (window && !windows.some(entry => workspaceWindowKey(entry) === workspaceWindowKey(window))) windows.push(window);
     }
-    const active = windows.some(window => workspaceWindowKey(window) === data.workspaceActiveKey)
-      ? data.workspaceActiveKey as string : windows[0] ? workspaceWindowKey(windows[0]) : null;
+    const active = typeof data.workspaceActiveKey === "string" && windows.some(window => workspaceWindowKey(window) === data.workspaceActiveKey)
+      ? data.workspaceActiveKey : windows[0] ? workspaceWindowKey(windows[0]) : null;
     restored[owner] = { workspaceWindows: windows, workspaceActiveKey: active, workspaceOpen: data.workspaceOpen === true && windows.length > 0 };
   }
   return restored;

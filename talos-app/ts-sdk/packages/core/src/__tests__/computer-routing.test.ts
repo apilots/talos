@@ -8,8 +8,8 @@ import { RecordingTransport } from "./app-server.fixture";
 describe("Computer routing through both client transports", () => {
   it("uses normalized absolute URLs for workspace info and model requests", async () => {
     const info = { workspaceId: "team", rootPrefix: "/srv/team", userWorkspaceDir: "/srv/team/alice" };
-    const request = vi.fn().mockResolvedValue(info);
-    const client = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080/");
+    const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue(info);
+    const client = new TalosClient({ request: request as import("../adapters").HttpAdapter["request"] }, noopStreamAdapter(), "http://localhost:8080/");
     await expect(client.workspaceDocs.info()).resolves.toEqual(info);
     await client.models.list();
     expect(request).toHaveBeenNthCalledWith(1, "http://localhost:8080/v1/workspace/info");
@@ -17,8 +17,8 @@ describe("Computer routing through both client transports", () => {
   });
 
   it("routes workspace, model and project queries to the selected Computer", async () => {
-    const request = vi.fn().mockResolvedValue({});
-    const client = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080/");
+    const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue({});
+    const client = new TalosClient({ request: request as import("../adapters").HttpAdapter["request"] }, noopStreamAdapter(), "http://localhost:8080/");
     await client.workspaceDocs.info({ nodeId: "worker-1" });
     await client.models.list({ nodeId: "worker-1" });
     await client.projects.list({ nodeId: "worker-1" });
@@ -30,8 +30,8 @@ describe("Computer routing through both client transports", () => {
   });
 
   it("keeps the selected Computer across directory and document operations", async () => {
-    const request = vi.fn().mockResolvedValue({});
-    const client = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080");
+    const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue({});
+    const client = new TalosClient({ request: request as import("../adapters").HttpAdapter["request"] }, noopStreamAdapter(), "http://localhost:8080");
     const target = { nodeId: "worker-b" };
     await client.config.get("llm", target);
     await client.config.reload(target);
@@ -56,8 +56,8 @@ describe("Computer routing through both client transports", () => {
   });
 
   it("reads and writes memory files through request objects", async () => {
-    const request = vi.fn().mockResolvedValue({ file: { date: "2026-06-24" } });
-    const http: HttpAdapter = { request };
+    const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue({ file: { date: "2026-06-24" } });
+    const http: HttpAdapter = { request: request as import("../adapters").HttpAdapter["request"] };
     const streamAdapter: StreamAdapter = {
       stream: vi.fn().mockResolvedValue(undefined),
     };
@@ -130,8 +130,8 @@ function noopStreamAdapter(): StreamAdapter {
 
 it("exposes owner deletion with the same response over HTTP and JSON-RPC", async () => {
   const response = { nodeId: "worker/old" };
-  const request = vi.fn().mockResolvedValue(response);
-  const browser = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080");
+  const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue(response);
+  const browser = new TalosClient({ request: request as import("../adapters").HttpAdapter["request"] }, noopStreamAdapter(), "http://localhost:8080");
   await expect(browser.computers.delete(response)).resolves.toEqual(response);
   expect(request).toHaveBeenCalledExactlyOnceWith("http://localhost:8080/v1/computers/worker%2Fold", { method: "DELETE" });
   const transport = new RecordingTransport();
@@ -143,8 +143,8 @@ it("exposes owner deletion with the same response over HTTP and JSON-RPC", async
 
 it("routes the same account-scoped Talo lifecycle through HTTP and JSON-RPC", async () => {
   const response: ManagedWorkerResponse = { enabled: true, instance: null };
-  const request = vi.fn().mockResolvedValue(response);
-  const http = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080");
+  const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue(response);
+  const http = new TalosClient({ request: request as import("../adapters").HttpAdapter["request"] }, noopStreamAdapter(), "http://localhost:8080");
   const transport = new RecordingTransport();
   const rpcRequest = vi.spyOn(transport, "request").mockResolvedValue(response);
   const rpc = new AppServerClient(transport);
@@ -178,8 +178,8 @@ it("routes the same account-scoped Talo lifecycle through HTTP and JSON-RPC", as
 });
 
 it("forwards AbortSignal to HTTP Computer and Talo reads only when provided", async () => {
-  const request = vi.fn().mockResolvedValue({ enabled: true, instance: null });
-  const http = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080");
+  const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue({ enabled: true, instance: null });
+  const http = new TalosClient({ request: request as import("../adapters").HttpAdapter["request"] }, noopStreamAdapter(), "http://localhost:8080");
   const controller = new AbortController();
   await http.computers.read({ nodeId: "worker/1" });
   await http.computers.read({ nodeId: "worker/1" }, controller.signal);

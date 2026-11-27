@@ -43,7 +43,7 @@ it("keeps an existing example's full JSON and sibling values until the user expl
   const object = { enable_thinking: false, sibling: { tags: ["保留", "quoted \"value\""], nullable: null, nested: { mode: "precise" } } };
   const raw = JSON.stringify(object, null, 2);
   const original = { ...formToModel({ ...emptyModelForm, id: "model" }), cost: { input: 3, output: 5, cache_read: 1, cache_write: 2 }, request_parameters: { chat_template_kwargs: object } };
-  const saved = vi.fn();
+  const saved = vi.fn<(model: ReturnType<typeof formToModel>) => void>();
   const changed = vi.fn();
   function Harness() {
     const [form, setForm] = useState({ ...modelToForm(original), request_parameters: [{ key: " chat_template_kwargs ", value: raw }] });

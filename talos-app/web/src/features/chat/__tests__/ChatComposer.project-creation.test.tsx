@@ -9,8 +9,8 @@ import "@/shared/i18n/setup";
 import { renderComposer } from "./ChatComposer.test-utils";
 
 const apiMocks = vi.hoisted(() => ({
-  createFsDirectory: vi.fn(),
-  readFsDirectory: vi.fn(),
+  createFsDirectory: vi.fn<typeof import("../api")["createFsDirectory"]>(),
+  readFsDirectory: vi.fn<typeof import("../api")["readFsDirectory"]>(),
 }));
 
 vi.mock("../api", () => ({
@@ -28,10 +28,10 @@ describe("ChatComposer project creation", () => {
       readable: true,
       writable: true,
     });
-    apiMocks.createFsDirectory.mockImplementation(async (_parent: string, name: string) => ({
+    apiMocks.createFsDirectory.mockImplementation((_parent: string, name: string) => Promise.resolve(({
       path: `/Users/xujiang/${name}`,
       created: true,
-    }));
+    })));
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: {

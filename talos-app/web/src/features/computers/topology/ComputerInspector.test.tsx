@@ -21,7 +21,7 @@ vi.mock("../ComputerDesktop", () => ({
   ComputerDesktopButton: (props: { nodeId?: string; online: boolean; shortcut?: boolean }) => mocks.desktopButton(props),
 }));
 
-const node = topologyNodes[1]!;
+const node = topologyNodes[1];
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.desktopButton.mockImplementation(() => null);
@@ -105,7 +105,7 @@ it("preserves an authoritative not-found error instead of calling it a network f
 
 it.each(["en", "zh-CN"])("keeps local hardware and runtime visible without granting directory management (%s)", async (locale) => {
   mocks.read.mockReturnValue({ data: { ...node, ownerUserId: "alice" }, error: new TypeError("Failed to fetch"), refetch: mocks.retry });
-  const local = { ...topologyNodes[0]!, nodeId: node.nodeId, displayName: "Local hardware", ownerUserId: "alice",
+  const local = { ...topologyNodes[0], nodeId: node.nodeId, displayName: "Local hardware", ownerUserId: "alice",
     systemInfo: { os: "macOs" as const, osVersion: "macOS", architecture: "aarch64", hostname: "local-host",
       cpuModel: "Local CPU", logicalCpuCount: 8, memoryBytes: 16 * 1024 ** 3, boardModel: null,
       graphics: [], networkInterfaces: [], workerVersion: "0.1.19" },
@@ -114,7 +114,7 @@ it.each(["en", "zh-CN"])("keeps local hardware and runtime visible without grant
   const labels = computerResources[locale as keyof typeof computerResources];
   expect(screen.getByRole("heading", { name: local.displayName })).toBeVisible();
   expect(screen.getByText(labels.localRuntime.ready)).toBeVisible();
-  expect(screen.getByText(local.systemInfo!.hostname)).toBeVisible();
+  expect(screen.getByText(local.systemInfo.hostname)).toBeVisible();
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: labels.disable })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: labels.open }));

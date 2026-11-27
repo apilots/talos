@@ -59,7 +59,7 @@ export function registerDesktopIpcHandlers(
   ipcMain.handle(TALOS_IPC.previewOpen, (event, request: unknown) => ipcResponse(async () => {
     assertProductRenderer(event); await filePreviews.open(request, event.sender);
   }));
-  ipcMain.handle(TALOS_IPC.setAppIcon, (event, id: unknown) => ipcResponse(async () => {
+  ipcMain.handle(TALOS_IPC.setAppIcon, (event, id: unknown) => ipcResponse(() => {
     assertProductRenderer(event);
     if (!isAppIconId(id)) {
       throw new TalosApiError({
@@ -134,7 +134,7 @@ function assertProductRenderer(event: Electron.IpcMainInvokeEvent): void {
 
 /** Preserve the public envelope across IPC; native Error properties do not survive it. */
 async function ipcResponse<T>(
-  operation: () => Promise<T>,
+  operation: () => T | Promise<T>,
   failureMessage = "The desktop backend connection failed; technical details are available in the desktop log.",
 ): Promise<AppProtocol.ApiResponse<T>> {
   try {
