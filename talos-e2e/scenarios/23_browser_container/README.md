@@ -120,5 +120,5 @@ Desktop hosts with separate databases and Sync disabled. It waits for the
 Server directory pull before selecting a remote Computer, checks immediate
 rename write-through and a subsequent Server-side rename, then exercises the
 existing Worker control and media path. The Web topology selects the exact
-`Inspect <display name>` button before `View computer`; it must not use a broad
+`Inspect <display name>` button before `Desktop`; it must not use a broad
 Talos text match that can select the control-plane card instead.

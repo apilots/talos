@@ -436,6 +436,15 @@
 .cmp-inspector-heading p {
   margin-top: 7px;
 }
+.cmp-inspector-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.cmp-inspector-actions > button {
+  width: 100%;
+}
 .cmp-peer-details {
   margin-top: 24px;
 }

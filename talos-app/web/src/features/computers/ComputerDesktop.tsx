@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Hand, Loader2, Monitor, Pause, Play, Settings2 } from "lucide-react";
+import { Globe, Hand, Loader2, Monitor, Pause, Play, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { BrowserSnapshot, DesktopViewGrant } from "@talos/sdk-core";
 import type RFB from "@novnc/novnc/lib/rfb";
@@ -17,6 +17,9 @@ import { createUuid } from "@/shared/lib/uuid";
 import { useBrowser } from "./browser-query";
 import { TaloLifecycleMenu } from "./talo-lifecycle";
 
+export const inspectorActionButtonClassName =
+  "h-9 min-w-0 gap-1.5 rounded-lg bg-selected px-2.5 py-0 text-[13px] leading-5 whitespace-nowrap enabled:hover:bg-ink/[0.09]";
+
 /** The Session shortcut requires remote desktop capability. The inspector also supports browser targets. */
 export function ComputerDesktopButton({ nodeId, online, shortcut = false }: { nodeId?: string; online: boolean; shortcut?: boolean }) {
   const { t } = useTranslation("computers");
@@ -27,10 +30,17 @@ export function ComputerDesktopButton({ nodeId, online, shortcut = false }: { no
   const remoteDesktop = snapshot.display.kind === "dockerDesktop";
   if (shortcut && (!browser.isSuccess || !remoteDesktop)) return null;
   if (!remoteDesktop && !snapshot.targets.length) return null;
-  const label = t(remoteDesktop ? "desktop.open" : "desktop.browser");
-  return <Button type="button" variant="ghost" className={shortcut ? "size-7 shrink-0 p-0" : "shrink-0 gap-2 whitespace-nowrap px-2 py-2 text-xs sm:px-3.5"} aria-label={label} title={label} onClick={(event) => { event.currentTarget.focus(); open({ kind: "computer", nodeId }); }}>
-    <Monitor aria-hidden="true" size={16} strokeWidth={shortcut ? 1.5 : undefined} />
-    {shortcut ? null : <span className="hidden sm:inline">{label}</span>}
+  const tooltip = t(remoteDesktop ? "desktop.open" : "desktop.browser");
+  const label = t(remoteDesktop ? "desktop.remoteDesktop" : "desktop.browserAction");
+  const Icon = remoteDesktop ? Monitor : Globe;
+  if (shortcut) {
+    return <Button type="button" variant="ghost" className="size-7 shrink-0 p-0" aria-label={tooltip} title={tooltip} onClick={(event) => { event.currentTarget.focus(); open({ kind: "computer", nodeId }); }}>
+      <Monitor aria-hidden="true" size={16} strokeWidth={1.5} />
+    </Button>;
+  }
+  return <Button type="button" variant="secondary" className={inspectorActionButtonClassName} title={tooltip} onClick={(event) => { event.currentTarget.focus(); open({ kind: "computer", nodeId }); }}>
+    <Icon aria-hidden="true" size={14} className="shrink-0 text-muted" />
+    <span className="truncate">{label}</span>
   </Button>;
 }
 

@@ -60,7 +60,7 @@ afterEach(async()=>{cleanup();useAppStore.setState({workspaceWindows:[],workspac
 it("opens the computer without randomUUID on an HTTP origin", async () => {
   vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
   const { query } = show(snapshot());
-  fireEvent.click(await screen.findByRole("button", { name: "View computer" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Desktop" }));
   await screen.findByText("Agent can operate");
   expect(fixture.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     viewerId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
@@ -72,7 +72,7 @@ it("opens the computer without randomUUID on an HTTP origin", async () => {
 it("reports a disconnect before the first frame and can request a fresh view", async () => {
   fixture.connectRfb = false;
   const { query } = show(snapshot());
-  fireEvent.click(await screen.findByRole("button", { name: "View computer" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Desktop" }));
   await waitFor(() => expect(fixture.rfbs).toHaveLength(1));
   act(() => fixture.rfbs[0].dispatchEvent(new Event("disconnect")));
   expect(await screen.findByRole("alert")).toHaveTextContent("The view disconnected");
@@ -88,14 +88,14 @@ it("reports a disconnect before the first frame and can request a fresh view", a
 it("does not advertise or request a remote stream for a native Desktop",async()=>{
   const {query}=show(snapshot("desktop"));
   await waitFor(()=>expect(fixture.operate).toHaveBeenCalled());
-  expect(screen.queryByRole("button",{name:"View computer"})).not.toBeInTheDocument();
+  expect(screen.queryByRole("button",{name:"Desktop"})).not.toBeInTheDocument();
   act(()=>useAppStore.getState().openWorkspaceWindow({kind:"computer",nodeId:"worker"}));
   await screen.findByText("Browser unavailable");
   expect(fixture.open).not.toHaveBeenCalled();query.clear();
 });
 it("keeps the same read-only stream through a locale change and closes it on an account switch",async()=>{
   const {query,rerender}=show(snapshot());
-  fireEvent.click(await screen.findByRole("button",{name:"View computer"}));
+  fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));
   await screen.findByText("Agent can operate");
   expect(fixture.rfbs).toHaveLength(1);
   await act(()=>i18n.changeLanguage("zh-CN"));
@@ -111,7 +111,7 @@ it("keeps the same read-only stream through a locale change and closes it on an 
 });
 it("requests a fresh immutable stream for takeover instead of upgrading the old RFB connection",async()=>{
   const value=snapshot();const {query}=show(value);
-  fireEvent.click(await screen.findByRole("button",{name:"View computer"}));
+  fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));
   await screen.findByText("Agent can operate");
   fixture.operate.mockImplementation(async({operation})=>{
     if(operation.kind==="takeControl") {
@@ -148,7 +148,7 @@ it("ignores an old generation grant that finishes after the current grant",async
  const first=snapshot(),second=snapshot();second.control={...second.control,generation:"new-generation",revision:2};
  const {query}=show(first);const old=deferred<DesktopViewGrant>(),current=deferred<DesktopViewGrant>();
  fixture.open.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
- fireEvent.click(await screen.findByRole("button",{name:"View computer"}));await waitFor(()=>expect(fixture.open).toHaveBeenCalledTimes(1));
+ fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));await waitFor(()=>expect(fixture.open).toHaveBeenCalledTimes(1));
  fixture.operate.mockResolvedValue(second);act(()=>query.setQueryData(["talos","alice","browser","worker"],second));
  await waitFor(()=>expect(fixture.open).toHaveBeenCalledTimes(2));
  await act(async()=>current.resolve({...grant("readOnly",2),generation:"new-generation"}));await screen.findByText("Agent can operate");
@@ -157,13 +157,13 @@ it("ignores an old generation grant that finishes after the current grant",async
 });
 it("retires a pending grant when Browser is disabled",async()=>{
  const value=snapshot();const {query}=show(value);const pending=deferred<DesktopViewGrant>();fixture.open.mockReturnValueOnce(pending.promise);
- fireEvent.click(await screen.findByRole("button",{name:"View computer"}));await waitFor(()=>expect(fixture.open).toHaveBeenCalledTimes(1));
+ fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));await waitFor(()=>expect(fixture.open).toHaveBeenCalledTimes(1));
  const disabled={...value,enabled:false};fixture.operate.mockResolvedValue(disabled);act(()=>query.setQueryData(["talos","alice","browser","worker"],disabled));
  await screen.findByText("Desktop unavailable");await act(async()=>pending.resolve(grant("readOnly")));
  expect(fixture.socket).not.toHaveBeenCalled();query.clear();
 });
 it("keeps the same stream through expand/collapse and restores keyboard focus on close",async()=>{
- const {query}=show(snapshot());const trigger=await screen.findByRole("button",{name:"View computer"});trigger.focus();fireEvent.click(trigger);
+ const {query}=show(snapshot());const trigger=await screen.findByRole("button",{name:"Desktop"});trigger.focus();fireEvent.click(trigger);
  await screen.findByText("Agent can operate");expect(screen.getByRole("tab",{name:"worker"})).toHaveFocus();
  fireEvent.click(screen.getByRole("button",{name:"Expand workspace"}));
  expect(screen.getByRole("button",{name:"Restore workspace"})).toBeInTheDocument();
@@ -177,7 +177,7 @@ it("keeps the same stream through expand/collapse and restores keyboard focus on
 
 it("keeps pause/resume in the session viewer and preserves read-only pixels while pausing",async()=>{
  const value=snapshot();const {query}=show(value);
- fireEvent.click(await screen.findByRole("button",{name:"View computer"}));await screen.findByText("Agent can operate");
+ fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));await screen.findByText("Agent can operate");
  fixture.operate.mockImplementation(async({operation})=>{
   if(operation.kind==="pause")value.control={...value.control,revision:2,epoch:1,owner:{kind:"suspended",reason:"userPaused"}};
   if(operation.kind==="resume")value.control={...value.control,revision:3,epoch:2,owner:{kind:"idle"}};
@@ -192,7 +192,7 @@ it("keeps pause/resume in the session viewer and preserves read-only pixels whil
 
 it("keeps Desktop browser choice and local actions in the computer page without a remote stream",async()=>{
  const value=snapshot("desktop");value.targets=[{targetId:"managed",kind:"managed",displayName:"Talos browser",readiness:{status:"ready"},localOpen:"desktopOwned"},{targetId:"connected",kind:"connected",displayName:"My Chrome",readiness:{status:"needsConnection"},localOpen:"externalUserWindow"}];
- const {query}=show(value);fireEvent.click(await screen.findByRole("button",{name:"Computer browser"}));
+ const {query}=show(value);fireEvent.click(await screen.findByRole("button",{name:"Browser"}));
  await screen.findByRole("button",{name:"Open browser"});expect(screen.getAllByRole("radio")).toHaveLength(2);
  fireEvent.click(screen.getByRole("button",{name:"Open browser"}));await waitFor(()=>expect(fixture.operate).toHaveBeenCalledWith({operation:{kind:"openLocal"}}));
  expect(fixture.open).not.toHaveBeenCalled();expect(fixture.socket).not.toHaveBeenCalled();query.clear();
@@ -201,7 +201,7 @@ it("keeps Desktop browser choice and local actions in the computer page without 
 
 it("retires a pending stream on tab switch and reauthorizes the original Computer on return",async()=>{
  const {query}=show(snapshot());const old=deferred<DesktopViewGrant>();fixture.open.mockReturnValueOnce(old.promise);
- fireEvent.click(await screen.findByRole("button",{name:"View computer"}));
+ fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));
  await waitFor(()=>expect(fixture.open).toHaveBeenCalledTimes(1));
  act(()=>useAppStore.getState().openWorkspaceWindow({kind:"computer",nodeId:"second-worker"}));
  await screen.findByText("Agent can operate");
@@ -214,4 +214,41 @@ it("retires a pending stream on tab switch and reauthorizes the original Compute
  expect(fixture.open).toHaveBeenLastCalledWith(expect.objectContaining({nodeId:"worker",inputMode:"readOnly"}));
  expect(fixture.open.mock.calls[0][0].viewerId).not.toBe(fixture.open.mock.calls[2][0].viewerId);
  expect(fixture.operate.mock.calls.some(([request])=>request.operation.kind==="resume")).toBe(false);query.clear();
+});
+
+it("renders secondary inspector button variants with localized labels and preserves shortcut icon mode", async () => {
+  const { query, unmount } = show(snapshot());
+  const desktopButton = await screen.findByRole("button", { name: "Desktop" });
+  expect(desktopButton).toHaveAttribute("title", "View computer");
+  expect(desktopButton).toHaveClass("border", "border-border", "bg-selected");
+  expect(desktopButton.querySelector(".lucide-monitor")).not.toBeNull();
+  expect(screen.getByText("Desktop")).not.toHaveClass("hidden");
+  await act(() => i18n.changeLanguage("zh-CN"));
+  expect(screen.getByRole("button", { name: "远程桌面" })).toHaveAttribute("title", "查看电脑");
+  unmount();
+  query.clear();
+
+  await act(() => i18n.changeLanguage("en"));
+  const native = snapshot("desktop");
+  native.targets = [{ targetId: "managed", kind: "managed", displayName: "Talos browser", readiness: { status: "ready" }, localOpen: "desktopOwned" }];
+  const second = show(native);
+  const browserButton = await screen.findByRole("button", { name: "Browser" });
+  expect(browserButton).toHaveAttribute("title", "Computer browser");
+  expect(browserButton).toHaveClass("border", "border-border", "bg-selected");
+  expect(browserButton.querySelector(".lucide-globe")).not.toBeNull();
+  expect(screen.getByText("Browser")).not.toHaveClass("hidden");
+  await act(() => i18n.changeLanguage("zh-CN"));
+  expect(screen.getByRole("button", { name: "浏览器" })).toHaveAttribute("title", "电脑浏览器");
+  second.unmount();
+  second.query.clear();
+
+  await act(() => i18n.changeLanguage("en"));
+  fixture.operate.mockResolvedValue(snapshot());
+  const thirdQuery = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={thirdQuery}><MemoryRouter><ComputerDesktopButton nodeId="worker" online shortcut /></MemoryRouter></QueryClientProvider>);
+  const shortcutButton = await screen.findByRole("button", { name: "View computer" });
+  expect(shortcutButton).toHaveAttribute("title", "View computer");
+  expect(shortcutButton).toHaveClass("size-7");
+  expect(shortcutButton.querySelector("span")).toBeNull();
+  thirdQuery.clear();
 });
