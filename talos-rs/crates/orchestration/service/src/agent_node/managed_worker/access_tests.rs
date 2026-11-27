@@ -355,3 +355,34 @@ async fn managed_worker_publication_uses_its_lease_while_user_management_stays_r
         .unwrap_err()
         .is_code(ErrorCode::Unauthenticated));
 }
+
+#[tokio::test]
+async fn managed_worker_info_reports_configured_idle_timeout_seconds() {
+    let (service, _record) = seeded_service().await;
+    let mut policy = ServerRuntimePolicy::default();
+    policy.idle_timeout_seconds = 600;
+    service
+        .install_managed_worker_runtime(
+            Arc::new(UnusedRuntime),
+            Arc::new(ManagedAuth::default()),
+            WorkerRuntimeConfig {
+                kind: WorkerRuntimeKind::DockerEngine,
+                image: "fixture".into(),
+                control_plane_endpoint: "https://fixture.invalid".into(),
+                trusted_ca_file: None,
+                docker_engine: Default::default(),
+                kubernetes: Default::default(),
+            },
+            policy,
+            None,
+        )
+        .unwrap();
+    let actor = Actor::regular("owner").with_user_type(UserType::Max);
+    let response = service.read_managed_worker(&actor).await.unwrap();
+    let info = response.instance.unwrap();
+    assert_eq!(info.idle_timeout_seconds, Some(600));
+    let json = serde_json::to_value(&info).unwrap();
+    assert_eq!(json["idleTimeoutSeconds"], 600);
+    let roundtrip: ManagedWorkerInfo = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtrip.idle_timeout_seconds, Some(600));
+}

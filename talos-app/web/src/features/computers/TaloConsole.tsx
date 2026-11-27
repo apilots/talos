@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { AppProtocol } from "@talos/sdk-core";
 import {
   ChevronRight,
@@ -20,6 +20,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { useCanUseTalo } from "@/features/auth";
+import { snapshotTasks } from "@/features/automation/model";
 import { fileListQueryKey } from "@/features/files/api";
 import { SettingsModelsSection } from "@/features/settings";
 import { getTalosClient } from "@/shared/api/client";
@@ -32,6 +33,7 @@ import { Panel } from "@/shared/ui/Panel";
 import { ComputerBrowserConfiguration } from "./ComputerBrowserConfiguration";
 import { useProductScope } from "./hooks";
 import { TaloDesktopDialog } from "./TaloDesktopDialog";
+import { TaloHoverTip } from "./TaloHoverTip";
 import {
   TaloConfirmationDialog,
   TaloEmblem,
@@ -59,6 +61,20 @@ function isMediaMime(mimeType: string) {
   return mimeType.startsWith("image/") || mimeType.startsWith("video/") || mimeType.startsWith("audio/");
 }
 
+function formatIdleTimeout(seconds: number | undefined, language: string) {
+  if (seconds == null || seconds <= 0) return null;
+  const zh = language.toLowerCase().startsWith("zh");
+  if (seconds % 3600 === 0) {
+    const hours = seconds / 3600;
+    return zh ? `${hours} 小时` : `${hours}h`;
+  }
+  if (seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    return zh ? `${minutes} 分钟` : `${minutes}m`;
+  }
+  return zh ? `${seconds} 秒` : `${seconds}s`;
+}
+
 export type TaloConsoleActionRequest = {
   id: number;
   kind: "models" | "files";
@@ -66,24 +82,28 @@ export type TaloConsoleActionRequest = {
 
 export function TaloConsole({
   initialInstance,
+  sessionId,
   actionRequest,
 }: {
   initialInstance?: AppProtocol.ManagedWorkerInfo;
+  sessionId?: string;
   actionRequest?: TaloConsoleActionRequest | null;
 }) {
   const canUseTalo = useCanUseTalo();
   if (!canUseTalo) return null;
-  return <AuthorizedTaloConsole initialInstance={initialInstance} actionRequest={actionRequest} />;
+  return <AuthorizedTaloConsole initialInstance={initialInstance} sessionId={sessionId} actionRequest={actionRequest} />;
 }
 
 function AuthorizedTaloConsole({
   initialInstance,
+  sessionId,
   actionRequest,
 }: {
   initialInstance?: AppProtocol.ManagedWorkerInfo;
+  sessionId?: string;
   actionRequest?: TaloConsoleActionRequest | null;
 }) {
-  const { t } = useTranslation(["computers", "common"]);
+  const { t, i18n } = useTranslation(["computers", "common"]);
   const scope = useProductScope();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<ConsoleTab>("console");
@@ -115,20 +135,37 @@ function AuthorizedTaloConsole({
     connectDesktop,
   } = useTaloController(initialInstance, () => setDesktopOpen(true));
 
-  const filesQuery = useQuery({
+  const filesQuery = useInfiniteQuery({
     enabled: Boolean(open && tab === "files" && instance?.nodeId && phase === "ready"),
+    initialPageParam: undefined as string | undefined,
     queryKey: [...fileListQueryKey(scope), instance?.nodeId ?? "", "talo-console"],
+    queryFn: async ({ pageParam }) =>
+      (await getTalosClient({ service: "files", nodeId: instance!.nodeId })).files.list({
+        ...(pageParam ? { cursor: pageParam } : {}),
+        limit: 50,
+      }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const automationSessionId = sessionId ?? instance?.conversationSessionId ?? undefined;
+  const automationQuery = useQuery({
+    enabled: Boolean(open && tab === "console" && phase === "ready" && automationSessionId),
+    queryKey: ["talos", scope, "automation", automationSessionId ?? ""],
     queryFn: async () =>
-      (await getTalosClient({ service: "files", nodeId: instance!.nodeId })).files.list({ limit: 50 }),
+      (await getTalosClient({ sessionId: automationSessionId!, readOnly: true })).automation.read({
+        sessionId: automationSessionId!,
+      }),
     retry: false,
     refetchOnWindowFocus: false,
   });
 
   const filteredFiles = useMemo(() => {
-    const items = filesQuery.data?.data ?? [];
+    const items = filesQuery.data?.pages.flatMap((page) => page.data) ?? [];
     if (fileFilter === "all") return items;
     return items.filter((item) => (fileFilter === "media" ? isMediaMime(item.mimeType) : !isMediaMime(item.mimeType)));
-  }, [fileFilter, filesQuery.data?.data]);
+  }, [fileFilter, filesQuery.data?.pages]);
 
   const closeConsole = useCallback(() => {
     const active = document.activeElement;
@@ -199,6 +236,30 @@ function AuthorizedTaloConsole({
   const powerLabel = primaryPowerAction === "stop" ? stopActionLabel : startActionLabel;
 
   const phaseLabel = formatTaloStatusLabel((key) => t(`computers:${key}`), phase);
+  const desktopSubtitle =
+    phase === "ready"
+      ? t("computers:talo.desktopSubtitleReady")
+      : phase === "sleeping"
+        ? t("computers:talo.desktopSubtitleSleeping")
+        : phase === "stopped"
+          ? t("computers:talo.desktopSubtitleStopped")
+          : phaseLabel;
+  const idleDuration = formatIdleTimeout(instance.idleTimeoutSeconds, i18n.language);
+  const sleepBadgeLabel = idleDuration
+    ? t("computers:talo.autoSleepBadgeWithDuration", { duration: idleDuration })
+    : t("computers:talo.autoSleepBadge");
+  const sleepTipText = idleDuration
+    ? t("computers:talo.sleepTip", { duration: idleDuration })
+    : t("computers:talo.sleepTipNoDuration");
+  const activeAutomationCount = snapshotTasks(automationQuery.data).length;
+  const automationLabel =
+    phase !== "ready" || !automationSessionId || automationQuery.error
+      ? t("computers:talo.automationUnavailable")
+      : automationQuery.isLoading
+        ? "…"
+        : activeAutomationCount > 0
+          ? t("computers:talo.automationRunning", { count: activeAutomationCount })
+          : t("computers:talo.automationNone");
   const memoryGiB = Math.max(1, Math.round((instance.memoryBytes / GIB) * 10) / 10);
   const dotClass = taloDotTone(phase);
 
@@ -307,7 +368,7 @@ function AuthorizedTaloConsole({
           className="absolute right-3.5 top-3 z-30 flex max-h-[calc(100%-1.5rem)] w-[min(336px,calc(100%-1.75rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card/95 shadow-panel backdrop-blur-md"
         >
           {/* Centered Hero + Top-Right Close Button (Variant A interior) */}
-          <div className="relative flex shrink-0 flex-col items-center px-5 pb-4 pt-6 text-center">
+          <div className="relative flex shrink-0 flex-col items-center px-5 pb-3 pt-5 text-center">
             <Button
               ref={closeButtonRef}
               type="button"
@@ -319,13 +380,13 @@ function AuthorizedTaloConsole({
               <X size={16} aria-hidden="true" />
             </Button>
 
-            <TaloEmblem size={48} />
-            <h2 className="mt-2.5 text-lg font-bold tracking-tight text-ink">{t("computers:talo.title")}</h2>
+            <TaloEmblem size={44} />
+            <h2 className="mt-2 text-lg font-bold tracking-tight text-ink">{t("computers:talo.title")}</h2>
 
             <p
               role="status"
               className={cn(
-                "mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium",
+                "mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-full border px-3 py-0.5 text-xs font-medium",
                 phaseBadgeTone(phase),
               )}
             >
@@ -337,7 +398,7 @@ function AuthorizedTaloConsole({
             <div
               role="tablist"
               aria-label={t("computers:talo.manage")}
-              className="mt-3.5 inline-flex rounded-full border border-border bg-background p-1"
+              className="mt-3 inline-flex rounded-full border border-border bg-background p-1"
               onKeyDown={(event) => {
                 if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
                 event.preventDefault();
@@ -375,7 +436,7 @@ function AuthorizedTaloConsole({
               id="talo-console-panel-console"
               role="tabpanel"
               aria-labelledby="talo-console-tab-console"
-              className="min-h-0 flex-1 space-y-4 overflow-y-auto border-t border-divider px-4 pb-5 pt-4"
+              className="min-h-0 flex-1 space-y-3 overflow-y-auto border-t border-divider px-4 pb-4 pt-3"
             >
               {error ? (
                 <p role="alert" className="rounded-xl border border-danger/20 bg-danger/5 px-3.5 py-2.5 text-xs leading-5 text-danger">
@@ -392,7 +453,7 @@ function AuthorizedTaloConsole({
                     disabled={desktopDisabled}
                     onClick={(event) => requestDesktopFrom(event.currentTarget)}
                     className={cn(
-                      "flex w-full items-center justify-between gap-3.5 p-3.5 text-left transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-70",
+                      "flex w-full items-center justify-between gap-3.5 p-3 text-left transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-70",
                       rowFocusClass,
                     )}
                   >
@@ -401,12 +462,12 @@ function AuthorizedTaloConsole({
                         <span className="truncate">{t("computers:talo.desktopTitle")}</span>
                         <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-muted" />
                       </div>
-                      <p className="mt-1 truncate text-xs text-muted">{phaseLabel}</p>
+                      <p className="mt-1 truncate text-xs text-muted">{desktopSubtitle}</p>
                     </div>
                     <span
                       aria-hidden="true"
                       className={cn(
-                        "relative flex h-12 w-[4.75rem] shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border",
+                        "relative flex h-11 w-[4.5rem] shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border",
                         phase === "ready" ? "bg-[#1b2029]" : "bg-surface text-muted",
                       )}
                     >
@@ -427,114 +488,137 @@ function AuthorizedTaloConsole({
                 </Panel>
               </section>
 
-              {/* 2. Lifecycle & Controls Section (no default verbose tips paragraph) */}
+              {/* 2. Lifecycle & Controls Section (tips reveal on hover/focus) */}
               <section className="space-y-1.5">
-                <h3 className="px-1 text-[11px] font-semibold text-muted">{t("computers:talo.lifecycleSection")}</h3>
+                <div className="flex items-center justify-between gap-2 px-1">
+                  <h3 className="text-[11px] font-semibold text-muted">{t("computers:talo.lifecycleSection")}</h3>
+                  <TaloHoverTip content={sleepTipText}>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-muted transition hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+                    >
+                      <Moon size={10} aria-hidden="true" />
+                      <span>{sleepBadgeLabel}</span>
+                    </button>
+                  </TaloHoverTip>
+                </div>
                 <Panel className="divide-y divide-divider overflow-hidden bg-surface/60 text-xs">
                   {canStart ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => perform("start")}
-                      className={cn(
-                        "flex w-full items-center gap-2.5 px-3.5 py-3 text-left font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
-                        rowFocusClass,
-                      )}
-                    >
-                      {busy && operation === "start" ? (
-                        <Loader2 size={14} aria-hidden="true" className="shrink-0 animate-spin text-muted motion-reduce:animate-none" />
-                      ) : (
-                        <Play size={14} aria-hidden="true" className="shrink-0 text-muted" />
-                      )}
-                      <span>{startActionLabel}</span>
-                    </button>
+                    <TaloHoverTip content={t("computers:talo.startTip")}>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => perform("start")}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
+                          rowFocusClass,
+                        )}
+                      >
+                        {busy && operation === "start" ? (
+                          <Loader2 size={14} aria-hidden="true" className="shrink-0 animate-spin text-muted motion-reduce:animate-none" />
+                        ) : (
+                          <Play size={14} aria-hidden="true" className="shrink-0 text-muted" />
+                        )}
+                        <span>{startActionLabel}</span>
+                      </button>
+                    </TaloHoverTip>
                   ) : null}
                   {canStop ? (
+                    <TaloHoverTip content={t("computers:talo.stopTip")}>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => perform("stop")}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
+                          rowFocusClass,
+                        )}
+                      >
+                        {busy && operation === "stop" ? (
+                          <Loader2 size={14} aria-hidden="true" className="shrink-0 animate-spin text-muted motion-reduce:animate-none" />
+                        ) : (
+                          <Power size={14} aria-hidden="true" className="shrink-0 text-muted" />
+                        )}
+                        <span>{stopActionLabel}</span>
+                      </button>
+                    </TaloHoverTip>
+                  ) : null}
+                  <TaloHoverTip content={t("computers:talo.modelConfigTip")}>
                     <button
+                      ref={modelConfigTriggerRef}
                       type="button"
-                      disabled={busy}
-                      onClick={() => perform("stop")}
+                      disabled={phase !== "ready"}
+                      onClick={() => setModelConfigOpen(true)}
                       className={cn(
-                        "flex w-full items-center gap-2.5 px-3.5 py-3 text-left font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
+                        "flex w-full items-center justify-between gap-2.5 px-3.5 py-2.5 text-left font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
                         rowFocusClass,
                       )}
                     >
-                      {busy && operation === "stop" ? (
-                        <Loader2 size={14} aria-hidden="true" className="shrink-0 animate-spin text-muted motion-reduce:animate-none" />
-                      ) : (
-                        <Power size={14} aria-hidden="true" className="shrink-0 text-muted" />
-                      )}
-                      <span>{stopActionLabel}</span>
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <SlidersHorizontal size={14} aria-hidden="true" className="shrink-0 text-muted" />
+                        <span className="truncate">{t("computers:talo.modelConfig")}</span>
+                      </span>
+                      <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-muted" />
                     </button>
-                  ) : null}
-                  <button
-                    ref={modelConfigTriggerRef}
-                    type="button"
-                    disabled={phase !== "ready"}
-                    onClick={() => setModelConfigOpen(true)}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-2.5 px-3.5 py-3 text-left font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
-                      rowFocusClass,
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <SlidersHorizontal size={14} aria-hidden="true" className="shrink-0 text-muted" />
-                      <span className="truncate">{t("computers:talo.modelConfig")}</span>
-                    </span>
-                    <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-muted" />
-                  </button>
-                  <button
-                    ref={browserConfigTriggerRef}
-                    type="button"
-                    disabled={phase !== "ready"}
-                    onClick={() => setBrowserConfigOpen(true)}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-2.5 px-3.5 py-3 text-left font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
-                      rowFocusClass,
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <Globe size={14} aria-hidden="true" className="shrink-0 text-muted" />
-                      <span className="truncate">{t("computers:talo.browserConfig")}</span>
-                    </span>
-                    <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-muted" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy || operation === "delete"}
-                    onClick={(event) => {
-                      confirmTriggerRef.current = event.currentTarget;
-                      setConfirmation({ kind: "reset", instance });
-                    }}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-2.5 px-3.5 py-3 text-left font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
-                      rowFocusClass,
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <RotateCcw size={14} aria-hidden="true" className="shrink-0 text-muted" />
-                      <span className="truncate">{t("computers:talo.reset")}</span>
-                    </span>
-                    <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-muted" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={(event) => {
-                      confirmTriggerRef.current = event.currentTarget;
-                      setConfirmation({ kind: "delete", instance });
-                    }}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-2.5 px-3.5 py-3 text-left font-medium text-danger transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
-                      rowFocusClass,
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <Trash2 size={14} aria-hidden="true" className="shrink-0" />
-                      <span className="truncate">{t("computers:talo.delete")}</span>
-                    </span>
-                    <ChevronRight size={14} aria-hidden="true" className="shrink-0 opacity-70" />
-                  </button>
+                  </TaloHoverTip>
+                  <TaloHoverTip content={t("computers:talo.browserConfigTip")}>
+                    <button
+                      ref={browserConfigTriggerRef}
+                      type="button"
+                      disabled={phase !== "ready"}
+                      onClick={() => setBrowserConfigOpen(true)}
+                      className={cn(
+                        "flex w-full items-center justify-between gap-2.5 px-3.5 py-2.5 text-left font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
+                        rowFocusClass,
+                      )}
+                    >
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <Globe size={14} aria-hidden="true" className="shrink-0 text-muted" />
+                        <span className="truncate">{t("computers:talo.browserConfig")}</span>
+                      </span>
+                      <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-muted" />
+                    </button>
+                  </TaloHoverTip>
+                  <TaloHoverTip content={t("computers:talo.resetTip")}>
+                    <button
+                      type="button"
+                      disabled={busy || operation === "delete"}
+                      onClick={(event) => {
+                        confirmTriggerRef.current = event.currentTarget;
+                        setConfirmation({ kind: "reset", instance });
+                      }}
+                      className={cn(
+                        "flex w-full items-center justify-between gap-2.5 px-3.5 py-2.5 text-left font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
+                        rowFocusClass,
+                      )}
+                    >
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <RotateCcw size={14} aria-hidden="true" className="shrink-0 text-muted" />
+                        <span className="truncate">{t("computers:talo.resetRuntime")}</span>
+                      </span>
+                      <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-muted" />
+                    </button>
+                  </TaloHoverTip>
+                  <TaloHoverTip content={t("computers:talo.deleteTip")}>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={(event) => {
+                        confirmTriggerRef.current = event.currentTarget;
+                        setConfirmation({ kind: "delete", instance });
+                      }}
+                      className={cn(
+                        "flex w-full items-center justify-between gap-2.5 px-3.5 py-2.5 text-left font-medium text-danger transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
+                        rowFocusClass,
+                      )}
+                    >
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <Trash2 size={14} aria-hidden="true" className="shrink-0" />
+                        <span className="truncate">{t("computers:talo.delete")}</span>
+                      </span>
+                      <ChevronRight size={14} aria-hidden="true" className="shrink-0 opacity-70" />
+                    </button>
+                  </TaloHoverTip>
                 </Panel>
               </section>
 
@@ -542,17 +626,21 @@ function AuthorizedTaloConsole({
               <section className="space-y-1.5">
                 <h3 className="px-1 text-[11px] font-semibold text-muted">{t("computers:talo.environmentSection")}</h3>
                 <Panel className="divide-y divide-divider bg-surface/60 text-xs">
-                  <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+                  <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
                     <span className="text-muted">{t("computers:talo.computeSpec")}</span>
                     <span className="font-mono text-ink">
                       {t("computers:talo.computeValue", { cpu: instance.cpuCores, memory: memoryGiB })}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+                  <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
                     <span className="text-muted">{t("computers:talo.storageSpec")}</span>
                     <span className="text-ink">
                       {t(instance.diskQuota === "enforced" ? "computers:talo.storageEnforced" : "computers:talo.storageUnbounded")}
                     </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                    <span className="text-muted">{t("computers:talo.automationSpec")}</span>
+                    <span className="text-ink">{automationLabel}</span>
                   </div>
                 </Panel>
               </section>
@@ -603,35 +691,50 @@ function AuthorizedTaloConsole({
               ) : filteredFiles.length === 0 ? (
                 <p className="py-4 text-center text-xs text-muted">{t("computers:talo.emptyFiles")}</p>
               ) : (
-                <Panel className="divide-y divide-divider overflow-hidden bg-surface/60 text-xs">
-                  {filteredFiles.slice(0, 50).map((file) => {
-                    const media = isMediaMime(file.mimeType);
-                    const Icon = media ? ImageIcon : FileText;
-                    return (
-                      <button
-                        key={file.fileId}
+                <div className="space-y-2.5">
+                  <Panel className="divide-y divide-divider overflow-hidden bg-surface/60 text-xs">
+                    {filteredFiles.map((file) => {
+                      const media = isMediaMime(file.mimeType);
+                      const Icon = media ? ImageIcon : FileText;
+                      return (
+                        <button
+                          key={file.fileId}
+                          type="button"
+                          onClick={() =>
+                            useAppStore.getState().openWorkspaceWindow({
+                              kind: "file",
+                              fileId: file.fileId,
+                              nodeId: instance.nodeId,
+                            })
+                          }
+                          className={cn(
+                            "flex w-full items-center justify-between gap-2.5 px-3.5 py-2.5 text-left text-ink transition hover:bg-hover",
+                            rowFocusClass,
+                          )}
+                        >
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            <Icon size={14} aria-hidden="true" className="shrink-0 text-muted" />
+                            <span className="truncate font-medium">{file.originalFilename}</span>
+                          </span>
+                          <ChevronRight size={13} aria-hidden="true" className="shrink-0 text-muted" />
+                        </button>
+                      );
+                    })}
+                  </Panel>
+                  {filesQuery.hasNextPage ? (
+                    <div className="flex justify-center">
+                      <Button
                         type="button"
-                        onClick={() =>
-                          useAppStore.getState().openWorkspaceWindow({
-                            kind: "file",
-                            fileId: file.fileId,
-                            nodeId: instance.nodeId,
-                          })
-                        }
-                        className={cn(
-                          "flex w-full items-center justify-between gap-2.5 px-3.5 py-2.5 text-left text-ink transition hover:bg-hover",
-                          rowFocusClass,
-                        )}
+                        variant="ghost"
+                        disabled={filesQuery.isFetchingNextPage}
+                        onClick={() => void filesQuery.fetchNextPage()}
+                        className="h-8 rounded-full px-3 text-xs text-muted hover:text-ink"
                       >
-                        <span className="flex min-w-0 items-center gap-2.5">
-                          <Icon size={14} aria-hidden="true" className="shrink-0 text-muted" />
-                          <span className="truncate font-medium">{file.originalFilename}</span>
-                        </span>
-                        <ChevronRight size={13} aria-hidden="true" className="shrink-0 text-muted" />
-                      </button>
-                    );
-                  })}
-                </Panel>
+                        {filesQuery.isFetchingNextPage ? t("common:loading") : t("computers:talo.loadMoreFiles")}
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               )}
             </div>
           )}

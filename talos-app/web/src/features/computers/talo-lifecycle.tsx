@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AppProtocol } from "@talos/sdk-core";
 import { Ellipsis } from "lucide-react";
@@ -261,8 +261,9 @@ function AuthorizedTaloLifecycleMenu({ desktopNodeId, onDeleted }: { desktopNode
   const [desktopPortal, setDesktopPortal] = useState<HTMLElement | null>(null);
   const { status, instance, phase, operation, busy, error, confirmation, setConfirmation, perform } = useTaloController();
 
-  useLayoutEffect(() => {
-    setDesktopPortal(menuTrigger.current?.closest<HTMLElement>("[role='dialog'], dialog") ?? null);
+  const assignTriggerRef = useCallback((node: HTMLButtonElement | null) => {
+    menuTrigger.current = node;
+    setDesktopPortal(node?.closest<HTMLElement>("[role='dialog'], dialog") ?? null);
   }, []);
 
   useEffect(() => {
@@ -282,7 +283,7 @@ function AuthorizedTaloLifecycleMenu({ desktopNodeId, onDeleted }: { desktopNode
       {error ? <p role="alert" className="max-w-40 truncate text-xs text-danger" title={error}>{error}</p> : null}
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
-          <Button ref={menuTrigger} type="button" variant="ghost" className="p-2" aria-label={t("talo.manage")}>
+          <Button ref={assignTriggerRef} type="button" variant="ghost" className="p-2" aria-label={t("talo.manage")}>
             <Ellipsis size={16} aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>

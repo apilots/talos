@@ -8756,6 +8756,14 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "idleTimeoutSeconds": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "instanceId": {
           "type": "string"
         },

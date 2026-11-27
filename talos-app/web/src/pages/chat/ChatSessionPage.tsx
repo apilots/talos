@@ -173,7 +173,7 @@ export function ChatSessionContent({ sessionId, talo }: {
         }
       >
         {workerPhase != null && instance ? (
-          <TaloConsole initialInstance={instance} actionRequest={taloAction} />
+          <TaloConsole initialInstance={instance} sessionId={sessionId} actionRequest={taloAction} />
         ) : null}
         <ChatSessionTimeline
           blocks={blocks}
