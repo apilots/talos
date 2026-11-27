@@ -12,6 +12,16 @@ from ci_plan import plan, task_roots
 
 
 class ChangeScopeTests(unittest.TestCase):
+    def test_arena_runtime_selects_harness_without_rust_rebuild(self):
+        for path in ('arena_agent.py', 'arena_smoke.py', 'test_arena_agent.py', 'fixture.py',
+                     'payload.py', 'run_talos.py', 'atif.py', 'delegation_watch.py'):
+            selected = plan(['talos-bench/runtime/' + path])
+            self.assertTrue(selected['harness'], path)
+            self.assertEqual(selected['build']['binaries'], [], path)
+            self.assertEqual(selected['test_build']['tests'], {}, path)
+        roots = task_roots({'kind': 'harness', 'rust': [], 'frontend': [], 'binaries': []})
+        self.assertIn('talos-bench/runtime', roots)
+
     def test_automation_runtime_owners_select_hosted_business_acceptance(self):
         for path in [
             'talos-rs/crates/common/types/src/automation.rs',

@@ -187,3 +187,41 @@ uv run --python 3.12 --with harbor==0.25.0 python talos-bench/recheck.py \
 Keep the entire run directory, including the original runner job, verifier logs, task outputs, and build and provenance files. The local `complete` flag applies to the selected trials. Official eligibility also depends on the published dataset and coverage, accepted execution settings, and the suite's required artifacts. Check those requirements before running a full set or preparing a submission.
 
 See the [suite reference](../../talos-bench/README.md) for current commands and published submission routes. The [phase two design](../../spec/feat-059-benchmark-execution/design.md) defines execution and coverage. The [artifact contract](../../spec/feat-058-portable-benchmark-runs/design.md) defines per-suite exports and eligibility checks.
+
+## Runta Arena custom agent
+
+Upload `talos-bench/runtime/arena_agent.py` as the only Python file in an unlisted
+GitHub Gist. Select the custom harness in Runta Evaluations and supply the Gist
+revision link, or paste its source in deployments that expose an inline editor.
+The entry point exports `CustomAgent` and uses Harbor's supplied model connection.
+It supports OpenAI Chat Completions and Responses, including explicit endpoint,
+credential-variable and model overrides. Supported reasoning efforts are `low`,
+`medium`, `high` and `xhigh`; `low` maps to Talos's `light` domain value.
+
+The adapter pins Talos release `v0.1.18`, its product SHA-256 values and the Bench
+runtime files from the corresponding source commit. It downloads and verifies the native Linux
+product inside the task during setup. Small runtime files and configuration are
+uploaded through Harbor's environment interface.
+The task environment must be compatible with that release's native Linux binary.
+The currently pinned v0.1.18 Linux product requires glibc 2.38 and cannot run on
+Debian 12's glibc 2.36. Pin a published compatible release and its checksums before
+using this adapter for Debian 12 tasks; the release build baseline is documented
+in the [release workflow](../development/RELEASE.md). The adapter records
+installation output and release provenance in the agent logs.
+No build is performed during a trial. Existing Bench code executes the CLI,
+parses usage and exports the recorded transcript to ATIF.
+
+Start with one smoke task and one attempt using an API-key provider. Inspect the
+raw verifier outcome, `trajectory.json`, `talos-run.json`, stdout/stderr and
+`arena-provenance.json` before increasing the task selection. A successful smoke
+validates the integration. A qualifying Arena run follows the Arena's current
+participation rules and has its own public evaluation link.
+
+The secretless PR harness runs `python talos-bench/runtime/arena_smoke.py` with
+Harbor 0.25.0 and Docker. It exercises the actual fixed release, installation,
+model connection, `low` effort, a Bash tool call, usage and ATIF through Harbor's
+Docker environment. No Rust build or paid model is used. Evidence defaults to a
+new directory under `output/arena/hosted-smoke/`; an explicit `--output` must name
+a new directory. The fixed v0.1.18 smoke uses Ubuntu 24.04 because of that
+release's libc requirement. Portable release acceptance separately exercises the
+same new package in the minimum and newer Linux runtime environments.
