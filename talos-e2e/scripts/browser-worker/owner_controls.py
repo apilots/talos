@@ -140,7 +140,7 @@ def web_acceptance(web, computer, display_name):
                     expect(row.get_by_text('Succeeded', exact=True)).to_be_visible(timeout=15_000)
             page.screenshot(path=REPORT / 'web-builtin-jobs.png')
             page.goto(web + '/computers', wait_until='domcontentloaded')
-            view = page.get_by_role('button', name='View computer', exact=True)
+            view = page.get_by_role('button', name='Desktop', exact=True)
             expect(page.get_by_role('heading', name='Connection topology')).to_be_visible()
             page.get_by_role('button', name=f'Inspect {display_name}', exact=True).click()
             expect(view).to_be_visible(timeout=20_000)

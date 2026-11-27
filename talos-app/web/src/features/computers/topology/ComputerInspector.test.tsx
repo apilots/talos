@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createInstance } from "i18next";
@@ -12,15 +12,19 @@ import { computerResources } from "@/shared/i18n/computerResources";
 import { topologyNodes } from "@/shared/test/computer-topology.fixture";
 import { useAppStore } from "@/shared/store/app-store";
 
-const mocks = vi.hoisted(() => ({ read: vi.fn(), retry: vi.fn(), rename: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), retry: vi.fn(), rename: vi.fn(), desktopButton: vi.fn<(props: { nodeId?: string; online: boolean; shortcut?: boolean }) => ReactNode>(() => null) }));
 vi.mock("../hooks", () => ({ useComputer: mocks.read, useProductScope: () => "fixture" }));
 vi.mock("@/shared/api/desktop-client", () => ({ getDesktopBridge: () => undefined }));
 vi.mock("@/shared/api/client", () => ({ getTalosClient: () => ({ computers: { rename: mocks.rename } }) }));
-vi.mock("../ComputerDesktop", () => ({ ComputerDesktopButton: () => null }));
+vi.mock("../ComputerDesktop", () => ({
+  inspectorActionButtonClassName: "h-9 min-w-0 gap-1.5 rounded-lg bg-selected px-2.5 py-0 text-[13px] leading-5 whitespace-nowrap enabled:hover:bg-ink/[0.09]",
+  ComputerDesktopButton: (props: { nodeId?: string; online: boolean; shortcut?: boolean }) => mocks.desktopButton(props),
+}));
 
 const node = topologyNodes[1]!;
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.desktopButton.mockImplementation(() => null);
   mocks.read.mockReturnValue({ data: node, error: null, refetch: mocks.retry });
   useAppStore.setState({ connection: { ...useAppStore.getInitialState().connection, userId: "alice" } });
 });
@@ -130,4 +134,26 @@ it("disables retry while a detail retry is pending", async () => {
   mocks.read.mockReturnValue({ data: undefined, error: new TypeError("Failed to fetch"), isFetching: true, refetch: mocks.retry });
   await show();
   expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+});
+
+it("places primary and secondary inspector actions inside a single action bar", async () => {
+  const { container, unmount } = await show();
+  const actionBar = container.querySelector(".cmp-inspector-actions");
+  expect(actionBar).not.toBeNull();
+  const openButton = screen.getByRole("button", { name: "Open computer" });
+  expect(openButton.parentElement).toBe(actionBar);
+  expect(openButton).toHaveClass("border", "border-border", "bg-selected");
+  expect(openButton.querySelector(".lucide-laptop")).not.toBeNull();
+  expect(actionBar?.querySelectorAll("button")).toHaveLength(1);
+  unmount();
+
+  mocks.desktopButton.mockImplementation(() => <button type="button">Desktop</button>);
+  const second = await show();
+  const secondActionBar = second.container.querySelector(".cmp-inspector-actions");
+  expect(secondActionBar).not.toBeNull();
+  const buttons = secondActionBar?.querySelectorAll("button");
+  expect(buttons).toHaveLength(2);
+  expect(buttons?.[0]).toHaveTextContent("Open computer");
+  expect(buttons?.[1]).toHaveTextContent("Desktop");
+  expect(mocks.desktopButton).toHaveBeenLastCalledWith({ nodeId: node.nodeId, online: node.available });
 });

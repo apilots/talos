@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Laptop } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { createElectronAppServerClient, type TalosRuntimeState } from "@talos/sdk-app-server/desktop";
@@ -12,7 +13,7 @@ import { Button } from "@/shared/ui/Button";
 import { useComputer, useProductScope } from "../hooks";
 import { ComputerDirectoryError } from "../ComputerDirectoryError";
 import { ComputerDetails } from "../ComputerDetails";
-import { ComputerDesktopButton } from "../ComputerDesktop";
+import { ComputerDesktopButton, inspectorActionButtonClassName } from "../ComputerDesktop";
 import { SyncPeerDetails } from "./SyncPeerDetails";
 import { ComputerRegistrationActions } from "./ComputerRegistrationActions";
 import { computerPeers, computerLocalSyncStatus } from "./observations";
@@ -106,10 +107,19 @@ export function ComputerInspector({
           {t(`computers:${status.label}`)}{status.remoteDisabled ? ` · ${t("computers:remoteDisabled")}` : ""}
         </p>
       </div>
-      <Button className="w-full" title={!phase && !node.available ? t("computers:offlineHelp") : undefined} onClick={() => onOpen(node.nodeId)}>
-        {t("computers:open")}
-      </Button>
-      <ComputerDesktopButton nodeId={node.nodeId} online={node.available} />
+      <div className="cmp-inspector-actions">
+        <Button
+          type="button"
+          variant="secondary"
+          className={inspectorActionButtonClassName}
+          title={!phase && !node.available ? t("computers:offlineHelp") : t("computers:open")}
+          onClick={() => onOpen(node.nodeId)}
+        >
+          <Laptop aria-hidden="true" size={14} className="shrink-0 text-muted" />
+          <span className="truncate">{t("computers:open")}</span>
+        </Button>
+        <ComputerDesktopButton nodeId={node.nodeId} online={node.available} />
+      </div>
       <SyncPeerDetails
         peers={peers}
         metrics={metrics}
