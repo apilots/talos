@@ -49,29 +49,16 @@ impl AgentNodeService {
             .store
             .list(ListNodesParams {
                 exclude_node_id: excluded.filter(|id| id != "embedded"),
-                include_managed_workers: actor.can_use_managed_worker(),
+                include_managed_workers: false,
                 scope,
                 query,
                 cursor: request.cursor,
                 limit: request.limit.unwrap_or(50).clamp(1, 200),
             })
             .await?;
-        let managed = if actor.can_use_managed_worker() {
-            self.store.managed_worker(&actor.user_id).await?
-        } else {
-            None
-        };
         let mut data = Vec::with_capacity(page.data.len());
         for record in page.data {
-            let mut node = self.node_info(record).await;
-            if let Some(managed) = managed
-                .as_ref()
-                .filter(|managed| managed.node_id == node.node_id)
-            {
-                node.managed_worker_phase =
-                    Some(super::managed_worker::worker_phase(managed, node.available));
-            }
-            data.push(node);
+            data.push(self.node_info(record).await);
         }
         Ok(ComputerListResponse {
             data,

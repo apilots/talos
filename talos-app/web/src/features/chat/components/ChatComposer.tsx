@@ -89,7 +89,7 @@ export function ChatComposer({
     commands: commandIds,
     cursorIndex,
     enabled: !disabled,
-    isComposing,
+    isComposing, nodeId,
     value: draft,
   });
 

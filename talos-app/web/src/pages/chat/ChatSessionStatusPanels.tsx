@@ -4,15 +4,25 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/shared/ui/Button";
 import { Panel } from "@/shared/ui/Panel";
 
-export function ChatSessionMessageActions() {
+export function ChatSessionMessageActions({
+  onOpenFiles,
+  onOpenSettings,
+  taloMode = false,
+}: {
+  onOpenFiles?: () => void;
+  onOpenSettings?: () => void;
+  taloMode?: boolean;
+} = {}) {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
 
   return (
     <>
-      <Button onClick={() => navigate("/files")} variant="secondary">{t("openFiles")}</Button>
-      <Button onClick={() => navigate("/settings/personalization")} variant="secondary">{t("openMemory")}</Button>
-      <Button onClick={() => navigate("/settings")} variant="secondary">{t("openSettings")}</Button>
+      <Button onClick={onOpenFiles ?? (() => navigate("/files"))} variant="secondary">{t("openFiles")}</Button>
+      {taloMode ? null : (
+        <Button onClick={() => navigate("/settings/personalization")} variant="secondary">{t("openMemory")}</Button>
+      )}
+      <Button onClick={onOpenSettings ?? (() => navigate("/settings"))} variant="secondary">{t("openSettings")}</Button>
     </>
   );
 }

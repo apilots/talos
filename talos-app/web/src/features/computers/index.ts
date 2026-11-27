@@ -19,4 +19,7 @@ export { ComputerConnectHelp } from "./ComputerConnectHelp";
 
 export { ComputerDesktopButton, ComputerDesktop } from "./ComputerDesktop";
 export { SessionDesktopShortcut } from "./SessionDesktopShortcut";
+export { TaloConsole, type TaloConsoleActionRequest } from "./TaloConsole";
+export { TaloDesktopDialog } from "./TaloDesktopDialog";
+export { TaloLifecycleMenu } from "./talo-lifecycle";
 export { TaloPanel, taloHasConversation, useManagedWorkerStatus } from "./TaloPanel";

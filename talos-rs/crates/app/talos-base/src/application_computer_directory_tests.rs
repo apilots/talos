@@ -871,3 +871,38 @@ async fn a_directory_snapshot_cannot_suppress_a_later_committed_rename() {
 async fn a_directory_snapshot_cannot_discard_a_later_created_computer_credential() {
     accepts_mutation_committed_after_a_directory_snapshot(PendingMutation::Create).await;
 }
+
+#[tokio::test]
+async fn managed_worker_from_control_plane_directory_never_enters_personal_computer_cache() {
+    let fixture = Fixture::start().await;
+    let actor = actor();
+    {
+        let mut directory = fixture.directory.write().unwrap();
+        let mut talo = directory[0].clone();
+        talo.node_id = "talo-managed-node".into();
+        talo.display_name = "Talo".into();
+        talo.managed_worker_phase = Some(talos_types::ManagedWorkerPhase::Ready);
+        directory.push(talo);
+    }
+    fixture
+        .runtime
+        .sync_host
+        .refresh_computer_directory(&actor)
+        .await
+        .unwrap();
+    let page = fixture
+        .runtime
+        .service
+        .list_computers(&actor, Default::default())
+        .await
+        .unwrap();
+    assert!(page
+        .data
+        .iter()
+        .all(|node| node.node_id != "talo-managed-node"));
+    assert!(page
+        .data
+        .iter()
+        .all(|node| node.managed_worker_phase.is_none()));
+    fixture.finish().await;
+}

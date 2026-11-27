@@ -28,6 +28,7 @@ vi.mock("@/shared/store/app-store", async () => {
 });
 vi.mock("@/features/computers", () => ({
   useLocalComputer: () => ({}),
+  TaloConsole: () => null,
   useManagedWorkerStatus: () => ({ status: {} }),
   SessionDesktopShortcut: () => null,
   useComputers: () => ({ selectedId: "other-computer" }),

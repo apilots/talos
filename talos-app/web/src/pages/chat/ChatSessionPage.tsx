@@ -1,6 +1,6 @@
 import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 import { useQuery } from "@tanstack/react-query";
-import { TaloPanel } from "@/features/computers";
+import { TaloConsole, type TaloConsoleActionRequest } from "@/features/computers";
 import { useTranslation } from "react-i18next";
 import { SessionTracingPanel, TraceTabs } from "@/features/tracing";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
@@ -41,9 +41,11 @@ export function ChatSessionContent({ sessionId, talo }: {
   talo?: AppProtocol.ManagedWorkerInfo;
 }) {
   const { t: tracingText } = useTranslation("tracing");
-  const { t: computerText } = useTranslation("computers");
   const [view, setView] = useState<"conversation" | "tracing">("conversation");
   const [tracingOpened, setTracingOpened] = useState(false);
+  const [taloAction, setTaloAction] = useState<TaloConsoleActionRequest | null>(null);
+  const triggerTaloAction = (kind: "models" | "files") =>
+    setTaloAction((previous) => ({ id: (previous?.id ?? 0) + 1, kind }));
   const changeView = (next: "conversation" | "tracing") => {
     if (next === "tracing") setTracingOpened(true);
     setView(next);
@@ -53,15 +55,20 @@ export function ChatSessionContent({ sessionId, talo }: {
   const session = sessionQuery.data;
   const missingSession = !session && sessionQuery.error instanceof TalosApiError &&
     sessionQuery.error.code === AppProtocol.ErrorCode.ResourceNotFound;
-  const checkReservation = Boolean(!talo && missingSession);
-  const { status } = useManagedWorkerStatus(checkReservation);
+  const scope = useProductScope();
+  const selectComputer = useAppStore((state) => state.selectComputer);
+  const { data: sessionComputer, error: sessionComputerError } = useComputer(session?.nodeId);
+  const checkManagedTalo = Boolean(
+    !talo && (missingSession || session?.sessionKind === "talo" || sessionComputer?.managedWorkerPhase != null),
+  );
+  const { status } = useManagedWorkerStatus(checkManagedTalo);
   const instance = talo ?? status.data?.instance;
   const reservedTalo = instance?.conversationSessionId === sessionId ? instance : undefined;
   const firstTaloTurn = Boolean(missingSession && reservedTalo);
-  const scope = useProductScope();
-  const selectComputer = useAppStore((state) => state.selectComputer);
   const nodeId = session?.nodeId ?? reservedTalo?.nodeId;
-  const { data: computer, error: computerError } = useComputer(nodeId);
+  const { data: reservedComputer, error: reservedComputerError } = useComputer(session?.nodeId ? undefined : reservedTalo?.nodeId);
+  const computer = session?.nodeId ? sessionComputer : reservedComputer;
+  const computerError = session?.nodeId ? sessionComputerError : reservedComputerError;
   const local = useLocalComputer();
   const isLocal = Boolean(nodeId && nodeId === local.nodeId);
   const workerPhase = isLocal ? undefined : reservedTalo?.phase ?? computer?.managedWorkerPhase ?? (instance?.nodeId === nodeId ? instance?.phase : undefined);
@@ -69,10 +76,11 @@ export function ChatSessionContent({ sessionId, talo }: {
   const ready = isLocal ? local.runtime?.kind === "ready" : workerPhase == null ? computer?.available : workerPhase === "ready";
   const canSend = Boolean((ready || workerPhase === "sleeping") &&
     ((session && !sessionQuery.error) || firstTaloTurn));
+  const isTaloSession = Boolean(talo || reservedTalo || workerPhase != null || session?.sessionKind === "talo");
   useEffect(() => {
-    const computer = session?.nodeId ?? reservedTalo?.nodeId;
-    if (computer) selectComputer(scope, computer);
-  }, [reservedTalo?.nodeId, session?.nodeId, sessionId, scope, selectComputer]);
+    if (isTaloSession) return;
+    if (session?.nodeId) selectComputer(scope, session.nodeId);
+  }, [isTaloSession, session?.nodeId, sessionId, scope, selectComputer]);
   const { data: modelCatalog } = useModelsQuery(nodeId);
   const computerOffline = computer?.status !== "disabled" &&
     (computerError ? isServiceUnavailable(computerError) : computer?.available === false);
@@ -144,15 +152,7 @@ export function ChatSessionContent({ sessionId, talo }: {
           )}
         </p>
       ) : null}
-      {talo ? (
-        <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-7 py-2">
-          <h1 className="text-sm font-semibold text-ink">{computerText("talo.title")}</h1>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {talo.diskQuota === "unsupported" ? <p className="text-xs text-muted">{computerText("talo.quotaUnsupported")}</p> : null}
-            <TaloPanel desktopButton />
-          </div>
-        </header>
-      ) : <TraceTabs
+      {talo ? null : <TraceTabs
         className="session-view-tabs"
         label={tracingText("title")}
         value={view}
@@ -169,9 +169,12 @@ export function ChatSessionContent({ sessionId, talo }: {
         role={talo ? undefined : "tabpanel"}
         aria-labelledby={talo ? undefined : "session-view-conversation"}
         className={
-          view === "conversation" ? "flex min-h-0 flex-1 flex-col" : "hidden"
+          view === "conversation" ? "relative flex min-h-0 flex-1 flex-col" : "hidden"
         }
       >
+        {workerPhase != null && instance ? (
+          <TaloConsole initialInstance={instance} actionRequest={taloAction} />
+        ) : null}
         <ChatSessionTimeline
           blocks={blocks}
           canRetryResponse={canRetryResponse}
@@ -179,6 +182,9 @@ export function ChatSessionContent({ sessionId, talo }: {
           endRef={autoScroll.endRef}
           isCancelling={isCancelling}
           isReconnecting={streamConnectionState === "reconnecting"}
+          onOpenFiles={isTaloSession && instance ? () => triggerTaloAction("files") : undefined}
+          onOpenSettings={isTaloSession && instance ? () => triggerTaloAction("models") : undefined}
+          taloMode={isTaloSession}
           onUserActionSubmit={(response) => {
             if (!pendingUserAction || !activeTurnId) {
               return;
@@ -197,6 +203,7 @@ export function ChatSessionContent({ sessionId, talo }: {
           showMessageList={shouldShowMessageList}
           showReconnectControls={showReconnectControls}
           streamError={streamError}
+          topClearance={workerPhase != null && Boolean(instance)}
           pendingUserAction={pendingUserAction}
           userActionDisabled={
             submitUserAction.isPending || pendingUserAction?.state !== "pending"

@@ -117,21 +117,29 @@ async fn managed_worker_management_and_discovery_require_cloud_admin_or_max() {
                 .node_id,
             record.node_id
         );
-        assert_eq!(
-            service
-                .list_computers(
-                    &actor,
-                    ComputerListRequest {
-                        cursor: None,
-                        limit: Some(1),
-                        query: None,
-                    }
-                )
-                .await
-                .unwrap()
-                .total,
-            1
-        );
+        let page = service
+            .list_computers(
+                &actor,
+                ComputerListRequest {
+                    cursor: None,
+                    limit: Some(10),
+                    query: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(page.data.is_empty());
+        assert_eq!(page.total, 0);
+        let direct = service
+            .read_computer(
+                &actor,
+                talos_types::GetNodeRequest {
+                    node_id: record.node_id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(direct.managed_worker_phase.is_some());
     }
     let persisted = service
         .store

@@ -1,0 +1,216 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
+import { StrictMode } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
+import type { AppProtocol } from "@talos/sdk-core";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+import { i18n } from "@/shared/i18n/setup";
+import { resetTalosClientFactory, setTalosClientFactory, type TalosWebClient } from "@/shared/api/client";
+import { useAppStore } from "@/shared/store/app-store";
+import { topologyNodes } from "@/shared/test/computer-topology.fixture";
+import { SessionDesktopShortcut } from "./SessionDesktopShortcut";
+import { TaloConsole } from "./TaloConsole";
+import { useComputers } from "./hooks";
+
+vi.mock("@/shared/api/desktop-client", () => ({ isDesktopRuntime: () => false, getDesktopBridge: () => undefined }));
+
+const readManagedWorker = vi.fn();
+const startManagedWorker = vi.fn();
+const stopManagedWorker = vi.fn();
+const resetManagedWorker = vi.fn();
+const deleteManagedWorker = vi.fn();
+const listComputers = vi.fn();
+
+const taloInstance: AppProtocol.ManagedWorkerInfo = {
+  instanceId: "talo-instance",
+  nodeId: "talo-node",
+  conversationSessionId: "sess_talo",
+  generation: 2,
+  phase: "ready",
+  operation: null,
+  cpuCores: 4,
+  memoryBytes: 8 * 1024 ** 3,
+  diskQuota: "enforced",
+  error: null,
+};
+
+let query: QueryClient;
+
+function QuickNodesProbe() {
+  const { quickNodes, nodes, total, selectedId } = useComputers();
+  return (
+    <>
+      <output aria-label="Quick nodes">{quickNodes.map((node) => node.nodeId).join(",")}</output>
+      <output aria-label="Listed nodes">{nodes.map((node) => node.nodeId).join(",")}</output>
+      <output aria-label="Listed total">{total}</output>
+      <output aria-label="Selected node">{selectedId || "none"}</output>
+    </>
+  );
+}
+
+function showConsole(instance = taloInstance) {
+  return render(
+    <StrictMode>
+      <QueryClientProvider client={query}>
+        <MemoryRouter>
+          <div className="relative h-[640px] w-[960px]">
+            <TaloConsole initialInstance={instance} />
+          </div>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+
+beforeEach(async () => {
+  query = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  await i18n.changeLanguage("en");
+  readManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: taloInstance });
+  startManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: taloInstance });
+  stopManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: { ...taloInstance, phase: "stopped" } });
+  resetManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: { ...taloInstance, phase: "resetting", operation: "reset" } });
+  deleteManagedWorker.mockReset().mockResolvedValue({ enabled: true, instance: null });
+  listComputers.mockReset().mockResolvedValue({ data: topologyNodes, total: 2, nextCursor: null });
+
+  useAppStore.setState({
+    selectedComputers: {},
+    workspaceWindows: [],
+    workspaceSnapshots: {},
+    workspaceOwner: null,
+    workspaceOpen: false,
+    connection: {
+      ...useAppStore.getInitialState().connection,
+      authStatus: "authenticated",
+      authRole: "user",
+      accountType: "Max",
+      userId: "alice",
+    },
+  });
+
+  setTalosClientFactory(() => ({
+    computers: {
+      list: listComputers,
+      readManagedWorker,
+      startManagedWorker,
+      stopManagedWorker,
+      resetManagedWorker,
+      deleteManagedWorker,
+      read: async ({ nodeId }: { nodeId: string }) => nodeId === taloInstance.nodeId
+        ? { ...topologyNodes[0], nodeId, displayName: "Talo", available: true, managedWorkerPhase: "ready" }
+        : topologyNodes.find((node) => node.nodeId === nodeId),
+    },
+    browser: {
+      operate: async () => ({
+        enabled: false,
+        host: "docker",
+        selectedTargetId: null,
+        targets: [],
+        display: { kind: "dockerDesktop", targetId: "managed" },
+        control: { generation: "gen-1", revision: 1, epoch: 0, owner: { kind: "idle" } },
+      }),
+    },
+    sync: { status: async () => ({ localComputerId: null }) },
+  }) as unknown as TalosWebClient);
+});
+
+afterEach(() => {
+  cleanup();
+  query.clear();
+  resetTalosClientFactory();
+});
+
+it("defaults collapsed without stealing focus, expands on demand, and restores focus on Escape", async () => {
+  showConsole();
+  expect(document.body).toHaveFocus();
+  expect(screen.queryByRole("complementary", { name: "Manage Talo" })).not.toBeInTheDocument();
+
+  const centerEmblem = await screen.findByRole("button", { name: "Talo · Talo is ready" });
+  const moreTrigger = screen.getByRole("button", { name: "Open Talo controls" });
+  expect(centerEmblem).toBeVisible();
+  expect(moreTrigger).toBeVisible();
+
+  fireEvent.click(centerEmblem);
+  const panel = await screen.findByRole("complementary", { name: "Manage Talo" });
+  expect(panel).toBeVisible();
+  await waitFor(() => expect(within(panel).getByRole("button", { name: "Close Talo controls" })).toHaveFocus());
+  expect(within(panel).getByText("4 vCPU · 8 GiB")).toBeVisible();
+  expect(within(panel).getByText("Persistent Home (quota enforced)")).toBeVisible();
+  expect(screen.queryByText(/Connect to the desktop to wake Talo/)).not.toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByRole("complementary", { name: "Manage Talo" })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Talo · Talo is ready" })).toHaveFocus());
+});
+
+it("wakes a sleeping Talo and opens the remote desktop in a modal without touching RightWorkspace tabs", async () => {
+  const sleeping = { ...taloInstance, phase: "sleeping" as const };
+  readManagedWorker.mockResolvedValue({ enabled: true, instance: sleeping });
+  startManagedWorker.mockResolvedValue({ enabled: true, instance: taloInstance });
+
+  showConsole(sleeping);
+  const center = await screen.findByRole("button", { name: "Talo · Talo is asleep" });
+  fireEvent.click(center);
+
+  const panel = await screen.findByRole("complementary", { name: "Manage Talo" });
+  expect(within(panel).getByRole("button", { name: "Wake Talo" })).toBeVisible();
+  expect(within(panel).getByRole("button", { name: "Stop Talo" })).toBeVisible();
+
+  fireEvent.click(within(panel).getByRole("button", { name: /Talo desktop/ }));
+  expect(await screen.findByRole("dialog", { name: "Talo desktop" })).toBeVisible();
+  expect(startManagedWorker).toHaveBeenCalledExactlyOnceWith({
+    instanceId: taloInstance.instanceId,
+    expectedGeneration: taloInstance.generation,
+  });
+  expect(useAppStore.getState().workspaceWindows).toHaveLength(0);
+});
+
+it("supports zh-CN localization and confirms reset and delete actions", async () => {
+  await act(() => i18n.changeLanguage("zh-CN"));
+  showConsole();
+
+  fireEvent.click(await screen.findByRole("button", { name: "打开 Talo 控制台" }));
+  const panel = await screen.findByRole("complementary", { name: "管理 Talo" });
+  expect(within(panel).getByRole("tab", { name: "控制台" })).toHaveAttribute("aria-selected", "true");
+  expect(within(panel).getByRole("tab", { name: "文件与产物" })).toBeVisible();
+  expect(within(panel).getByText("计算规格")).toBeVisible();
+  expect(within(panel).getByText("Home 已挂载（启用配额）")).toBeVisible();
+
+  fireEvent.click(within(panel).getByRole("button", { name: "重置 Talo" }));
+  const confirmReset = await screen.findByRole("alertdialog", { name: "重置 Talo？" });
+  fireEvent.click(within(confirmReset).getByRole("button", { name: "重置 Talo" }));
+  await waitFor(() => expect(resetManagedWorker).toHaveBeenCalledExactlyOnceWith({
+    instanceId: taloInstance.instanceId,
+    expectedGeneration: taloInstance.generation,
+  }));
+});
+
+it("excludes managed Talo nodes from quickNodes, computer lists, and selectedComputerId", async () => {
+  listComputers.mockResolvedValue({
+    data: [
+      { ...topologyNodes[0], nodeId: taloInstance.nodeId, displayName: "Talo", managedWorkerPhase: "ready" },
+      ...topologyNodes,
+    ],
+    total: 3,
+    nextCursor: null,
+  });
+  const scope = JSON.stringify(["http://localhost:3000", "alice"]);
+  useAppStore.setState({ selectedComputers: { [scope]: taloInstance.nodeId } });
+  render(
+    <QueryClientProvider client={query}>
+      <MemoryRouter>
+        <QuickNodesProbe />
+        <SessionDesktopShortcut nodeId={taloInstance.nodeId} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  await waitFor(() => expect(screen.getByLabelText("Quick nodes")).toHaveTextContent("manager-a,worker-b"));
+  expect(screen.getByLabelText("Quick nodes").textContent).not.toContain("talo-node");
+  expect(screen.getByLabelText("Listed nodes")).toHaveTextContent("manager-a,worker-b");
+  expect(screen.getByLabelText("Listed total")).toHaveTextContent("2");
+  await waitFor(() => expect(screen.getByLabelText("Selected node")).toHaveTextContent("none"));
+  expect(screen.queryByRole("button", { name: /View computer|Open browser/i })).not.toBeInTheDocument();
+});

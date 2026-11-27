@@ -178,6 +178,9 @@ impl ApplicationSyncHost {
         info: &NodeInfo,
         started: Instant,
     ) -> TalosResult<NodeInfo> {
+        if info.managed_worker_phase.is_some() {
+            return Ok(info.clone());
+        }
         let _publish = self.computer_directory.publish.lock().await;
         if !self.account_connections_allowed(account) {
             return Err(TalosError::new(
@@ -210,6 +213,9 @@ impl ApplicationSyncHost {
     ) -> TalosResult<NodeInfo> {
         if info.node_id != id || info.owner_user_id.as_deref() != Some(&actor.user_id) {
             return Err(TalosError::authorization_denied());
+        }
+        if info.managed_worker_phase.is_some() {
+            return Ok(info.clone());
         }
         let _publish = self.computer_directory.publish.lock().await;
         if !self.account_connections_allowed(&actor.user_id) {
@@ -342,6 +348,9 @@ impl ApplicationSyncHost {
                     || info.owner_user_id.as_deref() != Some(&verified.user_id)
                 {
                     return Err(TalosError::authorization_denied());
+                }
+                if info.managed_worker_phase.is_some() {
+                    continue;
                 }
                 if incoming.insert(info.node_id.clone(), info).is_some() {
                     return Err(TalosError::new(

@@ -128,6 +128,7 @@ function sessionMissing() {
 
 vi.mock("@/features/computers", () => ({
   useLocalComputer: () => ({}),
+  TaloConsole: () => null,
   useProductScope: () => "test-scope",
   useComputer: (nodeId?: string) => ({ data: nodeId === "personal-talo"
     ? { available: apiMocks.phase === "ready", managedWorkerPhase: apiMocks.phase }
