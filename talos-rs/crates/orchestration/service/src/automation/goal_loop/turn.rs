@@ -20,13 +20,37 @@ impl TurnService {
         store: DatabaseAutomationStore,
         resolver: Arc<dyn AutomationSkillResolver>,
     ) -> TalosResult<()> {
+        self.install_automation_mode(
+            store,
+            resolver,
+            crate::automation::goal_loop::AutomationAssembly::Executing,
+        )
+    }
+    pub(crate) fn install_automation_definitions(
+        &self,
+        store: DatabaseAutomationStore,
+        resolver: Arc<dyn AutomationSkillResolver>,
+    ) -> TalosResult<()> {
+        self.install_automation_mode(
+            store,
+            resolver,
+            crate::automation::goal_loop::AutomationAssembly::DefinitionsOnly,
+        )
+    }
+    fn install_automation_mode(
+        &self,
+        store: DatabaseAutomationStore,
+        resolver: Arc<dyn AutomationSkillResolver>,
+        assembly: crate::automation::goal_loop::AutomationAssembly,
+    ) -> TalosResult<()> {
         let automation = SessionAutomationService::new(
             store,
             self.execution.execution_store.clone(),
             self.message_queue.clone(),
             resolver,
         )
-        .with_managed_workers(self.nodes.clone());
+        .with_managed_workers(self.nodes.clone())
+        .with_assembly(assembly);
         self.automation.set(Arc::new(automation)).map_err(|_| {
             TalosError::new(
                 talos_error::ErrorCode::Conflict,
@@ -42,6 +66,9 @@ impl TurnService {
         let Some(automation) = self.automation.get().cloned() else {
             return Ok(());
         };
+        if !automation.executes() {
+            return Ok(());
+        }
         if self.canonical_active_turn(&session.id).await?.is_some()
             || !self.message_queue.list(&session.id)?.messages.is_empty()
         {
@@ -118,6 +145,9 @@ impl TurnService {
         }
         .await;
         if let Err(error) = result {
+            if agent_protocol::AgentAdmissionUnconfirmed::contains(&error) {
+                return Err(error);
+            }
             if !error.is_code(talos_error::ErrorCode::Conflict)
                 && !error.is_code(talos_error::ErrorCode::ActiveTurnRunning)
             {

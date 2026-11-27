@@ -4,12 +4,7 @@ use agent_client::{AgentNodeClient, AgentNodeRunner, AgentSessionDataClient};
 use agent_pb as pb;
 use agent_pb::agent_node_control_server::AgentNodeControl;
 use agent_pb::agent_node_management_server::AgentNodeManagement;
-use talos_agent::{
-    AgentFuture, AgentResult, AttachmentReader, ResolvedAttachment, SessionHistoryReadParams,
-    SessionHistoryReader, TurnFileScope,
-};
-use talos_agent_api::SessionHistoryTurn;
-use talos_agent_provider_kernel::KernelMemoryProgressStore;
+use talos_agent::{AttachmentReader, ResolvedAttachment, TurnFileScope};
 use talos_auth::{RequestIdentity, UserRole};
 use talos_coordinator::AgentCoordinator;
 use talos_error::TalosResult;
@@ -33,17 +28,6 @@ use super::*;
 
 struct TestAuth;
 
-struct EmptyHistory;
-
-impl SessionHistoryReader for EmptyHistory {
-    fn read(
-        &self,
-        _: SessionHistoryReadParams,
-    ) -> AgentFuture<'_, AgentResult<Vec<SessionHistoryTurn>>> {
-        Box::pin(async { Ok(Vec::new()) })
-    }
-}
-
 struct TestAttachments;
 
 impl AttachmentReader for TestAttachments {
@@ -66,33 +50,6 @@ impl AttachmentReader for TestAttachments {
                 bytes: bytes::Bytes::from_static(b"content"),
             }])
         })
-    }
-}
-
-#[derive(Default)]
-struct TestMemoryProgress(tokio::sync::Mutex<u64>);
-
-#[async_trait::async_trait]
-impl KernelMemoryProgressStore for TestMemoryProgress {
-    async fn processed_until_event_seq(&self, _: &str) -> TalosResult<u64> {
-        Ok(*self.0.lock().await)
-    }
-
-    async fn advance_processed_until_event_seq(
-        &self,
-        _: &str,
-        expected_until_seq: u64,
-        next_until_seq: u64,
-    ) -> TalosResult<()> {
-        let mut current = self.0.lock().await;
-        if *current != expected_until_seq {
-            return Err(TalosError::new(
-                ErrorCode::Conflict,
-                "memory cursor conflict",
-            ));
-        }
-        *current = next_until_seq;
-        Ok(())
     }
 }
 
@@ -239,7 +196,6 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
     let publisher = RemoteNodePublisher {
         coordinator_id: uuid::Uuid::new_v4().to_string(),
         connections: Arc::default(),
-        resource_routes: ResourceRoutes::default(),
         coordinator: coordinator.clone(),
     };
     let management = NodeManagementRpc::new(nodes.clone(), Arc::new(TestAuth));
@@ -303,6 +259,7 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
                 token: credential,
             }),
             params: Some(pb::RegisterParams {
+                product_owner: agent_pb::NodeProductOwner::Server as i32,
                 system_info: None,
                 deployments: vec![pb::Deployment {
                     agent_id: "talos".into(),
@@ -397,8 +354,6 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     let store = Arc::new(DatabaseAgentNodeStore::new(&storage));
     let nodes = AgentNodeService::new(store.clone());
     let sessions = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
-    let memory_progress: Arc<dyn KernelMemoryProgressStore> =
-        Arc::new(TestMemoryProgress::default());
     let created = nodes
         .create_node(
             &Actor::regular("user-1"),
@@ -415,15 +370,8 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     let mut session = session_record();
     session.execution_node_id = node_id.clone();
     sessions.insert_session_record(&session).await.unwrap();
-    let session_data = NodeSessionDataRpc::new(
-        nodes.clone(),
-        sessions.clone(),
-        Arc::new(talos_service::SessionHistoryService::new(Arc::new(
-            talos_service::TimelineEventService::new(sessions.clone()),
-        ))),
-        Arc::new(TestAttachments),
-        memory_progress,
-    );
+    let session_data =
+        NodeSessionDataRpc::new(nodes.clone(), sessions.clone(), Arc::new(TestAttachments));
     let coordinator = Arc::new(CoordinatorImpl::new(
         Arc::new(talos_router::RouterImpl::new()),
         sessions.clone(),
@@ -528,17 +476,6 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     .await
     .unwrap();
     coordinator.ensure_agent("talos").await.unwrap();
-    assert!(SessionHistoryReader::read(
-        &resources,
-        SessionHistoryReadParams {
-            session_id: "session-1".into(),
-            window: talos_agent::SessionHistoryWindow::Latest,
-            limit: 10,
-        }
-    )
-    .await
-    .unwrap()
-    .is_empty());
     let attachments = AttachmentReader::read(
         &resources,
         &TurnFileScope {
@@ -550,29 +487,6 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     .await
     .unwrap();
     assert_eq!(attachments[0].bytes, bytes::Bytes::from_static(b"content"));
-    assert_eq!(
-        resources
-            .processed_until_event_seq("session-1")
-            .await
-            .unwrap(),
-        0
-    );
-    resources
-        .advance_processed_until_event_seq("session-1", 0, 7)
-        .await
-        .unwrap();
-    assert_eq!(
-        resources
-            .processed_until_event_seq("session-1")
-            .await
-            .unwrap(),
-        7
-    );
-    assert!(resources
-        .advance_processed_until_event_seq("session-1", 0, 8)
-        .await
-        .unwrap_err()
-        .is_code(ErrorCode::Conflict));
     assert!(AgentControl::list(
         &resources,
         ListSubagentsRequest {
@@ -600,13 +514,6 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     .await
     .unwrap();
     assert_eq!(files[0].file_id, "image-1");
-    resources::assert_large_history_supplement_round_trip(
-        &storage,
-        &sessions,
-        &resources,
-        &session.id,
-    )
-    .await;
     stop_node.cancel();
     node_task.await.unwrap().unwrap();
     assert_eq!(*lease_events.lock().unwrap(), vec![true, false]);

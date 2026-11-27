@@ -351,6 +351,7 @@ struct TestServices {
     executor: Arc<RecordingAgentExecution>,
     coordinator: Arc<RecordingAgentCoordinator>,
     timeline: Arc<TimelineEventService>,
+    journal: Arc<talos_store::execution::WorkerExecutionStore>,
     _workspace: tempfile::TempDir,
 }
 
@@ -384,19 +385,24 @@ async fn test_services_with_config(config: TalosConfig) -> TestServices {
         talos_config::DEFAULT_WORKSPACE_ID,
         workspace.path().to_path_buf(),
     ));
-    let sessions = Arc::new(crate::test_support::session_service(
-        store.clone(),
-        Arc::new(MockProjectStore::new()),
-        config.clone(),
-    ));
-    let event_service = Arc::new(TimelineEventService::new(store.clone()));
     let executor = Arc::new(RecordingAgentExecution::default());
-    let profile_store: Arc<dyn ProfileStore> = Arc::new(DatabaseProfileStore::new(&storage));
     let recording_coordinator = Arc::new(RecordingAgentCoordinator::default());
     let coordinator: Arc<dyn AgentCoordinator> = Arc::new(RecordingExecutionCoordinator {
         execution: executor.clone(),
         delegate: recording_coordinator.clone(),
     });
+    let (coordinator, journal) = crate::test_worker::durable_with_store(
+        crate::test_support::with_environment(coordinator, config.clone()),
+    )
+    .await;
+    let sessions = Arc::new(SessionService::new(
+        store.clone(),
+        Arc::new(MockProjectStore::new()),
+        config.clone(),
+        coordinator.clone(),
+    ));
+    let event_service = Arc::new(TimelineEventService::new(store.clone()));
+    let profile_store: Arc<dyn ProfileStore> = Arc::new(DatabaseProfileStore::new(&storage));
     let turns = Arc::new(TurnService::new(
         crate::turn::AgentExecutionDriver::new(
             coordinator,
@@ -418,6 +424,7 @@ async fn test_services_with_config(config: TalosConfig) -> TestServices {
         executor,
         coordinator: recording_coordinator,
         timeline: event_service,
+        journal,
         _workspace: workspace,
     }
 }
@@ -528,6 +535,13 @@ async fn create_parent_with_conf(
         message,
     )
     .await;
+    crate::test_worker::seed_product_history(
+        services.sessions.as_ref(),
+        services.store.as_ref(),
+        services.journal.as_ref(),
+        &parent_ref.session_id,
+    )
+    .await;
     parent_ref
 }
 
@@ -557,6 +571,13 @@ async fn create_running_child_named(
         services.store.as_ref() as &dyn AgentExecutionStore,
         identity,
         message,
+    )
+    .await;
+    crate::test_worker::seed_product_history(
+        services.sessions.as_ref(),
+        services.store.as_ref(),
+        services.journal.as_ref(),
+        &child.id,
     )
     .await;
     (
@@ -645,6 +666,29 @@ async fn create_child_session(
         )
         .await
         .unwrap()
+}
+
+async fn settle_durable_turn(
+    services: &TestServices,
+    session_id: &str,
+    turn_id: &str,
+    payload: CanonicalAgentEventPayload,
+) {
+    settle_canonical_turn(
+        services.store.as_ref(),
+        services.timeline.as_ref(),
+        session_id,
+        turn_id,
+        payload,
+    )
+    .await;
+    crate::test_worker::seed_product_history(
+        services.sessions.as_ref(),
+        services.store.as_ref(),
+        services.journal.as_ref(),
+        session_id,
+    )
+    .await;
 }
 
 async fn settle_canonical_turn(
@@ -1038,9 +1082,8 @@ async fn child_admission_is_atomic_per_tree_and_releases_at_settlement() {
         error.is_code(talos_error::ErrorCode::SessionBudgetExceeded),
         "{error}"
     );
-    settle_canonical_turn(
-        &services.store,
-        &services.timeline,
+    settle_durable_turn(
+        &services,
         &admitted.subagent.session_id,
         &admitted.turn.turn_id,
         CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
@@ -1050,9 +1093,8 @@ async fn child_admission_is_atomic_per_tree_and_releases_at_settlement() {
     .await;
     let (settled, previous_turn_id) =
         create_running_child_named(&services, parent.clone(), "child-settled").await;
-    settle_canonical_turn(
-        &services.store,
-        &services.timeline,
+    settle_durable_turn(
+        &services,
         &settled.session_id,
         &previous_turn_id,
         CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
@@ -1075,9 +1117,8 @@ async fn child_admission_is_atomic_per_tree_and_releases_at_settlement() {
     };
     assert_ne!(turn_id, previous_turn_id);
 
-    settle_canonical_turn(
-        &services.store,
-        &services.timeline,
+    settle_durable_turn(
+        &services,
         &next.subagent.session_id,
         &next.turn.turn_id,
         CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {

@@ -12,7 +12,6 @@ use talos_error::TalosResult;
 use talos_service::{Actor, FileByteStream};
 use talos_types::*;
 
-use crate::computers::managed_worker_response;
 use crate::gateway::Gateway;
 
 pub(crate) use crate::require_non_empty;
@@ -23,114 +22,106 @@ impl Gateway for ServiceGateway {
     async fn session_automation(
         &self,
         actor: &Actor,
-        request: talos_types::SessionAutomationReadRequest,
-    ) -> TalosResult<talos_types::SessionAutomationSnapshot> {
+        request: SessionAutomationReadRequest,
+    ) -> TalosResult<SessionAutomationSnapshot> {
         ServiceGateway::session_automation(self, actor, request).await
     }
     async fn execute_automation(
         &self,
         actor: &Actor,
-        request: talos_types::AutomationRequest,
-    ) -> TalosResult<talos_types::AutomationControlResult> {
+        request: AutomationRequest,
+    ) -> TalosResult<AutomationControlResult> {
         ServiceGateway::execute_automation(self, actor, request).await
     }
     async fn list_automation(
         &self,
         actor: &Actor,
-        request: talos_types::AutomationListRequest,
-    ) -> TalosResult<talos_types::AutomationListResponse> {
+        request: AutomationListRequest,
+    ) -> TalosResult<AutomationListResponse> {
         ServiceGateway::list_automation(self, actor, request).await
     }
     async fn automation_command_catalog(
         &self,
         actor: &Actor,
-        request: talos_types::AutomationCommandCatalogRequest,
-    ) -> TalosResult<talos_types::AutomationCommandCatalogResponse> {
+        request: AutomationCommandCatalogRequest,
+    ) -> TalosResult<AutomationCommandCatalogResponse> {
         ServiceGateway::automation_command_catalog(self, actor, request).await
     }
     async fn resolve_automation_command(
         &self,
         actor: &Actor,
-        request: talos_types::AutomationCommandResolveRequest,
-    ) -> TalosResult<talos_types::AutomationCommandResolveResponse> {
+        request: AutomationCommandResolveRequest,
+    ) -> TalosResult<AutomationCommandResolveResponse> {
         ServiceGateway::resolve_automation_command(self, actor, request).await
     }
     async fn list_builtin_jobs(
         &self,
         actor: &Actor,
-        request: talos_types::BuiltinJobListRequest,
-    ) -> TalosResult<talos_types::BuiltinJobListResponse> {
+        request: BuiltinJobListRequest,
+    ) -> TalosResult<BuiltinJobListResponse> {
         ServiceGateway::list_builtin_jobs(self, actor, request).await
     }
     async fn control_builtin_job(
         &self,
         actor: &Actor,
-        request: talos_types::BuiltinJobControlRequest,
-    ) -> TalosResult<talos_types::BuiltinJobInfo> {
+        request: BuiltinJobControlRequest,
+    ) -> TalosResult<BuiltinJobInfo> {
         ServiceGateway::control_builtin_job(self, actor, request).await
     }
 
     async fn list_computers(
         &self,
         actor: &Actor,
-        request: talos_types::ComputerListRequest,
-    ) -> TalosResult<talos_types::ComputerListResponse> {
+        request: ComputerListRequest,
+    ) -> TalosResult<ComputerListResponse> {
         ServiceGateway::list_computers(self, actor, request).await
     }
-    async fn read_computer(
-        &self,
-        actor: &Actor,
-        request: talos_types::GetNodeRequest,
-    ) -> TalosResult<talos_types::NodeInfo> {
+    async fn read_computer(&self, actor: &Actor, request: GetNodeRequest) -> TalosResult<NodeInfo> {
         ServiceGateway::read_computer(self, actor, request).await
     }
     async fn create_computer(
         &self,
         actor: &Actor,
-        request: talos_types::CreateNodeRequest,
-    ) -> TalosResult<talos_types::CreatedNode> {
+        request: CreateNodeRequest,
+    ) -> TalosResult<CreatedNode> {
         ServiceGateway::create_computer(self, actor, request).await
     }
     async fn rename_computer(
         &self,
         actor: &Actor,
-        request: talos_types::RenameComputerRequest,
-    ) -> TalosResult<talos_types::NodeInfo> {
+        request: RenameComputerRequest,
+    ) -> TalosResult<NodeInfo> {
         ServiceGateway::rename_computer(self, actor, request).await
     }
     async fn delete_computer(
         &self,
         actor: &Actor,
-        request: talos_types::DeleteComputerRequest,
-    ) -> TalosResult<talos_types::DeleteComputerResponse> {
+        request: DeleteComputerRequest,
+    ) -> TalosResult<DeleteComputerResponse> {
         ServiceGateway::delete_computer(self, actor, request).await
     }
 
     async fn set_computer_status(
         &self,
         actor: &Actor,
-        request: talos_types::SetComputerStatusRequest,
-    ) -> TalosResult<talos_types::NodeInfo> {
+        request: SetComputerStatusRequest,
+    ) -> TalosResult<NodeInfo> {
         ServiceGateway::set_computer_status(self, actor, request).await
     }
     async fn rotate_computer_credential(
         &self,
         actor: &Actor,
-        request: talos_types::RotateCredentialRequest,
-    ) -> TalosResult<talos_types::NodeCredential> {
+        request: RotateCredentialRequest,
+    ) -> TalosResult<NodeCredential> {
         ServiceGateway::rotate_computer_credential(self, actor, request).await
     }
 
     async fn read_managed_worker(&self, actor: &Actor) -> TalosResult<ManagedWorkerResponse> {
-        self.service.nodes.read_managed_worker(actor).await
+        ServiceGateway::read_managed_worker(self, actor).await
     }
 
     async fn create_managed_worker(&self, actor: &Actor) -> TalosResult<ManagedWorkerResponse> {
-        let nodes = &self.service.nodes;
-        nodes
-            .create_managed_worker(actor)
-            .await
-            .map(managed_worker_response)
+        ServiceGateway::create_managed_worker(self, actor).await
     }
 
     async fn start_managed_worker(
@@ -138,11 +129,7 @@ impl Gateway for ServiceGateway {
         actor: &Actor,
         request: ManagedWorkerActionRequest,
     ) -> TalosResult<ManagedWorkerResponse> {
-        let nodes = &self.service.nodes;
-        nodes
-            .start_managed_worker(actor, request)
-            .await
-            .map(managed_worker_response)
+        ServiceGateway::start_managed_worker(self, actor, request).await
     }
 
     async fn stop_managed_worker(
@@ -150,11 +137,7 @@ impl Gateway for ServiceGateway {
         actor: &Actor,
         request: ManagedWorkerActionRequest,
     ) -> TalosResult<ManagedWorkerResponse> {
-        let nodes = &self.service.nodes;
-        nodes
-            .stop_managed_worker(actor, request)
-            .await
-            .map(managed_worker_response)
+        ServiceGateway::stop_managed_worker(self, actor, request).await
     }
 
     async fn reset_managed_worker(
@@ -162,11 +145,7 @@ impl Gateway for ServiceGateway {
         actor: &Actor,
         request: ManagedWorkerActionRequest,
     ) -> TalosResult<ManagedWorkerResponse> {
-        let nodes = &self.service.nodes;
-        nodes
-            .reset_managed_worker(actor, request)
-            .await
-            .map(managed_worker_response)
+        ServiceGateway::reset_managed_worker(self, actor, request).await
     }
 
     async fn delete_managed_worker(
@@ -174,11 +153,7 @@ impl Gateway for ServiceGateway {
         actor: &Actor,
         request: DeleteManagedWorkerRequest,
     ) -> TalosResult<ManagedWorkerResponse> {
-        let nodes = &self.service.nodes;
-        nodes
-            .delete_managed_worker(actor, request)
-            .await
-            .map(managed_worker_response)
+        ServiceGateway::delete_managed_worker(self, actor, request).await
     }
 
     async fn read_profile(
@@ -572,56 +547,67 @@ impl Gateway for ServiceGateway {
     async fn import_mcp_server(
         &self,
         actor: &Actor,
-        request: talos_types::McpServerImportRequest,
-    ) -> TalosResult<talos_types::PluginInstallResponse> {
+        request: McpServerImportRequest,
+    ) -> TalosResult<PluginInstallResponse> {
         self.service.import_mcp_server(actor, request).await
     }
 
     async fn start_mcp_authentication(
         &self,
         actor: &Actor,
-        request: talos_types::McpAuthenticationStartRequest,
-    ) -> TalosResult<talos_types::McpAuthenticationStartResponse> {
+        request: McpAuthenticationStartRequest,
+    ) -> TalosResult<McpAuthenticationStartResponse> {
         self.service.start_mcp_authentication(actor, request).await
+    }
+
+    async fn start_mcp_authentication_with_origin(
+        &self,
+        actor: &Actor,
+        request: McpAuthenticationStartRequest,
+        callback_origin: Option<&str>,
+    ) -> TalosResult<McpAuthenticationStartResponse> {
+        self.service
+            .start_mcp_authentication_with_origin(actor, request, callback_origin)
+            .await
     }
 
     async fn read_mcp_authentication(
         &self,
         actor: &Actor,
-        request: talos_types::McpAuthenticationReadRequest,
-    ) -> TalosResult<talos_types::McpAuthenticationResponse> {
+        request: McpAuthenticationReadRequest,
+    ) -> TalosResult<McpAuthenticationResponse> {
         self.service.read_mcp_authentication(actor, request).await
     }
 
     async fn update_mcp_credentials(
         &self,
         actor: &Actor,
-        request: talos_types::McpCredentialsUpdateRequest,
-    ) -> TalosResult<talos_types::McpAuthenticationResponse> {
+        request: McpCredentialsUpdateRequest,
+    ) -> TalosResult<McpAuthenticationResponse> {
         self.service.update_mcp_credentials(actor, request).await
     }
 
     async fn open_desktop(
         &self,
         actor: &Actor,
-        request: talos_types::DesktopOpenRequest,
-    ) -> TalosResult<talos_types::DesktopViewGrant> {
+        request: DesktopOpenRequest,
+    ) -> TalosResult<DesktopViewGrant> {
         self.service.open_desktop(actor, request).await
     }
 
     async fn browser(
         &self,
         actor: &Actor,
-        request: talos_types::BrowserRequest,
-    ) -> TalosResult<talos_types::BrowserSnapshot> {
+        request: BrowserRequest,
+    ) -> TalosResult<BrowserSnapshot> {
         self.service.browser(actor, request).await
     }
 
     async fn list_mcp_servers(
         &self,
         actor: &Actor,
-        request: talos_types::McpServerListRequest,
-    ) -> TalosResult<talos_types::McpServerListResponse> {
+        request: McpServerListRequest,
+    ) -> TalosResult<McpServerListResponse> {
         self.service.list_mcp_servers(actor, request).await
     }
 
@@ -710,38 +696,38 @@ impl Gateway for ServiceGateway {
         &self,
         actor: &Actor,
         request: FileReadRequest,
-    ) -> TalosResult<talos_types::FileContentResponse> {
+    ) -> TalosResult<FileContentResponse> {
         ServiceGateway::read_file_content(self, actor, request).await
     }
 
     async fn prepare_file_preview(
         &self,
         actor: &Actor,
-        request: talos_types::FilePreviewPrepareRequest,
-    ) -> TalosResult<talos_types::FilePreviewDescriptor> {
+        request: FilePreviewPrepareRequest,
+    ) -> TalosResult<FilePreviewDescriptor> {
         self.service.prepare_file_preview(actor, request).await
     }
 
     async fn read_file_preview(
         &self,
         actor: &Actor,
-        request: talos_types::FilePreviewReadRequest,
-    ) -> TalosResult<talos_types::FilePreviewContent> {
+        request: FilePreviewReadRequest,
+    ) -> TalosResult<FilePreviewContent> {
         ServiceGateway::read_file_preview(self, actor, request).await
     }
 
     async fn read_file_preview_capability(
         &self,
-        request: talos_types::FilePreviewReadRequest,
-    ) -> TalosResult<talos_types::FilePreviewBytes> {
+        request: FilePreviewReadRequest,
+    ) -> TalosResult<FilePreviewBytes> {
         self.service.read_file_preview_capability(request).await
     }
 
     async fn close_file_preview(
         &self,
         actor: &Actor,
-        request: talos_types::FilePreviewCloseRequest,
-    ) -> TalosResult<talos_types::FilePreviewCloseResponse> {
+        request: FilePreviewCloseRequest,
+    ) -> TalosResult<FilePreviewCloseResponse> {
         self.service.close_file_preview(actor, request).await
     }
 

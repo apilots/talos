@@ -1,7 +1,7 @@
+use super::product_scope::{ProductJson, ProductQuery};
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
-use axum::response::Json;
+use axum::extract::State;
 
 use talos_auth::RequestIdentity;
 use talos_types::{
@@ -16,7 +16,7 @@ use super::state::HttpApiState;
 pub(super) async fn read_directory_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Query(request): Query<FsDirectoryReadRequest>,
+    ProductQuery(request): ProductQuery<FsDirectoryReadRequest>,
 ) -> Result<JsonResponse<FsDirectoryReadResponse>, ApiError> {
     let response = state
         .gateway
@@ -29,7 +29,7 @@ pub(super) async fn read_directory_handler(
 pub(super) async fn create_directory_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Json(request): Json<FsDirectoryCreateRequest>,
+    ProductJson(request): ProductJson<FsDirectoryCreateRequest>,
 ) -> Result<JsonResponse<FsDirectoryCreateResponse>, ApiError> {
     let response = state
         .gateway

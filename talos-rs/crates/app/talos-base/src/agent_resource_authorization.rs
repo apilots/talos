@@ -2,14 +2,6 @@
 use super::*;
 use agent_protocol::NodeAuth;
 
-#[derive(Clone)]
-pub(super) enum ResourceAuthority {
-    Lease,
-    Invocation {
-        computer_id: String,
-        caller: Box<pb::CoordinatorCallContext>,
-    },
-}
 impl NodeSessionDataRpc {
     pub(crate) async fn authorize_local_session(
         &self,
@@ -33,10 +25,7 @@ impl NodeSessionDataRpc {
         supplied_scope: Option<&pb::CoordinatorCallContext>,
     ) -> TalosResult<()> {
         self.authorize(auth, &caller.session_id).await?;
-        let scope = match &self.authority {
-            ResourceAuthority::Invocation { caller, .. } => Some(caller.as_ref()),
-            ResourceAuthority::Lease => supplied_scope,
-        };
+        let scope = supplied_scope;
         if let Some(scope) = scope {
             let session = scope.session.as_ref().ok_or_else(denied)?;
             if session.session_id != caller.session_id
@@ -45,8 +34,6 @@ impl NodeSessionDataRpc {
                     .turn_id
                     .as_deref()
                     .is_some_and(|turn| turn != caller.turn_id)
-                || (matches!(self.authority, ResourceAuthority::Invocation { .. })
-                    && scope.turn_id.is_none())
             {
                 return Err(denied());
             }
@@ -54,68 +41,37 @@ impl NodeSessionDataRpc {
         Ok(())
     }
 
-    pub(super) fn should_route(&self) -> bool {
-        matches!(self.authority, ResourceAuthority::Lease)
-    }
-
-    pub(in crate::agent_node_rpc) fn with_routes(mut self, routes: ResourceRoutes) -> Self {
-        self.routes = Some(routes);
-        self
-    }
-    pub(crate) fn for_invocation(
-        &self,
-        computer_id: String,
-        caller: pb::CoordinatorCallContext,
-    ) -> Self {
-        let mut data = self.clone();
-        data.authority = ResourceAuthority::Invocation {
-            computer_id,
-            caller: Box::new(caller),
-        };
-        data.routes = None;
-        data
-    }
     pub(super) async fn authorize(
         &self,
         auth: Option<pb::NodeAuth>,
         session_id: &str,
     ) -> TalosResult<SessionRecord> {
         let auth = node_pb::decode_auth(auth)?;
-        match &self.authority {
-            ResourceAuthority::Lease => {
-                self.nodes.authenticate_lease(&auth).await?;
-                let session = self.session(session_id).await?;
-                self.nodes.authorize_session_lease(&auth, &session).await?;
-                Ok(session)
-            }
-            ResourceAuthority::Invocation {
-                computer_id,
-                caller,
-            } => {
-                let scope = caller.session.as_ref().ok_or_else(denied)?;
-                self.authorize_scope(
-                    computer_id,
-                    session_id,
-                    &scope.session_id,
-                    &scope.agent_id,
-                    &scope.workspace_id,
-                    &scope.user_id,
-                )
-                .await
-            }
-        }
+        self.nodes
+            .as_ref()
+            .ok_or_else(denied)?
+            .authenticate_lease(&auth)
+            .await?;
+        let session = self.session(session_id).await?;
+        self.nodes
+            .as_ref()
+            .ok_or_else(denied)?
+            .authorize_session_lease(
+                &auth,
+                &talos_control_plane::SessionLeaseBinding {
+                    execution_node_id: &session.execution_node_id,
+                    user_id: &session.user_id,
+                },
+            )
+            .await?;
+        Ok(session)
     }
     pub(super) async fn authorize_owner(&self, auth: &NodeAuth) -> TalosResult<String> {
-        match &self.authority {
-            ResourceAuthority::Lease => self.nodes.authorize_lease_owner(auth).await,
-            ResourceAuthority::Invocation { caller, .. } => {
-                let session_id = &caller.session.as_ref().ok_or_else(denied)?.session_id;
-                Ok(self
-                    .authorize(Some(node_pb::encode_auth(auth.clone())), session_id)
-                    .await?
-                    .user_id)
-            }
-        }
+        self.nodes
+            .as_ref()
+            .ok_or_else(denied)?
+            .authorize_lease_owner(auth)
+            .await
     }
     async fn session(&self, session_id: &str) -> TalosResult<SessionRecord> {
         self.sessions

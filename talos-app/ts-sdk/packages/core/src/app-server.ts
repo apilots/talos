@@ -81,6 +81,7 @@ export type AppServerActiveTurnChangedHandler = (notification: AppProtocol.Sessi
 export type AppServerErrorHandler = (error: Error) => void;
 
 export interface AppServerRequestOptions {
+  computerId?: string;
   actorCredentials?: AppProtocol.ActorCredentials | null;
 }
 

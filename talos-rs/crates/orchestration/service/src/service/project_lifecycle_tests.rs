@@ -74,8 +74,47 @@ async fn retained_project_metadata_and_deletion_do_not_require_its_worker_or_dir
     .await;
     let actor = Actor::regular("member-user");
     let directory = tempfile::tempdir().unwrap();
-    for node in ["embedded", "offline-worker"] {
-        // Persist the retained binding directly; no Worker is registered for offline-worker.
+    let offline = service
+        .nodes
+        .create_node(
+            &actor,
+            crate::CreateNodeRequest {
+                display_name: "Offline Worker".into(),
+                endpoint: None,
+                owner_user_id: None,
+                credential_expires_at: chrono::Utc::now().timestamp() + 3600,
+            },
+        )
+        .await
+        .unwrap();
+    let principal = service
+        .nodes
+        .server()
+        .unwrap()
+        .authenticate_registration(&agent_protocol::NodeAuth {
+            node_id: offline.node.node_id.clone(),
+            token: offline.credential.token,
+        })
+        .await
+        .unwrap();
+    service
+        .nodes
+        .server()
+        .unwrap()
+        .register(
+            &principal,
+            agent_protocol::RegisterParams {
+                product_owner: talos_types::NodeProductOwner::Server,
+                system_info: None,
+                deployments: vec![agent_protocol::Deployment {
+                    agent_id: "default".into(),
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    for node in ["embedded", offline.node.node_id.as_str()] {
+        // Ownership is registered, while no execution transport or directory is available.
         let project = service
             .files
             .projects

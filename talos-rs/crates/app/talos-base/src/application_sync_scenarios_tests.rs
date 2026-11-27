@@ -323,7 +323,7 @@ pub(super) async fn run_topology(scenario: TopologyScenario) {
             )
             .await
             .unwrap();
-        peer.service.resume_account_sync(&actor);
+        peer.service.resume_account_host(&actor);
         wait_for("background local Computer identity published", async || {
             peer.service
                 .sync_status(&actor)
@@ -345,17 +345,12 @@ pub(super) async fn run_topology(scenario: TopologyScenario) {
             )
         );
         wait_for("background account Sync installed", async || {
-            peer.sync_host
-                .sync_stores
-                .handles
-                .lock()
-                .await
-                .contains_key(ACCOUNT)
+            peer.host.stores.handles.lock().await.contains_key(ACCOUNT)
         })
         .await;
         handles.push(
-            peer.sync_host
-                .sync_stores
+            peer.host
+                .stores
                 .handles
                 .lock()
                 .await
@@ -482,7 +477,7 @@ pub(super) async fn run_topology(scenario: TopologyScenario) {
     })
     .await;
     let state = worker_state(&a, "shared-session").await;
-    assert_eq!(state.coordinator_id.as_deref(), Some(b.sync_peer_id()));
+    assert_eq!(state.coordinator_id.as_deref(), Some(b.host_id()));
     assert!(model
         .prompts
         .lock()
@@ -809,8 +804,8 @@ pub(super) async fn run_topology(scenario: TopologyScenario) {
         .await
         .unwrap();
     handles[0] = a
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .handles
         .lock()
         .await

@@ -6,8 +6,7 @@ use talos_agent_api::{
 };
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
-#[path = "supplement_merge.rs"]
-mod merge;
+use crate::execution::supplement_merge as merge;
 
 const MAX_TURN_BYTES: usize = 32 * 1024 * 1024;
 

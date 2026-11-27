@@ -405,6 +405,15 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
         .insert_session_record(&projection)
         .await
         .unwrap();
+    // This historical projection predates always-on source capture. New Store
+    // mutations without an adapter must remain pending and block stale imports.
+    b.storage
+        .execute(
+            "DELETE FROM resource_revisions WHERE kind='session' AND resource_id='session-1'",
+            &[],
+        )
+        .await
+        .unwrap();
     a.sessions.insert_session_record(&talo).await.unwrap();
     run(&a, "session-1", "z-first").await;
     run(&a, "session-1", "a-second").await;

@@ -21,7 +21,7 @@ export class FakeBridge implements AppServerBridge {
         name: "fake",
         version: "0.1.5",
         auth_enabled: false,
-        cloud_auth_url: null,
+        cloud_auth_url: null, capabilities: { sync: true, relay: true },
       },
     });
   }

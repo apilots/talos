@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1900 1580" role="img" aria-labelledby="title desc" lang="zh-CN">
+<title id="title">Talos 四层关系、Worker 存储边界与五种产品组装总图</title>
+<desc id="desc">共享产品运行时持有产品配置、任务计划和执行派生视图。每个 Worker 复用节点服务，独立保存配置、凭证、Memory 和 Provider 产物，下沉执行历史与 Memory 形成进度。Server 控制面归拢节点与托管管理，控制面客户端处理接入。底部表格列出 TUI、AppServer Desktop、TalosServer、Docker Worker 和 Native Worker 的组装。名称对应现有实现，控制面和 Relay 已落地，最终验收进行中。</desc>
+<style>
+text { font-family:'PingFang SC','Microsoft YaHei',sans-serif; fill:#eff4f9; font-size:21px; }
+.title { font-size:40px; font-weight:650; }
+.head { font-size:28px; font-weight:650; }
+.label { font-size:22px; font-weight:600; }
+.muted { fill:#a9b9ca; font-size:19px; }
+.small { fill:#a9b9ca; font-size:17px; }
+.green { fill:#7be0bd; }
+.orange { fill:#f1c17c; }
+.blue { fill:#93c6ff; }
+.panel { fill:#172430; stroke:#334555; }
+.wire { fill:none; stroke:#93c6ff; stroke-width:2; marker-end:url(#blue); }
+.fact { fill:none; stroke:#7be0bd; stroke-width:2; marker-end:url(#green); }
+</style>
+<defs>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#93c6ff"/></marker>
+<marker id="green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#7be0bd"/></marker>
+</defs>
+<rect width="1900" height="1580" fill="#10171f"/>
+<text x="40" y="57" class="title">Talos · 四层关系与 Worker 存储边界</text>
+<text x="40" y="96" class="muted">绿色：既有能力复用    橙色：执行持久化已下沉    虚线框：可组合 lib    每 Worker 独立实例与数据</text>
+<text x="40" y="125" class="small">蓝箭头：调用 / 接入 / 宿主绑定；绿箭头：已提交事实交付。图示关系通过稳定契约实现，不表示实现库编译依赖。</text>
+<rect x="40" y="145" width="800" height="460" rx="17" fill="#172430" stroke="#334555"/>
+<text x="68" y="188" class="head blue">M1 / M2 · 共享产品运行时</text>
+<text x="68" y="224" class="label">talos-service · talos-store · talos-coordinator</text>
+<text x="68" y="262" class="muted">TalosService · TimelineEventService · CoordinatorImpl</text>
+<text x="68" y="293" class="muted">DatabaseSessionStore · 产品 Store 端口</text>
+<rect x="65" y="321" width="750" height="166" rx="17" fill="#20354a" stroke="#334555"/>
+<text x="87" y="356" class="label blue">产品数据与业务事务</text>
+<text x="87" y="393" class="">Session / Project 配置 · Goal / Loop 定义与计划</text>
+<text x="87" y="428" class="">Automation 管理 · 用量 / 结算 · 产品策略</text>
+<text x="87" y="465" class="muted">Timeline / 进度 = Worker 已提交事件的最终一致视图</text>
+<text x="68" y="526" class="label">本机产品 → 所属电脑产品库 / 原配置后端</text>
+<text x="68" y="560" class="label">云产品 → 所属 Server 产品库 / 原配置后端</text>
+<text x="68" y="588" class="small">宿主装配：talos-base::TalosApplicationRuntime</text>
+<rect x="1060" y="145" width="800" height="460" rx="17" fill="#172430" stroke="#334555"/>
+<text x="1088" y="188" class="head green">M3 / M4 · Worker 运行时 · 每个实例自持数据</text>
+<text x="1088" y="224" class="label">talos-worker · talos-agent · agent-protocol</text>
+<text x="1088" y="259" class="muted">TalosWorker · AgentHarnessRpcAdapter · SessionOwner</text>
+<text x="1088" y="295" class="label green">已有复用</text>
+<text x="1225" y="295" class="muted">ConfigService / YamlConfigStore</text>
+<text x="1225" y="328" class="muted">MemoryService / MemoryStore</text>
+<text x="1225" y="361" class="muted">PluginManagerService / McpCredentialStore</text>
+<text x="1225" y="394" class="muted">FileKernelSessionArtifactStore</text>
+<text x="1088" y="432" class="label orange">已下沉</text>
+<text x="1225" y="432" class="muted">执行历史 / 准入输入 / 事件与终态</text>
+<text x="1225" y="465" class="muted">KernelMemoryProgressStore 的本地实现</text>
+<rect x="1085" y="487" width="750" height="89" rx="17" fill="#20372f" stroke="#334555"/>
+<text x="1107" y="520" class="label">本 Worker 的配置 / 凭证 / Memory 索引 / 执行库</text>
+<text x="1107" y="553" class="muted">Provider 私有产物 / 浏览器状态 / 实际宿主资源</text>
+<text x="1088" y="592" class="small">同一 Worker 的 lib / WSS / gRPC 共用实例、状态和锁</text>
+<path d="M844 340H1050" class="wire"/>
+<text x="950" y="310" class="small" text-anchor="middle">输入 / 绑定 / 版本</text>
+<path d="M1056 520H850" class="fact"/>
+<text x="950" y="491" class="small" text-anchor="middle">已提交事件 / 游标</text>
+<text x="950" y="564" class="small" text-anchor="middle">两库独立事务</text>
+<rect x="40" y="630" width="1820" height="57" rx="17" fill="#342d22" stroke="#334555"/>
+<text x="67" y="667" class="label orange">ConfigService 按职责拆分：LLM / WebSearch 等节点配置 → Worker；消息发送等产品策略 → 产品管理者。</text>
+<rect x="40" y="737" width="800" height="244" rx="17" fill="#172b3e" stroke="#334555" stroke-dasharray="8 6"/>
+<text x="68" y="780" class="head blue">M5 Server 控制面【已抽取】</text>
+<text x="68" y="817" class="label">talos-control-plane · AgentNodeService · ManagedWorkers</text>
+<text x="68" y="854" class="">注册 · 凭证 / 租约 · 目录 · 发布 / 撤销 · Talo 生命周期</text>
+<text x="68" y="890" class="muted">复用 talos-auth / AgentNodeStore / talos-worker-runtime</text>
+<text x="68" y="925" class="label">控制面数据 → Server 的节点 / 托管管理 Store</text>
+<text x="68" y="957" class="small">NodeControlRpc 留在网络适配层；业务任务调度由产品运行时负责</text>
+<rect x="1060" y="737" width="800" height="244" rx="17" fill="#172430" stroke="#334555"/>
+<text x="1088" y="780" class="head blue">控制面客户端 / 接入适配（M1 与 Worker 宿主）</text>
+<text x="1088" y="817" class="label">agent-client · 现有 SDK · 宿主接入模块</text>
+<text x="1088" y="854" class="muted">AgentNodeRunner · AgentNodeClient</text>
+<text x="1088" y="888" class="muted">RegisteredWorker：复用已有 Worker 的注册装配</text>
+<text x="1088" y="924" class="label">本机身份 / 注册凭证 → 接入宿主的本地存储</text>
+<text x="1088" y="956" class="small">注册接入调用控制面；远端业务请求调用 Server 产品 API</text>
+<path d="M445 607V624H23V722H445V733" class="wire"/>
+<text x="460" y="722" class="small">Server 产品服务使用节点管理 / 唤醒端口</text>
+<path d="M1060 865H850" class="wire"/>
+<text x="950" y="825" class="small" text-anchor="middle">主动 WSS / gRPC</text>
+<text x="950" y="903" class="small" text-anchor="middle">注册 / 租约 / 发布</text>
+<path d="M1460 734V695H1880V600H1838" class="wire"/>
+<text x="1490" y="716" class="small">宿主绑定同一 Worker 实例</text>
+<rect x="40" y="1004" width="1820" height="62" rx="17" fill="#222b2d" stroke="#334555"/>
+<text x="68" y="1044" class="label green">M6 可选 Relay lib：个人宿主连接与流转发</text>
+<text x="710" y="1030" class="muted">M7 可选 Sync：复制可裁剪；与身份 / 注册 / 路由 / 执行解耦，原协议保持</text>
+<text x="710" y="1056" class="small">M2 Store 常驻捕获变更 / tombstone：未装配 Sync 期间的修改与删除，后续仍可同步</text>
+<text x="40" y="1110" class="head">五种产品如何组装</text>
+<rect x="40" y="1130" width="1820" height="49" rx="10" fill="#223344"/>
+<text x="52" y="1162" class="label">产品入口</text>
+<text x="287" y="1162" class="label">共享产品运行时</text>
+<text x="662" y="1162" class="label">Worker 运行时</text>
+<text x="1027" y="1162" class="label">Server 控制面</text>
+<text x="1252" y="1162" class="label">接入客户端</text>
+<text x="1582" y="1162" class="label">可选能力</text>
+<rect x="40" y="1184" width="1820" height="56" rx="6" fill="#15212b"/>
+<text x="52" y="1220" class="muted">TUI</text>
+<text x="287" y="1220" class="muted">本机产品服务 / 产品库</text>
+<text x="662" y="1220" class="muted">内嵌 Worker + 本机环境</text>
+<text x="1027" y="1220" class="muted">不装配服务端</text>
+<text x="1252" y="1220" class="muted">发布 / 远程操作时使用</text>
+<text x="1582" y="1220" class="muted">Sync</text>
+<text x="52" y="1279" class="muted">AppServer / Desktop</text>
+<text x="287" y="1279" class="muted">本机产品服务 / 产品库</text>
+<text x="662" y="1279" class="muted">内嵌同一 Worker</text>
+<text x="1027" y="1279" class="muted">不装配服务端</text>
+<text x="1252" y="1279" class="muted">按需装配</text>
+<text x="1582" y="1279" class="muted">Sync</text>
+<rect x="40" y="1302" width="1820" height="56" rx="6" fill="#15212b"/>
+<text x="52" y="1338" class="muted">TalosServer</text>
+<text x="287" y="1338" class="muted">云产品服务 / 产品库 / 调度</text>
+<text x="662" y="1338" class="muted">可选内嵌或远端 Worker 绑定</text>
+<text x="1027" y="1338" class="muted">装配</text>
+<text x="1252" y="1338" class="muted">自身 Worker 发布时使用</text>
+<text x="1582" y="1338" class="muted">Relay / Sync 独立可选</text>
+<text x="52" y="1397" class="muted">Docker Worker</text>
+<text x="287" y="1397" class="muted">由所属 Server 提供</text>
+<text x="662" y="1397" class="muted">独立 Worker + 容器环境</text>
+<text x="1027" y="1397" class="muted">不装配服务端</text>
+<text x="1252" y="1397" class="muted">装配 · gRPC Connect</text>
+<text x="1582" y="1397" class="muted">Talo 增加托管生命周期</text>
+<rect x="40" y="1420" width="1820" height="56" rx="6" fill="#15212b"/>
+<text x="52" y="1456" class="muted">Native Worker</text>
+<text x="287" y="1456" class="muted">由所属 Server 提供</text>
+<text x="662" y="1456" class="muted">独立 Worker + 本机环境</text>
+<text x="1027" y="1456" class="muted">不装配服务端</text>
+<text x="1252" y="1456" class="muted">装配 · WSS</text>
+<text x="1582" y="1456" class="muted">按 runner 配置选择载体</text>
+<line x1="40" y1="1500" x2="1860" y2="1500" stroke="#334555"/>
+<text x="40" y="1533" class="small">WorkerExecutionStore + LocalExecutionHarness 保存执行事实；产品投影按游标读取；Memory 进度本地持久化。</text>
+<text x="40" y="1566" class="small">纯管理 CLI 只装产品服务；执行入口持有 Worker 唯一命名空间 · 原配置 / Provider 文件保留 · 最终验收进行中</text>
+</svg>

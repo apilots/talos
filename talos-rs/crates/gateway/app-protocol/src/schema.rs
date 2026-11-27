@@ -182,6 +182,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ClientInfo>());
     output.push_str(&export::<crate::requests::ClientKind>());
     output.push_str(&export::<crate::requests::ServerInfo>());
+    output.push_str(&export::<crate::requests::ServerCapabilities>());
     output.push_str(&export::<crate::requests::ClientCapabilities>());
     output.push_str(&export::<crate::requests::ActorCredentials>());
     output.push_str(&export::<crate::requests::ActorCredential>());

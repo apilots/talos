@@ -487,6 +487,22 @@ pub trait Gateway: Send + Sync {
         request: talos_types::McpAuthenticationStartRequest,
     ) -> TalosResult<talos_types::McpAuthenticationStartResponse>;
 
+    /// Internal relay context; the HTTP transport supplies the trusted public origin.
+    async fn start_mcp_authentication_with_origin(
+        &self,
+        actor: &Actor,
+        request: talos_types::McpAuthenticationStartRequest,
+        callback_origin: Option<&str>,
+    ) -> TalosResult<talos_types::McpAuthenticationStartResponse> {
+        if callback_origin.is_some() {
+            return Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "MCP product callback routing is unavailable.",
+            ));
+        }
+        self.start_mcp_authentication(actor, request).await
+    }
+
     async fn read_mcp_authentication(
         &self,
         actor: &Actor,

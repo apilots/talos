@@ -38,7 +38,7 @@ impl TalosService {
     ) -> ServiceResult<WorkspaceInfoResponse> {
         self.worker_environment(actor, request.node_id.as_deref())
             .await?
-            .workspace_info(actor.worker_environment_context())
+            .workspace_info(crate::access::worker_environment_context(actor))
             .await
     }
     pub async fn list_projects(
@@ -126,7 +126,7 @@ impl TalosService {
             )
         };
         environment
-            .read_directory(actor.worker_environment_context(), request)
+            .read_directory(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn create_fs_directory(
@@ -138,7 +138,7 @@ impl TalosService {
             .active_worker_environment(actor, request.node_id.as_deref())
             .await?;
         environment
-            .create_directory(actor.worker_environment_context(), request)
+            .create_directory(crate::access::worker_environment_context(actor), request)
             .await
     }
 }

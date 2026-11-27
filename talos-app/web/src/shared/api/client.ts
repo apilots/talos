@@ -2,11 +2,12 @@ import { createBrowserTalosClient, TalosApiError } from "@talos/sdk-browser";
 
 import { DESKTOP_CLOUD_ORIGIN } from "@talos/sdk-app-server/desktop";
 import { connectionScope } from "@/shared/store/connection-scope";
-import { bindComputerTarget } from "./computer-target";
+import { bindComputerTarget, deferProductClient } from "./computer-target";
 import { actorCredentialsFromToken, createDesktopTalosClient, getDesktopBridge } from "./desktop-client";
 import { canUseTalo } from "@/shared/types/account";
 import { desktopProductOwner, withManagementTimeout, type ProductTarget } from "./desktop-product-owner";
-import { productQueries, type SessionDetail } from "./product-queries";
+import { productQueries, sessionComputer, type SessionDetail } from "./product-queries";
+import { sessionRouteComputer } from "./session-route";
 import { resolveServerBaseUrl } from "./server-base-url";
 import { useAppStore, getConnectionSettings } from "@/shared/store/app-store";
 
@@ -15,6 +16,8 @@ type Methods<T, K extends keyof T> = Pick<T, K>;
 
 /** Transport-neutral API surface consumed by the Web application. */
 export type TalosWebClient = {
+  capabilities: BrowserTalosClient["capabilities"];
+  forComputer?: (computerId: string) => TalosWebClient;
   trajectory: BrowserTalosClient["trajectory"];
   automation: BrowserTalosClient["automation"];
   builtinJobs: BrowserTalosClient["builtinJobs"];
@@ -124,43 +127,57 @@ export function getTalosClient(target?: string | ClientTarget): TalosWebClient |
   const selected = state.selectedComputers[scope];
   const request = typeof target === "object" ? target : undefined;
   const nodeId = typeof target === "object"
-    ? ("nodeId" in target ? target.nodeId : undefined)
+    ? ("sessionId" in target && target.sessionId ? sessionRouteComputer(target.sessionId) : undefined)
+      ?? ("nodeId" in target ? target.nodeId : undefined)
+      ?? ("sessionId" in target && target.sessionId ? sessionComputer(productQueries, scope, target.sessionId) : undefined)
+      ?? selected
     : target ?? selected;
   const bind = (client: TalosWebClient) => nodeId ? bindComputerTarget(client, nodeId) : client;
   const bridge = getDesktopBridge();
   if (clientFactory || !bridge) {
     const client = bind(clientFactory ? clientFactory() : getServerTalosClient());
-    return request ? Promise.resolve(client) : client;
+    return request ? Promise.resolve(client) : !clientFactory && target === undefined ? {
+      ...client,
+      sessions: { ...client.sessions, get: async ({ sessionId }) =>
+        (await getTalosClient({ sessionId, readOnly: true })).sessions.get({ sessionId }) },
+    } : client;
   }
 
   const token = () => getAuthTokenForRequests(scope);
   const sdk = getServerTalosClient();
   // Account directory ownership is independent of the selected execution transport.
   const local = { ...createDesktopTalosClient(bridge, token), computers: sdk.computers };
-  const cloud: TalosWebClient = {
-    ...sdk,
+  const decorateCloud = (api: BrowserTalosClient, computerId?: string): TalosWebClient => ({
+    ...api,
+    forComputer: id => decorateCloud(api.forComputer(id), id),
     desktop: {
       open: async params => {
-        const grant = await sdk.desktop.open(params);
+        const grant = await api.desktop.open(params);
         return { ...grant, ticket: `server:${grant.ticket}` };
       },
       connect: local.desktop.connect,
     },
-    files: { ...sdk.files, preview: {
+    files: { ...api.files, preview: {
       ...local.files.preview,
       prepare: async params => {
         const actor = actorCredentialsFromToken(token());
         if (!actor || !bridge.preview) throw new TalosApiError({
           code: "serviceUnavailable", message: "The authenticated preview service is unavailable.", localization: null,
         });
-        return bridge.preview.prepareCloud(params, actor);
+        return bridge.preview.prepareCloud(params, actor, computerId);
       },
     } },
-  };
+  });
+  const cloud = decorateCloud(sdk);
   if (request?.service === "server") return Promise.resolve(cloud);
   const routing = desktopProductOwner(local, cloud, productQueries, scope, canUseTalo(state.connection),
-    state.connection.authStatus === "authenticated", state.connection.controlPlaneEndpoint);
-  if (request) return routing.resolve(request).then(bind);
+    state.connection.authStatus === "authenticated", state.connection.controlPlaneEndpoint, async () => {
+      const response = await bridge.invoke<import("@talos/sdk-core").AppProtocol.DesktopWorkerIdentityResponse>("desktop/workerIdentity", null);
+      if (response.status === "error") throw new TalosApiError(response.error);
+      return response.data.nodeId;
+    }, nodeId ?? undefined);
+  if (request) return routing.resolve({ ...request, nodeId }).then(bind);
   const host = { ...local, sessions: { ...local.sessions, get: ({ sessionId }: { sessionId: string }) => routing.readSession(sessionId) } };
-  return nodeId ? bindComputerTarget(host, nodeId, id => routing.resolve({ nodeId: id })) : host;
+  const client = nodeId ? bindComputerTarget(deferProductClient(host, () => routing.resolve({ nodeId })), nodeId) : host;
+  return target === undefined ? { ...client, sessions: { ...client.sessions, get: ({ sessionId }) => routing.readSession(sessionId) } } : client;
 }

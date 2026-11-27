@@ -1,6 +1,5 @@
 //! Central administrator claim uses gRPC Connect and preserves personal ownership.
 use super::*;
-use agent_protocol::WorkerEnvironment;
 use axum::{routing::post, Json, Router};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -121,9 +120,10 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
             .await
             .unwrap();
         let handle = server.handle();
-        let sync_host = server.sync_host.clone();
-        let nodes = server.sync_host.service.nodes.clone();
-        let worker_failures = server.sync_host.worker_failures.subscribe();
+        let coordinator = server.coordinator.clone();
+        let host = server.host.clone();
+        let nodes = server.host.service.nodes.clone();
+        let worker_failures = server.host.worker_failures.subscribe();
         let task = tokio::spawn(server.run());
         wait_for("central RPC ready", async || {
             tokio::net::TcpStream::connect(rpc).await.is_ok()
@@ -177,7 +177,7 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
         } else {
             ADMIN_TOKEN
         };
-        sync_host.schedule_refresh(
+        host.schedule_refresh(
             &talos_service::Actor::regular("server-admin")
                 .with_role(if owner_token == ADMIN_TOKEN {
                     talos_auth::UserRole::Admin
@@ -239,11 +239,7 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
         assert_eq!(own_models["status"], "success");
         for token in [TOKEN, OTHER_ADMIN_TOKEN] {
             // Restore identity explicitly before exercising local data authorization.
-            sync_host
-                .auth_service
-                .verify_access_token(token)
-                .await
-                .unwrap();
+            host.auth_service.verify_access_token(token).await.unwrap();
             let status: Value = client
                 .get(format!("{url}/v1/sync/status"))
                 .bearer_auth(token)
@@ -272,23 +268,23 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
             // Another administrator may have passed the empty-identity check
             // before the owner finished claiming. Reject that delayed enrollment
             // without stopping the already registered owner's Worker.
-            let other = sync_host
+            let other = host
                 .auth_service
                 .verify_access_token(OTHER_ADMIN_TOKEN)
                 .await
                 .unwrap();
             let store = talos_config::YamlConfigStore::new(config.source_path());
             let result = super::desktop_worker::WorkerEnrollment {
-                sync_host: &sync_host,
-                config: &sync_host.config,
+                host: &host,
+                config: &host.config,
                 store: &store,
-                account: &sync_host.service.account,
-                auth: &sync_host.auth_service,
-                worker: &sync_host.worker_registration,
-                execution: &sync_host.worker,
-                rpc: &sync_host.worker_rpc,
+                account: &host.service.account,
+                auth: &host.auth_service,
+                worker: &host.worker_registration,
+                execution: &host.worker,
+                rpc: &host.worker_rpc,
                 device_name: "delayed administrator",
-                worker_failures: &sync_host.worker_failures,
+                worker_failures: &host.worker_failures,
             }
             .enroll_worker(None, Some(&other))
             .await;
@@ -297,12 +293,10 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
                 .is_code(talos_error::ErrorCode::PermissionDenied));
             assert!(gateway.get_node(ADMIN_TOKEN, &id).await.unwrap().available);
         }
-        let (connection, auth) = gateway
-            .connect_coordinator(ADMIN_TOKEN, &uuid::Uuid::new_v4().to_string(), &id)
+        let environment = coordinator
+            .worker_environment("embedded", "server-admin")
             .await
             .unwrap();
-        let environment =
-            agent_client::AgentEnvironmentClient::from_connection(connection.clone(), auth);
         let workspace = environment
             .workspace_info(agent_protocol::WorkerEnvironmentContext {
                 user_id: "server-admin".into(),
@@ -312,7 +306,6 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
             .await
             .unwrap();
         assert!(!workspace.workspace_id.is_empty());
-        connection.close();
         // Simulate the previous self-outbound configuration without replacing its
         // identity. The next startup must upgrade this same node to direct RPC.
         if iteration == 0 {

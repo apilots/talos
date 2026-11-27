@@ -403,3 +403,50 @@ fn foreground_creation_uses_owner_receipt_even_when_snapshot_is_already_empty() 
     result.created_object = None;
     assert!(automation::created_target(&result).is_err());
 }
+
+#[test]
+fn definition_commands_do_not_start_a_second_executor() {
+    for args in [
+        vec!["talos", "goal", "--session", "s1", "show"],
+        vec!["talos", "goal", "--session", "s1", "pause"],
+        vec!["talos", "goal", "--session", "s1", "clear"],
+        vec![
+            "talos",
+            "goal",
+            "--session",
+            "s1",
+            "edit",
+            "updated objective",
+        ],
+        vec!["talos", "loop", "--session", "s1", "list"],
+        vec!["talos", "loop", "--session", "s1", "stop", "loop-1"],
+        vec!["talos", "loop", "--session", "s1", "clear", "loop-1"],
+        vec!["talos", "automation", "list"],
+        vec!["talos", "session", "list"],
+        vec!["talos", "session", "info", "s1"],
+        vec!["talos", "session", "set-model", "s1", "provider:model"],
+        vec!["talos", "models"],
+        vec!["talos", "status"],
+    ] {
+        let command = Cli::try_parse_from(args).unwrap().command.unwrap();
+        assert!(product_only(&command));
+    }
+    for args in [
+        vec!["talos", "exec", "task"],
+        vec!["talos", "goal", "--session", "s1", "start", "task"],
+        vec!["talos", "goal", "--session", "s1", "resume"],
+        vec![
+            "talos",
+            "loop",
+            "--session",
+            "s1",
+            "start",
+            "--every",
+            "1",
+            "task",
+        ],
+    ] {
+        let command = Cli::try_parse_from(args).unwrap().command.unwrap();
+        assert!(!product_only(&command));
+    }
+}

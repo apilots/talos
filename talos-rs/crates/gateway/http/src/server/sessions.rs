@@ -1,3 +1,4 @@
+use super::product_scope::ProductQuery;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -25,7 +26,7 @@ pub(super) struct SessionHistoryQuery {
 pub(super) async fn list_sessions_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Query(request): Query<SessionListRequest>,
+    ProductQuery(request): ProductQuery<SessionListRequest>,
 ) -> Result<JsonResponse<talos_types::SessionListResponse>, ApiError> {
     let response = state
         .gateway

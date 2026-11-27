@@ -1,4 +1,5 @@
 use super::*;
+use agent_protocol::NodeAuth;
 use talos_coordinator::AgentCoordinator;
 
 #[path = "agent_node_connect_tests.rs"]
@@ -35,7 +36,6 @@ impl Fixture {
         let publisher = RemoteNodePublisher {
             coordinator_id: uuid::Uuid::new_v4().to_string(),
             connections: Arc::default(),
-            resource_routes: ResourceRoutes::default(),
             coordinator: Arc::new(CoordinatorImpl::new(
                 Arc::new(talos_router::RouterImpl::new()),
                 sessions,
@@ -111,6 +111,7 @@ impl Fixture {
         Request::new(pb::RegisterRequest {
             auth: Some(self.credential_auth()),
             params: Some(pb::RegisterParams {
+                product_owner: agent_pb::NodeProductOwner::Server as i32,
                 system_info: None,
                 deployments: agent_ids
                     .iter()
@@ -218,7 +219,6 @@ async fn outbound_registration_renews_without_publishing_and_preserves_uuid_on_r
     let restarted_publisher = RemoteNodePublisher {
         coordinator_id: uuid::Uuid::new_v4().to_string(),
         connections: Arc::default(),
-        resource_routes: ResourceRoutes::default(),
         ..fixture.publisher.clone()
     };
     let restarted_control = NodeControlRpc::new(

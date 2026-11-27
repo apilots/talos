@@ -251,3 +251,7 @@ mod rpc_tests;
 #[cfg(test)]
 #[path = "rpc_connect_tests.rs"]
 mod rpc_connect_tests;
+
+#[cfg(test)]
+#[path = "local_execution_tests.rs"]
+mod local_execution_tests;

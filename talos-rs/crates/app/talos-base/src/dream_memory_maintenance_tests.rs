@@ -165,12 +165,6 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             .await
             .expect("session store"),
     );
-    let memory_progress = Arc::new(crate::memory_progress::SessionMemoryProgress::new(
-        sessions.clone(),
-    ));
-    let history = Arc::new(talos_service::SessionHistoryService::new(Arc::new(
-        talos_service::TimelineEventService::new(sessions.clone()),
-    )));
     for (session_id, user_id, last_activity) in [("s1", "u1", 2), ("s2", "u2", 1)] {
         let mut record = session_record(session_id, user_id, last_activity);
         if session_id == "s2" {
@@ -249,8 +243,6 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             runtime_home.path().to_path_buf(),
         )),
         talos_worker::TalosWorkerResources {
-            session_history_reader: history,
-            memory_progress_store: memory_progress,
             attachment_reader: file_service.clone(),
             tool_image_store: Arc::new(crate::tool_images::ToolImages(file_service.clone())),
             agent_control: None,
@@ -259,9 +251,55 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     )
     .await
     .unwrap();
-    for (id, harness) in worker.harnesses() {
+    worker.use_local_resources({
+        let data = crate::agent_node_rpc::NodeSessionDataRpc::new(
+            nodes.clone(),
+            sessions.clone(),
+            file_service.clone(),
+        );
+        let files = file_service.clone();
+        move |context| {
+            let data = data.clone();
+            let files = files.clone();
+            Box::pin(async move {
+                data.authorize_local_session(&context).await?;
+                Ok(talos_worker::TalosWorkerResources {
+                    attachment_reader: files.clone(),
+                    tool_image_store: Arc::new(crate::tool_images::ToolImages(files)),
+                    agent_control: None,
+                    automation_control: None,
+                })
+            })
+        }
+    });
+    for (session_id, user) in [("s1", "u1"), ("s2", "u2")] {
+        seed_worker_turn(
+            &worker,
+            sessions.as_ref(),
+            &config,
+            session_id,
+            user,
+            &format!("turn-{session_id}"),
+        )
+        .await;
+    }
+    let (worker_api, worker_auth) = worker
+        .start_local(
+            talos_error::SessionOwnerKind::Server,
+            talos_agent::SessionHold::Turn,
+        )
+        .await
+        .unwrap();
+    for (id, harness) in worker
+        .local_harnesses(
+            &worker_api,
+            &worker_auth,
+            "11111111-1111-4111-8111-111111111111",
+        )
+        .unwrap()
+    {
         coordinator
-            .register_agent("embedded".into(), id.clone(), harness.clone())
+            .register_agent("embedded".into(), id, harness)
             .await
             .unwrap();
     }
@@ -341,7 +379,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         .expect("requested model refs")
         .clone();
     assert!(!requested_model_refs.is_empty());
-    let expected_inner_model = config.agent.inner_model.unwrap();
+    let expected_inner_model = config.agent.inner_model.clone().unwrap();
     let usage_kinds = profiles
         .updates()
         .into_iter()
@@ -373,6 +411,12 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         "remember failure invariant",
     )
     .await;
+    seed_worker_turn(&worker, sessions.as_ref(), &config, "s1", "u1", "turn-s1-2").await;
+    let memory_before_failure = worker
+        .execution_store()
+        .memory_progress("s1")
+        .await
+        .unwrap();
     let record_before_failure = sessions
         .get_session_record("s1")
         .await
@@ -384,14 +428,13 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         .process_session(record_before_failure.clone())
         .await
         .expect_err("Dream Memory must fail when usage recording fails");
-    let record_after_failure = sessions
-        .get_session_record("s1")
-        .await
-        .expect("reload session")
-        .expect("session record");
     assert_eq!(
-        record_after_failure.memory_processed_until_event_seq,
-        record_before_failure.memory_processed_until_event_seq
+        worker
+            .execution_store()
+            .memory_progress("s1")
+            .await
+            .unwrap(),
+        memory_before_failure
     );
 
     assert!(
@@ -538,4 +581,76 @@ fn candidate_response(title: &str) -> String {
     format!(
         r#"{{"mode":"maintenance","memory_candidates":[{{"title":"{title}","body":"durable memory","kind":"fact","importance":"high"}}]}}"#
     )
+}
+
+async fn seed_worker_turn(
+    worker: &talos_worker::TalosWorker,
+    source: &dyn AgentExecutionStore,
+    config: &TalosConfig,
+    session_id: &str,
+    user_id: &str,
+    turn_id: &str,
+) {
+    let identity = AgentTurnRef::new(session_id, turn_id);
+    let events = source
+        .list_agent_turn_events(&identity, 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|event| AgentEvent {
+            identity: event.identity,
+            sequence: event.sequence,
+            occurred_at: event.occurred_at,
+            payload: event.payload,
+        })
+        .collect::<Vec<_>>();
+    let input = events
+        .iter()
+        .find_map(|event| match &event.payload {
+            AgentEventPayload::MessageCompleted(message) => Some(message.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let context = agent_protocol::AgentSessionContext {
+        agent_id: "dream-agent".into(),
+        session_id: session_id.into(),
+        workspace: config.resolve_workspace("default", user_id).unwrap(),
+    };
+    let journal = worker.execution_store();
+    journal
+        .admit(
+            &context,
+            &agent_protocol::AgentExecutionCommand::Input {
+                params: Box::new(agent_protocol::AgentInputParams {
+                    command: None,
+                    agent_id: "dream-agent".into(),
+                    identity,
+                    input: input.clone(),
+                }),
+            },
+            vec![events[0].clone()],
+            &agent_protocol::AgentRunCheckpoint {
+                last_sequence: 1,
+                messages: vec![],
+                metrics: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+    journal
+        .append(
+            &context,
+            events[1..].to_vec(),
+            &agent_protocol::AgentRunCheckpoint {
+                last_sequence: events.last().unwrap().sequence,
+                messages: vec![input],
+                metrics: Default::default(),
+            },
+            Some(agent_protocol::AgentExecutionSettlement::Finished {
+                memory_usage: vec![],
+                metrics: Default::default(),
+            }),
+        )
+        .await
+        .unwrap();
 }

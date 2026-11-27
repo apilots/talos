@@ -1,8 +1,5 @@
 use std::path::Path;
 
-use agent_client::AgentSessionDataClient;
-use async_trait::async_trait;
-use talos_agent_provider_kernel::KernelMemoryProgressStore;
 use talos_config::Config;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
@@ -34,26 +31,6 @@ async fn run_with_config(config: Config) -> TalosResult<()> {
         tokio::select! { _ = shutdown_signal() => Ok(()), result = worker.wait() => result };
     let cleanup = worker.shutdown().await;
     result.and(cleanup)
-}
-
-pub(crate) struct RemoteMemoryProgress(pub(crate) AgentSessionDataClient);
-
-#[async_trait]
-impl KernelMemoryProgressStore for RemoteMemoryProgress {
-    async fn processed_until_event_seq(&self, session_id: &str) -> TalosResult<u64> {
-        self.0.processed_until_event_seq(session_id).await
-    }
-
-    async fn advance_processed_until_event_seq(
-        &self,
-        session_id: &str,
-        expected_until_seq: u64,
-        next_until_seq: u64,
-    ) -> TalosResult<()> {
-        self.0
-            .advance_processed_until_event_seq(session_id, expected_until_seq, next_until_seq)
-            .await
-    }
 }
 
 fn init_logging(config: &Config) -> TalosResult<talos_logging::LogGuard> {

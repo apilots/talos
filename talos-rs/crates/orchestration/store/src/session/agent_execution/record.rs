@@ -7,7 +7,7 @@ use super::{
     AgentContinuationBindingStatus, AgentEventRecord,
 };
 
-pub(super) async fn append_events(
+pub(crate) async fn append_events(
     transaction: &mut dyn StorageTransaction,
     events: Vec<AgentEvent>,
 ) -> TalosResult<Vec<AgentEventRecord>> {
@@ -54,7 +54,7 @@ pub(super) async fn append_events(
     Ok(records)
 }
 
-pub(super) async fn load_active_turn(
+pub(crate) async fn load_active_turn(
     transaction: &mut dyn StorageTransaction,
     session_id: &str,
 ) -> TalosResult<Option<AgentActiveTurnRecord>> {

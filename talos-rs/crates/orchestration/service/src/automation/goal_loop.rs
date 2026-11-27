@@ -34,13 +34,20 @@ pub(crate) enum AutomationCaller<'a> {
         call_id: &'a str,
     },
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AutomationAssembly {
+    Executing,
+    DefinitionsOnly,
+}
+
 #[derive(Clone)]
 pub struct SessionAutomationService {
+    assembly: AutomationAssembly,
     pub(crate) store: DatabaseAutomationStore,
     execution: Arc<dyn AgentExecutionStore>,
     queue: SessionMessageQueueService,
     resolver: Arc<dyn AutomationSkillResolver>,
-    nodes: Option<crate::AgentNodeService>,
+    nodes: Option<crate::ProductNodeAccess>,
     changed: tokio::sync::broadcast::Sender<AutomationChangedNotification>,
     gates: Arc<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
     declarations: Arc<Mutex<HashMap<(String, String), Declaration>>>,
@@ -62,6 +69,7 @@ impl SessionAutomationService {
         resolver: Arc<dyn AutomationSkillResolver>,
     ) -> Self {
         Self {
+            assembly: AutomationAssembly::Executing,
             store,
             execution,
             queue,
@@ -73,7 +81,14 @@ impl SessionAutomationService {
             explicit_dispatch: Default::default(),
         }
     }
-    pub(crate) fn with_managed_workers(mut self, nodes: Option<crate::AgentNodeService>) -> Self {
+    pub(crate) fn with_assembly(mut self, assembly: AutomationAssembly) -> Self {
+        self.assembly = assembly;
+        self
+    }
+    pub(crate) fn executes(&self) -> bool {
+        self.assembly == AutomationAssembly::Executing
+    }
+    pub(crate) fn with_managed_workers(mut self, nodes: Option<crate::ProductNodeAccess>) -> Self {
         self.nodes = nodes;
         self
     }

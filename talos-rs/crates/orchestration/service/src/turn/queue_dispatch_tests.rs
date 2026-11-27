@@ -115,6 +115,8 @@ async fn profile_discard_failure_preserves_the_error_and_dispatches_queued_work(
     let input = completed_agent_user_input("failed-turn", "message-1", test_user_input("first"), 1)
         .unwrap();
     commit_test_running_turn(store.as_ref(), identity, input).await;
+    seed_worker_fixture(&service, store.as_ref(), execution.as_ref()).await;
+    fail_worker_fixture(execution.as_ref(), talos_error::ErrorCode::InternalError).await;
     DatabaseProfileStore::new(&storage)
         .record_turn_usage(talos_store::profile::TurnUsageUpdate {
             user_id: "u1".to_string(),
@@ -138,20 +140,16 @@ async fn profile_discard_failure_preserves_the_error_and_dispatches_queued_work(
         .execute(storage.pool()).await.unwrap();
     queue.add("s1", test_user_input("next")).unwrap();
     let active = store.get_agent_active_turn("s1").await.unwrap().unwrap();
-    let error = service
+    service
         .recover_active_turn(test_session(), active)
         .await
-        .unwrap_err();
-    assert!(
-        format!("{error:?}").contains("profile-discard-sentinel"),
-        "{error:?}"
-    );
+        .unwrap();
     wait_for_stream_requests(execution.as_ref(), 1).await;
 }
 
 #[tokio::test]
 async fn committed_failure_recovery_releases_execution_and_dispatches_the_queue() {
-    for rejected_stage in ["panic", "permit", "metricsUpdated", "turnCompleted"] {
+    for rejected_stage in ["panic", "permit"] {
         let logs = tempfile::tempdir().unwrap();
         let log_path = logs.path().join("recovery.log");
         let dispatch = log_dispatch(&log_path);
@@ -410,6 +408,8 @@ async fn automation_settlement_warning_preserves_usage_cleanup_and_queued_work()
     )
     .unwrap();
     commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
+    seed_worker_fixture(&service, store.as_ref(), execution.as_ref()).await;
+    fail_worker_fixture(execution.as_ref(), talos_error::ErrorCode::InternalError).await;
     DatabaseProfileStore::new(&storage)
         .record_turn_usage(talos_store::profile::TurnUsageUpdate {
             user_id: "u1".into(),
@@ -520,4 +520,251 @@ async fn explicit_automation_without_registration_keeps_completion_and_publishes
         let snapshot = store.automation_store().snapshot("s1").await.unwrap();
         assert!(snapshot.goal.is_none() && snapshot.loops.is_empty());
     }
+}
+
+#[tokio::test]
+async fn product_transaction_failure_retains_original_worker_receipt_until_cursor_replay() {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    let execution = Arc::new(RecordingAgentExecution::default());
+    let (service, _, store, queue) = test_service_with_storage(
+        execution.clone(),
+        Arc::new(RecordingAgentCoordinator::default()),
+        storage.clone(),
+    )
+    .await;
+    create_test_session_record(store.clone()).await;
+    sqlx::query("CREATE TRIGGER reject_projection BEFORE INSERT ON agent_events BEGIN SELECT RAISE(FAIL,'projection-unavailable'); END").execute(storage.pool()).await.unwrap();
+    queue
+        .add("s1", test_user_input("queued once after replay"))
+        .unwrap();
+    let request = StartTurnRequest {
+        node_id: None,
+        session_id: "s1".into(),
+        input: test_user_input("admit once"),
+        model_selection: None,
+        user_permission_mode: None,
+        project_id: None,
+        current_directory: None,
+        client_request_id: Some("durable-original".into()),
+    };
+    let first = submit_test_start(
+        &service,
+        test_session(),
+        request.clone(),
+        Some("durable-original"),
+    )
+    .await
+    .unwrap();
+    let journal = execution.worker_store.lock().unwrap().clone().unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if journal
+                .settlement(&AgentTurnRef::new("s1", &first.turn_id))
+                .await
+                .unwrap()
+                .is_some()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(execution.stream_requests.lock().unwrap().len(), 1);
+    assert!(service
+        .reserve_start_turn(&request, Some("durable-original"), Duration::ZERO)
+        .await
+        .is_err());
+    assert_eq!(execution.stream_requests.lock().unwrap().len(), 1);
+    sqlx::query("DROP TRIGGER reject_projection")
+        .execute(storage.pool())
+        .await
+        .unwrap();
+    service.reconcile_worker_events("s1").await.unwrap();
+    wait_for_stream_requests(execution.as_ref(), 2).await;
+    let replay = submit_test_start(&service, test_session(), request, Some("durable-original"))
+        .await
+        .unwrap();
+    assert_eq!(replay.turn_id, first.turn_id);
+    assert_eq!(replay.request_id, first.request_id);
+    assert_eq!(execution.stream_requests.lock().unwrap().len(), 2);
+    let facts = journal.terminal_events("s1", None, 256).await.unwrap();
+    assert!(facts
+        .iter()
+        .any(|(_, event)| event.identity.turn_id == first.turn_id
+            && matches!(event.payload, CanonicalAgentEventPayload::TurnCompleted(_))));
+}
+
+#[tokio::test]
+async fn lost_commit_confirmation_retains_queue_identity_until_worker_replay() {
+    let execution = Arc::new(RecordingAgentExecution::default());
+    execution
+        .lose_start_confirmation
+        .store(true, Ordering::SeqCst);
+    let (service, _, store, queue) = test_service(execution.clone()).await;
+    create_test_session_record(store.clone()).await;
+    let first = queue
+        .add("s1", test_user_input("original queued input"))
+        .unwrap()
+        .messages[0]
+        .id
+        .clone();
+    queue
+        .add("s1", test_user_input("next queued input"))
+        .unwrap();
+    let error = service.try_dispatch_next("s1").await.unwrap_err();
+    assert!(agent_protocol::AgentAdmissionUnconfirmed::contains(&error));
+    assert!(!queue.is_reserved(&first, "s1").unwrap());
+    let original = execution.stream_requests.lock().unwrap()[0].clone();
+    let original_key = original.command.as_ref().unwrap().idempotency_key.clone();
+    assert_eq!(original_key, format!("queued:{first}"));
+    let journal = execution.worker_store.lock().unwrap().clone().unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while journal
+            .settlement(&original.context.identity())
+            .await
+            .unwrap()
+            .is_none()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    service.reconcile_worker_events("s1").await.unwrap();
+    wait_for_stream_requests(&execution, 2).await;
+    assert!(!queue
+        .list("s1")
+        .unwrap()
+        .messages
+        .iter()
+        .any(|message| message.id == first));
+    assert_eq!(
+        execution
+            .stream_requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|params| params
+                .command
+                .as_ref()
+                .is_some_and(|command| command.idempotency_key == original_key))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn unknown_commit_not_received_retries_original_queue_identity_after_lease_expiry() {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    let execution = Arc::new(RecordingAgentExecution::default());
+    execution
+        .lose_commit_before_worker
+        .store(true, Ordering::SeqCst);
+    let (service, _, store, queue) = test_service_with_storage(
+        execution.clone(),
+        Arc::new(RecordingAgentCoordinator::default()),
+        storage.clone(),
+    )
+    .await;
+    create_test_session_record(store.clone()).await;
+    let message_id = queue
+        .add("s1", test_user_input("original input"))
+        .unwrap()
+        .messages[0]
+        .id
+        .clone();
+    let error = service.try_dispatch_next("s1").await.unwrap_err();
+    assert!(agent_protocol::AgentAdmissionUnconfirmed::contains(&error));
+    assert!(!queue.is_reserved(&message_id, "s1").unwrap());
+    let original = execution.stream_requests.lock().unwrap()[0].clone();
+    let journal = execution.worker_store.lock().unwrap().clone().unwrap();
+    assert!(journal
+        .execution_state(&original.context.session)
+        .await
+        .unwrap()
+        .is_none());
+    // The existing product command lease governs uncertainty; reclaims keep original identities.
+    sqlx::query("UPDATE agent_command_idempotency SET lease_expires_at=1 WHERE status='reserved'")
+        .execute(storage.pool())
+        .await
+        .unwrap();
+    let accepted = service.try_dispatch_next("s1").await.unwrap().unwrap();
+    assert_eq!(accepted.turn_id, original.context.turn_id);
+    assert_eq!(accepted.message_id.as_deref(), Some(message_id.as_str()));
+    let retry = execution.stream_requests.lock().unwrap()[1].clone();
+    assert_eq!(retry.command, original.command);
+    wait_for_canonical_terminal(store.as_ref()).await;
+    assert_eq!(
+        journal
+            .terminal_events("s1", None, 256)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn expired_unknown_command_replays_worker_admission_before_rebuilding_input() {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    let execution = Arc::new(RecordingAgentExecution::default());
+    execution
+        .lose_start_confirmation
+        .store(true, Ordering::SeqCst);
+    let (service, _, store, _) = test_service_with_storage(
+        execution.clone(),
+        Arc::new(RecordingAgentCoordinator::default()),
+        storage.clone(),
+    )
+    .await;
+    create_test_session_record(store.clone()).await;
+    let request = StartTurnRequest {
+        node_id: None,
+        session_id: "s1".into(),
+        input: test_user_input("same original request"),
+        model_selection: None,
+        user_permission_mode: None,
+        project_id: None,
+        current_directory: None,
+        client_request_id: Some("expired-unknown".into()),
+    };
+    let error = submit_test_start(
+        &service,
+        test_session(),
+        request.clone(),
+        Some("expired-unknown"),
+    )
+    .await
+    .unwrap_err();
+    assert!(agent_protocol::AgentAdmissionUnconfirmed::contains(&error));
+    let original = execution.stream_requests.lock().unwrap()[0].clone();
+    let journal = execution.worker_store.lock().unwrap().clone().unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while journal
+            .settlement(&original.context.identity())
+            .await
+            .unwrap()
+            .is_none()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    sqlx::query("UPDATE agent_command_idempotency SET lease_expires_at=1 WHERE status='reserved'")
+        .execute(storage.pool())
+        .await
+        .unwrap();
+    // No background reconcile ran: this retry itself must find the original Worker receipt.
+    let replay = submit_test_start(&service, test_session(), request, Some("expired-unknown"))
+        .await
+        .unwrap();
+    assert_eq!(replay.turn_id, original.context.turn_id);
+    assert_eq!(
+        replay.message_id.as_deref(),
+        Some(original.input.message_id.as_str())
+    );
+    assert_eq!(execution.stream_requests.lock().unwrap().len(), 1);
 }

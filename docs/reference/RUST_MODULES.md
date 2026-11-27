@@ -2,7 +2,7 @@
 
 [Chinese](RUST_MODULES_zh.md)
 
-The Talos Rust workspace currently contains 59 members. `talos-rs/Cargo.toml`
+The Talos Rust workspace currently contains 61 members. `talos-rs/Cargo.toml`
 is the authoritative membership source; this document explains ownership rather
 than replacing the manifest.
 
@@ -13,8 +13,8 @@ than replacing the manifest.
 | Perception | 1 | `talos-channel` |
 | Cognition | 1 | `talos-memory` |
 | Action | 11 | `talos-browser`, `talos-mcp`, `talos-plugin`, `talos-skills`, tools, policy, sandbox SPI, and platform sandboxes |
-| Orchestration | 13 | `agent-pb`, `agent-protocol`, `agent-client`, `talos-agent-api`, `talos-run-control`, `talos-agent-kernel`, `talos-agent-provider-kernel`, `talos-agent`, `talos-store`, `talos-sync`, `talos-service`, `talos-router`, `talos-coordinator` |
-| Gateway | 4 | `talos-gateway`, `talos-gateway-http`, `talos-app-protocol`, `talos-app-server` |
+| Orchestration | 14 | `agent-pb`, `agent-protocol`, `agent-client`, `talos-agent-api`, `talos-run-control`, `talos-agent-kernel`, `talos-agent-provider-kernel`, `talos-agent`, `talos-store`, `talos-sync`, `talos-control-plane`, `talos-service`, `talos-router`, `talos-coordinator` |
+| Gateway | 5 | `talos-gateway`, `talos-gateway-http`, `talos-app-protocol`, `talos-app-server`, `talos-relay-server` |
 | Application composition | 3 | `talos-base`, `talos-worker`, `talos-upgrade` |
 | Apps and SDKs | 4 | `talos-sdk`, `talos-sdk-embedded`, `talos-app-server-test-client`, `talos-tui` |
 | Binaries | 3 | `app-server`, `talos-server`, `talos-worker` |
@@ -40,8 +40,10 @@ than replacing the manifest.
 
 ## Orchestration and gateways
 
-- `crates/orchestration/store/`: database records and store interfaces.
-- `crates/orchestration/service/`: product-facing application service facade.
+- `crates/orchestration/store/`: product Store interfaces, always-on change/tombstone capture, optional Sync adapters, and the independent Worker execution schema.
+- `crates/orchestration/service/`: product-facing application service facade and cursor-based materialization of Worker facts.
+- `crates/orchestration/control-plane/`: account-authorized node registration, leases, directory publication, shared admission protection and managed Worker lifecycle. It does not own Session history or Sync replication.
+- `crates/gateway/relay-server/`: optional, bounded personal-product HTTP transport over outbound WSS. Cloud products enter their Server services directly; the Relay retains no product database.
 - `crates/orchestration/router/` and `coordinator/`: Agent binding and dispatch.
 - `crates/orchestration/agent-api/`: public Agent messages, events and history contracts.
 - `crates/orchestration/agent-pb/`, `agent-protocol/`, and `agent-client/`: generated gRPC API,

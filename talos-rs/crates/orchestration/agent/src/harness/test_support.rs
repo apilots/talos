@@ -197,7 +197,7 @@ impl AgentSession for FakeSession {
                 }
             }
             FakeMode::LargeHistory => {
-                for _ in 0..6 {
+                for _ in 0..12 {
                     let message = turn.events.start_message(AgentMessageRole::Agent).await?;
                     let block = turn
                         .events
@@ -206,7 +206,7 @@ impl AgentSession for FakeSession {
                             AgentMessageBlockContent::AssistantText(
                                 talos_agent_api::AgentAssistantText {
                                     phase: talos_agent_api::AgentAssistantTextPhase::Commentary,
-                                    text: "x".repeat(768 * 1024),
+                                    text: "x".repeat(384 * 1024),
                                 },
                             ),
                         )
@@ -351,6 +351,9 @@ impl AgentSession for FakeSession {
 
 pub(super) fn run_params(identity: AgentTurnRef, message_id: &str) -> AgentRunParams {
     AgentRunParams {
+        subagent_limit: None,
+        command: None,
+        automation_origin: None,
         context: context(identity.clone()),
         input: user_message(&identity, message_id),
         checkpoint: None,
@@ -377,6 +380,7 @@ pub(super) fn user_message(
 
 pub(super) fn context(identity: AgentTurnRef) -> AgentContext {
     AgentContext {
+        tree_identity: talos_types::SessionTreeIdentity::Primary,
         history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),

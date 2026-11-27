@@ -15,7 +15,7 @@ talos-base = { workspace = true }
 talos-error = { workspace = true }
 talos-gateway = { workspace = true }
 talos-sdk = { workspace = true }
-talos-service = { workspace = true }
+talos-service = { workspace = true, features = ["product"] }
 talos-types = { workspace = true }
 tokio = { workspace = true }
 

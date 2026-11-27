@@ -8,6 +8,7 @@ async fn waiting_input_replays_the_committed_response_without_claiming_twice() {
         test_service(agent_execution.clone()).await;
     create_test_session_record(store.clone()).await;
     insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
+    seed_worker_fixture(&service, store.as_ref(), agent_execution.as_ref()).await;
     let request = SubmitTurnInputRequest {
         identity: AgentTurnRef::new("s1", "turn-original"),
         input: SubmitTurnInput::UserActionResponse {
@@ -40,6 +41,7 @@ async fn dynamic_tool_response_resumes_the_original_canonical_turn() {
         test_service(agent_execution.clone()).await;
     create_test_session_record(store.clone()).await;
     insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
+    seed_worker_fixture(&service, store.as_ref(), agent_execution.as_ref()).await;
 
     service
         .submit_user_action(
@@ -97,9 +99,10 @@ async fn sandbox_cancel_is_one_canonical_response_and_one_terminal_fact() {
     *agent_execution.turn_errors_remaining.lock().unwrap() = 1;
     let coordinator = Arc::new(RecordingAgentCoordinator::default());
     let (service, _event_service, store, _message_queue) =
-        test_service_with_coordinator(agent_execution, coordinator.clone()).await;
+        test_service_with_coordinator(agent_execution.clone(), coordinator.clone()).await;
     create_test_session_record(store.clone()).await;
     insert_pending_sandbox_approval(store.as_ref()).await;
+    seed_worker_fixture(&service, store.as_ref(), agent_execution.as_ref()).await;
     let response = UserActionResponse::SandboxApproval(SandboxApprovalDecision::Cancel);
 
     let accepted = service

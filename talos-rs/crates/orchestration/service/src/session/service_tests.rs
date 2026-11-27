@@ -41,6 +41,10 @@ struct RecordingSessionStore {
 
 #[async_trait]
 impl SessionStore for RecordingSessionStore {
+    async fn ensure_worker_execution_session(&self, _session_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn get_history_cursor(
         &self,
         _session_id: &str,
@@ -345,6 +349,7 @@ async fn agent_context_is_built_once_from_session_authorities() {
     let identity = AgentTurnRef::new(session.id.clone(), "turn-1");
     let model_selection = session.conf.model_selection.clone().unwrap();
     let expected = AgentContext {
+        tree_identity: talos_types::SessionTreeIdentity::Primary,
         history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),

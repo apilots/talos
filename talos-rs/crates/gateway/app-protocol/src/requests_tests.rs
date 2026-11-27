@@ -307,3 +307,35 @@ fn automation_notification_is_a_session_invalidation_without_runtime_identity() 
         assert!(fields.get(field).is_none());
     }
 }
+
+#[test]
+fn product_scope_binds_typed_defaults_and_rejects_conflicting_targets() {
+    let mut request = ClientRequestParams::ModelList(ModelListRequest { node_id: None });
+    request.bind_computer_target("worker-a").unwrap();
+    assert_eq!(request.computer_target(), Some("worker-a"));
+    assert!(request.bind_computer_target("worker-b").is_err());
+}
+
+#[test]
+fn product_scope_never_rebinds_session_identity() {
+    let mut request = ClientRequestParams::SessionGet(SessionGetRequest {
+        session_id: "saved-session".into(),
+    });
+    let before = request.clone();
+    request.bind_computer_target("worker-a").unwrap();
+    assert_eq!(request, before);
+}
+
+#[test]
+fn jsonrpc_product_scope_survives_round_trip_independently_of_credentials() {
+    let mut request = crate::JsonRpcRequest::new(
+        crate::RequestId::Number(42),
+        "session/get",
+        Some(json!({"sessionId":"s"})),
+    );
+    request.computer_id = Some("computer-a".into());
+    let encoded = serde_json::to_value(&request).unwrap();
+    assert_eq!(encoded["computerId"], "computer-a");
+    let decoded: crate::JsonRpcRequest = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded.computer_id.as_deref(), Some("computer-a"));
+}

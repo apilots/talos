@@ -143,7 +143,12 @@ async fn durable_input_delivery_outlives_the_request_owner() {
                 .await
         }
     });
-    agent_execution.input_permit_started.notified().await;
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        agent_execution.input_permit_started.notified(),
+    )
+    .await
+    .expect("accepted input must reach its Provider delivery permit");
     request_owner.abort();
     agent_execution.input_permit_release.notify_one();
     tokio::time::timeout(Duration::from_secs(1), async {

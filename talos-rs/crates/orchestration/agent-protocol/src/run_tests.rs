@@ -7,13 +7,13 @@ use talos_types::{ModelInfo, ModelRef, ModelSelection, UserPermissionMode};
 use crate::{AgentContext, AgentRunCheckpoint, AgentRunParams, AgentSessionContext};
 
 #[test]
-fn continuation_requires_checkpoint_and_provider_reference_together() {
+fn continuation_can_restore_its_checkpoint_inside_the_worker() {
     let mut params = run_params();
     params.continuation = Some(AgentContinuationRef {
         opaque_id: "continuation-1".to_owned(),
     });
 
-    assert!(params.validate().is_err());
+    assert!(params.validate().is_ok());
 
     params.checkpoint = Some(AgentRunCheckpoint {
         last_sequence: 1,
@@ -21,6 +21,17 @@ fn continuation_requires_checkpoint_and_provider_reference_together() {
         metrics: AgentRunMetrics::default(),
     });
     assert!(params.validate().is_ok());
+}
+
+#[test]
+fn checkpoint_cannot_be_supplied_without_a_provider_reference() {
+    let mut params = run_params();
+    params.checkpoint = Some(AgentRunCheckpoint {
+        last_sequence: 1,
+        messages: Vec::new(),
+        metrics: AgentRunMetrics::default(),
+    });
+    assert!(params.validate().is_err());
 }
 
 #[test]
@@ -36,7 +47,11 @@ fn input_must_be_one_completed_user_message_for_the_same_turn() {
 
 fn run_params() -> AgentRunParams {
     AgentRunParams {
+        subagent_limit: None,
+        command: None,
+        automation_origin: None,
         context: AgentContext {
+            tree_identity: talos_types::SessionTreeIdentity::Primary,
             history_cursor: None,
             session: AgentSessionContext {
                 agent_id: "default".to_owned(),

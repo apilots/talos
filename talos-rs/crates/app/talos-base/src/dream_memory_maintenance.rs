@@ -64,6 +64,14 @@ impl DreamMemoryMaintenance {
             });
             for record in records {
                 let session_id = record.id.clone();
+                match self
+                    .session_store
+                    .ensure_worker_execution_session(&session_id)
+                    .await
+                {
+                    Err(error) if error.is_code(talos_error::ErrorCode::InvalidRequest) => continue,
+                    result => result?,
+                }
                 match self.process_session(record).await {
                     Ok(true) => report.processed_sessions += 1,
                     Ok(false) => {}
@@ -84,6 +92,9 @@ impl DreamMemoryMaintenance {
         &self,
         record: talos_store::session::SessionRecord,
     ) -> TalosResult<bool> {
+        self.session_store
+            .ensure_worker_execution_session(&record.id)
+            .await?;
         let workspace = self.workspaces.resolve(
             &self.workspace_paths,
             &record.workspace_id,

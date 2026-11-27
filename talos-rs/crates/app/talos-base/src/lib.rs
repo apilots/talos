@@ -1,6 +1,11 @@
+mod server_product_routing;
+mod webui;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use webui::{canonical_or_original, resolve_packaged_webui_dir};
+#[cfg(test)]
+use webui::{resolve_webui_dir, WebuiLookupInput, WebuiLookupResult};
 
 use talos_app_server::BackgroundTaskDrain;
 use talos_auth::AuthService;
@@ -21,7 +26,7 @@ use talos_types::{
 };
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::info;
 
 const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 
@@ -34,20 +39,28 @@ pub use agent_node_rpc::{
 mod application_automation;
 mod application_computer_directory;
 mod application_desktop;
+mod application_host;
 mod application_managed_worker;
+mod application_management_host;
 mod application_runtime;
 mod application_storage;
+#[cfg(feature = "sync")]
 mod application_sync;
 mod application_sync_background;
 mod application_sync_computers;
 mod application_sync_deletion;
+#[cfg(feature = "sync")]
 mod application_sync_enrollment;
 mod application_sync_files;
+#[cfg(feature = "sync")]
 mod application_sync_hub_recovery;
+#[cfg(feature = "sync")]
 mod application_sync_management;
+#[cfg(feature = "sync")]
 mod application_sync_metrics;
+#[cfg(feature = "sync")]
 mod application_sync_observer;
-#[cfg(all(test, feature = "e2e"))]
+#[cfg(all(test, feature = "e2e", feature = "sync"))]
 #[path = "application_sync_tests.rs"]
 mod application_sync_tests;
 mod desktop_application;
@@ -55,7 +68,9 @@ mod desktop_cloud;
 mod desktop_media;
 mod desktop_worker;
 mod dream_memory_maintenance;
-mod memory_progress;
+mod host_identity;
+#[cfg(feature = "relay")]
+mod relay_host;
 #[cfg(test)]
 #[path = "application_sync_server_tests.rs"]
 mod server_registration_tests;
@@ -98,7 +113,7 @@ pub struct TalosServerOptions {
 
 pub struct TalosServerRuntime {
     auth_service: Arc<dyn AuthService>,
-    sync_host: Arc<application_sync::ApplicationSyncHost>,
+    host: Arc<application_host::ApplicationHost>,
     http_server: HttpServer,
     channel_server: Option<ChannelServer>,
     node_rpc_server: Option<agent_node_rpc::NodeRpcServer>,
@@ -126,10 +141,25 @@ pub struct EmbeddedAppServer {
     pub runtime: TalosApplicationRuntime,
 }
 
+/// Product-definition ports for short management commands. No execution runtime is owned.
+pub struct TalosProductRuntime {
+    pub config: Config,
+    pub service: Arc<TalosService>,
+    pub event_service: Arc<TimelineEventService>,
+    pub auth_service: Arc<dyn AuthService>,
+    pub gateway: Arc<dyn Gateway>,
+}
+pub struct EmbeddedProductServer {
+    pub log_guard: LogGuard,
+    pub runtime: TalosProductRuntime,
+}
+
 #[derive(Clone)]
 pub struct TalosApplicationRuntime {
-    pub(crate) sync_host: Arc<application_sync::ApplicationSyncHost>,
+    pub(crate) host: Arc<application_host::ApplicationHost>,
+    #[cfg(all(test, feature = "sync"))]
     pub(crate) sync: Arc<talos_sync::TalosSync>,
+    pub(crate) host_id: String,
     pub(crate) worker: talos_worker::TalosWorker,
     pub(crate) worker_rpc: Arc<talos_worker::WorkerRpcHost>,
     pub(crate) resource_stop: tokio_util::sync::CancellationToken,
@@ -142,13 +172,10 @@ pub struct TalosApplicationRuntime {
     pub auth_service: Arc<dyn AuthService>,
     pub gateway: Arc<dyn Gateway>,
     pub coordinator: Arc<CoordinatorImpl>,
-    pub node_service: AgentNodeService,
+    pub node_service: Option<AgentNodeService>,
     pub tool_registry: Arc<ToolRegistry>,
     pub(crate) session_store: Arc<dyn talos_store::session::SessionStore>,
-    pub(crate) session_history_reader: Arc<dyn talos_agent::SessionHistoryReader>,
     pub(crate) attachment_reader: Arc<dyn talos_agent::AttachmentReader>,
-    pub(crate) memory_progress_store:
-        Arc<dyn talos_agent_provider_kernel::KernelMemoryProgressStore>,
     pub(crate) agent_control: Arc<dyn talos_tools::AgentControl>,
     pub(crate) automation_control: Arc<dyn talos_tools::AutomationControl>,
     pub(crate) tool_image_store: Arc<dyn talos_tools::ToolImageStore>,
@@ -158,38 +185,8 @@ pub struct TalosApplicationRuntime {
 
 impl TalosApplicationRuntime {
     /// Stable management identity shared with authenticated Connect and sync.
-    pub fn sync_peer_id(&self) -> &str {
-        self.sync.peer_id()
-    }
-
-    /// Compose the original product resource owners for one selected Computer.
-    /// Use only with the authenticated coordinator SDK, which verifies the live
-    /// invocation before dispatch. This handler still checks persisted Session
-    /// ownership and binding; it neither imports data nor owns network reconnect.
-    pub fn coordinator_resource_handler(
-        &self,
-        computer_id: String,
-    ) -> Arc<dyn agent_client::AgentResourceRpcHandler> {
-        Arc::new(agent_node_rpc::CoordinatorResources {
-            service: self.service.clone(),
-            computer_id,
-            data: agent_node_rpc::NodeSessionDataRpc::new(
-                self.node_service.clone(),
-                self.session_store.clone(),
-                self.session_history_reader.clone(),
-                self.attachment_reader.clone(),
-                self.memory_progress_store.clone(),
-            ),
-            images: agent_node_rpc::NodeToolImageRpc::new(
-                self.node_service.clone(),
-                self.tool_image_store.clone(),
-                self.config.storage.files.limits.max_upload_bytes,
-            ),
-            control: self.agent_control.clone(),
-            automation: self.automation_control.clone(),
-            files: self.service.files.clone(),
-            auth: self.auth_service.clone(),
-        })
+    pub fn host_id(&self) -> &str {
+        &self.host_id
     }
 }
 
@@ -300,11 +297,32 @@ pub async fn run_embedded_app_server(
         let config_source = resolve_config_source_path(&config);
         log_config_source(config_source);
         let startup_report = startup::finish_startup(&config)?;
-        build_application_runtime_after_startup(config, &startup_report, options).await
+        build_application_runtime_after_startup(
+            config,
+            &startup_report,
+            options,
+            talos_types::NodeProductOwner::Computer,
+        )
+        .await
     }
     .await
     .inspect_err(talos_logging::report_error)?;
     Ok(EmbeddedAppServer { log_guard, runtime })
+}
+
+/// Open existing product definitions without starting Worker, Sync, registration or schedulers.
+pub async fn run_embedded_product_server(
+    options: Option<&TalosServerOptions>,
+) -> TalosResult<EmbeddedProductServer> {
+    let log_guard = startup::prepare_startup(options)?;
+    let config = load_runtime_config()?;
+    let report = startup::finish_startup(&config)?;
+    let runtime = application_runtime::build_product_runtime(
+        config,
+        &report.resources.database_migrations.backend_dir,
+    )
+    .await?;
+    Ok(EmbeddedProductServer { log_guard, runtime })
 }
 
 pub fn should_print_version(arg: Option<&str>) -> bool {
@@ -326,92 +344,6 @@ fn resolve_config_source_path(config: &Config) -> Option<PathBuf> {
     config_path
         .exists()
         .then(|| canonical_or_original(config_path))
-}
-
-fn resolve_packaged_webui_dir() -> Option<PathBuf> {
-    let resolution = resolve_webui_dir(WebuiLookupInput {
-        env_dir: std::env::var_os(TALOS_WEBUI_DIR_ENV).map(PathBuf::from),
-        current_exe: std::env::current_exe().ok(),
-        current_dir: std::env::current_dir().ok(),
-    });
-    match resolution {
-        WebuiLookupResult::Found(path) => {
-            info!("Serving Talos WebUI from {}", path.display());
-            Some(path)
-        }
-        WebuiLookupResult::InvalidEnv(path) => {
-            let index_path = path.join("index.html");
-            warn!(
-                "{} is set but {} was not found; starting API-only server.",
-                TALOS_WEBUI_DIR_ENV,
-                index_path.display()
-            );
-            None
-        }
-        WebuiLookupResult::Missing => {
-            warn!(
-                "Talos WebUI bundle not found; starting API-only server. Set {} to serve a WebUI bundle.",
-                TALOS_WEBUI_DIR_ENV
-            );
-            None
-        }
-    }
-}
-
-#[derive(Debug)]
-struct WebuiLookupInput {
-    env_dir: Option<PathBuf>,
-    current_exe: Option<PathBuf>,
-    current_dir: Option<PathBuf>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum WebuiLookupResult {
-    Found(PathBuf),
-    InvalidEnv(PathBuf),
-    Missing,
-}
-
-fn resolve_webui_dir(input: WebuiLookupInput) -> WebuiLookupResult {
-    if let Some(path) = input.env_dir {
-        return if is_webui_dir(&path) {
-            WebuiLookupResult::Found(canonical_or_original(path))
-        } else {
-            WebuiLookupResult::InvalidEnv(path)
-        };
-    }
-
-    for candidate in webui_dir_candidates(&input) {
-        if is_webui_dir(&candidate) {
-            return WebuiLookupResult::Found(canonical_or_original(candidate));
-        }
-    }
-
-    WebuiLookupResult::Missing
-}
-
-fn webui_dir_candidates(input: &WebuiLookupInput) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(exe_dir) = input
-        .current_exe
-        .as_ref()
-        .and_then(|path| path.parent().map(PathBuf::from))
-    {
-        candidates.push(exe_dir.join("webui"));
-        candidates.push(exe_dir.join("..").join("webui"));
-    }
-    if let Some(current_dir) = input.current_dir.as_ref() {
-        candidates.push(current_dir.join("webui"));
-    }
-    candidates
-}
-
-fn is_webui_dir(path: &std::path::Path) -> bool {
-    path.join("index.html").is_file()
-}
-
-fn canonical_or_original(path: PathBuf) -> PathBuf {
-    path.canonicalize().unwrap_or(path)
 }
 
 fn log_config_source(config_source: Option<PathBuf>) {
@@ -494,7 +426,7 @@ impl TalosServerRuntime {
     pub async fn run(self) -> TalosResult<()> {
         let TalosServerRuntime {
             auth_service,
-            sync_host,
+            host,
             http_server,
             channel_server,
             node_rpc_server,
@@ -560,7 +492,7 @@ impl TalosServerRuntime {
             None => Ok(()),
         };
         shutdown_token.cancel();
-        sync_host.shutdown_refreshes().await;
+        host.shutdown_refreshes().await;
         let registration = match worker_registration.lock().await.take() {
             Some(registration) => registration.shutdown().await,
             None => Ok(()),
@@ -580,7 +512,7 @@ impl TalosServerRuntime {
         .await;
         let result = application_automation::combine(result, registration);
         let result = application_automation::combine(result, browser.shutdown().await);
-        let result = application_automation::combine(result, sync_host.shutdown().await);
+        let result = application_automation::combine(result, host.shutdown().await);
         let result = application_automation::combine(result, shutdown_result);
         let result = application_automation::combine(result, worker_rpc.shutdown().await);
         auth_service.shutdown().await;
@@ -606,16 +538,20 @@ async fn start_server_after_startup(
 ) -> TalosResult<TalosServerRuntime> {
     let config = apply_runtime_options(config, options.as_ref());
     config.validate_runtime()?;
-    let runtime =
-        build_application_runtime_after_startup(config.clone(), startup_report, options.as_ref())
-            .await?;
-
-    let managed_worker = application_managed_worker::configure(
-        &config,
-        &runtime.node_service,
-        runtime.auth_service.clone(),
+    let runtime = build_application_runtime_after_startup(
+        config.clone(),
+        startup_report,
+        options.as_ref(),
+        talos_types::NodeProductOwner::Server,
     )
     .await?;
+
+    let nodes = runtime
+        .node_service
+        .as_ref()
+        .expect("Server product owns the control plane");
+    let managed_worker =
+        application_managed_worker::configure(&config, nodes, runtime.auth_service.clone()).await?;
 
     let node_rpc_server = config
         .agent_node
@@ -623,15 +559,13 @@ async fn start_server_after_startup(
         .as_ref()
         .map(|node_config| {
             let session_data = agent_node_rpc::NodeSessionDataRpc::new(
-                runtime.node_service.clone(),
+                nodes.clone(),
                 runtime.session_store.clone(),
-                runtime.session_history_reader.clone(),
                 runtime.attachment_reader.clone(),
-                runtime.memory_progress_store.clone(),
             );
             agent_node_rpc::NodeRpcServer::new(
                 node_config,
-                runtime.node_service.clone(),
+                nodes.clone(),
                 runtime.auth_service.clone(),
                 runtime.coordinator.clone(),
                 agent_node_rpc::NodeResourceServices {
@@ -639,7 +573,7 @@ async fn start_server_after_startup(
                     agent_control: runtime.agent_control.clone(),
                     automation_control: runtime.automation_control.clone(),
                     tool_images: agent_node_rpc::NodeToolImageRpc::new(
-                        runtime.node_service.clone(),
+                        nodes.clone(),
                         runtime.tool_image_store.clone(),
                         runtime.config.storage.files.limits.max_upload_bytes,
                     ),
@@ -648,7 +582,7 @@ async fn start_server_after_startup(
             .and_then(|server| {
                 server
                     .with_worker_adapter(runtime.worker_rpc.adapter())
-                    .with_coordinator_id(runtime.sync.peer_id().into())
+                    .with_coordinator_id(runtime.host_id.as_str().into())
             })
         })
         .transpose()?;
@@ -660,7 +594,8 @@ async fn start_server_after_startup(
         config.clone(),
         config.gateway.host.clone(),
         config.gateway.port,
-    );
+    )
+    .with_routes(product_capability_routes());
 
     let auth_disabled = options
         .as_ref()
@@ -674,6 +609,15 @@ async fn start_server_after_startup(
     if let Some(webui_dir) = options.as_ref().and_then(|value| value.webui_dir.clone()) {
         http_server = http_server.with_webui_dir(webui_dir);
     }
+
+    let shutdown_token = CancellationToken::new();
+    http_server = server_product_routing::ServerProductRouter::assemble(
+        http_server,
+        nodes.clone(),
+        runtime.service.clone(),
+        runtime.host_id.clone(),
+        shutdown_token.clone(),
+    );
 
     let enable_channels = options
         .as_ref()
@@ -690,10 +634,10 @@ async fn start_server_after_startup(
 
     Ok(TalosServerRuntime {
         auth_service: runtime.auth_service,
-        sync_host: runtime.sync_host,
+        host: runtime.host,
         coordinator: runtime.coordinator,
         gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),
-        shutdown_token: CancellationToken::new(),
+        shutdown_token,
         lifecycle: http_server.lifecycle(),
         automation: runtime.automation,
         _native_job_host: runtime._native_job_host,
@@ -736,6 +680,7 @@ async fn run_json_rpc_stdio_after_startup(
         runtime_config,
         startup_report,
         desktop_session_options().as_ref(),
+        talos_types::NodeProductOwner::Computer,
     )
     .await?;
     let desktop_host_bridge = if desktop_host_name.is_some() {
@@ -773,13 +718,22 @@ async fn run_json_rpc_stdio_after_startup(
                 .clone()
                 .expect("Desktop host bridge is composed together"),
         )),
-        None => app,
+        None => Arc::new(desktop_application::DesktopApplication::new(
+            &runtime,
+            config.agent.name.clone(),
+            app,
+            talos_app_server::DesktopHostBridge::new(),
+        )),
     };
     let result = talos_app_server::run_stdio_with_max_frame_bytes(
         app,
         validator,
         talos_app_server::AppServerConfig {
             desktop_host: desktop_host_bridge,
+            capabilities: talos_app_protocol::requests::ServerCapabilities {
+                sync: cfg!(feature = "sync"),
+                relay: cfg!(feature = "relay"),
+            },
             auth_enabled: config.gateway.auth,
             cloud_auth_url: Some(config.cloud.web_base_url.clone()),
             ..talos_app_server::AppServerConfig::default()
@@ -794,7 +748,7 @@ async fn run_json_rpc_stdio_after_startup(
         )
     });
     let result = application_automation::finish(result, &automation, &plugins).await;
-    runtime.sync_host.shutdown_refreshes().await;
+    runtime.host.shutdown_refreshes().await;
     let registration = match runtime.worker_registration.lock().await.take() {
         Some(registration) => registration.shutdown().await,
         None => Ok(()),
@@ -802,7 +756,7 @@ async fn run_json_rpc_stdio_after_startup(
     let result = application_automation::combine(result, registration);
     let result = application_automation::combine(result, runtime.worker.browser().shutdown().await);
     let result = application_automation::combine(result, worker_rpc.shutdown().await);
-    let result = application_automation::combine(result, runtime.shutdown_sync().await);
+    let result = application_automation::combine(result, runtime.shutdown_host().await);
     runtime.auth_service.shutdown().await;
     {
         runtime.resource_stop.cancel();
@@ -810,10 +764,26 @@ async fn run_json_rpc_stdio_after_startup(
     }
 }
 
+/// Product capability discovery reports assembly, independently of account settings.
+pub(crate) fn product_capability_routes() -> axum::Router {
+    axum::Router::new().route(
+        "/v1/capabilities",
+        axum::routing::get(|| async {
+            axum::Json(talos_types::ApiResponse::success(
+                talos_app_protocol::requests::ServerCapabilities {
+                    sync: cfg!(feature = "sync"),
+                    relay: cfg!(feature = "relay"),
+                },
+            ))
+        }),
+    )
+}
+
 async fn build_application_runtime_after_startup(
     config: Config,
     startup_report: &startup::FinishStartupReport,
     options: Option<&TalosServerOptions>,
+    product_owner: talos_types::NodeProductOwner,
 ) -> TalosResult<TalosApplicationRuntime> {
     application_runtime::build_application_runtime_with_policy(
         config,
@@ -821,6 +791,7 @@ async fn build_application_runtime_after_startup(
         options
             .and_then(|options| options.session_ownership)
             .unwrap_or_default(),
+        product_owner,
     )
     .await
 }

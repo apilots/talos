@@ -108,3 +108,29 @@ pub(crate) async fn bind_admission_origin(
     }
     bind_input(tx, turn, origin, message_id).await
 }
+
+/// Replay records accepted versions without re-admitting work or undoing newer controls.
+pub(crate) async fn bind_replayed_admission_origin(
+    tx: &mut dyn StorageTransaction,
+    turn: &AgentTurnRef,
+    origin: &AutomationTurnOrigin,
+    message_id: &str,
+) -> TalosResult<()> {
+    bind_input(tx, turn, origin, message_id).await?;
+    match origin {
+        AutomationTurnOrigin::Goal {
+            goal_id,
+            objective_revision,
+        } => {
+            tx.execute("UPDATE session_goals SET latest_turn_id=? WHERE id=? AND session_id=? AND objective_revision=?", &[&turn.turn_id,goal_id,&turn.session_id,&objective_revision.to_string()]).await?;
+        }
+        AutomationTurnOrigin::Loop {
+            loop_id,
+            config_revision,
+            ..
+        } => {
+            tx.execute("UPDATE session_loops SET latest_turn_id=?,pending_turn_id=?,next_due_at=NULL WHERE id=? AND session_id=? AND config_revision=? AND (pending_turn_id IS NULL OR pending_turn_id=?)", &[&turn.turn_id,&turn.turn_id,loop_id,&turn.session_id,&config_revision.to_string(),&turn.turn_id]).await?;
+        }
+    }
+    Ok(())
+}

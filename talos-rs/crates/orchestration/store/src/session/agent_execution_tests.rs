@@ -687,7 +687,7 @@ async fn terminal_settlement_and_compaction_usage_update_disjoint_session_state(
 }
 
 #[tokio::test]
-async fn session_clear_atomically_removes_canonical_history_and_resets_summary() {
+async fn session_clear_hides_history_retains_pending_facts_and_resets_summary() {
     let store = store().await;
     let original = session_record();
     store.insert_session_record(&original).await.unwrap();
@@ -761,7 +761,11 @@ async fn session_clear_atomically_removes_canonical_history_and_resets_summary()
     };
     assert_eq!(revisions().await, 1);
     assert!(store.clear_session_history("session-1", 200).await.unwrap());
-    assert_eq!(revisions().await, 0);
+    assert_eq!(
+        revisions().await,
+        1,
+        "uncaptured command facts remain durable"
+    );
 
     let mut expected = original;
     expected.title = talos_types::DEFAULT_SESSION_TITLE.to_string();

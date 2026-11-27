@@ -55,12 +55,15 @@ async fn test_state_with_config_and_plugin_manager(
         reload_hook,
     );
     let app = TalosService::new(
-        Arc::new(TestAgentCoordinator(
-            config.clone(),
-            memory,
-            plugin_manager.clone(),
-            config_service.clone(),
-        )),
+        Arc::new(
+            TestAgentCoordinator::new(
+                config.clone(),
+                memory,
+                plugin_manager.clone(),
+                config_service.clone(),
+            )
+            .await,
+        ),
         nodes,
         session_store,
         agent_execution_store,
@@ -180,7 +183,7 @@ async fn test_get_and_put_web_search_config_handlers() {
     let update_response = put_config_handler(
         State(state.clone()),
         Some(axum::extract::Extension(admin_auth())),
-        axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
+        super::super::product_scope::ProductQuery(talos_types::WorkspaceInfoRequest::default()),
         Json(talos_types::ConfigValue::WebSearch(Box::new(
             web_search.clone(),
         ))),
@@ -198,7 +201,7 @@ async fn test_get_and_put_web_search_config_handlers() {
     let get_response = get_config_handler(
         State(state),
         Some(axum::extract::Extension(admin_auth())),
-        axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
+        super::super::product_scope::ProductQuery(talos_types::WorkspaceInfoRequest::default()),
         Path("webSearch".to_string()),
     )
     .await
@@ -220,7 +223,7 @@ async fn test_config_handler_allows_authorized_regular_worker_user() {
     let response = put_config_handler(
         State(state),
         Some(axum::extract::Extension(test_auth())),
-        axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
+        super::super::product_scope::ProductQuery(talos_types::WorkspaceInfoRequest::default()),
         Json(talos_types::ConfigValue::WebSearch(Box::default())),
     )
     .await
@@ -263,7 +266,7 @@ async fn test_list_sessions_handler_returns_data_array() {
     let response = list_sessions_handler(
         State(state),
         axum::extract::Extension(test_auth()),
-        Query(SessionListRequest::default()),
+        super::super::product_scope::ProductQuery(SessionListRequest::default()),
     )
     .await
     .expect("list sessions should succeed");
@@ -457,7 +460,7 @@ async fn test_get_workspace_doc_handler_returns_exists_false_for_missing_file() 
     let state = test_state_with_config(config, false).await;
 
     let response = get_workspace_doc_handler(
-        Query(Default::default()),
+        super::super::product_scope::ProductQuery(Default::default()),
         State(state),
         axum::extract::Extension(test_auth()),
         Path("soul".to_string()),
@@ -481,7 +484,7 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
         State(state.clone()),
         axum::extract::Extension(test_auth()),
         Path("2026-04-04".to_string()),
-        Json(talos_types::MemoryFileWriteRequest {
+        super::super::product_scope::ProductJson(talos_types::MemoryFileWriteRequest {
             node_id: None,
             date: "2026-04-04".to_string(),
             content: canonical_memory("stable fact"),
@@ -495,7 +498,7 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
     assert_eq!(put_data.file.date, "2026-04-04");
 
     let get_response = get_memory_file_handler(
-        Query(Default::default()),
+        super::super::product_scope::ProductQuery(Default::default()),
         State(state.clone()),
         axum::extract::Extension(test_auth()),
         Path("2026-04-04".to_string()),
@@ -509,7 +512,9 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
     let list_response = list_memory_files_handler(
         State(state),
         axum::extract::Extension(test_auth()),
-        Query(serde_json::from_value(serde_json::json!({ "limit": 10 })).unwrap()),
+        super::super::product_scope::ProductQuery(
+            serde_json::from_value(serde_json::json!({ "limit": 10 })).unwrap(),
+        ),
     )
     .await
     .expect("list memory files should succeed");
@@ -540,7 +545,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         State(state.clone()),
         axum::extract::Extension(test_auth()),
         Path("2026-04-04".to_string()),
-        Json(talos_types::MemoryFileWriteRequest {
+        super::super::product_scope::ProductJson(talos_types::MemoryFileWriteRequest {
             node_id: None,
             date: "2026-04-04".to_string(),
             content: canonical_memory("shared service fact"),
@@ -556,6 +561,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::MemoryFileRead,
                 params: ClientRequestParams::MemoryFileRead(MemoryFileReadRequest {
                     node_id: None,
@@ -574,6 +580,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::WorkspaceDocRead,
                 params: ClientRequestParams::WorkspaceDocRead(WorkspaceDocReadRequest {
                     node_id: None,
@@ -592,6 +599,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::ModelList,
                 params: ClientRequestParams::ModelList(ModelListRequest::default()),
             },
@@ -604,6 +612,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         .dispatch(
             &admin_actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::ConfigGet,
                 params: ClientRequestParams::ConfigGet(ConfigGetRequest::default()),
             },
@@ -673,7 +682,7 @@ Use this skill for protocol contract verification.
     let added = add_plugin_source_handler(
         State(state.clone()),
         axum::extract::Extension(test_auth()),
-        Json(PluginSourceAddRequest {
+        super::super::product_scope::ProductJson(PluginSourceAddRequest {
             node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: repo,
@@ -694,6 +703,7 @@ Use this skill for protocol contract verification.
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::PluginSearch,
                 params: ClientRequestParams::PluginSearch(PluginSearchRequest {
                     node_id: None,
@@ -740,6 +750,7 @@ Use this skill for protocol contract verification.
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::McpAuthenticationRead,
                 params: ClientRequestParams::McpAuthenticationRead(
                     talos_types::McpAuthenticationReadRequest {
@@ -756,6 +767,7 @@ Use this skill for protocol contract verification.
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::McpCredentialsUpdate,
                 params: ClientRequestParams::McpCredentialsUpdate(
                     talos_types::McpCredentialsUpdateRequest {
@@ -815,7 +827,7 @@ Use this skill for protocol contract verification.
         list_mcp_servers_handler(
             State(state.clone()),
             axum::extract::Extension(test_auth()),
-            Query(talos_types::McpServerListRequest {
+            super::super::product_scope::ProductQuery(talos_types::McpServerListRequest {
                 node_id: None,
                 cursor: None,
                 limit: Some(1),
@@ -831,6 +843,7 @@ Use this skill for protocol contract verification.
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::McpServerList,
                 params: ClientRequestParams::McpServerList(talos_types::McpServerListRequest {
                     node_id: None,
@@ -850,7 +863,7 @@ Use this skill for protocol contract verification.
     assert!(list_mcp_servers_handler(
         State(state),
         axum::extract::Extension(test_auth()),
-        Query(talos_types::McpServerListRequest {
+        super::super::product_scope::ProductQuery(talos_types::McpServerListRequest {
             node_id: None,
             cursor: None,
             limit: Some(0)
@@ -877,7 +890,7 @@ async fn test_search_memory_files_handler_returns_matching_data() {
     let response = search_memory_files_handler(
         State(state.clone()),
         axum::extract::Extension(test_auth()),
-        Query(
+        super::super::product_scope::ProductQuery(
             serde_json::from_value(serde_json::json!({
                 "query": "stable",
                 "limit": 5
@@ -892,7 +905,7 @@ async fn test_search_memory_files_handler_returns_matching_data() {
     assert_eq!(search_data.data[0].source.date, "2026-04-04");
     let memory_id = search_data.data[0].memory_id.clone();
     let detail = get_memory_handler(
-        Query(Default::default()),
+        super::super::product_scope::ProductQuery(Default::default()),
         State(state),
         axum::extract::Extension(test_auth()),
         Path(memory_id.clone()),
@@ -963,6 +976,7 @@ async fn project_list_http_and_rpc_filter_retained_projects_by_actor_and_compute
         },
         store,
         Arc::new(projects),
+        None,
     )
     .await;
     let app = Router::new()
@@ -1054,7 +1068,7 @@ async fn workspace_info_http_and_rpc_share_actor_scoped_storage_locations() {
     };
     let state = test_state_with_config(config, false).await;
     let http = workspace_info_handler(
-        axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
+        super::super::product_scope::ProductQuery(talos_types::WorkspaceInfoRequest::default()),
         State(state.clone()),
         axum::extract::Extension(test_auth()),
     )
@@ -1066,6 +1080,7 @@ async fn workspace_info_http_and_rpc_share_actor_scoped_storage_locations() {
         .dispatch(
             &talos_service::Actor::regular("static-token"),
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::WorkspaceInfo,
                 params: ClientRequestParams::WorkspaceInfo(talos_types::WorkspaceInfoRequest {
                     node_id: None,

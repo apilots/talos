@@ -140,11 +140,12 @@ impl RequestScheduler {
     ) -> impl FnOnce(Actor) -> Dispatch + Send + 'static {
         let owned = self.owned_turns.clone();
         move |actor| {
+            let computer_id = request.computer_id.clone();
             let params = match request.params {
                 ClientRequestParams::EventSubscribe(params) => {
                     return Box::pin(async move {
                         let _ = subscriptions
-                            .subscribe(app.as_ref(), &actor, params, outgoing, id)
+                            .subscribe(app.as_ref(), &actor, params, computer_id, outgoing, id)
                             .await;
                     });
                 }
@@ -153,7 +154,7 @@ impl RequestScheduler {
                         let _ = subscriptions.unsubscribe(params, outgoing, id).await;
                     });
                 }
-                ClientRequestParams::TurnStart(params) => params,
+                ClientRequestParams::TurnStart(params) if computer_id.is_none() => params,
                 _ => {
                     let response = app.prepare_request(actor, request);
                     return Box::pin(async move { reply(outgoing, id, response.await).await });

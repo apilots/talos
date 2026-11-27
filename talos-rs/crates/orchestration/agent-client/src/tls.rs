@@ -1,5 +1,7 @@
 use tonic::transport::{Certificate, ClientTlsConfig};
 
+/// Plaintext loopback is restricted to local mock-service transport tests.
+#[cfg(test)]
 pub(crate) async fn loopback_channel(
     address: std::net::SocketAddr,
 ) -> talos_error::TalosResult<tonic::transport::Channel> {

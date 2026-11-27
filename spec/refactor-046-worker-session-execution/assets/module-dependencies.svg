@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 1200" role="img" aria-labelledby="title desc" lang="zh-CN">
+  <title id="title">Talos 七大模块及依赖方向</title>
+  <desc id="desc">入口装配产品服务、控制面和可选 Relay。产品服务调用 Worker 执行端口与控制面，Relay 消费控制面路由。Worker 使用环境能力。Sync 可选适配器依赖产品和接入生命周期端口，核心模块无 Sync 反向依赖。通用 auth、Store 和托管资源驱动沿用已有模块。 常驻 Store 捕获独立于可选 Sync，并在无 Sync 期间持久记录修改、删除和 tombstone。</desc>
+  <style>
+text { fill:#f0f4f8; font-family:'PingFang SC','Microsoft YaHei',sans-serif; font-size:22px; }
+.title { font-size:37px; font-weight:650; }
+.head { font-size:26px; font-weight:600; }
+.sub { font-size:18px; fill:#a8b8c9; }
+.box { fill:#192735; stroke:#344355; }
+.edge { fill:none; stroke:#8fc2ff; stroke-width:2; marker-end:url(#arrow); }
+.optional { fill:none; stroke:#e5bc74; stroke-width:2; stroke-dasharray:7 6; marker-end:url(#optional); }
+</style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#8fc2ff" />
+    </marker>
+    <marker id="optional" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#e5bc74" />
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="#10161d" />
+  <text x="40" y="60" class="title">七大模块 · 依赖稳定契约 · 宿主按需装配</text>
+  <text x="40" y="101" class="sub">实线为通过端口调用 / 依赖 · 虚线为可选适配器依赖 · 控制面、执行和核心产品能力独立于 Sync</text>
+  <rect x="40" y="150" width="1600" height="130" rx="18" class="box" />
+  <text x="70" y="192" class="head">M1 产品入口与 API</text>
+  <text x="70" y="230">TUI / Embedded SDK · Desktop / IPC · Server Web / HTTP · 统一领域类型和错误</text>
+  <text x="70" y="260" class="sub">产品 binary 与 talos-base 负责具体实例、Store、网络适配器和生命周期装配</text>
+  <path d="M270 282V367" class="edge" />
+  <path d="M830 282V367" class="edge" />
+  <path d="M1100 282H1130V735H1070" class="edge" />
+  <text x="1145" y="635" class="sub">节点管理 API</text>
+  <rect x="40" y="380" width="460" height="150" rx="17" class="box" />
+  <text x="70" y="422" class="head">M2 产品管理</text>
+  <text x="70" y="459">Session · Goal/Loop · Automation</text>
+  <text x="70" y="492" class="sub">产品 Store · 派生视图 · 调度与结算</text>
+  <rect x="600" y="380" width="460" height="150" rx="17" fill="#203b36" stroke="#74dbbd" stroke-dasharray="6 5" />
+  <text x="630" y="422" class="head">M6 可选个人 Relay lib</text>
+  <text x="630" y="459">连接附着 · 个人请求 / 流转发</text>
+  <text x="630" y="492" class="sub">消费控制面已授权路由，不持有产品库</text>
+  <rect x="1200" y="380" width="440" height="150" rx="17" fill="#2b2924" stroke="#e5bc74" stroke-dasharray="6 5" />
+  <text x="1230" y="422" class="head">M7 可选个人 Sync</text>
+  <text x="1230" y="459">复制适配器 · 保持原同步协议</text>
+  <text x="1230" y="492" class="sub">身份 / 注册 / 路由 / 执行独立于复制</text>
+  <path d="M1643 455H1660V1040H1646" class="optional" />
+  <text x="1230" y="355" class="sub">按原水位消费持久记录</text>
+  <path d="M1420 533V596H1005V667" class="optional" />
+  <text x="1150" y="579" class="sub">消费既有接入生命周期端口</text>
+  <path d="M270 533V667" class="edge" />
+  <text x="290" y="603" class="sub">受保护 Worker 端口</text>
+  <path d="M503 455H550V735H588" class="edge" />
+  <text x="565" y="634" class="sub">目标 / 唤醒</text>
+  <path d="M830 533V667" class="edge" />
+  <text x="850" y="651" class="sub">授权 / 发布路由</text>
+  <rect x="40" y="680" width="460" height="220" rx="17" fill="#203b36" />
+  <text x="70" y="723" class="head">M3 共享 Agent 执行</text>
+  <text x="70" y="762">talos-worker · Harness · Provider SPI</text>
+  <text x="70" y="800">准入 · Session 锁 · 执行历史</text>
+  <text x="70" y="837">上下文 · 恢复 · 终态事实</text>
+  <text x="70" y="876" class="sub">agent-kernel 为当前 Provider 私有实现</text>
+  <rect x="600" y="680" width="460" height="220" rx="17" fill="#243c56" />
+  <text x="630" y="723" class="head">M5 独立控制面 lib</text>
+  <text x="630" y="762">注册 · 凭证 / 租约 · 目录</text>
+  <text x="630" y="800">发布 / 撤销 · 托管生命周期</text>
+  <text x="630" y="837" class="sub">复用 auth、节点 Store、托管资源驱动</text>
+  <text x="630" y="876" class="sub">不反向依赖 M2、M6 或 M7</text>
+  <rect x="1200" y="680" width="440" height="220" rx="17" class="box" />
+  <text x="1230" y="723" class="head">M4 Worker 环境能力</text>
+  <text x="1230" y="762">模型配置 · Skills / MCP</text>
+  <text x="1230" y="800">工具 · 浏览器 · 文件 · 沙箱</text>
+  <text x="1230" y="837" class="sub">原节点资源接口与配置 owner</text>
+  <text x="1230" y="876" class="sub">按 nodeId 管理，目标节点落盘</text>
+  <path d="M270 903V960H1420V913" class="edge" />
+  <text x="1120" y="950" class="sub">执行使用环境能力端口</text>
+  <line x1="40" y1="1000" x2="1640" y2="1000" stroke="#344355" />
+  <text x="40" y="1125" class="sub">共享基础：types / auth / error / config / storage。节点状态与注册 Store 保持唯一 owner。</text>
+  <text x="40" y="1165" class="sub">talos-worker-runtime 管理 Docker / Kubernetes 资源；talos-worker 运行 Agent。Sync 与 Relay 独立 optional 装配。</text>
+  <path d="M40 500H20V1040H35" class="edge" />
+  <rect x="40" y="1005" width="1600" height="82" rx="14" fill="#203b36" />
+  <text x="70" y="1037" class="head">M2 Store 常驻变更 / tombstone 捕获</text>
+  <text x="70" y="1073" class="sub">与业务同事务 · Sync 装配 / 开关无关 · 必要身份与基线保留 · 可选复制实现消费记录并沿原协议恢复</text>
+</svg>

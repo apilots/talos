@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn interrupt_requires_the_current_turn_and_pauses_until_explicit_queue_start() {
     let cancelled_turn_ids = Arc::new(Mutex::new(Vec::new()));
-    let (service, store) = test_application_with_coordinator(
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::Accepted,
         }),
@@ -33,6 +33,14 @@ async fn interrupt_requires_the_current_turn_and_pauses_until_explicit_queue_sta
     )
     .expect("canonical User message should be valid");
     crate::test_support::commit_test_running_turn(store.as_ref(), identity.clone(), message).await;
+
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        journal.as_ref(),
+        "session-interrupt-queue",
+    )
+    .await;
 
     let stale_error = service
         .interrupt_turn(
@@ -99,7 +107,7 @@ async fn interrupt_requires_the_current_turn_and_pauses_until_explicit_queue_sta
 
 #[tokio::test]
 async fn interrupt_restores_active_turn_when_harness_rejects_interruption() {
-    let (service, store) = test_application_with_coordinator(
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::StartFailed,
         }),
@@ -125,6 +133,14 @@ async fn interrupt_restores_active_turn_when_harness_rejects_interruption() {
         "session-interrupt-rejected",
         "turn-existing",
         "msg-existing",
+    )
+    .await;
+
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        journal.as_ref(),
+        "session-interrupt-rejected",
     )
     .await;
 
@@ -154,7 +170,7 @@ async fn interrupt_restores_active_turn_when_harness_rejects_interruption() {
 
 #[tokio::test]
 async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
-    let (service, store) = test_application_with_coordinator(
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::StartFailed,
         }),
@@ -183,6 +199,14 @@ async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
     )
     .await;
 
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        journal.as_ref(),
+        "session-cleanup-unconfirmed",
+    )
+    .await;
+
     let response = service
         .interrupt_turn(
             &actor,
@@ -202,7 +226,7 @@ async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
     );
     let identity = talos_types::AgentTurnRef::new("session-cleanup-unconfirmed", "turn-existing");
     let before = store.list_agent_turn_events(&identity, 32).await.unwrap();
-    let recovery_error = service
+    let recovered = service
         .recover_timeline(
             &actor,
             talos_types::RecoverTimelineRequest {
@@ -212,8 +236,11 @@ async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
             },
         )
         .await
-        .unwrap_err();
-    assert!(recovery_error.is_code(talos_error::ErrorCode::RunCleanupUnconfirmed));
+        .unwrap();
+    assert_eq!(
+        recovered.active_turn.unwrap().state,
+        talos_agent_api::ActiveTurnState::Cancelling
+    );
     let subscription = service
         .open_timeline_subscription(
             &actor,
@@ -227,9 +254,31 @@ async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
             },
         )
         .await;
-    assert!(
-        matches!(subscription, Err(error) if error.is_code(talos_error::ErrorCode::RunCleanupUnconfirmed))
+    assert!(subscription.is_ok());
+    let retry = service
+        .interrupt_turn(
+            &actor,
+            talos_agent_api::InterruptTurnRequest {
+                identity: identity.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        retry.outcome,
+        AgentInterruptOutcome::CleanupUnconfirmed { task_count: 1 }
     );
+    assert!(service
+        .start_turn(
+            &actor,
+            request_source(),
+            start_turn_request(&identity.session_id, "blocked"),
+            None
+        )
+        .await
+        .err()
+        .unwrap()
+        .is_code(talos_error::ErrorCode::ActiveTurnRunning));
     assert_eq!(
         store.list_agent_turn_events(&identity, 32).await.unwrap(),
         before
@@ -252,7 +301,7 @@ async fn interrupting_a_waiting_action_commits_one_canonical_terminal_fact() {
     };
 
     let cancelled_turn_ids = Arc::new(Mutex::new(Vec::new()));
-    let (service, store) = test_application_with_coordinator(
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::StartFailed,
         }),
@@ -365,6 +414,14 @@ async fn interrupting_a_waiting_action_commits_one_canonical_terminal_fact() {
         .await
         .unwrap();
 
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        journal.as_ref(),
+        &identity.session_id,
+    )
+    .await;
+
     service
         .interrupt_turn(
             &actor,
@@ -375,10 +432,8 @@ async fn interrupting_a_waiting_action_commits_one_canonical_terminal_fact() {
         .await
         .unwrap();
 
-    assert_eq!(
-        *cancelled_turn_ids.lock().unwrap(),
-        vec!["turn-waiting".to_string()]
-    );
+    // The persisted waiting settlement proves there is no live Provider to cancel.
+    assert!(cancelled_turn_ids.lock().unwrap().is_empty());
     assert!(store
         .get_agent_active_turn("session-waiting-cancel")
         .await

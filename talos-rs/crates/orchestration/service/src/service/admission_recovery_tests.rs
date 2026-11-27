@@ -31,11 +31,6 @@ async fn timeline_recovery_does_not_settle_this_process_admission() {
     });
     reached.notified().await;
 
-    let active_before = store
-        .get_agent_active_turn(session_id)
-        .await
-        .unwrap()
-        .expect("admission must be durable before the start permit is consumed");
     let recovered = service
         .recover_timeline(
             &actor,
@@ -48,6 +43,11 @@ async fn timeline_recovery_does_not_settle_this_process_admission() {
         .await
         .expect("recovery should reuse the live admission owner");
 
+    let active_before = store
+        .get_agent_active_turn(session_id)
+        .await
+        .unwrap()
+        .expect("recovery must project the Worker admission while delivery remains blocked");
     assert_eq!(
         recovered.active_turn,
         Some(crate::timeline::mapping::map_timeline_active_turn(

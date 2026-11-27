@@ -53,6 +53,7 @@ impl AgentHarnessRpcAdapter {
         lease: Lease,
         harness: Arc<dyn AgentHarness>,
         execution: AgentRunExecution,
+        session: agent_protocol::AgentSessionContext,
         caller: talos_types::AgentCaller,
         resources: (
             crate::SessionLease,
@@ -112,7 +113,6 @@ impl AgentHarnessRpcAdapter {
             let consumed = tokio::select! {
                 biased;
                 _ = lease.ended() => None,
-                _ = events_tx.closed() => None,
                 result = admission.permit.consume() => Some(result),
             };
             match consumed {
@@ -126,6 +126,24 @@ impl AgentHarnessRpcAdapter {
                             .lock()
                             .expect("Agent cleanup lock poisoned")
                             .get_or_insert(error.clone());
+                    }
+                    if let Ok(Some(state)) =
+                        harness.read_session_execution_state(session.clone()).await
+                    {
+                        if state.active_turn.is_none()
+                            && state.history_cursor.completed_turn_id.as_deref()
+                                != Some(identity.turn_id.as_str())
+                        {
+                            drop(reservation);
+                            adapter.session_owner.release_turn(&identity);
+                            if let Err(cleanup) = adapter.session_gate.reconcile_unadmitted(
+                                &session,
+                                &identity,
+                                state.history_cursor,
+                            ) {
+                                talos_logging::report_error(&cleanup);
+                            }
+                        }
                     }
                     let _ = accepted_tx.send(Err(error));
                     adapter
@@ -150,35 +168,45 @@ impl AgentHarnessRpcAdapter {
             }
             let mut settlement = Box::pin(settlement.recv());
             let mut events_open = true;
+            let mut delivery_open = true;
             loop {
                 tokio::select! {
                     biased;
                     _ = lease.ended() => break,
-                    _ = events_tx.closed() => break,
-                    permit = events_tx.reserve(), if events_open => {
-                        let Ok(permit) = permit else { break };
-                        match tokio::select! {
-                            biased;
-                            _ = lease.ended() => break,
-                            _ = events_tx.closed() => break,
-                            event = events.recv() => event,
-                        } {
-                            Some(event) => permit.send(event),
-                            None => events_open = false,
-                        }
-                    }
-                    result = &mut settlement, if !events_open => {
-                        let result = result.and_then(|settlement| {
-                            if confirms_cleanup(&settlement) { adapter.session_gate.cleaned(&identity)?; }
-                            if matches!(settlement, agent_protocol::AgentRunSettlement::WaitingForInput { .. })
-                                && adapter.session_owner.hold() == crate::SessionHold::Attached {
-                                adapter.session_owner.release_turn(&identity);
+                    event = events.recv(), if events_open => match event {
+                        Some(event) => {
+                            if delivery_open {
+                                tokio::select! {
+                                    biased;
+                                    _ = lease.ended() => break,
+                                    sent = events_tx.send(event) => delivery_open = sent.is_ok(),
+                                }
                             }
-                            Ok(settlement)
-                        });
+                        }
+                        None => events_open = false,
+                    },
+                    result = &mut settlement, if !events_open => {
+                        let result = match result {
+                            Ok(settlement) => {
+                                let confirmed = if confirms_cleanup(&settlement) { adapter.session_gate.cleaned(&identity) } else { Ok(()) };
+                                let confirmed = match (&settlement, confirmed) {
+                                    (agent_protocol::AgentRunSettlement::Finished { .. }, Ok(())) => match harness.read_session_execution_state(session.clone()).await {
+                                        Ok(Some(state)) if state.active_turn.is_none() => adapter.session_gate.settled(&session, &identity, state.history_cursor),
+                                        Ok(_) => Ok(()),
+                                        Err(error) => Err(error),
+                                    },
+                                    (_, result) => result,
+                                };
+                                if confirmed.is_ok() && (matches!(settlement, agent_protocol::AgentRunSettlement::Finished { .. }) || adapter.session_owner.hold() == crate::SessionHold::Attached) { adapter.session_owner.release_turn(&identity); }
+                                confirmed.map(|()| settlement)
+                            }
+                            Err(error) => Err(error),
+                        };
                         adapter.active.lock().expect("Agent active lock poisoned").remove(&(agent_id, identity.session_id, identity.turn_id));
                         drop(reservation);
-                        let _ = settlement_tx.send(result);
+                        if let Err(Err(error) | Ok(agent_protocol::AgentRunSettlement::Finished { result:Err(error),.. })) = settlement_tx.send(result) {
+                            talos_logging::report_error(&error);
+                        }
                         return;
                     }
                 }
@@ -247,7 +275,6 @@ impl AgentHarnessRpcAdapter {
             let consumed = tokio::select! {
                 biased;
                 _ = lease.ended() => return,
-                _ = tx.closed() => return,
                 result = execution.admission.permit.consume() => result,
             };
             if let Err(error) = consumed {
@@ -307,7 +334,7 @@ impl AgentHarnessRpcAdapter {
         Response::new(Box::pin(ReceiverStream::new(rx)))
     }
 
-    fn prepare_run(
+    async fn prepare_run(
         &self,
         auth: &NodeAuth,
         context: &agent_protocol::AgentContext,
@@ -326,11 +353,12 @@ impl AgentHarnessRpcAdapter {
                     !self.session_owner.holds_turn(&identity)
                 })?;
         }
+        let expected = self.durable_state(&context.session).await?.history_cursor;
         let reservation = self.session_gate.reserve(
             &context.session,
             &identity,
             coordinator,
-            &context.history_cursor.clone().unwrap_or_default(),
+            &expected,
             admission,
         )?;
         self.authorize_admission(&lease)?;
@@ -362,9 +390,37 @@ impl AgentHarnessRpcAdapter {
             prepared.lease,
             prepared.harness,
             execution,
+            prepared.session,
             prepared.identity,
             (prepared.ownership, resource_guard, prepared.reservation),
         ))
+    }
+
+    async fn replay_active(
+        &self,
+        auth: &NodeAuth,
+        params: &agent_protocol::AgentRunParams,
+        coordinator: &str,
+    ) -> TalosResult<Option<AgentRunExecution>> {
+        self.authorize(auth)?;
+        let marker = self.session_gate.read(&params.context.session)?;
+        if marker.active_turn.as_ref() != Some(&params.context.identity())
+            || marker.coordinator_id.as_deref() != Some(coordinator)
+        {
+            return Ok(None);
+        }
+        let harness = self.harness(&params.context.session.agent_id)?;
+        let state = harness
+            .read_session_execution_state(params.context.session.clone())
+            .await?;
+        if !state
+            .is_some_and(|state| state.active_turn.as_ref() == Some(&params.context.identity()))
+        {
+            return Ok(None);
+        }
+        // Only the journal can accept this as an exact original command replay.
+        // An unrelated command still fails the underlying Harness reservation.
+        harness.start(params.clone()).await.map(Some)
     }
 
     pub(super) async fn admit_start(
@@ -373,12 +429,17 @@ impl AgentHarnessRpcAdapter {
         params: agent_protocol::AgentRunParams,
         coordinator: &str,
     ) -> TalosResult<AgentRunExecution> {
+        if let Some(execution) = self.replay_active(auth, &params, coordinator).await? {
+            return Ok(execution);
+        }
         let admission = if params.continuation.is_some() {
             super::session_gate::RunAdmission::Continuation
         } else {
             super::session_gate::RunAdmission::NewTurn
         };
-        let prepared = self.prepare_run(auth, &params.context, admission, Ok(coordinator))?;
+        let prepared = self
+            .prepare_run(auth, &params.context, admission, Ok(coordinator))
+            .await?;
         let execution = prepared.harness.start(params).await?;
         self.finish_admission(prepared, execution, None).await
     }
@@ -414,8 +475,23 @@ impl AgentHarnessRpcAdapter {
             super::session_gate::RunAdmission::NewTurn
         };
         let coordinator = self.coordinator_id(first.caller.as_ref(), &params.context.session);
+        let coordinator = coordinator.map_err(status_from_error)?;
+        if let Some(execution) = self
+            .replay_active(&auth, &params, coordinator)
+            .await
+            .map_err(status_from_error)?
+        {
+            let commit = Box::pin(read_commit(
+                inbound,
+                start_commit,
+                self.clone(),
+                lease.clone(),
+            ));
+            return Ok(self.serve_run(commit, lease, Ok(execution)));
+        }
         let prepared = self
-            .prepare_run(&auth, &params.context, admission, coordinator)
+            .prepare_run(&auth, &params.context, admission, Ok(coordinator))
+            .await
             .map_err(status_from_error)?;
         let execution = match prepared.harness.start(params).await {
             Ok(execution) => Ok(self
@@ -439,12 +515,14 @@ impl AgentHarnessRpcAdapter {
         context: agent_protocol::AgentContext,
         coordinator: &str,
     ) -> TalosResult<AgentRunExecution> {
-        let prepared = self.prepare_run(
-            auth,
-            &context,
-            super::session_gate::RunAdmission::NewTurn,
-            Ok(coordinator),
-        )?;
+        let prepared = self
+            .prepare_run(
+                auth,
+                &context,
+                super::session_gate::RunAdmission::NewTurn,
+                Ok(coordinator),
+            )
+            .await?;
         let execution = prepared.harness.compact_session(context).await?;
         self.finish_admission(prepared, execution, None).await
     }
@@ -483,6 +561,7 @@ impl AgentHarnessRpcAdapter {
                 super::session_gate::RunAdmission::NewTurn,
                 coordinator,
             )
+            .await
             .map_err(status_from_error)?;
         let execution = match prepared.harness.compact_session(context).await {
             Ok(execution) => Ok(self
@@ -560,7 +639,7 @@ impl AgentHarnessRpcAdapter {
                 "missing input params",
             )));
         };
-        let params = harness_pb::decode_input_params(params).map_err(status_from_error)?;
+        let params = harness_pb::decode_input_params(*params).map_err(status_from_error)?;
         let peer = first
             .caller
             .as_ref()

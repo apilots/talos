@@ -85,7 +85,7 @@ impl StoreSyncAdapter {
             .storage
             .query(
                 "SELECT DISTINCT r.kind, r.resource_id FROM resource_revisions r
-             WHERE r.kind <> 'computer' AND r.owner_user_id IN (?2, ?3) AND r.kind || ':' || r.resource_id>?4 AND r.revision>COALESCE((
+             WHERE r.kind <> 'computer' AND NOT EXISTS (SELECT 1 FROM sessions legacy WHERE r.kind='session' AND legacy.session_key=r.resource_id AND legacy.execution_architecture='legacy_read_only') AND r.owner_user_id IN (?2, ?3) AND r.kind || ':' || r.resource_id>?4 AND r.revision>COALESCE((
                  SELECT MAX(c.revision) FROM sync_resource_capture c
                  WHERE c.hub_id=?1 AND c.account_id=?2 AND c.kind=r.kind AND c.resource_id=r.resource_id
              ),0)
@@ -158,6 +158,33 @@ impl StoreSyncAdapter {
         resource: &SyncResourceKey,
         row: &Row,
     ) -> TalosResult<bool> {
+        if let SyncResourceKey::Session { session_id } = resource {
+            let existing = tx
+                .query(
+                    "SELECT execution_architecture FROM sessions WHERE session_key=?",
+                    &[session_id],
+                )
+                .await?;
+            if existing.first().is_some_and(|session| {
+                session.get_string("execution_architecture").as_deref() == Some("legacy_read_only")
+            }) {
+                return Ok(false);
+            }
+            if existing.is_empty() {
+                let revision: SessionRevision =
+                    serde_json::from_str(&metadata::text(row, "changes_json")?).map_err(codec)?;
+                let source = revision.after.as_ref().or(revision.before.as_ref());
+                let architecture = source
+                    .and_then(|cut| cut.fields.as_ref())
+                    .and_then(|fields| fields.row().get_string("execution_architecture"));
+                if architecture
+                    .as_deref()
+                    .is_none_or(|kind| kind == "legacy_read_only")
+                {
+                    return Ok(false);
+                }
+            }
+        }
         Ok(metadata::text(row, "execution_node_id")? != "embedded"
             || TalosSync::captures_embedded_resource(
                 tx,

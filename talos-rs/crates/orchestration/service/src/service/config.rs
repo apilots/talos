@@ -1,18 +1,41 @@
-//! Product authorization and node admission; configuration files belong to Worker.
+//! Product policy is local to its owner; node configuration is routed to Worker.
 use super::TalosService;
 use crate::Actor;
 use talos_error::TalosResult;
 use talos_types::*;
 impl TalosService {
+    /// Selects the owning product's configuration backend independently of its Workers.
+    #[must_use]
+    pub fn with_product_config_store(
+        mut self,
+        store: std::sync::Arc<dyn talos_config::ConfigStore>,
+    ) -> Self {
+        self.product_config_store = store;
+        self
+    }
+
     pub async fn get_config(
         &self,
         actor: &Actor,
         mut request: ConfigGetRequest,
     ) -> TalosResult<ConfigResponse> {
+        if request.path == ConfigPath::SessionMessageSendPolicy {
+            if actor.user_id.trim().is_empty() {
+                return Err(talos_error::TalosError::new(
+                    talos_error::ErrorCode::Unauthenticated,
+                    "Product configuration requires an authenticated actor.",
+                ));
+            }
+            self.access.ensure_worker_access(actor, "embedded").await?;
+            return self
+                .product_config_store
+                .load_session_message_send_policy()
+                .map(|policy| ConfigResponse::SessionMessageSendPolicy { policy });
+        }
         let node = request.node_id.take();
         self.worker_environment(actor, node.as_deref())
             .await?
-            .get_config(actor.worker_environment_context(), request)
+            .get_config(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn update_config(
@@ -20,6 +43,18 @@ impl TalosService {
         actor: &Actor,
         mut request: ConfigUpdateRequest,
     ) -> TalosResult<ConfigResponse> {
+        if let ConfigValue::SessionMessageSendPolicy(policy) = &request.value {
+            if actor.user_id.trim().is_empty() {
+                return Err(talos_error::TalosError::new(
+                    talos_error::ErrorCode::Unauthenticated,
+                    "Product configuration requires an authenticated actor.",
+                ));
+            }
+            self.access.ensure_worker_access(actor, "embedded").await?;
+            self.product_config_store
+                .save_session_message_send_policy(*policy)?;
+            return Ok(ConfigResponse::SessionMessageSendPolicy { policy: *policy });
+        }
         let node = request
             .node_id
             .take()
@@ -36,7 +71,7 @@ impl TalosService {
             self.sessions.reject_nonterminal_turns(&node).await?;
         }
         environment
-            .update_config(actor.worker_environment_context(), request)
+            .update_config(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn delete_config(
@@ -53,7 +88,7 @@ impl TalosService {
         let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
-            .delete_config(actor.worker_environment_context(), request)
+            .delete_config(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn reload_config(
@@ -70,7 +105,7 @@ impl TalosService {
         let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
-            .reload_config(actor.worker_environment_context(), request)
+            .reload_config(crate::access::worker_environment_context(actor), request)
             .await
     }
 }

@@ -80,6 +80,7 @@ class Acceptance:
         return session
 
     def goal(self):
+        idle_session = self.seed("management-seed")
         session = self.seed("goal-seed")
         marker = case_marker("goal")
         child = self.launch("goal-start", ["goal", "--session", session, "start",
@@ -89,6 +90,20 @@ class Acceptance:
         self.evidence.append({"case": "goal start model gate keeps CLI alive",
                               "session": session, "createdObject": reference,
                               "pid": child.pid, "alive": True})
+        assert session in self.run("live-session-info", ["session", "info", session])
+        assert session in self.run("live-session-list", ["session", "list"])
+        assert "Talos runtime accessible" in self.run("live-status", ["status"])
+        models = self.value("live-models", ["models", "--format", "json"])
+        assert models, "the product assembly must retain the local model catalog"
+        model = next(model for model in models if model["provider"] == "automation-fixture")
+        model_key = model["provider"] + ":" + model["id"]
+        changed = self.run("live-set-model", ["session", "set-model", idle_session, model_key])
+        assert idle_session in changed and model_key in changed
+        assert child.poll() is None, "management commands must not disturb the live executor"
+        self.evidence.append({"case": "concurrent product CLI queries and idle Session configuration",
+                              "liveSession": session, "idleSession": idle_session,
+                              "commands": ["session info", "session list", "status", "models", "session set-model"],
+                              "executorAlive": True})
         self.release(marker)
         self.wait_exit("goal-start", child)
         state = self.value("goal-complete", ["goal", "--session", session])

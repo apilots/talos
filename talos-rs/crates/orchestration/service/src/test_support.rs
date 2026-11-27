@@ -222,12 +222,7 @@ impl AgentCoordinator for EnvironmentCoordinator {
     ) -> TalosResult<Option<agent_protocol::SessionExecutionState>> {
         self.delegate.read_session_execution_state(context).await
     }
-    async fn commit_session_execution_state(
-        &self,
-        params: agent_protocol::CommitSessionExecutionStateParams,
-    ) -> TalosResult<()> {
-        self.delegate.commit_session_execution_state(params).await
-    }
+
     async fn worker_environment(
         &self,
         _node_id: &str,
@@ -256,6 +251,25 @@ impl AgentCoordinator for EnvironmentCoordinator {
         context: &AgentSessionContext,
     ) -> TalosResult<std::sync::Arc<dyn talos_agent::AgentHarness>> {
         self.delegate.session_harness(context).await
+    }
+    async fn read_session_events(
+        &self,
+        params: agent_protocol::AgentSessionEventsParams,
+    ) -> TalosResult<agent_protocol::AgentSessionEventsResult> {
+        self.delegate.read_session_events(params).await
+    }
+    async fn read_execution_payload(
+        &self,
+        params: agent_protocol::AgentExecutionPayloadParams,
+    ) -> TalosResult<agent_protocol::AgentExecutionPayloadResult> {
+        self.delegate.read_execution_payload(params).await
+    }
+    async fn retire_session(
+        &self,
+        context: AgentSessionContext,
+        expected: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate.retire_session(context, expected).await
     }
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         self.delegate.start(params).await

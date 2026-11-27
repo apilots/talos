@@ -178,13 +178,37 @@ export class TalosClient {
     private readonly streamAdapter: StreamAdapter,
     private readonly baseUrl: string,
     private readonly desktopStream?: DesktopStreamAdapter,
+    private readonly computerId?: string,
+    private readonly routeRoot?: TalosClient,
   ) {}
+
+  /** Scope every product request and stream to the authoritative Server route. */
+  forComputer = (computerId: string): TalosClient => {
+    if (!computerId.trim() || computerId.length > 128) throw new Error("Invalid Computer identity.");
+    if (this.routeRoot) return this.routeRoot.forComputer(computerId);
+    const headers = (value?: Record<string, string>) => ({ ...value, "x-talos-computer": computerId });
+    return new TalosClient({
+      request: (url, options) => this.http.request(url, { ...options, headers: headers(options?.headers) }),
+    }, {
+      stream: (url, options, onMessage, onError) => this.streamAdapter.stream(
+        url, { ...options, headers: headers(options.headers) }, onMessage, onError,
+      ),
+    }, this.baseUrl, this.desktopStream, computerId, this);
+  };
 
   private url(path: string): string {
     return `${this.baseUrl.replace(/\/$/, "")}${path}`;
   }
 
+  private withComputer<T extends object>(request: T): T & { nodeId?: string | null } {
+    if (!this.computerId) return request;
+    return { ...request, nodeId: (request as { nodeId?: string | null }).nodeId ?? this.computerId };
+  }
+
   private urlWithQuery<T extends object>(path: string, query?: T) {
+    if (this.computerId && /^(?:\/v1\/(?:llm|models|projects|sessions)$|\/v1\/(?:config|skills|mcp|plugin|fs|memory|workspace)\/|\/v1\/skills$)/.test(path)) {
+      query = this.withComputer(query ?? {} as T);
+    }
     if (!query) {
       return this.url(path);
     }
@@ -205,6 +229,10 @@ export class TalosClient {
     readTool: (request: TrajectoryAPI.TrajectoryReadToolRequest, signal?: AbortSignal): Promise<TrajectoryAPI.TrajectoryReadToolResponse> => this.http.request(this.url("/v1/trajectory/tool/read"), { method: "POST", body: JSON.stringify(request), signal }),
     readPayload: (request: TrajectoryAPI.TrajectoryReadPayloadRequest, signal?: AbortSignal): Promise<TrajectoryAPI.TrajectoryReadPayloadResponse> => this.http.request(this.url("/v1/trajectory/payload/read"), { method: "POST", body: JSON.stringify(request), signal }),
   });
+  capabilities = {
+    read: (): Promise<AutomationProtocol.ServerCapabilities> => this.http.request(this.url("/v1/capabilities")),
+  };
+
   sync = {
     metrics: (): Promise<SyncMetricsResponse> => this.http.request(this.url("/v1/sync/metrics")),
     status: (): Promise<SyncStatusResponse> => this.http.request(this.url("/v1/sync/status")),
@@ -284,18 +312,18 @@ export class TalosClient {
     read: (request: SkillsReadRequest): Promise<SkillsReadResponse> =>
       this.http.request<SkillsReadResponse>(this.url("/v1/skills/read"), {
         method: "POST",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
       }),
     resolve: (request: SkillsResolveRequest): Promise<SkillsResolveResponse> =>
       this.http.request<SkillsResolveResponse>(this.url("/v1/skills/resolve"), {
         method: "POST",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
       }),
   };
 
   desktop = {
     open: (request: DesktopOpenRequest): Promise<DesktopViewGrant> =>
-      this.http.request<DesktopViewGrant>(this.url("/v1/desktop/open"), { method: "POST", body: JSON.stringify(request) }),
+      this.http.request<DesktopViewGrant>(this.url("/v1/desktop/open"), { method: "POST", body: JSON.stringify(this.withComputer(request)) }),
     connect: (grant: DesktopViewGrant): WebSocket => {
       if (!this.desktopStream) throw new Error("Desktop media adapter is unavailable.");
       return this.desktopStream.connect(grant);
@@ -304,14 +332,14 @@ export class TalosClient {
 
   browser = {
     operate: (request: BrowserRequest): Promise<BrowserSnapshot> =>
-      this.http.request<BrowserSnapshot>(this.url("/v1/browser"), { method: "POST", body: JSON.stringify(request) }),
+      this.http.request<BrowserSnapshot>(this.url("/v1/browser"), { method: "POST", body: JSON.stringify(this.withComputer(request)) }),
   };
 
   mcp = {
-    import: (request: McpServerImportRequest): Promise<PluginInstallResponse> => this.http.request<PluginInstallResponse>(this.url("/v1/mcp/servers/import"), { method: "POST", body: JSON.stringify(request) }),
-    startAuthentication: (request: McpAuthenticationStartRequest): Promise<McpAuthenticationStartResponse> => this.http.request<McpAuthenticationStartResponse>(this.url("/v1/mcp/servers/auth/start"), { method: "POST", body: JSON.stringify(request) }),
-    readAuthentication: (request: McpAuthenticationReadRequest): Promise<McpAuthenticationResponse> => this.http.request<McpAuthenticationResponse>(this.url("/v1/mcp/servers/auth/read"), { method: "POST", body: JSON.stringify(request) }),
-    updateCredentials: (request: McpCredentialsUpdateRequest): Promise<McpAuthenticationResponse> => this.http.request<McpAuthenticationResponse>(this.url("/v1/mcp/servers/credentials"), { method: "PUT", body: JSON.stringify(request) }),
+    import: (request: McpServerImportRequest): Promise<PluginInstallResponse> => this.http.request<PluginInstallResponse>(this.url("/v1/mcp/servers/import"), { method: "POST", body: JSON.stringify(this.withComputer(request)) }),
+    startAuthentication: (request: McpAuthenticationStartRequest): Promise<McpAuthenticationStartResponse> => this.http.request<McpAuthenticationStartResponse>(this.url("/v1/mcp/servers/auth/start"), { method: "POST", body: JSON.stringify(this.withComputer(request)) }),
+    readAuthentication: (request: McpAuthenticationReadRequest): Promise<McpAuthenticationResponse> => this.http.request<McpAuthenticationResponse>(this.url("/v1/mcp/servers/auth/read"), { method: "POST", body: JSON.stringify(this.withComputer(request)) }),
+    updateCredentials: (request: McpCredentialsUpdateRequest): Promise<McpAuthenticationResponse> => this.http.request<McpAuthenticationResponse>(this.url("/v1/mcp/servers/credentials"), { method: "PUT", body: JSON.stringify(this.withComputer(request)) }),
 
     list: (request: McpServerListRequest = {}): Promise<McpServerListResponse> =>
       this.http.request<McpServerListResponse>(this.urlWithQuery("/v1/mcp/servers", request)),
@@ -321,42 +349,42 @@ export class TalosClient {
     search: (request: PluginSearchRequest): Promise<PluginSearchResponse> =>
       this.http.request<PluginSearchResponse>(this.url("/v1/plugin/search"), {
         method: "POST",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
       }),
     list: (request: PluginListRequest): Promise<PluginListResponse> =>
       this.http.request<PluginListResponse>(this.url("/v1/plugin/list"), {
         method: "POST",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
       }),
     read: (request: PluginReadRequest): Promise<PluginReadResponse> =>
       this.http.request<PluginReadResponse>(this.url("/v1/plugin/read"), {
         method: "POST",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
       }),
     install: (request: PluginInstallRequest): Promise<PluginInstallResponse> =>
       this.http.request<PluginInstallResponse>(this.url("/v1/plugin/install"), {
         method: "POST",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
       }),
     update: (request: PluginUpdateRequest): Promise<PluginUpdateResponse> =>
       this.http.request<PluginUpdateResponse>(this.url("/v1/plugin/update"), {
         method: "POST",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
       }),
     uninstall: (request: PluginUninstallRequest): Promise<PluginUninstallResponse> =>
       this.http.request<PluginUninstallResponse>(this.url("/v1/plugin/uninstall"), {
         method: "POST",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
       }),
     enable: (request: PluginEnableRequest): Promise<PluginEnableResponse> =>
       this.http.request<PluginEnableResponse>(this.url("/v1/plugin/enable"), {
         method: "POST",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
       }),
     disable: (request: PluginDisableRequest): Promise<PluginDisableResponse> =>
       this.http.request<PluginDisableResponse>(this.url("/v1/plugin/disable"), {
         method: "POST",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
     }),
     sources: {
       list: (query: PluginSourceListRequest = {}): Promise<PluginSourceListResponse> =>
@@ -364,17 +392,17 @@ export class TalosClient {
       add: (request: PluginSourceAddRequest): Promise<PluginSourceAddResponse> =>
         this.http.request<PluginSourceAddResponse>(this.url("/v1/plugin/sources"), {
           method: "POST",
-          body: JSON.stringify(request),
+          body: JSON.stringify(this.withComputer(request)),
         }),
       refresh: (request: PluginSourceRefreshRequest): Promise<PluginSourceRefreshResponse> =>
         this.http.request<PluginSourceRefreshResponse>(this.url("/v1/plugin/sources/refresh"), {
           method: "POST",
-          body: JSON.stringify(request),
+          body: JSON.stringify(this.withComputer(request)),
         }),
       remove: (request: PluginSourceRemoveRequest): Promise<PluginSourceRemoveResponse> =>
         this.http.request<PluginSourceRemoveResponse>(this.url("/v1/plugin/sources/remove"), {
           method: "POST",
-          body: JSON.stringify(request),
+          body: JSON.stringify(this.withComputer(request)),
         }),
     },
   };
@@ -534,7 +562,7 @@ export class TalosClient {
     create: (body: ProjectCreateRequest): Promise<ProjectCreateResponse> =>
       this.http.request<ProjectCreateResponse>(this.url("/v1/projects"), {
         method: "POST",
-        body: JSON.stringify(body),
+        body: JSON.stringify(this.withComputer(body)),
       }),
     patch: (request: ProjectPatchRequest): Promise<ProjectPatchResponse> =>
       this.http.request<ProjectPatchResponse>(this.url(`/v1/projects/${request.project_id}`), {
@@ -645,7 +673,7 @@ export class TalosClient {
       create: (body: FsDirectoryCreateRequest): Promise<FsDirectoryCreateResponse> =>
         this.http.request<FsDirectoryCreateResponse>(this.url("/v1/fs/directory"), {
           method: "POST",
-          body: JSON.stringify(body),
+          body: JSON.stringify(this.withComputer(body)),
         }),
     },
   };
@@ -660,7 +688,7 @@ export class TalosClient {
     put: (request: MemoryFileWriteRequest) =>
       this.http.request<MemoryFileWriteResponse>(this.url(`/v1/memory/files/${request.date}`), {
         method: "PUT",
-        body: JSON.stringify(request),
+        body: JSON.stringify(this.withComputer(request)),
       }),
     search: async (
       query: MemorySearchRequest,
@@ -756,7 +784,7 @@ export class TalosClient {
           "idempotency-key": idempotencyKey,
         },
         body: JSON.stringify({
-          ...request,
+          ...this.withComputer(request),
           clientRequestId: idempotencyKey,
         }),
       }),

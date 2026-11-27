@@ -3,7 +3,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "auth.proto",
         "automation.proto",
         "desktop.proto",
-        "coordinator.proto",
         "memory.proto",
         "node.proto",
         "connection.proto",
@@ -46,6 +45,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".talos.agent.v1.ReadPluginResponse.result")
         .boxed(".talos.agent.v1.RunResponse.result")
         .boxed(".talos.agent.v1.StartParams.body")
+        .boxed(".talos.agent.v1.SubmitInputParams.body")
+        .boxed(".talos.agent.v1.AgentExecutionSettlement.state")
         .boxed(".talos.agent.v1.UpdateConfigResponse.result")
         .boxed(".talos.agent.v1.UpdatePluginResponse.result")
         .compile_protos(
@@ -53,7 +54,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/auth.proto",
                 "proto/automation.proto",
                 "proto/desktop.proto",
-                "proto/coordinator.proto",
                 "proto/memory.proto",
                 "proto/node.proto",
                 "proto/connection.proto",

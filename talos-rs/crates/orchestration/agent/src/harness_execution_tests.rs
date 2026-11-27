@@ -153,6 +153,7 @@ async fn running_input_requires_dynamic_input_before_delivery() {
 
     let error = match harness
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: TEST_AGENT_ID.to_string(),
             identity: identity.clone(),
             input: user_message(&identity, "message-2"),
@@ -198,6 +199,7 @@ async fn interrupt_wins_over_pending_input_delivery_failure() {
 
     let admission = harness
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: TEST_AGENT_ID.to_string(),
             identity: identity.clone(),
             input: user_message(&identity, "message-2"),

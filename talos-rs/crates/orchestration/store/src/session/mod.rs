@@ -1,3 +1,7 @@
+mod worker_projection;
+pub use worker_projection::{
+    WorkerProjectionCommit, WorkerProjectionParams, WorkerSettlementRecord,
+};
 pub mod agent_execution;
 #[path = "store/local_registration.rs"]
 mod local_registration;

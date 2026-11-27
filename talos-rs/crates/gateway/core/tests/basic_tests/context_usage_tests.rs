@@ -9,7 +9,6 @@ use talos_agent_provider_kernel::{
     empty_skill_roots_resolver, FileKernelSessionArtifactStore, KernelAgentProvider,
     KernelAgentProviderParams,
 };
-use talos_coordinator::CoordinatorImpl;
 use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelBlockCompleted,
@@ -17,7 +16,6 @@ use talos_llm_provider::{
     ReasoningOutput, Usage,
 };
 use talos_memory::{DreamMemoryFormationStore, MemoryScope};
-use talos_store::session::SessionStore;
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
 use talos_types::{ModelRef, RecoverTimelineRequest, SessionActiveTurnRequest, SessionGetRequest};
@@ -25,8 +23,6 @@ use tokio::sync::mpsc;
 
 const AGENT_ID: &str = "context-usage-agent";
 const SESSION_ID: &str = "context-usage-session";
-
-struct StaticRouter;
 
 struct EmptyAttachmentReader;
 
@@ -42,57 +38,45 @@ impl AttachmentReader for EmptyAttachmentReader {
     }
 }
 
-struct SessionMemoryProgress {
-    sessions: Arc<dyn SessionStore>,
-}
-
-#[async_trait]
-impl KernelMemoryProgressStore for SessionMemoryProgress {
-    async fn processed_until_event_seq(&self, session_id: &str) -> TalosResult<u64> {
-        self.sessions
-            .get_session_record(session_id)
-            .await?
-            .map(|record| record.memory_processed_until_event_seq)
-            .ok_or_else(|| {
-                talos_error::TalosError::new(
-                    talos_error::ErrorCode::ResourceNotFound,
-                    session_id.to_string(),
-                )
-            })
+/// This fixture intentionally executes exactly one fresh Turn; it is not a history implementation.
+struct FreshWorkerHistory(Arc<talos_store::execution::WorkerExecutionStore>);
+impl talos_agent::SessionHistoryReader for FreshWorkerHistory {
+    fn append_supplement(
+        &self,
+        supplement: talos_agent_api::trajectory::SessionHistorySupplement,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<()>> {
+        Box::pin(async move { self.0.append_supplement(supplement).await })
     }
-
+    fn read(
+        &self,
+        params: talos_agent::SessionHistoryReadParams,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<Vec<talos_agent_api::SessionHistoryTurn>>> {
+        Box::pin(async move {
+            assert!(
+                self.0
+                    .terminal_events(&params.session_id, None, 1)
+                    .await?
+                    .is_empty(),
+                "The context usage fixture must not read a previous Turn."
+            );
+            Ok(Vec::new())
+        })
+    }
+}
+#[async_trait]
+impl KernelMemoryProgressStore for FreshWorkerHistory {
+    async fn processed_until_event_seq(&self, session_id: &str) -> TalosResult<u64> {
+        self.0.memory_progress(session_id).await
+    }
     async fn advance_processed_until_event_seq(
         &self,
         session_id: &str,
-        expected_until_seq: u64,
-        next_until_seq: u64,
+        expected: u64,
+        next: u64,
     ) -> TalosResult<()> {
-        self.sessions
-            .advance_memory_processed_until_event_seq(
-                session_id,
-                expected_until_seq,
-                next_until_seq,
-            )
+        self.0
+            .advance_memory_progress(session_id, expected, next)
             .await
-    }
-}
-
-#[async_trait]
-impl talos_router::Router for StaticRouter {
-    async fn route(&self, _channel: &str, _user_id: &str) -> TalosResult<Option<String>> {
-        Ok(Some(AGENT_ID.to_string()))
-    }
-
-    async fn add_binding(&self, _binding: talos_router::Binding) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn remove_binding(&self, _id: &str) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn list_bindings(&self) -> TalosResult<Vec<talos_router::Binding>> {
-        Ok(Vec::new())
     }
 }
 
@@ -260,7 +244,10 @@ impl DreamMemoryFormationStore for NoopMemoryWriter {
     }
 }
 
-fn build_agent(config: &TalosConfig, store: Arc<DatabaseSessionStore>) -> Arc<dyn AgentHarness> {
+fn build_agent(
+    config: &TalosConfig,
+    journal: Arc<talos_store::execution::WorkerExecutionStore>,
+) -> Arc<dyn AgentHarness> {
     let registry = Arc::new(ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec![
         "echo_usage",
     ])));
@@ -269,9 +256,7 @@ fn build_agent(config: &TalosConfig, store: Arc<DatabaseSessionStore>) -> Arc<dy
         provider: Arc::new(TwoRoundProvider::default()),
     });
     let user_workspace_memory = Arc::new(talos_service::UserWorkspaceMemoryService::new());
-    let session_history_reader = Arc::new(talos_service::SessionHistoryService::new(Arc::new(
-        talos_service::TimelineEventService::new(store.clone()),
-    )));
+    let history = Arc::new(FreshWorkerHistory(journal));
     let provider = KernelAgentProvider::new(KernelAgentProviderParams {
         agent_id: AGENT_ID.to_string(),
         name: "Context Usage Agent".to_string(),
@@ -281,8 +266,8 @@ fn build_agent(config: &TalosConfig, store: Arc<DatabaseSessionStore>) -> Arc<dy
         kernel_config: config.agent.kernel.clone(),
         skill_roots_resolver: empty_skill_roots_resolver(),
         session_artifact_store: Arc::new(FileKernelSessionArtifactStore),
-        session_history_reader,
-        memory_progress_store: Arc::new(SessionMemoryProgress { sessions: store }),
+        session_history_reader: history.clone(),
+        memory_progress_store: history,
         dream_memory_store: Arc::new(NoopMemoryWriter),
         user_workspace_memory_reader: user_workspace_memory,
         attachment_reader: Arc::new(EmptyAttachmentReader),
@@ -305,30 +290,16 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
     config.agent.kernel.prompt.window.reserved_output_tokens =
         talos_config::ReservedOutputPolicy::Fixed { tokens: 32 };
     let (storage, store) = test_session_storage().await;
-    let agent = build_agent(&config, store.clone());
-    let node_store = Arc::new(talos_store::node::DatabaseAgentNodeStore::new(&storage));
-    talos_service::AgentNodeService::new(node_store.clone())
-        .register_embedded(true)
-        .await
-        .unwrap();
-    let coordinator = Arc::new(CoordinatorImpl::new(
-        Arc::new(StaticRouter),
-        store.clone(),
-        node_store,
-    ));
-    coordinator
-        .register_environment(
-            "embedded".into(),
-            Arc::new(talos_service::WorkerEnvironmentService::new(
-                Arc::new(std::sync::RwLock::new(config.clone())),
-                Some(std::env::temp_dir()),
-            )),
+    let journal = Arc::new(
+        talos_store::execution::WorkerExecutionStore::open(
+            &workspace_root.path().join("worker.sqlite"),
         )
-        .await;
-    coordinator
-        .register_agent("embedded".into(), AGENT_ID.to_string(), agent)
         .await
-        .expect("integration agent should register");
+        .unwrap(),
+    );
+    let agent = build_agent(&config, journal.clone());
+    let coordinator =
+        test_worker_coordinator(&config, &storage, store.clone(), AGENT_ID, agent, journal).await;
     let gateway = test_gateway_with_coordinator(
         config,
         storage,

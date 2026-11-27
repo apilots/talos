@@ -5,7 +5,7 @@ use std::{fs, net::SocketAddr};
 
 use agent_client::RemoteAgentClient;
 use agent_pb as pb;
-use agent_protocol::{error_pb, node_pb, NodeAuth};
+use agent_protocol::{error_pb, node_pb};
 use talos_auth::AuthService;
 use talos_config::AgentNodeControlConfig;
 use talos_coordinator::CoordinatorImpl;
@@ -14,8 +14,6 @@ use talos_service::{Actor, AgentNodeService};
 use talos_tools::{AgentControl, AutomationControl};
 use tokio_util::sync::CancellationToken;
 
-#[cfg(test)]
-use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
 #[path = "agent_node_resources_rpc.rs"]
@@ -25,21 +23,11 @@ pub use resources::{
 };
 #[path = "agent_node_connect.rs"]
 mod connect;
-#[path = "agent_coordinator_rpc.rs"]
-mod coordinator_rpc;
 #[path = "agent_desktop_rpc.rs"]
 mod desktop;
 pub(crate) use desktop::relay::{guard_transport, DesktopRelay};
-#[path = "agent_peer_file_rpc.rs"]
-mod peer_file_rpc;
-#[path = "agent_resource_routing.rs"]
-mod resource_routing;
-use resource_routing::ResourceRoutes;
-#[path = "agent_resource_dispatch.rs"]
-mod resource_dispatch;
-pub(crate) use resource_dispatch::CoordinatorResources;
 
-/// Original resource owners shared by TLS and protected loopback listeners.
+/// Existing resource owners shared by TLS ingress and in-process Worker bindings.
 pub struct NodeResourceServices {
     pub session_data: NodeSessionDataRpc,
     pub agent_control: Arc<dyn AgentControl>,
@@ -100,10 +88,7 @@ impl NodeRpcServer {
             coordinator_id: uuid::Uuid::new_v4().to_string(),
             coordinator,
             connections: Arc::default(),
-            resource_routes: ResourceRoutes::default(),
         };
-        let session_data = session_data.with_routes(remote_publisher.resource_routes.clone());
-        let tool_images = tool_images.with_routes(remote_publisher.resource_routes.clone());
         let subagent_control = NodeSubagentControlRpc::new(session_data.clone(), agent_control);
         let automation_control =
             NodeAutomationControlRpc::new(session_data.clone(), automation_control);
@@ -154,17 +139,6 @@ impl NodeRpcServer {
         )
         .max_decoding_message_size(65 * 1024)
         .max_encoding_message_size(65 * 1024);
-        let peer_files = pb::agent_peer_file_rpc_server::AgentPeerFileRpcServer::new(
-            peer_file_rpc::PeerFileRpc {
-                management: management.clone(),
-                routes: self.remote_publisher.resource_routes.clone(),
-            },
-        );
-        let callers = coordinator_rpc::CoordinatorRpc::new(
-            management.clone(),
-            self.remote_publisher.clone(),
-            shutdown.clone(),
-        );
         let management =
             pb::agent_node_management_server::AgentNodeManagementServer::new(management);
         let session_data =
@@ -182,8 +156,6 @@ impl NodeRpcServer {
         let mut routes = tonic::service::Routes::new(control)
             .add_service(management)
             .add_service(desktop)
-            .add_service(pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(callers))
-            .add_service(peer_files)
             .add_service(session_data)
             .add_service(subagent_control)
             .add_service(automation_control)
@@ -280,7 +252,6 @@ pub struct RemoteNodePublisher {
     coordinator: Arc<CoordinatorImpl>,
     // Live transport handles belong to the existing publication owner; no
     // additional persisted registry or execution ledger is introduced.
-    resource_routes: ResourceRoutes,
     connections: Arc<
         tokio::sync::Mutex<
             std::collections::HashMap<String, Arc<agent_client::AgentEnvironmentClient>>,

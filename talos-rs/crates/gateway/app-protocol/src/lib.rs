@@ -2,6 +2,7 @@ pub mod errors;
 pub mod events;
 pub mod jsonrpc;
 pub mod notifications;
+pub mod relay;
 pub mod requests;
 pub mod schema;
 pub mod server_requests;

@@ -29,6 +29,10 @@ impl MockSessionStore {
 
 #[async_trait]
 impl SessionStore for MockSessionStore {
+    async fn ensure_worker_execution_session(&self, _session_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn set_generated_title(
         &self,
         _identity: &talos_agent_api::AgentTurnRef,

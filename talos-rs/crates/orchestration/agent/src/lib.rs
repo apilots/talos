@@ -52,3 +52,6 @@ where
 {
     Arc::new(Harness::new(agent_id, provider))
 }
+
+mod local_execution;
+pub use local_execution::{LocalExecutionHarness, LocalTerminalObserver};

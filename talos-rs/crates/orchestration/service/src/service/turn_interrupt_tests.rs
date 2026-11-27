@@ -72,7 +72,7 @@ async fn interrupt_turn_unknown_session_returns_not_found() {
 #[tokio::test]
 async fn interrupt_turn_finalizes_orphaned_canonical_turn() {
     let cancelled_turn_ids = Arc::new(Mutex::new(Vec::new()));
-    let (service, store) = test_application_with_coordinator(
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::StartFailed,
         }),
@@ -103,6 +103,14 @@ async fn interrupt_turn_finalizes_orphaned_canonical_turn() {
     )
     .unwrap();
     crate::test_support::commit_test_running_turn(store.as_ref(), identity.clone(), message).await;
+
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        journal.as_ref(),
+        &identity.session_id,
+    )
+    .await;
 
     let response = service
         .interrupt_turn(

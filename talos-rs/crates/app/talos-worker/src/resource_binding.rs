@@ -10,6 +10,38 @@ use talos_agent_provider_kernel::{KernelExecutionResources, KernelResourceResolv
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
 type Key = (String, String);
+#[derive(Clone)]
+struct BoundResources {
+    invocation_id: String,
+    node_id: String,
+    product: TalosWorkerResources,
+}
+
+struct InvocationHistory {
+    history: Arc<crate::execution_history::WorkerExecutionHistory>,
+    node_id: String,
+}
+impl talos_agent::SessionHistoryReader for InvocationHistory {
+    fn source_node_id(&self) -> Option<String> {
+        Some(self.node_id.clone())
+    }
+    fn read(
+        &self,
+        params: talos_agent::SessionHistoryReadParams,
+    ) -> talos_agent::AgentFuture<
+        '_,
+        talos_agent::AgentResult<Vec<talos_agent_api::SessionHistoryTurn>>,
+    > {
+        self.history.read(params)
+    }
+    fn append_supplement(
+        &self,
+        supplement: talos_agent_api::trajectory::SessionHistorySupplement,
+    ) -> talos_agent::AgentFuture<'_, talos_agent::AgentResult<()>> {
+        self.history.append_supplement(supplement)
+    }
+}
+
 type LocalResolver = Arc<
     dyn Fn(
             AgentSessionContext,
@@ -19,13 +51,15 @@ type LocalResolver = Arc<
 >;
 #[derive(Clone)]
 pub(crate) struct ResourceBindings {
-    active: Arc<RwLock<HashMap<Key, (String, TalosWorkerResources)>>>,
+    history: Arc<crate::execution_history::WorkerExecutionHistory>,
+    active: Arc<RwLock<HashMap<Key, BoundResources>>>,
     local: Arc<RwLock<Option<LocalResolver>>>,
     remote: Arc<RwLock<Option<AgentSessionDataClient>>>,
 }
 impl ResourceBindings {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(history: Arc<crate::execution_history::WorkerExecutionHistory>) -> Self {
         Self {
+            history,
             active: Arc::default(),
             local: Arc::default(),
             remote: Arc::default(),
@@ -39,16 +73,19 @@ impl ResourceBindings {
                 .read()
                 .expect("Worker resource lock poisoned")
                 .get(&(context.agent_id.clone(), context.session_id.clone()))
-                .map(|(_, resources)| resources.clone());
+                .cloned();
             Ok(resources.map(|resources| KernelExecutionResources {
-                session_history_reader: resources.session_history_reader,
-                memory_progress_store: resources.memory_progress_store,
-                attachment_reader: resources.attachment_reader,
+                session_history_reader: Arc::new(InvocationHistory {
+                    history: bindings.history.clone(),
+                    node_id: resources.node_id,
+                }),
+                memory_progress_store: bindings.history.clone(),
+                attachment_reader: resources.product.attachment_reader,
                 tool_executor: Arc::new(ResourceTools {
                     registry: tools.clone(),
-                    images: resources.tool_image_store,
-                    control: resources.agent_control,
-                    automation: resources.automation_control,
+                    images: resources.product.tool_image_store,
+                    control: resources.product.agent_control,
+                    automation: resources.product.automation_control,
                 }),
             }))
         })
@@ -64,7 +101,9 @@ impl ResourceBindings {
             .read()
             .expect("Worker resource lock poisoned")
             .clone();
-        let resources = if let Some(caller) = caller {
+        let resources = if let Some(local) = local {
+            local(context.clone()).await?
+        } else {
             let remote = self
                 .remote
                 .read()
@@ -73,17 +112,11 @@ impl ResourceBindings {
                 .ok_or_else(|| {
                     TalosError::new(
                         ErrorCode::ServiceUnavailable,
-                        "Worker resource Gateway is unavailable",
+                        "Worker product resources are unavailable.",
                     )
                 })?;
-            let client = remote.for_invocation(auth.clone(), context, Some(caller.clone()))?;
+            let client = remote.for_invocation(auth.clone(), context, caller.cloned())?;
             client_resources(client)
-        } else if let Some(local) = local {
-            local(context.clone()).await?
-        } else {
-            // The original standalone registration owner supplies default ports
-            // before its listener is published. No remote failure falls back here.
-            return Ok(Box::new(()));
         };
         let key = (context.agent_id.clone(), context.session_id.clone());
         let id = uuid::Uuid::new_v4().to_string();
@@ -94,7 +127,14 @@ impl ResourceBindings {
                 "Session resource invocation is already active",
             ));
         }
-        active.insert(key.clone(), (id.clone(), resources));
+        active.insert(
+            key.clone(),
+            BoundResources {
+                invocation_id: id.clone(),
+                node_id: auth.node_id.clone(),
+                product: resources,
+            },
+        );
         Ok(Box::new(ResourceGuard {
             active: self.active.clone(),
             key,
@@ -103,14 +143,17 @@ impl ResourceBindings {
     }
 }
 struct ResourceGuard {
-    active: Arc<RwLock<HashMap<Key, (String, TalosWorkerResources)>>>,
+    active: Arc<RwLock<HashMap<Key, BoundResources>>>,
     key: Key,
     id: String,
 }
 impl Drop for ResourceGuard {
     fn drop(&mut self) {
         let mut active = self.active.write().expect("Worker resource lock poisoned");
-        if active.get(&self.key).is_some_and(|(id, _)| id == &self.id) {
+        if active
+            .get(&self.key)
+            .is_some_and(|resources| resources.invocation_id == self.id)
+        {
             active.remove(&self.key);
         }
     }
@@ -140,10 +183,15 @@ impl TalosWorker {
 
     pub(crate) fn resource_binder(&self) -> talos_agent::AgentInvocationResourceBinder {
         let resources = self.resource_bindings.clone();
+        let namespace = self._execution_namespace.clone();
         Arc::new(move |auth, session, caller| {
             let resources = resources.clone();
+            let namespace = namespace.clone();
             let (auth, session, caller) = (auth.clone(), session.clone(), caller.cloned());
-            Box::pin(async move { resources.bind(&auth, &session, caller.as_ref()).await })
+            Box::pin(async move {
+                let resources = resources.bind(&auth, &session, caller.as_ref()).await?;
+                Ok(Box::new((resources, namespace)) as Box<dyn Send>)
+            })
         })
     }
     /// Install the original product ports with their persisted invocation-scope
@@ -174,11 +222,42 @@ impl TalosWorker {
 fn client_resources(client: AgentSessionDataClient) -> TalosWorkerResources {
     let shared = Arc::new(client.clone());
     TalosWorkerResources {
-        session_history_reader: shared.clone(),
-        memory_progress_store: Arc::new(crate::standalone::RemoteMemoryProgress(client)),
         attachment_reader: shared.clone(),
         tool_image_store: shared.clone(),
         agent_control: Some(shared.clone()),
         automation_control: Some(shared),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use talos_agent::SessionHistoryReader;
+
+    #[tokio::test]
+    async fn invocation_history_keeps_each_authenticated_source_identity_on_one_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            talos_store::execution::WorkerExecutionStore::open(
+                &directory.path().join("worker.sqlite"),
+            )
+            .await
+            .unwrap(),
+        );
+        let history = Arc::new(crate::execution_history::WorkerExecutionHistory(store));
+        let embedded = InvocationHistory {
+            history: history.clone(),
+            node_id: "embedded".into(),
+        };
+        let registered = InvocationHistory {
+            history,
+            node_id: "registered-worker".into(),
+        };
+        assert_eq!(embedded.source_node_id().as_deref(), Some("embedded"));
+        assert_eq!(
+            registered.source_node_id().as_deref(),
+            Some("registered-worker")
+        );
+        assert!(Arc::ptr_eq(&embedded.history, &registered.history));
     }
 }

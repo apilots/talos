@@ -11,24 +11,10 @@ impl TalosService {
         turn_id: &str,
     ) -> ServiceResult<AgentInterruptOutcome> {
         let session = self.access.load_session(actor, session_id).await?;
-        if let Some(reply) = self
-            .forward_active_command(
-                actor,
-                &session,
-                agent_protocol::ActiveSessionCommand::Interrupt(InterruptTurnRequest {
-                    identity: talos_agent_api::AgentTurnRef::new(session_id, turn_id),
-                }),
-            )
-            .await?
-        {
-            let agent_protocol::ActiveSessionReply::Interrupt(reply) = reply else {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "Current coordinator returned an invalid command result.",
-                ));
-            };
-            return Ok(reply.outcome);
-        }
+        self.sessions
+            .ensure_execution_supported(&session.id)
+            .await?;
+
         if self
             .turns
             .canonical_active_turn(session_id)

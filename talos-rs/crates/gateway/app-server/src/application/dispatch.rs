@@ -7,6 +7,16 @@ impl TalosApplicationAdapter {
         actor: &Actor,
         request: ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
+        if request
+            .computer_id
+            .as_deref()
+            .is_some_and(|target| target != "embedded")
+        {
+            return Err(talos_error_to_api_error(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Remote product routing is not assembled in this application adapter.",
+            )));
+        }
         match request.params {
             ClientRequestParams::AutomationRead(params) => to_value(
                 self.gateway

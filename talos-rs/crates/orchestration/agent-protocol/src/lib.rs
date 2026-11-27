@@ -43,9 +43,9 @@ pub use node::{
 };
 pub use port::{AgentFuture, AgentHarness, DreamMemoryModelCall};
 pub use run::{
-    AgentAdmission, AgentAdmissionPermit, AgentInputParams, AgentInterruptParams,
-    AgentProgressEventReceiver, AgentRunExecution, AgentRunParams, AgentRunSettlement,
-    AgentRunSettlementReceiver,
+    AgentAdmission, AgentAdmissionPermit, AgentAdmissionUnconfirmed, AgentCommandIdentity,
+    AgentInputParams, AgentInterruptParams, AgentProgressEventReceiver, AgentRunExecution,
+    AgentRunParams, AgentRunSettlement, AgentRunSettlementReceiver,
 };
 
 pub use environment::{WorkerEnvironment, WorkerEnvironmentContext, WorkerWorktreeRequest};
@@ -59,13 +59,31 @@ pub use environment_oauth::{
 };
 
 mod coordinator_commands;
-pub mod coordinator_commands_pb;
 mod execution_state;
 pub use coordinator_commands::{
     ActiveSessionCommand, ActiveSessionCommands, ActiveSessionReply, ActiveSessionTarget,
 };
 pub mod execution_state_pb;
-pub use execution_state::{
-    CommitSessionExecutionStateParams, SessionExecutionState, SessionHistoryCursor,
-    SessionStateVisibility,
+pub use execution_state::{SessionExecutionState, SessionHistoryCursor};
+
+mod execution_events;
+pub use execution_events::{
+    AgentCommittedEvent, AgentExecutionCommand, AgentExecutionPayloadParams,
+    AgentExecutionPayloadResult, AgentExecutionPurpose, AgentExecutionSettlement,
+    AgentMemoryModelUsage, AgentSessionEventCursor, AgentSessionEventsParams,
+    AgentSessionEventsResult, MAX_EXECUTION_CAPTURE_BYTES, MAX_EXECUTION_EVENT_BYTES,
+    MAX_EXECUTION_PAGE_BYTES, MAX_EXECUTION_PAGE_EVENTS,
 };
+
+pub mod execution_events_pb;
+
+mod node_admission;
+pub use node_admission::NodeAdmissionGates;
+
+/// Result of the existing managed Worker wake admission policy.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ManagedDispatch {
+    Proceed,
+    Waking,
+    Deferred,
+}

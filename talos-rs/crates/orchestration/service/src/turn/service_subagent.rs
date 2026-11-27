@@ -110,6 +110,7 @@ impl TurnService {
         self.execution
             .admit_running_input(
                 AgentInputParams {
+                    command: None,
                     agent_id,
                     identity,
                     input,

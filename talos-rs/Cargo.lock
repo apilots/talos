@@ -20,9 +20,6 @@ dependencies = [
  "reqwest 0.12.28",
  "reqwest-websocket",
  "rustls",
- "serde_json",
- "sha2 0.10.9",
- "subtle",
  "talos-agent",
  "talos-agent-api",
  "talos-browser",
@@ -6380,6 +6377,7 @@ dependencies = [
  "libc",
  "prost",
  "rcgen",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6391,6 +6389,7 @@ dependencies = [
  "talos-logging",
  "talos-memory",
  "talos-run-control",
+ "talos-store",
  "talos-types",
  "tempfile",
  "tokio",
@@ -6466,6 +6465,8 @@ dependencies = [
 name = "talos-app-protocol"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
+ "agent-protocol",
+ "base64 0.22.1",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -6580,7 +6581,6 @@ dependencies = [
  "sha2 0.10.9",
  "talos-agent",
  "talos-agent-api",
- "talos-agent-provider-kernel",
  "talos-app-protocol",
  "talos-app-server",
  "talos-auth",
@@ -6588,6 +6588,7 @@ dependencies = [
  "talos-browser",
  "talos-channel",
  "talos-config",
+ "talos-control-plane",
  "talos-coordinator",
  "talos-error",
  "talos-fs",
@@ -6598,7 +6599,9 @@ dependencies = [
  "talos-mcp",
  "talos-memory",
  "talos-plugin",
+ "talos-relay-server",
  "talos-router",
+ "talos-sdk",
  "talos-service",
  "talos-storage",
  "talos-store",
@@ -6615,7 +6618,10 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
+ "tower 0.4.13",
  "tracing",
+ "tungstenite 0.27.0",
+ "url",
  "uuid",
 ]
 
@@ -6708,6 +6714,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "talos-control-plane"
+version = "0.1.19-SNAPSHOT"
+dependencies = [
+ "agent-protocol",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "getrandom 0.2.17",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
+ "subtle",
+ "talos-auth",
+ "talos-config",
+ "talos-error",
+ "talos-logging",
+ "talos-storage",
+ "talos-store",
+ "talos-types",
+ "talos-worker-runtime",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "talos-coordinator"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
@@ -6788,6 +6822,7 @@ dependencies = [
  "agent-protocol",
  "async-trait",
  "axum 0.7.9",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "futures-util",
@@ -7060,6 +7095,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "talos-relay-server"
+version = "0.1.19-SNAPSHOT"
+dependencies = [
+ "agent-protocol",
+ "axum 0.7.9",
+ "futures-util",
+ "serde_json",
+ "talos-app-protocol",
+ "talos-auth",
+ "talos-control-plane",
+ "talos-error",
+ "talos-logging",
+ "talos-storage",
+ "talos-store",
+ "talos-types",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
+ "tokio-util",
+ "tower 0.4.13",
+ "uuid",
+]
+
+[[package]]
 name = "talos-router"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
@@ -7093,16 +7152,21 @@ name = "talos-sdk"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
  "async-trait",
+ "axum 0.7.9",
  "base64 0.22.1",
  "bytes",
+ "futures-util",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "talos-agent-api",
  "talos-app-protocol",
  "talos-auth",
  "talos-error",
+ "talos-logging",
  "talos-types",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -7144,7 +7208,6 @@ dependencies = [
  "csv",
  "flate2",
  "futures-util",
- "getrandom 0.2.17",
  "http 1.4.0",
  "infer",
  "mime_guess",
@@ -7155,12 +7218,12 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
- "subtle",
  "talos-agent",
  "talos-agent-api",
  "talos-auth",
  "talos-browser",
  "talos-config",
+ "talos-control-plane",
  "talos-coordinator",
  "talos-error",
  "talos-fs",
@@ -7226,6 +7289,7 @@ dependencies = [
  "sqlx",
  "talos-agent-api",
  "talos-auth",
+ "talos-config",
  "talos-error",
  "talos-fs",
  "talos-memory",
@@ -7479,13 +7543,16 @@ dependencies = [
  "agent-pb",
  "agent-protocol",
  "async-trait",
+ "serde",
  "serde_json",
  "talos-agent",
  "talos-agent-api",
+ "talos-agent-kernel",
  "talos-agent-provider-kernel",
  "talos-browser",
  "talos-config",
  "talos-error",
+ "talos-fs",
  "talos-guard-task",
  "talos-llm-anthropic",
  "talos-llm-bailian",

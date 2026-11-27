@@ -33,12 +33,6 @@ impl TimelineEventService {
     pub(crate) fn supports_history_supplements(&self) -> bool {
         self.execution_store.supports_history_supplements()
     }
-    pub(crate) async fn append_history_supplement(
-        &self,
-        value: talos_agent_api::trajectory::SessionHistorySupplement,
-    ) -> TalosResult<()> {
-        self.execution_store.append_history_supplement(value).await
-    }
     pub(crate) async fn read_terminal_history_supplement(
         &self,
         identity: &AgentTurnRef,

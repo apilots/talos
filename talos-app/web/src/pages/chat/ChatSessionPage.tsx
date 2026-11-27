@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { SessionTracingPanel, TraceTabs } from "@/features/tracing";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import {
   ChatComposer,
@@ -30,10 +30,12 @@ import { AttachmentSessionContext } from "@/shared/api/attachment-session";
 import { ChatSessionTimeline } from "./ChatSessionTimeline";
 import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
 import { useChatSessionComposer } from "./useChatSessionComposer";
+import { sessionRouteComputer } from "@/shared/api/session-route";
 
 export function ChatSessionPage() {
   const sessionId = useParams().sessionId ?? "";
-  return <ChatSessionContent key={sessionId} sessionId={sessionId} />;
+  const [search] = useSearchParams();
+  return <ChatSessionContent key={JSON.stringify([sessionId, search.get("computerId")])} sessionId={sessionId} />;
 }
 
 export function ChatSessionContent({ sessionId, talo }: {
@@ -65,7 +67,7 @@ export function ChatSessionContent({ sessionId, talo }: {
   const instance = talo ?? status.data?.instance;
   const reservedTalo = instance?.conversationSessionId === sessionId ? instance : undefined;
   const firstTaloTurn = Boolean(missingSession && reservedTalo);
-  const nodeId = session?.nodeId ?? reservedTalo?.nodeId;
+  const nodeId = session?.nodeId ?? reservedTalo?.nodeId ?? sessionRouteComputer(sessionId);
   const { data: reservedComputer, error: reservedComputerError } = useComputer(session?.nodeId ? undefined : reservedTalo?.nodeId);
   const computer = session?.nodeId ? sessionComputer : reservedComputer;
   const computerError = session?.nodeId ? sessionComputerError : reservedComputerError;

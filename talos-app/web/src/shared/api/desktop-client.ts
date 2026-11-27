@@ -1,4 +1,4 @@
-import { createElectronAppServerClient, type DesktopRendererBridge } from "@talos/sdk-app-server/desktop";
+import { createElectronAppServerClient, getDesktopServerInfo, type DesktopRendererBridge } from "@talos/sdk-app-server/desktop";
 import { TalosStreamTerminatedError } from "@talos/sdk-core";
 import type {
   AppProtocol,
@@ -68,6 +68,7 @@ export function createDesktopTalosClient(
   };
 
   return {
+    capabilities: { read: async () => (await getDesktopServerInfo(bridge)).capabilities },
     trajectory: client.trajectory,
     automation: client.automation,
     builtinJobs: client.builtinJobs,

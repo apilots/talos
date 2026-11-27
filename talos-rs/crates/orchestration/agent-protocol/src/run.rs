@@ -15,10 +15,13 @@ type AgentPermitFuture = Pin<Box<dyn Future<Output = AgentResult<()>> + Send + '
 
 /// Parameters for starting or continuing one logical Agent Turn.
 ///
-/// A continuation reuses the same API and must provide both the canonical
-/// checkpoint and Provider-owned continuation reference.
-#[derive(Debug, Clone, PartialEq)]
+/// A continuation carries its Provider reference; the Worker restores the local
+/// checkpoint before invoking the underlying Harness.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AgentRunParams {
+    pub subagent_limit: Option<std::num::NonZeroU32>,
+    pub command: Option<AgentCommandIdentity>,
+    pub automation_origin: Option<talos_types::AutomationTurnOrigin>,
     pub context: AgentContext,
     pub input: AgentMessage,
     pub checkpoint: Option<AgentRunCheckpoint>,
@@ -42,10 +45,10 @@ impl AgentRunParams {
                 "Agent run input must be one completed User message",
             ));
         }
-        if self.checkpoint.is_some() != self.continuation.is_some() {
+        if self.checkpoint.is_some() && self.continuation.is_none() {
             return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
-                "Agent continuation requires both checkpoint and Provider reference",
+                "Agent checkpoint requires a Provider continuation reference",
             ));
         }
         Ok(())
@@ -53,15 +56,16 @@ impl AgentRunParams {
 }
 
 /// Parameters for delivering accepted input to one exact live invocation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AgentInputParams {
+    pub command: Option<AgentCommandIdentity>,
     pub agent_id: String,
     pub identity: AgentTurnRef,
     pub input: AgentMessage,
 }
 
 /// Parameters for interrupting one exact live invocation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AgentInterruptParams {
     pub agent_id: String,
     pub identity: AgentTurnRef,
@@ -186,3 +190,42 @@ impl std::fmt::Debug for AgentRunSettlementReceiver {
 #[cfg(test)]
 #[path = "run_tests.rs"]
 mod tests;
+
+/// Stable product command identity; never includes Store leases or SQL state.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AgentCommandIdentity {
+    pub command: talos_types::IdempotentCommand,
+    pub idempotency_key: String,
+    pub request_id: String,
+}
+
+/// Local typed transport evidence: a Commit was sent but its admission result was lost.
+/// Callers retain the original command identity and reconcile Worker facts before retry.
+#[derive(Debug)]
+pub struct AgentAdmissionUnconfirmed(TalosError);
+impl AgentAdmissionUnconfirmed {
+    pub fn wrap(error: TalosError) -> TalosError {
+        TalosError::new(error.error_code(), error.to_api_error().message.clone())
+            .with_source(Self(error))
+    }
+    pub fn contains(error: &TalosError) -> bool {
+        let mut source = std::error::Error::source(error);
+        while let Some(current) = source {
+            if current.is::<Self>() {
+                return true;
+            }
+            source = current.source();
+        }
+        false
+    }
+}
+impl std::fmt::Display for AgentAdmissionUnconfirmed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Worker admission confirmation was lost after Commit.")
+    }
+}
+impl std::error::Error for AgentAdmissionUnconfirmed {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}

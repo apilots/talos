@@ -31,6 +31,13 @@ async fn server(
     tokio::task::JoinHandle<()>,
 ) {
     let home = tempfile::tempdir().unwrap();
+    let journal = Arc::new(
+        talos_store::execution::WorkerExecutionStore::open(&home.path().join("worker.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let harness: Arc<dyn AgentHarness> =
+        Arc::new(crate::LocalExecutionHarness::new(harness, journal));
     let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()]).unwrap();
     let pem = certificate.cert.pem().into_bytes();
     let identity = Identity::from_pem(&pem, certificate.signing_key.serialize_pem());
@@ -101,15 +108,12 @@ pub(super) async fn commit_received_settlement(
         completed_turn_id: Some(event.identity.turn_id.clone()),
         completed_event_sequence: event.sequence,
     };
-    client
-        .commit_session_execution_state(agent_protocol::CommitSessionExecutionStateParams {
-            session: session_params(),
-            identity: Some(event.identity),
-            history_cursor: history_cursor.clone(),
-            visibility: agent_protocol::SessionStateVisibility::Local,
-        })
+    let state = client
+        .read_session_execution_state(session_params())
         .await
+        .unwrap()
         .unwrap();
+    assert_eq!(state.history_cursor, history_cursor);
     history_cursor
 }
 
@@ -136,7 +140,7 @@ async fn rpc_delivers_terminal_settlement_after_large_progress_history() {
                 completed += 1;
             }
         }
-        assert_eq!(completed, 6);
+        assert_eq!(completed, 12);
         assert!(matches!(
             run.settlement.recv().await.unwrap(),
             AgentRunSettlement::Finished { result: Ok(()), .. }
@@ -235,6 +239,7 @@ async fn rpc_input_commit_and_new_client_interrupt_keep_cleanup_conservative() {
 
     let admission = client
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: TEST_AGENT_ID.into(),
             identity: identity.clone(),
             input: user_message(&identity, "message-2"),
@@ -280,9 +285,11 @@ async fn waiting_rpc_cancellation_and_failed_continuation_keep_the_original_boun
         .unwrap()
         .unwrap();
     let mut invalid = run_params(identity.clone(), "answer");
-    invalid.continuation = Some(continuation.clone());
+    invalid.continuation = Some(talos_agent_api::AgentContinuationRef {
+        opaque_id: "invalid-reference".into(),
+    });
     assert!(
-        matches!(client.start(invalid).await, Err(error) if error.is_code(ErrorCode::InvalidRequest))
+        matches!(client.start(invalid).await, Err(error) if error.is_code(ErrorCode::Conflict))
     );
     assert_eq!(
         client
@@ -365,29 +372,30 @@ async fn waiting_rpc_cancellation_and_failed_continuation_keep_the_original_boun
     })
     .await
     .unwrap();
+    let after = client
+        .read_session_execution_state(session_params())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(after.active_turn.is_none());
+    assert!(after.handoff_ready);
     assert_eq!(
-        client
-            .read_session_execution_state(session_params())
-            .await
-            .unwrap()
-            .unwrap(),
-        before
+        after.history_cursor.completed_turn_id.as_deref(),
+        Some(identity.turn_id.as_str())
     );
     assert!(client
         .clear_session(session_params(), Default::default())
         .await
         .unwrap_err()
-        .is_code(ErrorCode::ActiveTurnRunning));
-    assert_eq!(
-        client
-            .interrupt(AgentInterruptParams {
-                agent_id: TEST_AGENT_ID.into(),
-                identity
-            })
-            .await
-            .unwrap(),
-        AgentInterruptOutcome::Cancelled
-    );
+        .is_code(ErrorCode::EventCursorExpired));
+    assert!(client
+        .interrupt(AgentInterruptParams {
+            agent_id: TEST_AGENT_ID.into(),
+            identity
+        })
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
     stop.cancel();
     task.await.unwrap();
 }
@@ -427,12 +435,12 @@ async fn tls_rpc_management_and_interrupt_preserve_harness_outcomes() {
         .clear_session(session_params(), Default::default())
         .await
         .unwrap_err()
-        .is_code(ErrorCode::Conflict));
+        .is_code(ErrorCode::EventCursorExpired));
     assert!(client
         .close_session(session_params(), Default::default())
         .await
         .unwrap_err()
-        .is_code(ErrorCode::Conflict));
+        .is_code(ErrorCode::EventCursorExpired));
     assert!(!provider.clear_called.load(Ordering::Acquire));
     assert!(!provider.close_called.load(Ordering::Acquire));
     client
@@ -440,8 +448,14 @@ async fn tls_rpc_management_and_interrupt_preserve_harness_outcomes() {
         .await
         .unwrap();
     assert!(provider.clear_called.load(Ordering::Acquire));
+    let cleared = client
+        .read_session_execution_state(session_params())
+        .await
+        .unwrap()
+        .unwrap()
+        .history_cursor;
     client
-        .close_session(session_params(), history_cursor)
+        .close_session(session_params(), cleared)
         .await
         .unwrap();
     assert!(provider.close_called.load(Ordering::Acquire));
@@ -702,15 +716,7 @@ async fn rpc_rejects_wrong_lease_and_dropped_admission_has_no_provider_effect() 
     provider.release.notify_one();
     let history_cursor =
         commit_received_settlement(&client, base.settlement.recv().await.unwrap()).await;
-    client
-        .commit_session_execution_state(agent_protocol::CommitSessionExecutionStateParams {
-            session: session_params(),
-            identity: None,
-            history_cursor: history_cursor.clone(),
-            visibility: agent_protocol::SessionStateVisibility::Shared,
-        })
-        .await
-        .unwrap();
+
     let shared = client
         .read_session_execution_state(session_params())
         .await
@@ -783,7 +789,7 @@ async fn rpc_rejects_wrong_lease_and_dropped_admission_has_no_provider_effect() 
 }
 
 #[tokio::test]
-async fn rpc_input_rejection_is_the_original_harness_failure() {
+async fn rpc_input_admission_survives_provider_delivery_rejection() {
     let provider = FakeProvider::new(FakeMode::RejectInput);
     let harness: Arc<dyn AgentHarness> =
         Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone()));
@@ -797,14 +803,14 @@ async fn rpc_input_rejection_is_the_original_harness_failure() {
     provider.wait_started().await;
     let input = client
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: TEST_AGENT_ID.into(),
             identity: identity.clone(),
             input: user_message(&identity, "message-2"),
         })
         .await
         .unwrap();
-    let error = input.permit.consume().await.unwrap_err();
-    assert!(error.is_code(ErrorCode::InvalidRequest));
+    input.permit.consume().await.unwrap();
     assert!(matches!(
         run.settlement.recv().await.unwrap(),
         AgentRunSettlement::Finished { result: Err(_), .. }
@@ -813,7 +819,7 @@ async fn rpc_input_rejection_is_the_original_harness_failure() {
     task.await.unwrap();
 }
 
-fn library_client(
+async fn library_client(
     mode: FakeMode,
 ) -> (
     tempfile::TempDir,
@@ -823,6 +829,15 @@ fn library_client(
 ) {
     let home = tempfile::tempdir().unwrap();
     let provider = FakeProvider::new(mode);
+    let journal = Arc::new(
+        talos_store::execution::WorkerExecutionStore::open(&home.path().join("worker.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let durable: Arc<dyn AgentHarness> = Arc::new(crate::LocalExecutionHarness::new(
+        Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone())),
+        journal,
+    ));
     let adapter = AgentHarnessRpcAdapter::new(
         "embedded".into(),
         Arc::new(std::sync::RwLock::new(
@@ -830,10 +845,7 @@ fn library_client(
                 .with_runtime_paths(talos_config::TalosPaths::from_home(home.path().to_owned()))
                 .with_workspace_definition(WorkspaceDefinition::new("workspace-1", "/tmp")),
         )),
-        vec![(
-            TEST_AGENT_ID.into(),
-            Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone())),
-        )],
+        vec![(TEST_AGENT_ID.into(), durable)],
     );
     let auth = NodeAuth {
         node_id: "embedded".into(),
@@ -864,11 +876,10 @@ fn eight_megabyte_message(identity: &AgentTurnRef) -> talos_agent_api::AgentMess
 }
 
 #[tokio::test]
-async fn library_admission_preserves_the_gate_and_accepts_eight_megabytes_without_rpc() {
-    let (_home, provider, adapter, client) = library_client(FakeMode::LargeHistory);
+async fn library_admission_preserves_the_gate_and_large_history_without_rpc() {
+    let (_home, provider, adapter, client) = library_client(FakeMode::LargeHistory).await;
     let identity = AgentTurnRef::new("session-1", "large-local");
-    let mut params = run_params(identity.clone(), "large-input");
-    params.input = eight_megabyte_message(&identity);
+    let params = run_params(identity.clone(), "large-input");
     let mut execution = client.start(params).await.unwrap();
     assert!(!provider.started.load(Ordering::Acquire));
     assert!(
@@ -884,28 +895,16 @@ async fn library_admission_preserves_the_gate_and_accepts_eight_megabytes_withou
             completed += 1;
         }
     }
-    assert_eq!(completed, 6);
+    assert_eq!(completed, 12);
     let AgentRunSettlement::Finished {
-        event,
+        event: _,
         result: Ok(()),
         ..
     } = execution.settlement.recv().await.unwrap()
     else {
         panic!("expected completion");
     };
-    client
-        .commit_session_execution_state(agent_protocol::CommitSessionExecutionStateParams {
-            session: session_params(),
-            identity: Some(event.identity.clone()),
-            history_cursor: agent_protocol::SessionHistoryCursor {
-                history_generation: 0,
-                completed_turn_id: Some(event.identity.turn_id),
-                completed_event_sequence: event.sequence,
-            },
-            visibility: agent_protocol::SessionStateVisibility::Local,
-        })
-        .await
-        .unwrap();
+
     client.shutdown(Duration::from_secs(2)).await.unwrap();
     assert!(provider.shutdown_called.load(Ordering::Acquire));
     adapter.clear_local_auth();
@@ -917,7 +916,7 @@ async fn library_admission_preserves_the_gate_and_accepts_eight_megabytes_withou
 
 #[tokio::test]
 async fn library_live_input_stays_paused_until_its_permit_is_consumed() {
-    let (_home, provider, _adapter, client) = library_client(FakeMode::Input);
+    let (_home, provider, _adapter, client) = library_client(FakeMode::Input).await;
     let identity = AgentTurnRef::new("session-1", "local-input");
     let mut execution = client
         .start(run_params(identity.clone(), "first"))
@@ -927,6 +926,7 @@ async fn library_live_input_stays_paused_until_its_permit_is_consumed() {
     provider.wait_started().await;
     let input = client
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: TEST_AGENT_ID.into(),
             identity: identity.clone(),
             input: user_message(&identity, "second"),
@@ -946,7 +946,7 @@ async fn library_live_input_stays_paused_until_its_permit_is_consumed() {
 
 #[tokio::test]
 async fn library_waiting_continuation_and_cancel_keep_the_original_boundary() {
-    let (_home, _provider, _adapter, client) = library_client(FakeMode::Waiting);
+    let (_home, _provider, _adapter, client) = library_client(FakeMode::Waiting).await;
     let identity = AgentTurnRef::new("session-1", "local-waiting");
     let mut execution = client
         .start(run_params(identity.clone(), "question"))
@@ -992,7 +992,7 @@ async fn library_waiting_continuation_and_cancel_keep_the_original_boundary() {
 #[tokio::test]
 async fn rpc_interrupt_coordinator_gate_remains_a_preflight_status() {
     use agent_pb::agent_harness_rpc_server::AgentHarnessRpc;
-    let (_home, provider, adapter, client) = library_client(FakeMode::Release);
+    let (_home, provider, adapter, client) = library_client(FakeMode::Release).await;
     let identity = AgentTurnRef::new("session-1", "turn-preflight");
     let mut run = client
         .start(run_params(identity.clone(), "message-1"))
@@ -1036,14 +1036,15 @@ fn library_input_request(
             token: "private-process-credential".into(),
         }),
         params: Some(agent_pb::SubmitInputParams {
-            body: Some(agent_pb::submit_input_params::Body::Input(
+            body: Some(agent_pb::submit_input_params::Body::Input(Box::new(
                 agent_protocol::harness_pb::encode_input_params(AgentInputParams {
+                    command: None,
                     agent_id: TEST_AGENT_ID.into(),
                     input: user_message(&identity, "input-1"),
                     identity,
                 })
                 .unwrap(),
-            )),
+            ))),
         }),
         caller: Some(agent_pb::CoordinatorCallContext {
             coordinator_id,
@@ -1054,7 +1055,7 @@ fn library_input_request(
 
 #[tokio::test]
 async fn rpc_input_gate_rejects_before_opening_a_connect_response() {
-    let (_home, _provider, adapter, _client) = library_client(FakeMode::Release);
+    let (_home, _provider, adapter, _client) = library_client(FakeMode::Release).await;
     let request = library_input_request(
         AgentTurnRef::new("session-1", "absent"),
         uuid::Uuid::new_v4().to_string(),
@@ -1076,7 +1077,7 @@ async fn rpc_input_gate_rejects_before_opening_a_connect_response() {
 #[tokio::test]
 async fn rpc_input_harness_rejection_remains_a_failure_payload() {
     use tokio_stream::StreamExt;
-    let (_home, provider, adapter, client) = library_client(FakeMode::Release);
+    let (_home, provider, adapter, client) = library_client(FakeMode::Release).await;
     let identity = AgentTurnRef::new("session-1", "turn-input-failure");
     let mut run = client
         .start(run_params(identity.clone(), "message-1"))
@@ -1135,7 +1136,7 @@ async fn rpc_input_harness_rejection_remains_a_failure_payload() {
 #[tokio::test]
 async fn rpc_shutdown_keeps_lookup_status_distinct_from_operation_failure() {
     use agent_pb::agent_harness_rpc_server::AgentHarnessRpc;
-    let (_home, provider, adapter, client) = library_client(FakeMode::Release);
+    let (_home, provider, adapter, client) = library_client(FakeMode::Release).await;
     let request = |agent_id: &str, timeout_ms| {
         tonic::Request::new(agent_pb::ShutdownRequest {
             auth: Some(agent_pb::NodeAuth {

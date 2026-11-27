@@ -295,7 +295,10 @@ message SessionContext {
   string workspace_id = 4;
 }
 message SessionEnvironment { string directory = 1; ConnectionMode connection_mode = 2; }
+message AgentSessionTree { oneof identity { Empty primary = 1; AgentSubagentSession subagent = 2; } }
+message AgentSubagentSession { TurnRef parent = 1; string tree_root_session_id = 2; string path = 3; }
 message AgentContext {
+  AgentSessionTree tree_identity = 10;
   SessionHistoryCursor history_cursor = 9;
   SessionContext session = 1; string turn_id = 2; optional string project_id = 3;
   optional string working_directory = 4; SessionEnvironment environment = 5;
@@ -303,8 +306,10 @@ message AgentContext {
 }
 message Checkpoint { uint64 last_sequence = 1; repeated AgentMessage messages = 2; RunMetrics metrics = 3; }
 message ContinuationRef { string opaque_id = 1; }
-message RunParams { AgentContext context = 1; AgentMessage input = 2; Checkpoint checkpoint = 3; ContinuationRef continuation = 4; }
-message InputParams { string agent_id = 1; TurnRef identity = 2; AgentMessage input = 3; }
+enum AgentCommandKind { AGENT_COMMAND_KIND_UNSPECIFIED = 0; TURN_SUBMISSION = 1; TURN_INPUT = 2; }
+message AgentCommandIdentity { AgentCommandKind command = 1; string idempotency_key = 2; string request_id = 3; }
+message RunParams { AgentContext context = 1; AgentMessage input = 2; Checkpoint checkpoint = 3; ContinuationRef continuation = 4; AgentCommandIdentity command = 5; AutomationTurnOrigin automation_origin = 6; optional uint32 subagent_limit = 7; }
+message InputParams { string agent_id = 1; TurnRef identity = 2; AgentMessage input = 3; AgentCommandIdentity command = 4; }
 message MediaSource { oneof source { string url = 1; string inline_base64 = 2; } }
 message Media { MediaSource source = 1; optional string mime_type = 2; }
 message SkillSelection { string name = 1; string path = 2; }

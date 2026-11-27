@@ -19,25 +19,9 @@ pub struct AgentEnvironmentClient {
     auth: NodeAuth,
     closed: tokio_util::sync::CancellationToken,
 }
-#[path = "direct_relay.rs"]
-mod direct_relay;
 mod registration;
 
 impl AgentEnvironmentClient {
-    pub async fn connect_loopback(
-        address: std::net::SocketAddr,
-        auth: NodeAuth,
-    ) -> TalosResult<Self> {
-        if auth.node_id.is_empty() || auth.token.is_empty() {
-            return Err(wire::invalid());
-        }
-        Ok(Self {
-            transport: HarnessTransport::Direct(crate::tls::loopback_channel(address).await?),
-            auth,
-            closed: tokio_util::sync::CancellationToken::new(),
-        })
-    }
-
     pub async fn connect(
         endpoint: &str,
         trust: AgentTlsTrust,

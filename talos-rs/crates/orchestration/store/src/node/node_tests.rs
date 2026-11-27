@@ -33,6 +33,7 @@ async fn outbound_migration_preserves_registered_nodes_and_security_constraints(
     sqlx::query("INSERT INTO agent_nodes(node_id, display_name, mode, status, health, created_at, updated_at) VALUES ('embedded','Embedded Agent','embedded','enabled','unknown',10,10)")
         .execute(storage.pool()).await.unwrap();
     let before = NodeRecord {
+        product_owner: None,
         system_info: None,
         node_id: "existing-node".into(),
         owner_user_id: Some("owner".into()),
@@ -99,6 +100,7 @@ async fn outbound_migration_preserves_registered_nodes_and_security_constraints(
     }
     assert!(nodes
         .register(RegisterNodeParams {
+            product_owner: talos_types::NodeProductOwner::Server,
             system_info: None,
             node_id: "outbound-node".into(),
             expected_credential_hash: [11; 32],
@@ -142,6 +144,7 @@ async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease(
         .unwrap();
     nodes
         .register(RegisterNodeParams {
+            product_owner: talos_types::NodeProductOwner::Server,
             system_info: Some(talos_types::NodeSystemInfo {
                 os: talos_types::NodeOperatingSystem::MacOs,
                 os_version: Some("macOS test".into()),
@@ -179,6 +182,7 @@ async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease(
 
     nodes
         .register(RegisterNodeParams {
+            product_owner: talos_types::NodeProductOwner::Server,
             system_info: None,
             node_id: "laptop-1".into(),
             expected_credential_hash: credential,

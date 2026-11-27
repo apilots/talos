@@ -100,6 +100,7 @@ async fn submit_test_start(
 }
 
 struct RecordingAgentExecution {
+    worker_store: Mutex<Option<Arc<talos_store::execution::WorkerExecutionStore>>>,
     stream_request: Mutex<Option<AgentRunParams>>,
     stream_requests: Mutex<Vec<AgentRunParams>>,
     stream_request_received: Notify,
@@ -108,6 +109,8 @@ struct RecordingAgentExecution {
     input_permit_error: Mutex<Option<talos_error::TalosError>>,
     start_permit_error: Mutex<Option<talos_error::TalosError>>,
     panic_start_permit: AtomicBool,
+    lose_start_confirmation: Arc<AtomicBool>,
+    lose_commit_before_worker: Arc<AtomicBool>,
     progress_event: Mutex<Option<CanonicalAgentEventPayload>>,
     hold_input_permit: Mutex<bool>,
     input_permit_started: Arc<Notify>,
@@ -132,6 +135,7 @@ struct RecordingAgentExecution {
 impl Default for RecordingAgentExecution {
     fn default() -> Self {
         Self {
+            worker_store: Mutex::new(None),
             stream_request: Mutex::new(None),
             stream_requests: Mutex::new(Vec::new()),
             stream_request_received: Notify::new(),
@@ -140,6 +144,8 @@ impl Default for RecordingAgentExecution {
             input_permit_error: Mutex::new(None),
             start_permit_error: Mutex::new(None),
             panic_start_permit: AtomicBool::new(false),
+            lose_start_confirmation: Arc::new(AtomicBool::new(false)),
+            lose_commit_before_worker: Arc::new(AtomicBool::new(false)),
             progress_event: Mutex::new(None),
             hold_input_permit: Mutex::new(false),
             input_permit_started: Arc::new(Notify::new()),
@@ -394,11 +400,21 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                 payload: CanonicalAgentEventPayload::MessageCompleted(completed_result_message),
             });
             next_sequence += 1;
-            let completed_original_block = AgentMessageBlock {
+            let mut completed_original_block = AgentMessageBlock {
                 status: AgentMessageBlockStatus::Completed,
                 completed_at: Some(6),
                 ..original_block
             };
+            if let AgentMessageBlockContent::ToolCall(call) = &mut completed_original_block.content
+            {
+                if let AgentToolCallArguments::Streaming { json_fragment } = &call.arguments {
+                    call.arguments = AgentToolCallArguments::Complete {
+                        value: talos_types::ToolArguments::from(
+                            serde_json::from_str::<serde_json::Value>(json_fragment).unwrap(),
+                        ),
+                    };
+                }
+            }
             progress.push(CanonicalAgentEvent {
                 identity: identity.clone(),
                 sequence: next_sequence,
@@ -716,8 +732,15 @@ async fn test_service_with_storage(
     let message_queue =
         SessionMessageQueueService::new(10).expect("queue service should initialize");
     let coordinator: Arc<dyn AgentCoordinator> = Arc::new(RecordingExecutionCoordinator {
-        execution: agent_execution,
+        execution: agent_execution.clone(),
         delegate: coordinator,
+    });
+    let (coordinator, journal) = crate::test_worker::durable_with_store(coordinator).await;
+    *agent_execution.worker_store.lock().unwrap() = Some(journal);
+    let coordinator: Arc<dyn AgentCoordinator> = Arc::new(LostAcceptedCoordinator {
+        delegate: coordinator,
+        lose_confirmation: agent_execution.lose_start_confirmation.clone(),
+        lose_before_commit: agent_execution.lose_commit_before_worker.clone(),
     });
     (
         TurnService::new(
@@ -964,4 +987,258 @@ async fn wait_for_canonical_terminal(store: &DatabaseSessionStore) {
     })
     .await
     .expect("canonical Turn should settle");
+}
+
+async fn seed_worker_fixture(
+    service: &TurnService,
+    product: &DatabaseSessionStore,
+    execution: &RecordingAgentExecution,
+) {
+    let journal = execution.worker_store.lock().unwrap().clone().unwrap();
+    let session = test_session();
+    let events = product
+        .list_agent_events_after(&session.id, None, 1000)
+        .await
+        .unwrap();
+    if events.is_empty() {
+        return;
+    }
+    let identity = events[0].identity.clone();
+    if journal.checkpoint(&identity).await.unwrap().is_some() {
+        return;
+    }
+    let context = service
+        .execution
+        .sessions
+        .build_agent_context(&session, identity.clone())
+        .await
+        .unwrap();
+    let input = events
+        .iter()
+        .find_map(|event| match &event.payload {
+            CanonicalAgentEventPayload::MessageCompleted(message)
+                if message.role == AgentMessageRole::User =>
+            {
+                Some(message.clone())
+            }
+            _ => None,
+        })
+        .unwrap();
+    let split=events.iter().position(|event|matches!(&event.payload,CanonicalAgentEventPayload::MessageCompleted(message) if message.message_id==input.message_id)).unwrap()+1;
+    let mut reducer = talos_agent::AgentEventReducer::new(identity.clone());
+    let admission = events[..split]
+        .iter()
+        .map(|event| CanonicalAgentEvent {
+            identity: event.identity.clone(),
+            sequence: event.sequence,
+            occurred_at: event.occurred_at,
+            payload: event.payload.clone(),
+        })
+        .collect::<Vec<_>>();
+    for event in &admission {
+        reducer.apply(event.clone()).unwrap();
+    }
+    journal
+        .admit(
+            &context.session,
+            &agent_protocol::AgentExecutionCommand::Run {
+                params: Box::new(AgentRunParams {
+                    subagent_limit: None,
+                    context: context.clone(),
+                    input,
+                    command: None,
+                    automation_origin: None,
+                    checkpoint: None,
+                    continuation: None,
+                }),
+            },
+            admission,
+            &reducer.checkpoint(),
+        )
+        .await
+        .unwrap();
+    let continuation = product
+        .get_agent_continuation_binding(&identity)
+        .await
+        .unwrap()
+        .map(|binding| binding.provider_ref)
+        .unwrap_or(AgentContinuationRef {
+            opaque_id: "continuation-1".into(),
+        });
+    for event in &events[split..] {
+        let event = CanonicalAgentEvent {
+            identity: event.identity.clone(),
+            sequence: event.sequence,
+            occurred_at: event.occurred_at,
+            payload: event.payload.clone(),
+        };
+        reducer.apply(event.clone()).unwrap();
+        let settlement = match &event.payload {
+            CanonicalAgentEventPayload::WaitingForInput(_) => {
+                Some(agent_protocol::AgentExecutionSettlement::WaitingForInput {
+                    continuation: continuation.clone(),
+                    metrics: reducer.checkpoint().metrics.clone(),
+                })
+            }
+            payload if payload.is_terminal() => {
+                Some(agent_protocol::AgentExecutionSettlement::Finished {
+                    memory_usage: Vec::new(),
+                    metrics: reducer.checkpoint().metrics.clone(),
+                })
+            }
+            _ => None,
+        };
+        journal
+            .append(
+                &context.session,
+                vec![event],
+                &reducer.checkpoint(),
+                settlement,
+            )
+            .await
+            .unwrap();
+    }
+}
+
+async fn fail_worker_fixture(execution: &RecordingAgentExecution, code: talos_error::ErrorCode) {
+    let journal = execution.worker_store.lock().unwrap().clone().unwrap();
+    let scope = journal.session_scope("s1").await.unwrap().unwrap();
+    let identity = journal
+        .execution_state(&scope)
+        .await
+        .unwrap()
+        .unwrap()
+        .active_turn
+        .unwrap();
+    let checkpoint = journal.checkpoint(&identity).await.unwrap().unwrap();
+    let mut reducer =
+        talos_agent::AgentEventReducer::from_checkpoint(identity.clone(), checkpoint).unwrap();
+    let mut events = reducer
+        .close_open_lifecycle(
+            AgentMessageStatus::Failed,
+            AgentMessageBlockStatus::Failed,
+            2,
+        )
+        .unwrap();
+    let event = CanonicalAgentEvent {
+        identity,
+        sequence: reducer.next_sequence(),
+        occurred_at: 2,
+        payload: CanonicalAgentEventPayload::TurnFailed(AgentTurnFailed {
+            error: TalosError::new(code, "Worker execution failed.").to_api_error(),
+            retryable: false,
+        }),
+    };
+    reducer.apply(event.clone()).unwrap();
+    events.push(event);
+    journal
+        .append(
+            &scope,
+            events,
+            &reducer.checkpoint(),
+            Some(agent_protocol::AgentExecutionSettlement::Finished {
+                metrics: reducer.checkpoint().metrics.clone(),
+                memory_usage: Vec::new(),
+            }),
+        )
+        .await
+        .unwrap();
+}
+
+struct LostAcceptedCoordinator {
+    delegate: Arc<dyn AgentCoordinator>,
+    lose_confirmation: Arc<AtomicBool>,
+    lose_before_commit: Arc<AtomicBool>,
+}
+#[async_trait]
+impl AgentCoordinator for LostAcceptedCoordinator {
+    async fn resolve_agent(
+        &self,
+        params: talos_coordinator::AgentSelectionParams,
+    ) -> TalosResult<String> {
+        self.delegate.resolve_agent(params).await
+    }
+    async fn ensure_agent(&self, agent: &str) -> TalosResult<()> {
+        self.delegate.ensure_agent(agent).await
+    }
+    async fn session_harness(
+        &self,
+        session: &AgentSessionContext,
+    ) -> TalosResult<Arc<dyn talos_agent::AgentHarness>> {
+        self.delegate.session_harness(session).await
+    }
+    async fn read_session_events(
+        &self,
+        params: agent_protocol::AgentSessionEventsParams,
+    ) -> TalosResult<agent_protocol::AgentSessionEventsResult> {
+        self.delegate.read_session_events(params).await
+    }
+    async fn read_session_execution_state(
+        &self,
+        scope: AgentSessionContext,
+    ) -> TalosResult<Option<agent_protocol::SessionExecutionState>> {
+        self.delegate.read_session_execution_state(scope).await
+    }
+    async fn select_execution_node(
+        &self,
+        agent: &str,
+        user: &str,
+        node: Option<&str>,
+    ) -> TalosResult<String> {
+        self.delegate.select_execution_node(agent, user, node).await
+    }
+    async fn submit_input(&self, params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        self.delegate.submit_input(params).await
+    }
+    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
+        self.delegate.interrupt(params).await
+    }
+    async fn compact_session(&self, params: AgentContext) -> TalosResult<AgentRunExecution> {
+        self.delegate.compact_session(params).await
+    }
+    async fn clear_session(
+        &self,
+        scope: AgentSessionContext,
+        cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate.clear_session(scope, cursor).await
+    }
+    async fn close_session(
+        &self,
+        scope: AgentSessionContext,
+        cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate.close_session(scope, cursor).await
+    }
+    async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
+        self.delegate.shutdown(timeout).await
+    }
+    async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
+        let mut execution = self.delegate.start(params).await?;
+        if self.lose_before_commit.swap(false, Ordering::SeqCst) {
+            execution.admission.permit = AgentAdmissionPermit::new(async {
+                Err(agent_protocol::AgentAdmissionUnconfirmed::wrap(
+                    TalosError::new(
+                        talos_error::ErrorCode::ServiceUnavailable,
+                        "Commit delivery disconnected.",
+                    ),
+                ))
+            });
+        } else if self.lose_confirmation.swap(false, Ordering::SeqCst) {
+            let permit = std::mem::replace(
+                &mut execution.admission.permit,
+                AgentAdmissionPermit::new(async { Ok(()) }),
+            );
+            execution.admission.permit = AgentAdmissionPermit::new(async move {
+                permit.consume().await?;
+                Err(agent_protocol::AgentAdmissionUnconfirmed::wrap(
+                    TalosError::new(
+                        talos_error::ErrorCode::ServiceUnavailable,
+                        "Confirmation disconnected.",
+                    ),
+                ))
+            });
+        }
+        Ok(execution)
+    }
 }

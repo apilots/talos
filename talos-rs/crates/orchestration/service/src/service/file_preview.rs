@@ -29,6 +29,11 @@ enum PreviewBinding {
 }
 
 impl TalosService {
+    /// The product composition reuses the isolated preview origin for personal relay URLs.
+    pub fn file_preview_origin(&self) -> Option<&str> {
+        self.file_preview_base_url.as_deref()
+    }
+
     pub async fn prepare_file_preview(
         &self,
         actor: &Actor,

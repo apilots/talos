@@ -1,8 +1,7 @@
 //! One Worker boundary shared by every Harness and transport. Only a small
-//! causal marker is durable; histories, queues and business records stay above.
-use agent_protocol::{
-    AgentSessionContext, SessionExecutionState, SessionHistoryCursor, SessionStateVisibility,
-};
+//! causal marker fences ingress; complete execution facts stay in the Worker journal.
+//! Product queues and other business records remain with the product owner.
+use agent_protocol::{AgentSessionContext, SessionExecutionState, SessionHistoryCursor};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -22,7 +21,6 @@ struct Marker {
     history_cursor: SessionHistoryCursor,
     coordinator_id: String,
     active: Option<AgentTurnRef>,
-    visibility: SessionStateVisibility,
     cleanup_confirmed: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,11 +53,6 @@ pub(super) struct SessionGate {
 pub(super) enum RunAdmission {
     NewTurn,
     Continuation,
-}
-#[derive(Clone, Copy)]
-pub(super) enum HistoryBootstrap {
-    Forbidden,
-    TrustedLocal,
 }
 enum Maintenance {
     Idle(SessionHistoryCursor),
@@ -248,7 +241,6 @@ impl SessionGate {
                 binding(&marker, context)?;
                 let handoff_ready = marker.active.is_none()
                     && marker.cleanup_confirmed
-                    && marker.visibility == SessionStateVisibility::Shared
                     && !state.reservations.contains_key(&context.session_id);
                 Ok(SessionExecutionState {
                     history_cursor: marker.history_cursor,
@@ -284,44 +276,33 @@ impl SessionGate {
             return Err(busy());
         }
         let previous_marker = self.load(&state, &context.session_id)?;
-        match &previous_marker {
-            Some(marker) => {
-                binding(marker, context)?;
-                if &marker.history_cursor != expected {
-                    return Err(conflict());
-                }
-                if !marker.cleanup_confirmed {
-                    return Err(TalosError::new(
-                        ErrorCode::RunCleanupUnconfirmed,
-                        "Worker Session cleanup requires recovery by its last coordinator",
-                    ));
-                }
-                if marker.active.is_some()
-                    && !(matches!(admission, RunAdmission::Continuation)
-                        && marker.active.as_ref() == Some(identity)
-                        && marker.coordinator_id == peer)
-                {
-                    return Err(busy());
-                }
-                if marker.coordinator_id != peer
-                    && marker.visibility != SessionStateVisibility::Shared
-                {
-                    return Err(conflict());
-                }
+        if let Some(marker) = &previous_marker {
+            binding(marker, context)?;
+            if &marker.history_cursor != expected {
+                return Err(conflict());
             }
-            None if expected != &SessionHistoryCursor::default() => return Err(conflict()),
-            None => {}
+            if !marker.cleanup_confirmed {
+                return Err(TalosError::new(
+                    ErrorCode::RunCleanupUnconfirmed,
+                    "Worker Session cleanup requires recovery by its last coordinator",
+                ));
+            }
+            if marker.active.is_some()
+                && !(matches!(admission, RunAdmission::Continuation)
+                    && marker.active.as_ref() == Some(identity)
+                    && marker.coordinator_id == peer)
+            {
+                return Err(busy());
+            }
         }
         let mut marker = previous_marker.clone().unwrap_or_else(|| Marker {
             binding: Binding::from(context),
             history_cursor: expected.clone(),
             coordinator_id: peer.into(),
             active: None,
-            visibility: SessionStateVisibility::Local,
             cleanup_confirmed: true,
         });
         marker.coordinator_id = peer.into();
-        marker.visibility = SessionStateVisibility::Local;
         marker.active = Some(identity.clone());
         self.save(&context.session_id, &marker)?;
         state
@@ -362,77 +343,109 @@ impl SessionGate {
         }
         Ok(())
     }
-    pub(super) fn commit(
+    /// Advance the causal marker from the Worker's own committed terminal facts.
+    pub(super) fn settled(
         &self,
         context: &AgentSessionContext,
-        peer: &str,
-        identity: Option<&AgentTurnRef>,
+        identity: &AgentTurnRef,
         history_cursor: SessionHistoryCursor,
-        visibility: SessionStateVisibility,
-        bootstrap: HistoryBootstrap,
     ) -> TalosResult<()> {
         let mut state = self.state.lock().expect("Worker Session gate lock");
-        let existing = self.load(&state, &context.session_id)?;
-        let mut marker = match existing {
-            Some(marker) => marker,
-            None if matches!(bootstrap, HistoryBootstrap::TrustedLocal)
-                && visibility == SessionStateVisibility::Local =>
-            {
-                if history_cursor.completed_turn_id.as_deref()
-                    != identity.map(|identity| identity.turn_id.as_str())
-                {
-                    return Err(conflict());
-                }
-                let marker = Marker {
-                    binding: Binding::from(context),
-                    history_cursor,
-                    coordinator_id: peer.into(),
-                    active: None,
-                    visibility,
-                    cleanup_confirmed: true,
-                };
-                self.save(&context.session_id, &marker)?;
-                return Ok(());
-            }
-            None => return Err(conflict()),
-        };
+        let mut marker = self
+            .load(&state, &context.session_id)?
+            .ok_or_else(conflict)?;
         binding(&marker, context)?;
-        if marker.coordinator_id != peer
-            || !marker.cleanup_confirmed
-            || identity.is_some_and(|identity| identity.session_id != context.session_id)
+        if marker
+            .active
+            .as_ref()
+            .is_some_and(|active| active != identity)
+            || history_cursor.completed_turn_id.as_deref() != Some(identity.turn_id.as_str())
+            || history_cursor.history_generation != marker.history_cursor.history_generation
+            || history_cursor.completed_event_sequence == 0
         {
             return Err(conflict());
         }
-        if visibility == SessionStateVisibility::Shared {
-            if marker.active.is_some() || marker.history_cursor != history_cursor {
-                return Err(conflict());
-            }
-        } else if let Some(active) = &marker.active {
-            if Some(active) != identity
-                || history_cursor.completed_turn_id.as_deref() != Some(active.turn_id.as_str())
-                || history_cursor.history_generation != marker.history_cursor.history_generation
-                || history_cursor.completed_event_sequence == 0
-            {
-                return Err(conflict());
-            }
-            marker.active = None;
-        } else if marker.history_cursor != history_cursor
-            && !(identity.is_none()
-                && history_cursor.history_generation
-                    == marker.history_cursor.history_generation + 1
-                && history_cursor.completed_turn_id.is_none()
-                && history_cursor.completed_event_sequence == 0)
-        {
-            return Err(conflict());
-        }
+        marker.active = None;
+        marker.cleanup_confirmed = true;
         marker.history_cursor = history_cursor;
-        marker.visibility = visibility;
         self.save(&context.session_id, &marker)?;
         if let Some(cached) = state.reservations.get_mut(&context.session_id) {
             *cached = marker;
         }
         Ok(())
     }
+
+    /// Release only a pre-admission marker proven absent from the local journal.
+    pub(super) fn reconcile_unadmitted(
+        &self,
+        context: &AgentSessionContext,
+        identity: &AgentTurnRef,
+        history_cursor: SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        let state = self.state.lock().expect("Worker Session gate lock");
+        if state.reservations.contains_key(&context.session_id) {
+            return Ok(());
+        }
+        let Some(mut marker) = self.load(&state, &context.session_id)? else {
+            return Ok(());
+        };
+        binding(&marker, context)?;
+        if marker.active.as_ref() != Some(identity) || marker.history_cursor != history_cursor {
+            return Ok(());
+        }
+        marker.active = None;
+        marker.cleanup_confirmed = true;
+        self.save(&context.session_id, &marker)
+    }
+
+    pub(super) fn sync_idle_snapshot(
+        &self,
+        context: &AgentSessionContext,
+        history_cursor: SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        let state = self.state.lock().expect("Worker Session gate lock");
+        if state.reservations.contains_key(&context.session_id) {
+            return Err(busy());
+        }
+        let Some(mut marker) = self.load(&state, &context.session_id)? else {
+            return Ok(());
+        };
+        binding(&marker, context)?;
+        if marker.active.is_some() || !marker.cleanup_confirmed {
+            return Err(conflict());
+        }
+        marker.history_cursor = history_cursor;
+        self.save(&context.session_id, &marker)
+    }
+
+    pub(super) fn reset_cursor(
+        &self,
+        context: &AgentSessionContext,
+        history_cursor: SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        let mut state = self.state.lock().expect("Worker Session gate lock");
+        let mut marker = self
+            .load(&state, &context.session_id)?
+            .ok_or_else(conflict)?;
+        binding(&marker, context)?;
+        if marker.active.is_some()
+            || !marker.cleanup_confirmed
+            || (history_cursor.history_generation != marker.history_cursor.history_generation
+                && history_cursor.history_generation
+                    != marker.history_cursor.history_generation + 1)
+            || history_cursor.completed_turn_id.is_some()
+            || history_cursor.completed_event_sequence != 0
+        {
+            return Err(conflict());
+        }
+        marker.history_cursor = history_cursor;
+        self.save(&context.session_id, &marker)?;
+        if let Some(cached) = state.reservations.get_mut(&context.session_id) {
+            *cached = marker;
+        }
+        Ok(())
+    }
+
     pub(super) fn maintenance(
         &self,
         context: &AgentSessionContext,
@@ -469,10 +482,12 @@ impl SessionGate {
             .load(&state, &context.session_id)?
             .unwrap_or_else(|| Marker {
                 binding: Binding::from(context),
-                history_cursor: Default::default(),
+                history_cursor: match &operation {
+                    Maintenance::Idle(expected) => expected.clone(),
+                    Maintenance::Reflection => Default::default(),
+                },
                 coordinator_id: peer.into(),
                 active: None,
-                visibility: SessionStateVisibility::Local,
                 cleanup_confirmed: true,
             });
         binding(&marker, context)?;
@@ -487,11 +502,7 @@ impl SessionGate {
         {
             return Err(busy());
         }
-        if marker.coordinator_id != peer && marker.visibility != SessionStateVisibility::Shared {
-            return Err(conflict());
-        }
         marker.coordinator_id = peer.into();
-        marker.visibility = SessionStateVisibility::Local;
         self.save(&context.session_id, &marker)?;
         state
             .reservations

@@ -497,3 +497,153 @@ mod mcp_credentials_tests;
 
 #[path = "mcp_oauth_tests.rs"]
 mod mcp_oauth_tests;
+
+#[cfg(feature = "relay")]
+#[path = "product_relay_tests.rs"]
+mod product_relay_tests;
+
+#[tokio::test]
+async fn product_management_assembly_does_not_open_the_live_worker_namespace() {
+    use talos_fs::FileSystem;
+    let mut config = Config::default();
+    let workspace = isolate_runtime_workspace(&mut config, "product-only-management");
+    config.gateway.auth = false;
+    config.storage.connection_string = workspace.join("management.sqlite").to_string_lossy().into();
+    let execution_dir = config.talos_paths().data_dir.join("worker");
+    let lock = execution_dir.join("execution.lock");
+    let executor_lock = talos_fs::std_fs().try_file_lock(&lock).unwrap().unwrap();
+    let runtime =
+        super::application_runtime::build_product_runtime(config.clone(), &test_migrations_dir())
+            .await
+            .unwrap();
+    assert!(runtime.service.nodes.server().is_err());
+    assert!(!execution_dir.join("execution.sqlite").exists());
+    assert!(!execution_dir.join("execution-admission").exists());
+    // Session definition queries use product persistence even while another executor is live.
+    runtime
+        .service
+        .session_automation(&talos_service::Actor::auth_disabled(), "missing")
+        .await
+        .unwrap_err();
+    use talos_store::file::FileStore;
+    let storage = super::application_storage::connect_application_storage(&config)
+        .await
+        .unwrap();
+    let files = talos_store::file::DatabaseFileStore::new(&storage);
+    files
+        .create_file(talos_store::file::FileRecord {
+            file_id: "live-upload".into(),
+            owner_user_id: "owner".into(),
+            project_id: None,
+            location: talos_store::file::FileLocation::Local {
+                storage_id: "local".into(),
+                object_key: "files/live-upload/body".into(),
+            },
+            original_filename: "body.txt".into(),
+            mime_type: None,
+            size_bytes: None,
+            status: talos_store::file::FileStatus::Uploading,
+            tags: vec![],
+            metadata: Default::default(),
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .unwrap();
+    let second = super::application_runtime::build_product_runtime(config, &test_migrations_dir())
+        .await
+        .unwrap();
+    let upload = files
+        .get_file_for_owner(&talos_store::file::FileOwnerKey {
+            file_id: "live-upload".into(),
+            owner_user_id: "owner".into(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(upload.status, talos_store::file::FileStatus::Uploading);
+    drop(second);
+    drop(files);
+    drop(storage);
+    drop(runtime);
+    drop(executor_lock);
+    fs::remove_dir_all(workspace).unwrap();
+}
+
+#[tokio::test]
+async fn personal_product_assembly_has_no_registration_or_managed_worker_authority() {
+    let mut config = Config::default();
+    let workspace = isolate_runtime_workspace(&mut config, "personal-no-control-plane");
+    config.gateway.auth = false;
+    config.storage.connection_string = workspace.join("personal.sqlite").to_string_lossy().into();
+    config.llm.anthropic.models = vec![provider_model(&config.llm.model)];
+    std::fs::create_dir_all(config.source_path().parent().unwrap()).unwrap();
+    config.save(config.source_path().to_str().unwrap()).unwrap();
+    let runtime = super::application_runtime::build_application_runtime_with_policy(
+        config,
+        &test_migrations_dir(),
+        Default::default(),
+        talos_types::NodeProductOwner::Computer,
+    )
+    .await
+    .unwrap();
+    assert!(runtime.node_service.is_none());
+    assert!(runtime.service.nodes.server().is_err());
+    let denied = runtime
+        .service
+        .nodes
+        .create_node(
+            &talos_service::Actor::regular("owner"),
+            talos_types::CreateNodeRequest {
+                display_name: "not-a-local-registration".into(),
+                owner_user_id: None,
+                endpoint: None,
+                credential_expires_at: chrono::Utc::now().timestamp() + 60,
+            },
+        )
+        .await
+        .err()
+        .expect("personal assembly cannot provision nodes");
+    assert!(denied.is_code(talos_error::ErrorCode::Unauthenticated));
+    let embedded = runtime
+        .service
+        .list_computers(&talos_service::Actor::auth_disabled(), Default::default())
+        .await
+        .unwrap();
+    assert_eq!(embedded.data.len(), 1);
+    assert_eq!(embedded.data[0].node_id, "embedded");
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn server_product_assembly_shares_control_plane_admission_with_product_operations() {
+    let mut config = Config::default();
+    let workspace = isolate_runtime_workspace(&mut config, "server-control-plane-gates");
+    config.gateway.auth = false;
+    config.storage.connection_string = workspace.join("server.sqlite").to_string_lossy().into();
+    config.llm.anthropic.models = vec![provider_model(&config.llm.model)];
+    let runtime = super::application_runtime::build_application_runtime_with_policy(
+        config,
+        &test_migrations_dir(),
+        Default::default(),
+        talos_types::NodeProductOwner::Server,
+    )
+    .await
+    .unwrap();
+    let server = runtime.node_service.as_ref().unwrap();
+    assert!(runtime.service.nodes.server().is_ok());
+    assert!(Arc::ptr_eq(
+        &server.admission_gates(),
+        &runtime.service.nodes.admission_gates()
+    ));
+    let read = server
+        .admission_gates()
+        .for_node("embedded")
+        .read_owned()
+        .await;
+    let write = runtime.service.nodes.admission_gates().for_node("embedded");
+    assert!(write.try_write().is_err());
+    drop(read);
+    assert!(write.try_write().is_ok());
+    runtime.shutdown().await.unwrap();
+}

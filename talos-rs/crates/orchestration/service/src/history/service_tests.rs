@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use talos_agent::{SessionHistoryReadParams, SessionHistoryWindow};
 use talos_agent_api::{
     AgentEvent, AgentEventPayload, AgentMessage, AgentMessageBlock, AgentMessageBlockContent,
     AgentMessageBlockStatus, AgentMessageRole, AgentMessageStatus, AgentStopReason,
@@ -45,7 +44,7 @@ async fn fixture() -> (
 }
 
 #[tokio::test]
-async fn recent_prompt_history_reads_the_terminal_metrics_beyond_the_first_event_page() {
+async fn completed_history_reads_terminal_metrics_beyond_the_first_event_page() {
     let (store, history, _) = fixture().await;
     let identity = AgentTurnRef::new("session-long", "turn-long");
     let user = completed_message(
@@ -60,23 +59,25 @@ async fn recent_prompt_history_reads_the_terminal_metrics_beyond_the_first_event
     let mut tail = admission.active_turn.last_event_seq;
     let mut sequence = admission.events.last().unwrap().sequence;
     let mut metrics = talos_agent_api::AgentRunMetrics::default();
+    // Exercise the UI checkpoint page boundary without a transaction per token.
+    let mut batch = Vec::new();
     for duration in 1..=10_001 {
         metrics.duration_ms = Some(duration);
         sequence += 1;
-        tail = store
-            .commit_progress_event(
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence,
-                    occurred_at: 12,
-                    payload: AgentEventPayload::MetricsUpdated(metrics.clone()),
-                },
-                tail,
-            )
-            .await
-            .unwrap()
-            .active_turn
-            .last_event_seq;
+        batch.push(AgentEvent {
+            identity: identity.clone(),
+            sequence,
+            occurred_at: 12,
+            payload: AgentEventPayload::MetricsUpdated(metrics.clone()),
+        });
+        if batch.len() == 256 || duration == 10_001 {
+            tail = store
+                .commit_progress_events(std::mem::take(&mut batch), tail)
+                .await
+                .unwrap()
+                .active_turn
+                .last_event_seq;
+        }
     }
     let terminal = store
         .commit_terminal_settlement(CommitTerminalSettlementParams {
@@ -93,16 +94,11 @@ async fn recent_prompt_history_reads_the_terminal_metrics_beyond_the_first_event
         })
         .await
         .unwrap();
-    let turns = talos_agent::SessionHistoryReader::read(
-        &history,
-        SessionHistoryReadParams {
-            session_id: identity.session_id.clone(),
-            window: SessionHistoryWindow::Latest,
-            limit: 1,
-        },
-    )
-    .await
-    .unwrap();
+    let turns = history
+        .read(&identity.session_id, None, Some(1))
+        .await
+        .unwrap()
+        .data;
     assert_eq!(
         (
             turns[0].identity.clone(),
@@ -258,22 +254,6 @@ async fn history_notice_reads_do_not_grow_per_turn() {
     storage.take_notice_reads();
     let page = history.read("session-1", None, Some(100)).await.unwrap();
     let page_reads = storage.take_notice_reads();
-    for window in [
-        SessionHistoryWindow::Latest,
-        SessionHistoryWindow::OldestAfter {
-            completed_event_seq: 0,
-        },
-    ] {
-        let turns = history
-            .read_window(SessionHistoryReadParams {
-                session_id: "session-1".to_string(),
-                window,
-                limit: 100,
-            })
-            .await
-            .unwrap();
-        assert_eq!(turns, page.data);
-    }
     assert_eq!(
         page.data
             .into_iter()
@@ -570,73 +550,4 @@ async fn history_cursor_rejects_a_nonterminal_page_boundary() {
         .expect_err("forged nonterminal history boundary must fail");
 
     assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
-}
-
-#[tokio::test]
-async fn bounded_history_windows_preserve_order_across_global_event_sequence_gaps() {
-    let (store, history, _) = fixture().await;
-    commit_completed_turn(
-        store.as_ref(),
-        AgentTurnRef::new("session-1", "turn-1"),
-        "1",
-    )
-    .await;
-    let first_terminal = history
-        .read("session-1", None, Some(10))
-        .await
-        .expect("first history should load")
-        .data[0]
-        .completed_event_seq;
-    commit_completed_turn(
-        store.as_ref(),
-        AgentTurnRef::new("session-2", "foreign-turn"),
-        "foreign",
-    )
-    .await;
-    commit_completed_turn(
-        store.as_ref(),
-        AgentTurnRef::new("session-1", "turn-2"),
-        "2",
-    )
-    .await;
-    commit_completed_turn(
-        store.as_ref(),
-        AgentTurnRef::new("session-1", "turn-3"),
-        "3",
-    )
-    .await;
-
-    let latest = history
-        .read_window(SessionHistoryReadParams {
-            session_id: "session-1".to_string(),
-            window: SessionHistoryWindow::Latest,
-            limit: 2,
-        })
-        .await
-        .expect("latest bounded history should load");
-    let after_first = history
-        .read_window(SessionHistoryReadParams {
-            session_id: "session-1".to_string(),
-            window: SessionHistoryWindow::OldestAfter {
-                completed_event_seq: first_terminal,
-            },
-            limit: 10,
-        })
-        .await
-        .expect("oldest bounded history should load");
-
-    assert_eq!(
-        latest
-            .iter()
-            .map(|turn| turn.identity.turn_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["turn-2", "turn-3"]
-    );
-    assert_eq!(
-        after_first
-            .iter()
-            .map(|turn| turn.identity.turn_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["turn-2", "turn-3"]
-    );
 }

@@ -27,8 +27,8 @@ pub(super) async fn verify(
     let (survivor, released_history) = legacy::restart_with_v1(survivor, actor, &old).await;
     let session = "paused-sharing";
     let expected = survivor
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .sessions
         .list_timeline_events_after(session, 0, 10_000)
         .await
@@ -50,7 +50,7 @@ pub(super) async fn verify(
         .await
         .unwrap()
         .node_id;
-    let storage = &survivor.sync_host.sync_stores.storage;
+    let storage = &survivor.host.stores.storage;
     storage.execute(
         "CREATE TRIGGER interrupt_hub_rebind BEFORE DELETE ON sync_bindings BEGIN SELECT RAISE(ABORT, 'controlled Hub migration interruption'); END",
         &[],
@@ -77,8 +77,8 @@ pub(super) async fn verify(
         "first automatic migration interrupted after stopping old transport",
         async || {
             survivor
-                .sync_host
-                .sync_stores
+                .host
+                .stores
                 .handles
                 .lock()
                 .await
@@ -142,7 +142,7 @@ pub(super) async fn verify(
     let reader = build_application_runtime_with_migration_dir(reader_config, &migration)
         .await
         .unwrap();
-    reader.service.resume_account_sync(actor);
+    reader.service.resume_account_host(actor);
     let recovery_started = std::time::Instant::now();
     let mut diagnosed = false;
     wait_for(
@@ -157,13 +157,13 @@ pub(super) async fn verify(
                         "SELECT hub_id,kind,resource_id,exported_version_json FROM visible_sync_outbox",
                         "SELECT session_id,COUNT(*) AS count FROM committed_agent_events GROUP BY session_id",
                     ] {
-                        eprintln!("Recovery diagnostic {label} {sql}: {:?}", runtime.sync_host.sync_stores.storage.query(sql, &[]).await);
+                        eprintln!("Recovery diagnostic {label} {sql}: {:?}", runtime.host.stores.storage.query(sql, &[]).await);
                     }
                 }
             }
             reader
-                .sync_host
-                .sync_stores
+                .host
+                .stores
                 .sessions
                 .list_timeline_events_after(session, 0, 10_000)
                 .await
@@ -199,7 +199,7 @@ pub(super) async fn verify(
     wait_for(
         "cold reader recovered the complete Computer directory",
         async || {
-            let Some(local) = reader.sync_host.local_computer(actor).await.unwrap() else {
+            let Some(local) = reader.host.local_computer(actor).await.unwrap() else {
                 return false;
             };
             let source = survivor
@@ -239,8 +239,8 @@ pub(super) async fn verify(
         .is_empty());
     let event = expected.first().unwrap().event.identity().clone();
     survivor
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .sessions
         .append_timeline_notice(talos_agent_api::TimelineSystemNotice {
             identity: event,
@@ -258,8 +258,8 @@ pub(super) async fn verify(
         "incremental notice followed the replacement baseline",
         async || {
             reader
-                .sync_host
-                .sync_stores
+                .host
+                .stores
                 .sessions
                 .list_timeline_events_after(session, 0, 10_000)
                 .await
@@ -268,8 +268,8 @@ pub(super) async fn verify(
     )
     .await;
     assert!(reader
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .sessions
         .get_session_record("delete-session")
         .await

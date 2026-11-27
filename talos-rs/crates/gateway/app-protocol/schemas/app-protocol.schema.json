@@ -8216,6 +8216,12 @@
           ],
           "default": null
         },
+        "computerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "$ref": "#/definitions/RequestId"
         },
@@ -12096,10 +12102,29 @@
       ],
       "type": "object"
     },
+    "ServerCapabilities": {
+      "description": "Optional modules assembled by this product host, independent of account settings.",
+      "properties": {
+        "relay": {
+          "type": "boolean"
+        },
+        "sync": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "relay",
+        "sync"
+      ],
+      "type": "object"
+    },
     "ServerInfo": {
       "properties": {
         "auth_enabled": {
           "type": "boolean"
+        },
+        "capabilities": {
+          "$ref": "#/definitions/ServerCapabilities"
         },
         "cloud_auth_url": {
           "type": [
@@ -12116,6 +12141,7 @@
       },
       "required": [
         "auth_enabled",
+        "capabilities",
         "name",
         "version"
       ],

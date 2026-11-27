@@ -171,7 +171,7 @@ async fn worker_state(
     .unwrap()
 }
 async fn close(runtime: TalosApplicationRuntime) {
-    runtime.shutdown_sync().await.unwrap();
+    runtime.shutdown_host().await.unwrap();
     if let Some(worker) = runtime.worker_registration.lock().await.take() {
         worker.shutdown().await.unwrap();
     }

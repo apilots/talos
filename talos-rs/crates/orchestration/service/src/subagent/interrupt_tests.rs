@@ -70,6 +70,13 @@ async fn interrupt_waiting_child_clears_its_durable_continuation() {
         )
         .await
         .unwrap();
+    crate::test_worker::seed_product_history(
+        services.sessions.as_ref(),
+        services.store.as_ref(),
+        services.journal.as_ref(),
+        &child.session_id,
+    )
+    .await;
     let result = services
         .subagents
         .interrupt(InterruptSubagentRequest {

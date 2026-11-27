@@ -18,6 +18,7 @@ use crate::test_support::NoopAgentCoordinator;
 
 #[derive(Default)]
 struct RecordingSessionStore {
+    legacy_sessions: Mutex<std::collections::BTreeSet<String>>,
     listed_queries: Mutex<Vec<SessionQuery>>,
     records: Mutex<Vec<SessionRecord>>,
     deleted_sessions: Mutex<Vec<String>>,
@@ -27,6 +28,7 @@ struct RecordingSessionStore {
 impl RecordingSessionStore {
     fn from_records(records: Vec<SessionRecord>) -> Self {
         Self {
+            legacy_sessions: Default::default(),
             listed_queries: Mutex::new(Vec::new()),
             records: Mutex::new(records),
             deleted_sessions: Mutex::new(Vec::new()),
@@ -92,6 +94,16 @@ fn recording_access_service(
 
 #[async_trait]
 impl SessionStore for RecordingSessionStore {
+    async fn ensure_worker_execution_session(&self, session_id: &str) -> TalosResult<()> {
+        if self.legacy_sessions.lock().unwrap().contains(session_id) {
+            return Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "This Session is read-only history.",
+            ));
+        }
+        Ok(())
+    }
+
     async fn set_generated_title(
         &self,
         _identity: &talos_agent_api::AgentTurnRef,
@@ -550,4 +562,21 @@ async fn creating_session_uses_actor_user_id() {
     assert_eq!(session.user_id, "member-user");
     assert_eq!(session.execution_node_id, "embedded");
     assert_eq!(store.records.lock().unwrap()[0].user_id, "member-user");
+}
+
+#[tokio::test]
+async fn legacy_history_is_local_only_even_for_the_same_authenticated_owner() {
+    let store = Arc::new(RecordingSessionStore::from_records(vec![record_for(
+        "owner", "old", None, None,
+    )]));
+    store.legacy_sessions.lock().unwrap().insert("old".into());
+    let access = recording_access_service(Arc::new(NoopAgentCoordinator), store);
+    let local = Actor::regular("owner");
+    assert_eq!(access.load_session(&local, "old").await.unwrap().id, "old");
+    let remote = local.with_request_origin(talos_auth::ProductRequestOrigin::RemoteProduct);
+    assert!(access
+        .load_session(&remote, "old")
+        .await
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::ResourceNotFound));
 }

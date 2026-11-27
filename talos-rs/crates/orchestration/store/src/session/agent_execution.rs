@@ -10,10 +10,10 @@ use talos_types::TurnCommandStatus;
 mod admission;
 mod cancellation;
 mod continuation;
-mod idempotency;
+pub(crate) mod idempotency;
 pub(crate) mod notice;
 pub(crate) mod record;
-mod settlement;
+pub(crate) mod settlement;
 mod sqlite;
 mod supplement;
 
@@ -98,6 +98,10 @@ pub struct CommandReservation {
 /// Exact lease that a named Store transaction must compare before committing a command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandLease {
+    /// True only when the Store transferred an expired original reservation.
+    pub reclaimed: bool,
+    /// Original reservation time; stable across lease reclaims, never sent to Worker.
+    pub created_at: i64,
     pub session_id: String,
     pub command: IdempotentCommand,
     pub idempotency_key: String,
@@ -168,6 +172,59 @@ pub struct CommitTerminalSettlementParams {
 /// Narrow atomic Store commands for canonical Agent execution facts.
 #[async_trait]
 pub trait AgentExecutionStore: Send + Sync {
+    async fn get_agent_event_by_sequence(
+        &self,
+        _identity: &AgentTurnRef,
+        _sequence: u64,
+    ) -> TalosResult<Option<AgentEventRecord>> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Execution event lookup is unavailable.",
+        ))
+    }
+
+    /// Product materialization position; product notices never advance this cursor.
+    async fn worker_event_cursor(
+        &self,
+        _session_id: &str,
+    ) -> TalosResult<Option<agent_protocol::AgentSessionEventCursor>> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Worker event materialization is unavailable",
+        ))
+    }
+
+    /// Atomically materialize committed Worker facts and their contiguous source position.
+    async fn project_worker_events(
+        &self,
+        _params: super::WorkerProjectionParams,
+    ) -> TalosResult<super::WorkerProjectionCommit> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Worker event materialization is unavailable",
+        ))
+    }
+
+    async fn pending_worker_settlements(
+        &self,
+        _session_id: &str,
+    ) -> TalosResult<Vec<super::WorkerSettlementRecord>> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Worker settlement materialization is unavailable",
+        ))
+    }
+
+    async fn complete_worker_settlement(
+        &self,
+        _cursor: &agent_protocol::AgentSessionEventCursor,
+    ) -> TalosResult<()> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Worker settlement materialization is unavailable",
+        ))
+    }
+
     /// Observe the Session reset generation around multi-query canonical history reads.
     /// Stores without destructive resets may leave this unsupported. Persistent
     /// implementations must advance it atomically with removal of canonical facts.

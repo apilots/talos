@@ -56,7 +56,7 @@ function AutomationPageContent() {
         <div className="divide-y divide-border/60">
           {entries.map((entry) => {
             const task: AutomationTask = entry.type === "goal" ? { type: "goal", value: entry.goal } : { type: "loop", value: entry.loopTask };
-            return <AutomationListRow key={`${task.type}-${task.value.id}`} task={task} pending={mutation.isPending} onEdit={setEditing} onAction={(action) => mutation.mutateAsync({ sessionId: task.value.sessionId, action })} />;
+            return <AutomationListRow key={`${task.type}-${task.value.id}`} task={task} computerId={computers.selectedId} pending={mutation.isPending} onEdit={setEditing} onAction={(action) => mutation.mutateAsync({ sessionId: task.value.sessionId, action })} />;
           })}
         </div>
         {tasks.hasNextPage ? <Button variant="ghost" className="mt-4" disabled={tasks.isFetchingNextPage} onClick={() => { void tasks.fetchNextPage(); }}>{t("automation:loadMore")}</Button> : null}

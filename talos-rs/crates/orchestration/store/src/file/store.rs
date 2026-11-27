@@ -62,7 +62,7 @@ pub trait FileStore: Send + Sync {
 /// SQLite-backed file repository.
 pub struct DatabaseFileStore {
     storage: talos_storage::SqliteStorage,
-    sync: std::sync::Arc<crate::sync::StoreSyncBindings>,
+    sync: std::sync::Arc<crate::capture::StoreCaptureBindings>,
 }
 
 impl DatabaseFileStore {
@@ -73,12 +73,14 @@ impl DatabaseFileStore {
         }
     }
 
+    #[cfg(feature = "sync")]
     pub fn with_sync(self, sync: std::sync::Arc<crate::sync::StoreSyncAdapter>) -> Self {
         self.sync.install(sync).expect("initial Store sync binding");
         self
     }
     /// Install a host-verified binding after login; existing transactions keep
     /// their original association until they commit.
+    #[cfg(feature = "sync")]
     pub fn install_sync(
         &self,
         adapter: std::sync::Arc<crate::sync::StoreSyncAdapter>,
@@ -89,11 +91,11 @@ impl DatabaseFileStore {
     async fn begin_write(
         &self,
         file_id: &str,
-    ) -> TalosResult<crate::sync::capture::SqliteCaptureTransaction> {
-        crate::sync::capture::SqliteCaptureTransaction::begin(
+    ) -> TalosResult<crate::capture::SqliteCaptureTransaction> {
+        crate::capture::SqliteCaptureTransaction::begin(
             &self.storage,
             self.sync.clone(),
-            vec![talos_sync::SyncResourceKey::File {
+            vec![crate::capture::ResourceKey::File {
                 file_id: file_id.into(),
             }],
         )

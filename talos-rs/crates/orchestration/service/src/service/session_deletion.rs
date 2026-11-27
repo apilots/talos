@@ -20,10 +20,46 @@ impl TalosService {
                 .write_owned()
                 .await;
             self.ensure_deletion_idle(session_id).await?;
+            self.sessions.ensure_execution_supported(session_id).await?;
+            let mut tree = self
+                .sessions
+                .list_subagent_tree_records(session_id.into(), None)
+                .await?;
+            tree.sort_by_key(|record| {
+                std::cmp::Reverse(match &record.tree_identity {
+                    talos_store::session::SessionTreeIdentity::Primary => 0,
+                    talos_store::session::SessionTreeIdentity::Subagent { path, .. } => {
+                        path.depth()
+                    }
+                })
+            });
+            tree.push(session.clone());
+            if self
+                .sessions
+                .execution_node_permanently_removed(&session)
+                .await?
+            {
+                // Permanent CP revocation fences all future access to this deleted node.
+                // Only its idle product projection is removed; ordinary offline nodes still
+                // require the Worker retirement preflight below.
+                for record in &tree {
+                    self.turns
+                        .settle_product_before_destruction(&record.id)
+                        .await?;
+                }
+                return Ok((session, guard));
+            }
             self.connect_selected_computer(actor, &session.execution_node_id)
                 .await?;
             self.subagents.ensure_tree_inactive(session_id).await?;
-            let session = self.access.prepare_session_deletion(session).await?;
+            // Complete every receipt before retiring any source. A later retirement
+            // failure leaves the product identities available for an idempotent retry.
+            for record in &tree {
+                self.turns.prepare_session_destruction(record).await?;
+            }
+            for record in tree {
+                self.access.prepare_session_deletion(record).await?;
+            }
             Ok::<_, TalosError>((session, guard))
         })
         .await

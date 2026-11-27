@@ -7,25 +7,33 @@ license.workspace = true
 
 # Native cross-project scenario; requires the separately built Sync binary.
 [features]
-e2e = []
+default = ["sync", "relay"]
+sync = ["dep:talos-sync", "dep:talos-sync-sdk", "dep:talos-sync-types", "talos-store/sync", "talos-service/sync", "talos-upgrade/sync"]
+relay = ["dep:talos-relay-server", "dep:tower", "dep:tungstenite"]
+e2e = ["sync"]
 
 [dependencies]
+tower = { version = "0.4", features = ["util"], optional = true }
+tungstenite = { version = "0.27", optional = true }
+axum = "0.7"
 axum-ws = { package = "axum", version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 prost.workspace = true
 chrono = { workspace = true }
 base64.workspace = true
 talos-browser.workspace = true
-talos-sync = { workspace = true }
-talos-sync-sdk = { workspace = true }
-talos-sync-types = { workspace = true }
+talos-sync = { workspace = true, optional = true }
+talos-sync-sdk = { workspace = true, optional = true }
+talos-sync-types = { workspace = true, optional = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
 reqwest-websocket = "0.5.1"
+url = "2.5"
 talos-app-protocol = { workspace = true }
+talos-sdk.workspace = true
 futures-util = { workspace = true }
 async-trait = { workspace = true }
 opendal = { workspace = true, features = ["reqwest-rustls-tls", "services-fs", "services-s3"] }
@@ -40,8 +48,9 @@ agent-client = { workspace = true }
 agent-protocol = { workspace = true }
 talos-agent = { path = "../../orchestration/agent" }
 talos-agent-api = { workspace = true }
-talos-agent-provider-kernel = { workspace = true }
-talos-service = { workspace = true }
+talos-service = { workspace = true, default-features = false, features = ["product", "control-plane"] }
+talos-control-plane = { workspace = true }
+talos-relay-server = { workspace = true, optional = true }
 talos-auth = { path = "../../infra/auth" }
 talos-automation = { workspace = true }
 talos-channel = { workspace = true }
@@ -65,9 +74,9 @@ talos-upgrade = { workspace = true }
 talos-worker = { workspace = true }
 
 [dev-dependencies]
+tower = { version = "0.4", features = ["util"] }
 loro.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
-axum = "0.7"
 talos-plugin = { workspace = true }
 bytes = { workspace = true }
 rcgen = "0.14"

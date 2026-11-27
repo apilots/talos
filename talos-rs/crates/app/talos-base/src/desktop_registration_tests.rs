@@ -1,6 +1,5 @@
 use super::*;
 use crate::desktop_application::DesktopApplication;
-use agent_protocol::WorkerEnvironment;
 use talos_auth::{
     CloudSessionCache, CloudSessionCacheEntry, CloudSessionUserSnapshot, OpenModeUserService,
     UserType,
@@ -72,9 +71,7 @@ impl DesktopFixture {
                 session_data: NodeSessionDataRpc::new(
                     nodes.clone(),
                     sessions,
-                    Arc::new(EmptyHistory),
                     Arc::new(TestAttachments),
-                    Arc::new(TestMemoryProgress::default()),
                 ),
                 agent_control: Arc::new(TestAgentControl),
                 automation_control: Arc::new(TestAutomationControl),
@@ -349,23 +346,8 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .worker_environment(&node_id, "user-1")
         .await
         .unwrap();
-    let gateway = agent_client::AgentNodeClient::connect(
-        &fixture.config.cloud.agent_base_url,
-        agent_client::AgentTlsTrust::Certificate(
-            std::fs::read(fixture.config.cloud.agent_trusted_ca_file.as_ref().unwrap()).unwrap(),
-        ),
-    )
-    .await
-    .unwrap();
-    assert!(gateway
-        .connect_coordinator("user-2", &uuid::Uuid::new_v4().to_string(), &node_id)
-        .await
-        .is_err());
-    let (peer, auth) = gateway
-        .connect_coordinator("user-1", &uuid::Uuid::new_v4().to_string(), &node_id)
-        .await
-        .unwrap();
-    let caller = agent_client::AgentEnvironmentClient::from_connection(peer.clone(), auth);
+    // Server-owned registration addresses the same protected Worker instance.
+    let caller = remote.clone();
     remote
         .create_directory(
             context.clone(),
@@ -699,168 +681,6 @@ async fn desktop_pending_first_enrollment_requires_explicit_owned_uuid() {
 }
 
 #[tokio::test]
-async fn desktop_source_files_cross_outgoing_peer_stream_without_session_and_keep_permissions() {
-    let fixture = DesktopFixture::new().await;
-    fixture.login("user-1");
-    let host = fixture.host("Source laptop");
-    let node_id = host
-        .enroll_worker(None, None)
-        .await
-        .unwrap()
-        .node_id
-        .unwrap();
-    fixture.registered(&node_id).await;
-    let gateway = agent_client::AgentNodeClient::connect(
-        &fixture.config.cloud.agent_base_url,
-        agent_client::AgentTlsTrust::Certificate(
-            std::fs::read(fixture.config.cloud.agent_trusted_ca_file.as_ref().unwrap()).unwrap(),
-        ),
-    )
-    .await
-    .unwrap();
-    let peer_id = uuid::Uuid::new_v4().to_string();
-    let (peer, _) = gateway
-        .connect_coordinator_with_resources(
-            "user-1",
-            &peer_id,
-            &node_id,
-            fixture
-                .runtime
-                .coordinator_resource_handler(node_id.clone()),
-        )
-        .await
-        .unwrap();
-    let image = Attachment::new(
-        AttachmentKind::Image,
-        "source.png",
-        "image/png",
-        Vec::from(&b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR"[..]).into(),
-    );
-    let owned = fixture
-        .runtime
-        .tool_image_store
-        .save("user-1", vec![image.clone()])
-        .await
-        .unwrap()
-        .remove(0);
-    let foreign = fixture
-        .runtime
-        .tool_image_store
-        .save("user-2", vec![image.clone()])
-        .await
-        .unwrap()
-        .remove(0);
-    let read = talos_types::FileReadRequest {
-        file_id: owned.file_id.clone(),
-    };
-    let (file, bytes) = gateway
-        .read_peer_file("user-1", &peer_id, read.clone(), 1024)
-        .await
-        .unwrap();
-    assert_eq!(file, owned);
-    assert_eq!(bytes, image.bytes);
-    assert!(gateway
-        .read_peer_file("user-1", &peer_id, read.clone(), 1)
-        .await
-        .unwrap_err()
-        .is_code(ErrorCode::AttachmentLimitExceeded));
-    assert!(gateway
-        .read_peer_file("user-2", &peer_id, read.clone(), 1024)
-        .await
-        .is_err());
-    assert!(gateway
-        .read_peer_file(
-            "user-1",
-            &peer_id,
-            talos_types::FileReadRequest {
-                file_id: foreign.file_id
-            },
-            1024
-        )
-        .await
-        .unwrap_err()
-        .is_code(ErrorCode::ResourceNotFound));
-    let updated = gateway
-        .update_peer_file(
-            "user-1",
-            &peer_id,
-            talos_types::FileUpdateRequest {
-                file_id: owned.file_id.clone(),
-                tags: Some(vec!["shared".into()]),
-                metadata: Some(std::collections::BTreeMap::from([(
-                    "origin".into(),
-                    "source".into(),
-                )])),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(updated.file.tags, ["shared"]);
-    let cleared = gateway
-        .update_peer_file(
-            "user-1",
-            &peer_id,
-            talos_types::FileUpdateRequest {
-                file_id: owned.file_id.clone(),
-                tags: Some(vec![]),
-                metadata: None,
-            },
-        )
-        .await
-        .unwrap();
-    assert!(cleared.file.tags.is_empty());
-    assert_eq!(cleared.file.metadata["origin"], "source");
-    assert_eq!(
-        fixture
-            .runtime
-            .service
-            .files
-            .read(&Actor::regular("user-1"), read.clone())
-            .await
-            .unwrap()
-            .file,
-        cleared.file
-    );
-    let deleted = gateway
-        .delete_peer_file(
-            "user-1",
-            &peer_id,
-            talos_types::FileDeleteRequest {
-                file_id: owned.file_id.clone(),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(deleted.file_id, owned.file_id);
-    assert!(fixture
-        .runtime
-        .service
-        .files
-        .read(&Actor::regular("user-1"), read.clone())
-        .await
-        .is_err());
-    peer.close();
-    tokio::time::timeout(std::time::Duration::from_secs(3), async {
-        loop {
-            let error = gateway
-                .read_peer_file("user-1", &peer_id, read.clone(), 1024)
-                .await
-                .unwrap_err();
-            if error.is_code(ErrorCode::ServiceUnavailable) {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    host.stop_registration().await.unwrap();
-    fixture.runtime.shutdown().await.unwrap();
-    fixture.stop.cancel();
-    fixture.server.await.unwrap().unwrap();
-}
-
-#[tokio::test]
 async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enrolls_new_uuid() {
     let fixture = DesktopFixture::new().await;
     fixture.login("user-1");
@@ -894,7 +714,7 @@ async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enro
         Some("user-1")
     );
     assert_eq!(
-        fixture.runtime.sync_host.local_computer_id().await.unwrap(),
+        fixture.runtime.host.local_computer_id().await.unwrap(),
         "embedded"
     );
     assert!(!host.rpc.is_finished());
@@ -908,8 +728,8 @@ async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enro
     fixture.registered(&new).await;
     let deleted = fixture
         .runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .storage
         .query(
             "SELECT owner_user_id FROM computer_deletions WHERE node_id = ?",
@@ -940,7 +760,7 @@ async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enro
     );
     assert!(!host.rpc.is_finished());
     host.stop_registration().await.unwrap();
-    fixture.runtime.shutdown_sync().await.unwrap();
+    fixture.runtime.shutdown_host().await.unwrap();
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
 }
@@ -957,7 +777,7 @@ async fn embedded_shutdown_retires_browser_ipc_before_returning() {
     assert!(!socket.exists());
     assert!(!socket.parent().unwrap().exists());
     assert!(tokio::net::UnixStream::connect(&socket).await.is_err());
-    fixture.runtime.shutdown_sync().await.unwrap();
+    fixture.runtime.shutdown_host().await.unwrap();
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
 }
@@ -978,12 +798,7 @@ async fn retained_metadata_and_identity_do_not_wait_for_registration_retirement(
         .unwrap()
         .node_id
         .unwrap();
-    let retirement = fixture
-        .runtime
-        .sync_host
-        .registration_retirement
-        .lock()
-        .await;
+    let retirement = fixture.runtime.host.registration_retirement.lock().await;
     YamlConfigStore::new(fixture.config.source_path())
         .mark_registration_removed(&registered, "user-1")
         .unwrap();
@@ -993,6 +808,7 @@ async fn retained_metadata_and_identity_do_not_wait_for_registration_retirement(
             .dispatch(
                 &actor,
                 ClientRequest {
+                    computer_id: None,
                     method: ClientMethod::DesktopWorkerIdentity,
                     params: ClientRequestParams::DesktopWorkerIdentity(Default::default()),
                 },
@@ -1003,7 +819,7 @@ async fn retained_metadata_and_identity_do_not_wait_for_registration_retirement(
         assert_eq!(
             fixture
                 .runtime
-                .sync_host
+                .host
                 .local_computer_for_client(&actor)
                 .await
                 .unwrap(),
@@ -1061,11 +877,11 @@ async fn desktop_sign_out_releases_worker_lock_before_shared_sync_cleanup() {
     );
     tokio::pin!(clear);
     assert!(futures_util::poll!(&mut clear).is_pending());
-    assert!(!host.sync_host.account_connections_allowed("user-1"));
+    assert!(!host.host.account_connections_allowed("user-1"));
 
     // Model Sync enable holding its lifecycle lock while it needs the Worker.
     // The first suspend has finished and sign-out is waiting for registration.
-    let lifecycle = host.sync_host.lifecycle.try_lock().unwrap();
+    let lifecycle = host.host.lifecycle.try_lock().unwrap();
     drop(registration);
     assert!(futures_util::poll!(&mut clear).is_pending());
     assert!(host.worker.try_lock().is_ok());

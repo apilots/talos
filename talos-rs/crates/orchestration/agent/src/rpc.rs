@@ -27,6 +27,8 @@ mod environment;
 mod execution_state;
 #[path = "rpc_registration.rs"]
 mod registration;
+#[path = "rpc_service.rs"]
+mod service;
 #[path = "rpc_session_gate.rs"]
 mod session_gate;
 #[path = "rpc_streams.rs"]
@@ -168,7 +170,9 @@ impl AgentHarnessRpcAdapter {
             .data_dir
             .clone();
         Self {
-            session_gate: session_gate::SessionGate::new(data_dir.join("worker/session-heads")),
+            session_gate: session_gate::SessionGate::new(
+                data_dir.join("worker/execution-admission"),
+            ),
             session_owner: crate::SessionOwner::new(
                 data_dir.join("worker/session-locks"),
                 talos_error::SessionOwnerKind::Server,
@@ -219,17 +223,8 @@ impl AgentHarnessRpcAdapter {
         context: &agent_protocol::AgentSessionContext,
         caller: Option<&pb::CoordinatorCallContext>,
     ) -> TalosResult<Box<dyn Send>> {
-        // Coordinator identity is independent of an invocation callback route.
-        // Loopback keeps the original private resource client; G supplies a route.
-        let route = caller.filter(|caller| !caller.connection_id.is_empty());
         if let Some(binder) = &self.resource_binder {
-            return binder(auth, context, route).await;
-        }
-        if route.is_some() {
-            return Err(TalosError::new(
-                ErrorCode::ServiceUnavailable,
-                "Worker invocation resources are unavailable",
-            ));
+            return binder(auth, context, caller).await;
         }
         Ok(Box::new(()))
     }
@@ -288,7 +283,7 @@ impl AgentHarnessRpcAdapter {
             })
     }
 
-    fn prepare_maintenance(
+    async fn prepare_maintenance(
         &self,
         session: &agent_protocol::AgentSessionContext,
         peer: &str,
@@ -299,6 +294,19 @@ impl AgentHarnessRpcAdapter {
         Arc<dyn AgentHarness>,
     )> {
         let ownership = self.session_owner.pin(&session.session_id)?;
+        let state = self.durable_state(session).await?;
+        if state.active_turn.is_some() {
+            return Err(TalosError::new(
+                ErrorCode::ActiveTurnRunning,
+                "Worker Session must be idle for maintenance.",
+            ));
+        }
+        if state.history_cursor != *expected {
+            return Err(TalosError::new(
+                ErrorCode::EventCursorExpired,
+                "Worker maintenance targets another causal history cursor.",
+            ));
+        }
         let reservation = self.session_gate.maintenance(session, peer, expected)?;
         let harness = self.harness(&session.agent_id)?;
         Ok((ownership, reservation, harness))
@@ -362,17 +370,15 @@ impl AgentHarnessRpcAdapter {
                 }
             })
         } else {
-            (|| {
-                let ownership = self.session_owner.pin(&params.identity.session_id)?;
-                self.session_gate.confirm_orphan_cleanup(
-                    &params.agent_id,
-                    &params.identity,
-                    peer,
-                    || !self.session_owner.holds_turn(&params.identity),
-                )?;
-                ownership.retain_turn(&params.identity.turn_id);
-                Ok(talos_agent_api::AgentInterruptOutcome::Cancelled)
-            })()
+            let _ownership = self.session_owner.pin(&params.identity.session_id)?;
+            self.session_gate.confirm_orphan_cleanup(
+                &params.agent_id,
+                &params.identity,
+                peer,
+                || !self.session_owner.holds_turn(&params.identity),
+            )?;
+            // The local journal owns waiting/restarted execution settlement.
+            self.harness(&params.agent_id)?.interrupt(params).await
         }
     }
 
@@ -408,246 +414,6 @@ impl AgentHarnessRpcAdapter {
         )
         .map_err(status_from_error)?;
         Ok(context)
-    }
-}
-
-#[tonic::async_trait]
-impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
-    type StartStream = RpcStream<pb::RunResponse>;
-    type SubmitInputStream = RpcStream<pb::InputResponse>;
-    type CompactSessionStream = RpcStream<pb::RunResponse>;
-    type FormDreamMemoryStream = RpcStream<pb::FormDreamMemoryResponse>;
-
-    async fn set_registration_admission(
-        &self,
-        request: Request<pb::SetRegistrationAdmissionRequest>,
-    ) -> Result<Response<pb::EmptyResponse>, Status> {
-        Ok(Response::new(empty_response(
-            self.registration_admission(request.into_inner()).await,
-        )))
-    }
-
-    async fn read_session_execution_state(
-        &self,
-        request: Request<pb::ReadSessionExecutionStateRequest>,
-    ) -> Result<Response<pb::SessionExecutionStateResponse>, Status> {
-        Ok(Response::new(pb::SessionExecutionStateResponse {
-            result: Some(match self.read_execution_state(request.into_inner()) {
-                Ok(state) => pb::session_execution_state_response::Result::State(
-                    agent_protocol::execution_state_pb::encode_state(state),
-                ),
-                Err(error) => {
-                    pb::session_execution_state_response::Result::Failure(failure(&error))
-                }
-            }),
-        }))
-    }
-    async fn commit_session_execution_state(
-        &self,
-        request: Request<pb::CommitSessionExecutionStateRequest>,
-    ) -> Result<Response<pb::EmptyResponse>, Status> {
-        Ok(Response::new(empty_response(
-            self.commit_execution_state(request.into_inner()),
-        )))
-    }
-
-    async fn start(
-        &self,
-        request: Request<Streaming<pb::StartRequest>>,
-    ) -> Result<Response<Self::StartStream>, Status> {
-        self.serve_start(Box::pin(request.into_inner())).await
-    }
-
-    async fn compact_session(
-        &self,
-        request: Request<Streaming<pb::CompactSessionRequest>>,
-    ) -> Result<Response<Self::CompactSessionStream>, Status> {
-        self.serve_compact_session(Box::pin(request.into_inner()))
-            .await
-    }
-
-    async fn submit_input(
-        &self,
-        request: Request<Streaming<pb::SubmitInputRequest>>,
-    ) -> Result<Response<Self::SubmitInputStream>, Status> {
-        self.serve_submit_input(Box::pin(request.into_inner()))
-            .await
-    }
-
-    async fn interrupt(
-        &self,
-        request: Request<pb::InterruptRequest>,
-    ) -> Result<Response<pb::InterruptResponse>, Status> {
-        let request = request.into_inner();
-        let auth = node_pb::decode_auth(request.auth).map_err(status_from_error)?;
-        self.authorize(&auth).map_err(status_from_error)?;
-        let params = harness_pb::decode_interrupt_params(request.params.ok_or_else(|| {
-            status_from_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "missing interrupt params",
-            ))
-        })?)
-        .map_err(status_from_error)?;
-        let peer = request
-            .caller
-            .as_ref()
-            .map(|caller| caller.coordinator_id.as_str())
-            .ok_or_else(|| status_from_error(invalid_request()))?;
-        let prepared = self
-            .prepare_interrupt(&auth, &params, peer)
-            .map_err(status_from_error)?;
-        let result = self.finish_interrupt(params, peer, prepared).await;
-        Ok(Response::new(pb::InterruptResponse {
-            result: Some(match result {
-                Ok(value) => pb::interrupt_response::Result::Interrupted(
-                    harness_pb::encode_interrupt_outcome(value),
-                ),
-                Err(error) => pb::interrupt_response::Result::Failure(failure(&error)),
-            }),
-        }))
-    }
-
-    async fn clear_session(
-        &self,
-        request: Request<pb::SessionRequest>,
-    ) -> Result<Response<pb::EmptyResponse>, Status> {
-        let request = request.into_inner();
-        let auth = node_pb::decode_auth(request.auth).map_err(status_from_error)?;
-        self.authorize(&auth).map_err(status_from_error)?;
-        let params = harness_pb::decode_session_context(
-            request.params,
-            &self.config.read().expect("Worker config lock poisoned"),
-        )
-        .map_err(status_from_error)?;
-        let peer = self
-            .coordinator_id(request.caller.as_ref(), &params)
-            .map_err(status_from_error)?;
-        let expected_history_cursor = agent_protocol::execution_state_pb::decode_history_cursor(
-            request.expected_history_cursor.ok_or_else(|| {
-                status_from_error(TalosError::new(
-                    ErrorCode::InvalidRequest,
-                    "Session history cursor is required",
-                ))
-            })?,
-        )
-        .map_err(status_from_error)?;
-        let (_ownership, _reservation, harness) = self
-            .prepare_maintenance(&params, peer, &expected_history_cursor)
-            .map_err(status_from_error)?;
-        let result = harness.clear_session(params, expected_history_cursor).await;
-        Ok(Response::new(empty_response(result)))
-    }
-
-    async fn close_session(
-        &self,
-        request: Request<pb::SessionRequest>,
-    ) -> Result<Response<pb::EmptyResponse>, Status> {
-        let request = request.into_inner();
-        let auth = node_pb::decode_auth(request.auth).map_err(status_from_error)?;
-        self.authorize(&auth).map_err(status_from_error)?;
-        let params = harness_pb::decode_session_context(
-            request.params,
-            &self.config.read().expect("Worker config lock poisoned"),
-        )
-        .map_err(status_from_error)?;
-        let peer = self
-            .coordinator_id(request.caller.as_ref(), &params)
-            .map_err(status_from_error)?;
-        let expected_history_cursor = agent_protocol::execution_state_pb::decode_history_cursor(
-            request.expected_history_cursor.ok_or_else(|| {
-                status_from_error(TalosError::new(
-                    ErrorCode::InvalidRequest,
-                    "Session history cursor is required",
-                ))
-            })?,
-        )
-        .map_err(status_from_error)?;
-        let (_ownership, _reservation, harness) = self
-            .prepare_maintenance(&params, peer, &expected_history_cursor)
-            .map_err(status_from_error)?;
-        let result = harness.close_session(params, expected_history_cursor).await;
-        Ok(Response::new(empty_response(result)))
-    }
-
-    async fn read_workspace_memory(
-        &self,
-        request: Request<pb::SessionRequest>,
-    ) -> Result<Response<pb::WorkspaceMemoryResponse>, Status> {
-        let request = request.into_inner();
-        let context = self.memory_context(request.auth, request.params)?;
-        let harness = self.harness(&context.agent_id).map_err(status_from_error)?;
-        let result = harness.read_workspace_memory(context).await;
-        Ok(Response::new(pb::WorkspaceMemoryResponse {
-            result: Some(
-                match result.and_then(agent_protocol::memory_pb::encode_snapshot) {
-                    Ok(snapshot) => pb::workspace_memory_response::Result::Snapshot(snapshot),
-                    Err(error) => pb::workspace_memory_response::Result::Failure(failure(&error)),
-                },
-            ),
-        }))
-    }
-
-    async fn update_workspace_memory(
-        &self,
-        request: Request<pb::UpdateWorkspaceMemoryRequest>,
-    ) -> Result<Response<pb::WorkspaceMemoryResponse>, Status> {
-        let request = request.into_inner();
-        let params = request.params.ok_or_else(|| {
-            status_from_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "missing memory params",
-            ))
-        })?;
-        let context = self.memory_context(request.auth, params.context)?;
-        let update = agent_protocol::memory_pb::decode_update(params.update.ok_or_else(|| {
-            status_from_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "missing memory update",
-            ))
-        })?)
-        .map_err(status_from_error)?;
-        let harness = self.harness(&context.agent_id).map_err(status_from_error)?;
-        let result = harness.update_workspace_memory(context, update).await;
-        Ok(Response::new(pb::WorkspaceMemoryResponse {
-            result: Some(
-                match result.and_then(agent_protocol::memory_pb::encode_snapshot) {
-                    Ok(snapshot) => pb::workspace_memory_response::Result::Snapshot(snapshot),
-                    Err(error) => pb::workspace_memory_response::Result::Failure(failure(&error)),
-                },
-            ),
-        }))
-    }
-
-    async fn form_dream_memory(
-        &self,
-        request: Request<Streaming<pb::FormDreamMemoryRequest>>,
-    ) -> Result<Response<Self::FormDreamMemoryStream>, Status> {
-        self.serve_dream_memory(Box::pin(request.into_inner()))
-            .await
-    }
-
-    async fn shutdown(
-        &self,
-        request: Request<pb::ShutdownRequest>,
-    ) -> Result<Response<pb::EmptyResponse>, Status> {
-        let request = request.into_inner();
-        let auth = node_pb::decode_auth(request.auth).map_err(status_from_error)?;
-        self.authorize(&auth).map_err(status_from_error)?;
-        let params = request.params.ok_or_else(|| {
-            status_from_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "missing shutdown params",
-            ))
-        })?;
-        let harness = self.harness(&params.agent_id).map_err(status_from_error)?;
-        let result = self
-            .shutdown_harness(
-                &params.agent_id,
-                harness,
-                Duration::from_millis(params.timeout_ms),
-            )
-            .await;
-        Ok(Response::new(empty_response(result)))
     }
 }
 

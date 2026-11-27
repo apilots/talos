@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+base64.workspace = true
 futures-util = { workspace = true }
 http-range-header = "0.4"
 percent-encoding = "2"
@@ -14,12 +15,13 @@ url = "2"
 talos-logging = { workspace = true }
 talos-agent-api = { workspace = true }
 talos-gateway = { path = "../core" }
-talos-service = { workspace = true }
+talos-service = { workspace = true, features = ["product"] }
 talos-error = { path = "../../infra/error" }
 talos-types = { path = "../../common/types" }
 talos-auth = { path = "../../infra/auth" }
 talos-config = { workspace = true }
 talos-app-protocol = { workspace = true }
+talos-app-server = { workspace = true }
 axum = { version = "0.7", features = ["macros", "multipart", "ws"] }
 tokio = { workspace = true, features = ["net", "signal"] }
 tokio-util = { workspace = true }
@@ -36,11 +38,11 @@ async-trait = "0.1"
 bytes = { workspace = true }
 
 [dev-dependencies]
+talos-service = { workspace = true, features = ["product", "control-plane"] }
 talos-mcp = { workspace = true }
 talos-agent = { workspace = true }
 opendal = { workspace = true, features = ["services-memory"] }
 sqlx = { workspace = true }
-talos-app-server = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-memory = { workspace = true }
 talos-plugin = { workspace = true }

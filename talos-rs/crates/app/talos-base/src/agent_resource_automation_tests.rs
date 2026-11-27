@@ -31,7 +31,7 @@ impl AutomationControl for RecordedAutomation {
 }
 
 #[tokio::test]
-async fn automation_requires_the_exact_reverse_invocation() {
+async fn automation_requires_the_exact_registered_worker_invocation() {
     let storage = Arc::new(
         SqliteStorage::new_with_max_connections(":memory:", 1)
             .await
@@ -46,18 +46,46 @@ async fn automation_requires_the_exact_reverse_invocation() {
     let pool = storage.pool().clone();
     let nodes = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(&storage)));
     let sessions = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
-    let record = session_record();
+    let created = nodes
+        .create_node(
+            &Actor::regular("user-1"),
+            agent_protocol::CreateNodeRequest {
+                display_name: "Worker".into(),
+                endpoint: None,
+                owner_user_id: None,
+                credential_expires_at: chrono::Utc::now().timestamp() + 3600,
+            },
+        )
+        .await
+        .unwrap();
+    let registration_auth = NodeAuth {
+        node_id: created.node.node_id.clone(),
+        token: created.credential.token,
+    };
+    let principal = nodes
+        .authenticate_registration(&registration_auth)
+        .await
+        .unwrap();
+    let registration = nodes
+        .register(
+            &principal,
+            agent_protocol::RegisterParams {
+                product_owner: talos_types::NodeProductOwner::Server,
+                deployments: vec![agent_protocol::Deployment {
+                    agent_id: "talos".into(),
+                }],
+                system_info: None,
+            },
+        )
+        .await
+        .unwrap();
+    let mut record = session_record();
+    record.execution_node_id = created.node.node_id;
     sessions.insert_session_record(&record).await.unwrap();
-    let data = NodeSessionDataRpc::new(
-        nodes,
-        sessions,
-        Arc::new(EmptyHistory),
-        Arc::new(TestAttachments),
-        Arc::new(TestMemoryProgress::default()),
-    );
+    let data = NodeSessionDataRpc::new(nodes, sessions, Arc::new(TestAttachments));
     let auth = NodeAuth {
         node_id: record.execution_node_id.clone(),
-        token: "foreign-lease".into(),
+        token: registration.lease_token,
     };
     let control = Arc::new(RecordedAutomation::default());
     let session = agent_protocol::AgentSessionContext {
@@ -80,16 +108,11 @@ async fn automation_requires_the_exact_reverse_invocation() {
     };
     let scope = pb::CoordinatorCallContext {
         coordinator_id: "original-coordinator".into(),
-        connection_id: "original-connection".into(),
-        rpc_call_id: 1,
         session: Some(harness_pb::encode_session_context(session)),
         turn_id: Some(params.caller.turn_id.clone()),
         project_id: None,
     };
-    let reverse = NodeAutomationControlRpc::new(
-        data.for_invocation(record.execution_node_id.clone(), scope.clone()),
-        control.clone(),
-    );
+    let reverse = NodeAutomationControlRpc::new(data.clone(), control.clone());
     for wrong_agent in [false, true] {
         let mut forged = params.clone();
         if wrong_agent {

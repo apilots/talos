@@ -18,6 +18,11 @@ use crate::{
 pub fn encode_run_params(value: AgentRunParams) -> TalosResult<pb::RunParams> {
     value.validate()?;
     Ok(pb::RunParams {
+        subagent_limit: value.subagent_limit.map(std::num::NonZeroU32::get),
+        command: value.command.map(encode_command),
+        automation_origin: value
+            .automation_origin
+            .map(crate::automation_pb::encode_origin),
         context: Some(encode_context(value.context)?),
         input: Some(encode_message(value.input)?),
         checkpoint: value.checkpoint.map(encode_checkpoint).transpose()?,
@@ -29,6 +34,15 @@ pub fn encode_run_params(value: AgentRunParams) -> TalosResult<pb::RunParams> {
 
 pub fn decode_run_params(value: pb::RunParams, config: &Config) -> TalosResult<AgentRunParams> {
     let value = AgentRunParams {
+        subagent_limit: value
+            .subagent_limit
+            .map(|value| std::num::NonZeroU32::new(value).ok_or_else(invalid))
+            .transpose()?,
+        command: value.command.map(decode_command).transpose()?,
+        automation_origin: value
+            .automation_origin
+            .map(crate::automation_pb::decode_origin)
+            .transpose()?,
         context: decode_context(value.context, config)?,
         input: decode_message(value.input.ok_or_else(invalid)?)?,
         checkpoint: value.checkpoint.map(decode_checkpoint).transpose()?,
@@ -42,6 +56,7 @@ pub fn decode_run_params(value: pb::RunParams, config: &Config) -> TalosResult<A
 
 pub fn encode_input_params(value: AgentInputParams) -> TalosResult<pb::InputParams> {
     Ok(pb::InputParams {
+        command: value.command.map(encode_command),
         agent_id: value.agent_id,
         identity: Some(encode_turn_ref(value.identity)),
         input: Some(encode_message(value.input)?),
@@ -53,6 +68,7 @@ pub fn decode_input_params(value: pb::InputParams) -> TalosResult<AgentInputPara
         return Err(invalid());
     }
     Ok(AgentInputParams {
+        command: value.command.map(decode_command).transpose()?,
         agent_id: value.agent_id,
         identity: decode_turn_ref(value.identity)?,
         input: decode_message(value.input.ok_or_else(invalid)?)?,
@@ -197,5 +213,34 @@ fn decode_checkpoint(value: pb::Checkpoint) -> TalosResult<AgentRunCheckpoint> {
             .map(decode_message)
             .collect::<TalosResult<_>>()?,
         metrics: decode_metrics(value.metrics)?,
+    })
+}
+
+pub fn encode_command(value: crate::AgentCommandIdentity) -> pb::AgentCommandIdentity {
+    pb::AgentCommandIdentity {
+        command: match value.command {
+            talos_types::IdempotentCommand::TurnSubmission => {
+                pb::AgentCommandKind::TurnSubmission as i32
+            }
+            talos_types::IdempotentCommand::TurnInput => pb::AgentCommandKind::TurnInput as i32,
+        },
+        idempotency_key: value.idempotency_key,
+        request_id: value.request_id,
+    }
+}
+pub fn decode_command(value: pb::AgentCommandIdentity) -> TalosResult<crate::AgentCommandIdentity> {
+    if value.idempotency_key.is_empty() || value.request_id.is_empty() {
+        return Err(invalid());
+    }
+    Ok(crate::AgentCommandIdentity {
+        command: match pb::AgentCommandKind::try_from(value.command) {
+            Ok(pb::AgentCommandKind::TurnSubmission) => {
+                talos_types::IdempotentCommand::TurnSubmission
+            }
+            Ok(pb::AgentCommandKind::TurnInput) => talos_types::IdempotentCommand::TurnInput,
+            _ => return Err(invalid()),
+        },
+        idempotency_key: value.idempotency_key,
+        request_id: value.request_id,
     })
 }

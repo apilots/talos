@@ -29,7 +29,16 @@ enum NodeMode { NODE_MODE_UNSPECIFIED = 0; NODE_MODE_EMBEDDED = 1; NODE_MODE_REM
 enum NodeStatus { NODE_STATUS_UNSPECIFIED = 0; NODE_STATUS_ENABLED = 1; NODE_STATUS_DISABLED = 2; }
 enum NodeHealth { NODE_HEALTH_UNSPECIFIED = 0; NODE_HEALTH_UNKNOWN = 1; NODE_HEALTH_HEALTHY = 2; NODE_HEALTH_DEGRADED = 3; }
 message Deployment { string agent_id = 1; }
-message RegisterParams { repeated Deployment deployments = 1; NodeSystemInfo system_info = 2; }
+enum NodeProductOwner {
+  NODE_PRODUCT_OWNER_UNSPECIFIED = 0;
+  NODE_PRODUCT_OWNER_COMPUTER = 1;
+  NODE_PRODUCT_OWNER_SERVER = 2;
+}
+message RegisterParams {
+  repeated Deployment deployments = 1;
+  NodeSystemInfo system_info = 2;
+  NodeProductOwner product_owner = 3;
+}
 message Registration {
   string lease_token = 1; LeaseValidity validity = 2; string owner_user_id = 3;
 }

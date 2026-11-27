@@ -374,7 +374,15 @@ async fn enabling_capture_preserves_a_large_existing_history_at_the_pre_mutation
             .await
             .unwrap();
     }
-    // First captured mutation must establish all baseline pages before this patch.
+    // Model a released pre-capture database: its canonical history predates
+    // transactional revisions. This patch must establish all baseline pages.
+    a.storage
+        .execute(
+            "DELETE FROM resource_revisions WHERE kind='session' AND resource_id='large-history'",
+            &[],
+        )
+        .await
+        .unwrap();
     a.sessions
         .patch_session(PatchSessionParams {
             session_id: "large-history".into(),

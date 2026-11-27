@@ -118,6 +118,7 @@ pub(super) async fn start_maintenance(
                 let service = service.clone();
                 async move {
                     if let Some(service) = service.upgrade() {
+                        service.reconcile_worker_events().await?;
                         service
                             .scan_session_loops(chrono::Utc::now().timestamp())
                             .await?;

@@ -392,13 +392,7 @@ fn control_server(
     sessions: Arc<dyn SessionStore>,
 ) -> NodeRpcServer {
     let resources = Arc::new(UnexpectedResourceCall);
-    let session_data = NodeSessionDataRpc::new(
-        nodes.clone(),
-        sessions,
-        resources.clone(),
-        resources.clone(),
-        resources.clone(),
-    );
+    let session_data = NodeSessionDataRpc::new(nodes.clone(), sessions, resources.clone());
     NodeRpcServer::new(
         config,
         nodes.clone(),

@@ -64,6 +64,7 @@ pub enum SessionTreeScope {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionQuery {
+    pub worker_execution_only: bool,
     pub execution_node_id: Option<String>,
     pub tree_scope: SessionTreeScope,
     pub user_id: Option<String>,

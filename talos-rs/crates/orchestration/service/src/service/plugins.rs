@@ -16,7 +16,7 @@ impl TalosService {
             .unwrap_or_else(|| "embedded".to_owned());
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .list_plugin_sources(actor.worker_environment_context(), request)
+            .list_plugin_sources(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn add_plugin_source(
@@ -31,7 +31,7 @@ impl TalosService {
         let node = self.resolve_computer_node(actor, &node).await?;
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .add_plugin_source(actor.worker_environment_context(), request)
+            .add_plugin_source(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn refresh_plugin_source(
@@ -46,7 +46,7 @@ impl TalosService {
         let node = self.resolve_computer_node(actor, &node).await?;
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .refresh_plugin_source(actor.worker_environment_context(), request)
+            .refresh_plugin_source(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn remove_plugin_source(
@@ -61,7 +61,7 @@ impl TalosService {
         let node = self.resolve_computer_node(actor, &node).await?;
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .remove_plugin_source(actor.worker_environment_context(), request)
+            .remove_plugin_source(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn search_plugins(
@@ -75,7 +75,7 @@ impl TalosService {
             .unwrap_or_else(|| "embedded".to_owned());
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .search_plugins(actor.worker_environment_context(), request)
+            .search_plugins(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn list_plugins(
@@ -89,7 +89,7 @@ impl TalosService {
             .unwrap_or_else(|| "embedded".to_owned());
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .list_plugins(actor.worker_environment_context(), request)
+            .list_plugins(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn read_plugin(
@@ -103,7 +103,7 @@ impl TalosService {
             .unwrap_or_else(|| "embedded".to_owned());
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .read_plugin(actor.worker_environment_context(), request)
+            .read_plugin(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn install_plugin(
@@ -119,7 +119,7 @@ impl TalosService {
         let environment = self.worker_environment(actor, Some(&node)).await?;
         let prepared = environment
             .prepare_plugin_change(
-                actor.worker_environment_context(),
+                crate::access::worker_environment_context(actor),
                 WorkerPluginChange::Install(request.clone()),
             )
             .await?;
@@ -128,7 +128,7 @@ impl TalosService {
             let environment = self.worker_environment(actor, Some(&node)).await?;
             environment
                 .install_plugin(
-                    actor.worker_environment_context(),
+                    crate::access::worker_environment_context(actor),
                     WorkerPluginInstall {
                         request,
                         preparation_id: prepared.preparation_id.clone(),
@@ -139,7 +139,7 @@ impl TalosService {
         .await;
         if result.is_err() {
             if let Err(error) = environment
-                .cancel_plugin_change(actor.worker_environment_context(), prepared)
+                .cancel_plugin_change(crate::access::worker_environment_context(actor), prepared)
                 .await
             {
                 talos_logging::report_error(&error);
@@ -160,7 +160,7 @@ impl TalosService {
         let environment = self.worker_environment(actor, Some(&node)).await?;
         let prepared = environment
             .prepare_plugin_change(
-                actor.worker_environment_context(),
+                crate::access::worker_environment_context(actor),
                 WorkerPluginChange::Update(request.clone()),
             )
             .await?;
@@ -169,7 +169,7 @@ impl TalosService {
             let environment = self.worker_environment(actor, Some(&node)).await?;
             environment
                 .update_plugin(
-                    actor.worker_environment_context(),
+                    crate::access::worker_environment_context(actor),
                     WorkerPluginUpdate {
                         request,
                         preparation_id: prepared.preparation_id.clone(),
@@ -180,7 +180,7 @@ impl TalosService {
         .await;
         if result.is_err() {
             if let Err(error) = environment
-                .cancel_plugin_change(actor.worker_environment_context(), prepared)
+                .cancel_plugin_change(crate::access::worker_environment_context(actor), prepared)
                 .await
             {
                 talos_logging::report_error(&error);
@@ -200,7 +200,7 @@ impl TalosService {
         let node = self.resolve_computer_node(actor, &node).await?;
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .uninstall_plugin(actor.worker_environment_context(), request)
+            .uninstall_plugin(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn enable_plugin(
@@ -215,7 +215,7 @@ impl TalosService {
         let node = self.resolve_computer_node(actor, &node).await?;
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .enable_plugin(actor.worker_environment_context(), request)
+            .enable_plugin(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn disable_plugin(
@@ -230,7 +230,7 @@ impl TalosService {
         let node = self.resolve_computer_node(actor, &node).await?;
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .disable_plugin(actor.worker_environment_context(), request)
+            .disable_plugin(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn browser(
@@ -266,7 +266,7 @@ impl TalosService {
         ) {
             let snapshot = environment
                 .browser(
-                    actor.worker_environment_context(),
+                    crate::access::worker_environment_context(actor),
                     BrowserRequest {
                         node_id: None,
                         operation: BrowserOperation::Read,
@@ -290,7 +290,7 @@ impl TalosService {
             }
         }
         environment
-            .browser(actor.worker_environment_context(), request)
+            .browser(crate::access::worker_environment_context(actor), request)
             .await
     }
 
@@ -305,7 +305,7 @@ impl TalosService {
             .unwrap_or_else(|| "embedded".to_owned());
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .list_mcp_servers(actor.worker_environment_context(), request)
+            .list_mcp_servers(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn read_mcp_authentication(
@@ -319,7 +319,7 @@ impl TalosService {
             .unwrap_or_else(|| "embedded".to_owned());
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .read_mcp_authentication(actor.worker_environment_context(), request)
+            .read_mcp_authentication(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn update_mcp_credentials(
@@ -334,7 +334,7 @@ impl TalosService {
         let node = self.resolve_computer_node(actor, &node).await?;
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .update_mcp_credentials(actor.worker_environment_context(), request)
+            .update_mcp_credentials(crate::access::worker_environment_context(actor), request)
             .await
     }
     pub async fn import_mcp_server(
@@ -349,7 +349,7 @@ impl TalosService {
         let node = self.resolve_computer_node(actor, &node).await?;
         let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
-            .import_mcp_server(actor.worker_environment_context(), request)
+            .import_mcp_server(crate::access::worker_environment_context(actor), request)
             .await
     }
 }

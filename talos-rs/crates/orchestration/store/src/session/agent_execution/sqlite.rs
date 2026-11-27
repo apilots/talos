@@ -15,6 +15,40 @@ const MAX_EVENT_READ_LIMIT: usize = 10_000;
 
 #[async_trait]
 impl AgentExecutionStore for DatabaseSessionStore {
+    async fn get_agent_event_by_sequence(
+        &self,
+        identity: &AgentTurnRef,
+        sequence: u64,
+    ) -> TalosResult<Option<AgentEventRecord>> {
+        self.storage.query("SELECT event_seq,session_id,turn_id,sequence,occurred_at,persisted_at,payload_json FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=?", &[&identity.session_id,&identity.turn_id,&sequence.to_string()]).await?.first().map(parse_event_record).transpose()
+    }
+
+    async fn worker_event_cursor(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<agent_protocol::AgentSessionEventCursor>> {
+        super::super::worker_projection::cursor(self, session_id).await
+    }
+    async fn project_worker_events(
+        &self,
+        params: super::super::WorkerProjectionParams,
+    ) -> TalosResult<super::super::WorkerProjectionCommit> {
+        super::super::worker_projection::project(self, params).await
+    }
+    async fn pending_worker_settlements(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Vec<super::super::WorkerSettlementRecord>> {
+        super::super::worker_projection::pending(self, session_id).await
+    }
+    async fn complete_worker_settlement(
+        &self,
+        cursor: &agent_protocol::AgentSessionEventCursor,
+    ) -> TalosResult<()> {
+        self.storage.execute("UPDATE worker_event_projection SET settlement_applied_at=? WHERE session_id=? AND history_generation=? AND worker_offset=? AND settlement_json <> 'null'", &[&chrono::Utc::now().timestamp().to_string(), &cursor.session_id, &cursor.generation.to_string(), &cursor.offset.to_string()]).await?;
+        Ok(())
+    }
+
     async fn history_generation(&self, session_id: &str) -> TalosResult<Option<u64>> {
         let rows = self
             .storage
@@ -69,6 +103,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
         super::supplement::read_payload(self, identity, payload_id).await
     }
 
+    #[cfg(feature = "sync")]
     async fn get_shared_active_turn(
         &self,
         session_id: &str,

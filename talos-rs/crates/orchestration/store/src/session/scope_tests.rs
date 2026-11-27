@@ -230,7 +230,7 @@ async fn active_subagent_turn_check_uses_one_tree_query() {
 }
 
 #[tokio::test]
-async fn delete_session_tree_removes_descendants_and_runtime_rows() {
+async fn delete_session_tree_removes_runtime_rows_but_retains_pending_facts() {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     run_migrations(storage.pool(), &test_migrations_dir())
         .await
@@ -296,7 +296,15 @@ async fn delete_session_tree_removes_descendants_and_runtime_rows() {
             counts[0].get_i64("idempotency_keys"),
             counts[0].get_i64("command_revisions"),
         ),
-        (Some(0), Some(0), Some(0), Some(0), Some(0))
+        (Some(0), Some(2), Some(0), Some(0), Some(2))
+    );
+    assert_eq!(
+        storage
+            .query("SELECT COUNT(*) AS count FROM visible_agent_events", &[])
+            .await
+            .unwrap()[0]
+            .get_i64("count"),
+        Some(0)
     );
 }
 
@@ -702,4 +710,53 @@ async fn session_patch_pinned_preserves_last_activity_and_allows_active_turn() {
         .unwrap();
     assert!(!unpinned.pinned);
     assert_eq!(unpinned.last_activity, 123);
+}
+
+#[tokio::test]
+async fn legacy_history_remains_readable_but_cannot_become_worker_execution() {
+    let store = store().await;
+    let old = record("legacy", "alice", None, None);
+    store.insert_session_record(&old).await.unwrap();
+    store
+        .storage
+        .execute(
+            "UPDATE sessions SET execution_architecture='legacy_read_only' WHERE session_key=?",
+            &["legacy"],
+        )
+        .await
+        .unwrap();
+    let error = store
+        .ensure_worker_execution_session("legacy")
+        .await
+        .unwrap_err();
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+    assert_eq!(
+        store
+            .get_session_record("legacy")
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        "legacy"
+    );
+    store
+        .insert_session_record(&record("new", "alice", None, None))
+        .await
+        .unwrap();
+    store.ensure_worker_execution_session("new").await.unwrap();
+    let remote = store
+        .list_session_records(&SessionQuery {
+            worker_execution_only: true,
+            limit: Some(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        remote
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["new"]
+    );
 }

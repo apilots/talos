@@ -149,6 +149,22 @@ def record(directory: Path, key: str, task: dict) -> None:
     (directory / 'success.json').write_text(json.dumps(value, indent=2))
 
 
+def check_product_features(packages: list[str]) -> None:
+    """Keep optional product composition covered when its owning runtime changes."""
+    if 'talos-base' not in packages:
+        return
+    for features in ('', 'sync', 'relay', 'sync,relay'):
+        args = ['just', 'check', '--locked', '-p', 'talos-base', '--no-default-features']
+        if features:
+            args.extend(['--features', features])
+        run(*args)
+    # The shared archive uses default features; compile and run the actual
+    # capture-only Store tests without inheriting that default-feature archive.
+    environment = dict(os.environ)
+    environment.pop('TALOS_TEST_ARCHIVE', None)
+    run('just', 'test', '--locked', '-p', 'talos-store', '--no-default-features', env=environment)
+
+
 def execute(task: dict, directory: Path) -> None:
     if task['kind'] == 'quality':
         if task['rust']:
@@ -156,6 +172,7 @@ def execute(task: dict, directory: Path) -> None:
             run('just', 'fmt-check')
             run('just', 'deps-check')
             run('just', 'clippy', '--locked', '--all-targets', *args)
+            check_product_features(task['rust'])
             archive = os.environ.get('TALOS_TEST_ARCHIVE')
             if archive:
                 verified(Path(archive))

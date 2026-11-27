@@ -20,6 +20,7 @@ async fn input_admission_blocks_delivery_until_permit() {
 
     let input = harness
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: TEST_AGENT_ID.to_string(),
             identity: identity.clone(),
             input: user_message(&identity, "message-2"),
@@ -53,6 +54,7 @@ async fn rejected_input_keeps_its_cause_after_provider_cleanup() {
 
     let delivery_error = harness
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: TEST_AGENT_ID.to_string(),
             identity,
             input: user_message(&AgentTurnRef::new("session-1", "turn-1"), "message-2"),

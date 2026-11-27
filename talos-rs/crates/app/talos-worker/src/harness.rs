@@ -41,6 +41,26 @@ impl WorkerHarness {
 }
 
 impl AgentHarness for WorkerHarness {
+    fn read_session_execution_state(
+        &self,
+        session: AgentSessionContext,
+    ) -> AgentFuture<'_, AgentResult<Option<SessionExecutionState>>> {
+        self.execution.read_session_execution_state(session)
+    }
+
+    fn read_execution_payload(
+        &self,
+        params: AgentExecutionPayloadParams,
+    ) -> AgentFuture<'_, AgentResult<AgentExecutionPayloadResult>> {
+        self.execution.read_execution_payload(params)
+    }
+    fn read_session_events(
+        &self,
+        params: AgentSessionEventsParams,
+    ) -> AgentFuture<'_, AgentResult<AgentSessionEventsResult>> {
+        self.execution.read_session_events(params)
+    }
+
     fn start(&self, params: AgentRunParams) -> AgentFuture<'_, AgentResult<AgentRunExecution>> {
         Box::pin(async move {
             let guard = self.execution_gate.clone().read_owned().await;
@@ -86,6 +106,14 @@ impl AgentHarness for WorkerHarness {
     ) -> AgentFuture<'_, AgentResult<()>> {
         self.execution
             .clear_session(context, expected_history_cursor)
+    }
+    fn retire_session(
+        &self,
+        context: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>> {
+        self.execution
+            .retire_session(context, expected_history_cursor)
     }
     fn close_session(
         &self,

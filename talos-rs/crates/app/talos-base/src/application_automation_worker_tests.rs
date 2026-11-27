@@ -101,21 +101,19 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
     .unwrap();
     let server = NodeRpcServer::new(
         &control_config,
-        runtime.node_service.clone(),
+        runtime.node_service.clone().expect("Server authority"),
         Arc::new(TestAuth),
         runtime.coordinator.clone(),
         NodeResourceServices {
             session_data: NodeSessionDataRpc::new(
-                runtime.node_service.clone(),
+                runtime.node_service.clone().expect("Server authority"),
                 runtime.session_store.clone(),
-                runtime.session_history_reader.clone(),
                 runtime.attachment_reader.clone(),
-                runtime.memory_progress_store.clone(),
             ),
             agent_control: runtime.agent_control.clone(),
             automation_control: runtime.automation_control.clone(),
             tool_images: NodeToolImageRpc::new(
-                runtime.node_service.clone(),
+                runtime.node_service.clone().expect("Server authority"),
                 runtime.tool_image_store.clone(),
                 1024 * 1024,
             ),
@@ -144,6 +142,8 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
     let actor = Actor::regular("user-1").with_access_token("user-1");
     let node = runtime
         .node_service
+        .as_ref()
+        .expect("Server authority")
         .create_node(
             &actor,
             agent_protocol::CreateNodeRequest {
@@ -346,6 +346,6 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
     worker.shutdown().await.unwrap();
     stop.cancel();
     serving.await.unwrap().unwrap();
-    runtime.shutdown_sync().await.unwrap();
+    runtime.shutdown_host().await.unwrap();
     runtime.shutdown().await.unwrap();
 }

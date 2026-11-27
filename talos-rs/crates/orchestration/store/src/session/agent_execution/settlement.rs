@@ -152,10 +152,27 @@ pub(super) async fn commit_terminal(
     Ok(record)
 }
 
-async fn update_completed_turn_session(
+pub(crate) async fn update_completed_turn_session(
     transaction: &mut dyn talos_storage::StorageTransaction,
     session_id: &str,
     metrics: talos_agent_api::AgentRunMetrics,
+) -> TalosResult<()> {
+    update_execution_usage(transaction, session_id, metrics, true).await
+}
+
+pub(crate) async fn update_compacted_session(
+    transaction: &mut dyn talos_storage::StorageTransaction,
+    session_id: &str,
+    metrics: talos_agent_api::AgentRunMetrics,
+) -> TalosResult<()> {
+    update_execution_usage(transaction, session_id, metrics, false).await
+}
+
+async fn update_execution_usage(
+    transaction: &mut dyn talos_storage::StorageTransaction,
+    session_id: &str,
+    metrics: talos_agent_api::AgentRunMetrics,
+    normal_turn: bool,
 ) -> TalosResult<()> {
     let rows = transaction
         .query(
@@ -170,12 +187,12 @@ async fn update_completed_turn_session(
         .get_i64("message_count")
         .and_then(|value| u64::try_from(value).ok())
         .ok_or_else(|| TalosError::internal("Session message count is invalid"))?
-        .saturating_add(2);
+        .saturating_add(if normal_turn { 2 } else { 0 });
     let latest_turn_seq = row
         .get_i64("latest_turn_seq")
         .and_then(|value| u64::try_from(value).ok())
         .ok_or_else(|| TalosError::internal("Session latest Turn sequence is invalid"))?
-        .saturating_add(1);
+        .saturating_add(u64::from(normal_turn));
     let mut usage = row
         .get_string("usage_json")
         .ok_or_else(|| TalosError::internal("Session usage is missing"))
@@ -188,7 +205,7 @@ async fn update_completed_turn_session(
             })
         })?;
     usage.tokens.accumulate(&metrics.usage);
-    if let Some(context) = metrics.context {
+    if let Some(context) = metrics.context.filter(|_| normal_turn) {
         usage.context = Some(context);
     }
     let usage_json = serde_json::to_string(&usage).map_err(|error| {

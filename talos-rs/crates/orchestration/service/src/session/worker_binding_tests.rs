@@ -44,20 +44,58 @@ async fn session_uses_worker_catalog_and_saved_workspace_after_default_changes()
     );
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     crate::test_support::run_test_migrations(storage.pool()).await;
+    let nodes = crate::AgentNodeService::new(Arc::new(
+        talos_store::node::DatabaseAgentNodeStore::new(&storage),
+    ));
+    let actor = crate::Actor::regular("user-1");
+    let created = nodes
+        .create_node(
+            &actor,
+            crate::CreateNodeRequest {
+                display_name: "Catalog Worker".into(),
+                endpoint: None,
+                owner_user_id: None,
+                credential_expires_at: chrono::Utc::now().timestamp() + 3600,
+            },
+        )
+        .await
+        .unwrap();
+    let node_id = created.node.node_id;
+    let principal = nodes
+        .authenticate_registration(&agent_protocol::NodeAuth {
+            node_id: node_id.clone(),
+            token: created.credential.token,
+        })
+        .await
+        .unwrap();
+    nodes
+        .register(
+            &principal,
+            agent_protocol::RegisterParams {
+                product_owner: talos_types::NodeProductOwner::Server,
+                system_info: None,
+                deployments: vec![agent_protocol::Deployment {
+                    agent_id: "default".into(),
+                }],
+            },
+        )
+        .await
+        .unwrap();
     let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
     let service = SessionService::new(
         store,
         Arc::new(MockProjectStore::new()),
         TalosConfig::default(),
         coordinator,
-    );
+    )
+    .with_managed_nodes(nodes.into());
     let record = service
         .create_session(CreateSessionParams {
             session_id: Some("remote-session".into()),
             source: talos_types::talos::SessionSource::http(),
             user_id: "user-1".into(),
             target_agent: "default".into(),
-            execution_node_id: "worker-a".into(),
+            execution_node_id: node_id.clone(),
             model_selection: None,
             conf: None,
             workspace_id: "pc".into(),
@@ -72,7 +110,7 @@ async fn session_uses_worker_catalog_and_saved_workspace_after_default_changes()
     );
     assert_eq!(
         service.session_info(&record).await.unwrap().node_id,
-        "worker-a"
+        node_id
     );
     assert_eq!(
         service.session_info(&record).await.unwrap().session_kind,

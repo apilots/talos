@@ -333,7 +333,7 @@ async fn repair_completed(
     Ok(record)
 }
 
-async fn record_completion(
+pub(crate) async fn record_completion(
     transaction: &mut dyn StorageTransaction,
     session_id: &str,
     command: IdempotentCommand,
@@ -395,6 +395,8 @@ async fn reclaim(
         ));
     }
     Ok(CommandLease {
+        reclaimed: true,
+        created_at: existing.record.created_at,
         session_id: existing.record.session_id,
         command: existing.record.command,
         idempotency_key: existing.record.idempotency_key,
@@ -486,6 +488,8 @@ fn parse_record(row: &Row) -> TalosResult<StoredRecord> {
 
 fn lease_from_request(requested: CommandReservation) -> CommandLease {
     CommandLease {
+        reclaimed: false,
+        created_at: requested.now,
         session_id: requested.session_id,
         command: requested.command,
         idempotency_key: requested.idempotency_key,

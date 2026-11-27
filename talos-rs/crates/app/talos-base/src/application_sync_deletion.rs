@@ -1,11 +1,11 @@
 //! Observe durable removal independently of UI polling and close the local alias.
-use super::application_sync::ApplicationSyncHost;
+use super::application_host::ApplicationHost;
 use talos_auth::RequestIdentity;
 use talos_config::YamlConfigStore;
 use talos_error::TalosResult;
 use talos_store::node::AgentNodeStore;
 
-impl ApplicationSyncHost {
+impl ApplicationHost {
     pub(crate) async fn refresh_removed_registration(
         &self,
         actor: &RequestIdentity,
@@ -16,7 +16,7 @@ impl ApplicationSyncHost {
         };
         if store.removed_registration_owner()?.as_deref() == Some(&actor.user_id)
             || self
-                .sync_stores
+                .stores
                 .nodes
                 .deletion_owner(&runner.node_id)
                 .await?
@@ -47,7 +47,7 @@ impl ApplicationSyncHost {
             }
             if store.removed_registration_owner()?.as_deref() == Some(&actor.user_id)
                 && self
-                    .sync_stores
+                    .stores
                     .sessions
                     .local_registration_retired(&actor.user_id, computer)
                     .await?
@@ -56,22 +56,24 @@ impl ApplicationSyncHost {
             }
             // Snapshot first. New work created after this transaction is never part
             // of the old identity, including if later cleanup has to be retried.
-            self.sync_stores
+            self.stores
                 .sessions
                 .record_local_registration_removal(&actor.user_id, computer)
                 .await?;
             store.mark_registration_removed(computer, &actor.user_id)?;
+            #[cfg(feature = "sync")]
             let active_sync = self
-                .sync_stores
+                .stores
                 .handles
                 .lock()
                 .await
                 .contains_key(&actor.user_id);
             self.retire_removed_local_registration(actor).await?;
+            #[cfg(feature = "sync")]
             if active_sync {
                 if let Some(binding) = self.sync.account_binding(actor).await? {
                     let credentials = self
-                        .sync_stores
+                        .stores
                         .credentials
                         .read()
                         .expect("Sync credentials lock")

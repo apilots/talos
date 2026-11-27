@@ -32,6 +32,7 @@ use super::{
 #[path = "../automation/goal_loop/turn.rs"]
 mod automation_runtime;
 mod completion;
+mod destruction;
 mod input;
 mod interrupt;
 mod managed_wake;
@@ -46,14 +47,14 @@ const TURN_SUBMISSION_LEASE_MS: i64 = 30_000;
 
 #[derive(Clone)]
 pub(crate) struct TurnService {
-    execution: AgentExecutionDriver,
+    pub(super) execution: AgentExecutionDriver,
     automation:
         Arc<std::sync::OnceLock<Arc<crate::automation::goal_loop::SessionAutomationService>>>,
     profile_store: Arc<dyn ProfileStore>,
     message_queue: SessionMessageQueueService,
     base_config: TalosConfig,
     execution_gate: Arc<super::NodeAdmissionGates>,
-    nodes: Option<crate::AgentNodeService>,
+    nodes: Option<crate::ProductNodeAccess>,
     wake_dispatches:
         Arc<std::sync::Mutex<std::collections::HashSet<(String, managed_wake::WakeCandidate)>>>,
     session_owner: Arc<std::sync::RwLock<Option<talos_agent::SessionOwner>>>,
@@ -76,7 +77,7 @@ impl TurnService {
         execution_gate: Arc<super::NodeAdmissionGates>,
     ) -> Self {
         Self {
-            execution,
+            execution: execution.with_message_queue(message_queue.clone()),
             automation: Default::default(),
             profile_store,
             message_queue,
@@ -115,27 +116,13 @@ impl TurnService {
             .transpose()
     }
 
-    pub(crate) fn with_managed_workers(mut self, nodes: crate::AgentNodeService) -> Self {
+    pub(crate) fn with_managed_workers(mut self, nodes: crate::ProductNodeAccess) -> Self {
         self.nodes = Some(nodes);
         self
     }
 
-    pub(crate) fn with_user_workspace_memory_reflection(
-        mut self,
-        inner_model: Arc<InnerModelClient>,
-    ) -> Self {
-        let sessions = self.execution.sessions.clone();
-        let coordinator = self.execution.coordinator.clone();
-        self.execution = self.execution.with_inner_model(
-            inner_model.clone(),
-            Arc::new(
-                crate::user_workspace_memory::UserWorkspaceMemoryReflection::new(
-                    inner_model,
-                    coordinator,
-                    sessions,
-                ),
-            ),
-        );
+    pub(crate) fn with_inner_model(mut self, inner_model: Arc<InnerModelClient>) -> Self {
+        self.execution = self.execution.with_inner_model(inner_model);
         self
     }
 
@@ -170,43 +157,21 @@ impl TurnService {
             .sessions
             .build_agent_context(&session, identity)
             .await?;
-        let usage = self.execution.compact(context).await?;
-        let completed_at = chrono::Utc::now();
-        let timezone_name = self.execution.sessions.kernel_timezone();
-        let timezone = talos_config::parse_timezone(&timezone_name)?;
-        let model_ref = session
-            .conf
-            .model_selection
-            .as_ref()
-            .expect("loaded Session must have a model selection")
-            .model_ref
-            .clone();
-        self.profile_store
-            .record_usage(ProfileUsageUpdate::ModelCall(ModelCallUsageUpdate {
-                user_id: session.user_id.clone(),
-                session_id: Some(session.id.clone()),
-                request_id,
-                kind: ModelUsageKind::Compact,
-                model_ref,
-                usage: usage.clone(),
-                usage_available: usage.is_available(),
-                timezone: timezone_name,
-                completed_at_ms: completed_at.timestamp_millis(),
-                usage_date: completed_at
-                    .with_timezone(&timezone)
-                    .date_naive()
-                    .format("%Y-%m-%d")
-                    .to_string(),
-            }))
-            .await?;
+        let session_id = session.id.clone();
+        let _request_id = request_id;
+        self.execution.compact(context).await?;
+        self.recover_worker_settlements(&session_id, false).await?;
         let record = self
             .execution
             .sessions
-            .record_compaction_usage(session, &usage)
-            .await?;
-        self.execution
-            .sessions
-            .schedule_shared_history_cursor(record.id.clone());
+            .load_record(&session_id)
+            .await?
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::SessionNotFound,
+                    "Session is unavailable.",
+                )
+            })?;
         self.execution.sessions.session_info(&record).await
     }
 
@@ -251,7 +216,6 @@ impl TurnService {
         }
         let reservation = self
             .execution
-            .execution_store
             .reserve_command(CommandReservation {
                 session_id: session_id.to_owned(),
                 command: IdempotentCommand::TurnSubmission,
@@ -444,7 +408,6 @@ impl TurnService {
             let lease_expires_at = now_ms.saturating_add(TURN_SUBMISSION_LEASE_MS);
             match self
                 .execution
-                .execution_store
                 .reserve_command(CommandReservation {
                     session_id: session_id.clone(),
                     command: IdempotentCommand::TurnSubmission,
@@ -510,7 +473,10 @@ impl TurnService {
             &turn_id,
             &message_id,
             submission.input,
-            chrono::Utc::now().timestamp(),
+            command_lease.as_ref().map_or_else(
+                || chrono::Utc::now().timestamp(),
+                |command| command.created_at / 1_000,
+            ),
         ) {
             Ok(input) => input,
             Err(error) => {
@@ -547,6 +513,9 @@ impl TurnService {
                 .build_agent_context_for_turn(&session, identity.clone(), worktree)
                 .await?;
             Ok(AgentRunParams {
+                subagent_limit: None,
+                command: None,
+                automation_origin: None,
                 context,
                 input,
                 checkpoint: None,
@@ -575,7 +544,9 @@ impl TurnService {
         let completion = match execution_result {
             Ok(completion) => completion,
             Err(error) => {
-                self.release_command(command_lease.take()).await;
+                if !agent_protocol::AgentAdmissionUnconfirmed::contains(&error) {
+                    self.release_command(command_lease.take()).await;
+                }
                 return Err(error);
             }
         };

@@ -268,6 +268,9 @@ async fn kernel_provider_keeps_streaming_while_live_input_waits_for_a_safe_bound
     let context = context(identity, temp_dir.path());
     let execution = harness
         .start(AgentRunParams {
+            subagent_limit: None,
+            command: None,
+            automation_origin: None,
             context,
             input: user_message(),
             checkpoint: None,
@@ -294,6 +297,7 @@ async fn kernel_provider_keeps_streaming_while_live_input_waits_for_a_safe_bound
     });
     let admission = harness
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: "agent-1".to_string(),
             identity: AgentTurnRef::new("session-1", "turn-1"),
             input: live_user_message(),
@@ -506,6 +510,7 @@ fn rich_input() -> Vec<AgentUserContentKind> {
 
 fn context(identity: AgentTurnRef, workspace_root: &Path) -> AgentContext {
     AgentContext {
+        tree_identity: talos_types::SessionTreeIdentity::Primary,
         history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),

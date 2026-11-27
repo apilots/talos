@@ -1,11 +1,11 @@
 //! Restore durable local capture after confirmed Worker enrollment.
-use super::application_sync::ApplicationSyncHost;
+use super::application_host::ApplicationHost;
 use talos_auth::RequestIdentity;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::Actor;
 use talos_sync::{ComputerAlias, SyncBindParams};
 
-impl ApplicationSyncHost {
+impl ApplicationHost {
     /// Explicit enrollment can attach new local work after its previous alias
     /// was retired. Restart the existing account transport so bootstrap captures
     /// facts created while no registered Computer owned the embedded alias.
@@ -53,7 +53,7 @@ impl ApplicationSyncHost {
         if computers.contains(&alias) {
             if !enabled
                 || self
-                    .sync_stores
+                    .stores
                     .handles
                     .lock()
                     .await

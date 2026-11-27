@@ -15,6 +15,7 @@ import { getEffectiveSessionStatus, isUnboundProject } from "@/shared/types/doma
 import { Sidebar } from "@/widgets/sidebar/Sidebar";
 import type { SidebarProjectGroup } from "@/widgets/sidebar/SidebarProjectSection";
 import type { SidebarSessionItem } from "@/widgets/sidebar/SidebarSessionRow";
+import { sessionPath } from "@/shared/api/session-route";
 
 export function SidebarContainer({ computer, computerEntry }: { computer?: import("@talos/sdk-core").AppProtocol.NodeInfo; computerEntry?: ReactNode } = {}) {
   const location = useLocation();
@@ -111,7 +112,7 @@ export function SidebarContainer({ computer, computerEntry }: { computer?: impor
       onRenameProject={async (projectId, name) => {
         await updateProjectName.mutateAsync({ projectId, name });
       }}
-      onSelectThread={(sessionId) => void navigate(`/sessions/${sessionId}`)}
+      onSelectThread={(sessionId) => void navigate(sessionPath(sessionId, sessions.find(session => session.id === sessionId)?.nodeId))}
       onLogout={handleLogout}
       projectActionPending={deleteProject.isPending || updateProjectName.isPending}
       sessionActionPending={deleteSession.isPending}

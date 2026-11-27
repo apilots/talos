@@ -6,11 +6,7 @@ use std::time::Duration;
 use agent_pb as pb;
 use agent_protocol::{error_pb, harness_pb, node_pb, resources_pb, NodeAuth};
 use bytes::Bytes;
-use talos_agent::{
-    AgentFuture, AgentResult, AttachmentReader, ResolvedAttachment, SessionHistoryReadParams,
-    SessionHistoryReader, SessionHistoryWindow, TurnFileScope,
-};
-use talos_agent_api::SessionHistoryTurn;
+use talos_agent::{AttachmentReader, ResolvedAttachment, TurnFileScope};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_llm_provider::{Attachment, AttachmentKind};
 use talos_tools::{AgentControl, AgentControlFuture, ToolImageStore};
@@ -74,7 +70,9 @@ impl AgentSessionDataClient {
         })
     }
 
-    pub async fn connect_loopback(
+    /// Connect the local mock resource service used by this crate's transport tests.
+    #[cfg(test)]
+    pub(crate) async fn connect_loopback(
         address: std::net::SocketAddr,
         auth: NodeAuth,
     ) -> TalosResult<Self> {
@@ -99,13 +97,7 @@ impl AgentSessionDataClient {
     ) -> TalosResult<Self> {
         let scope = agent_protocol::harness_pb::encode_session_context(session.clone());
         let caller = match caller {
-            Some(caller)
-                if caller.session.as_ref() == Some(&scope)
-                    && !caller.connection_id.is_empty()
-                    && caller.rpc_call_id != 0 =>
-            {
-                caller
-            }
+            Some(caller) if caller.session.as_ref() == Some(&scope) => caller,
             Some(_) => {
                 return Err(TalosError::new(
                     ErrorCode::PermissionDenied,
@@ -114,8 +106,6 @@ impl AgentSessionDataClient {
             }
             None => pb::CoordinatorCallContext {
                 coordinator_id: String::new(),
-                connection_id: String::new(),
-                rpc_call_id: 0,
                 session: Some(scope),
                 turn_id: None,
                 project_id: None,
@@ -147,51 +137,6 @@ impl AgentSessionDataClient {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
-    }
-
-    async fn read_history(
-        &self,
-        params: SessionHistoryReadParams,
-    ) -> TalosResult<Vec<SessionHistoryTurn>> {
-        let completed_event_seq = match params.window {
-            SessionHistoryWindow::Latest => None,
-            SessionHistoryWindow::OldestAfter {
-                completed_event_seq,
-            } => Some(completed_event_seq),
-        };
-        let limit = u32::try_from(params.limit).map_err(|_| {
-            TalosError::new(
-                ErrorCode::InvalidRequest,
-                "Session history limit is too large",
-            )
-        })?;
-        let response =
-            pb::agent_session_data_rpc_client::AgentSessionDataRpcClient::new(self.channel.clone())
-                .read_session_history(rpc_request(
-                    pb::ReadSessionHistoryRequest {
-                        caller: self.caller.clone(),
-                        auth: Some(node_pb::encode_auth(self.auth())),
-                        params: Some(pb::ReadSessionHistoryParams {
-                            session_id: params.session_id,
-                            completed_event_seq,
-                            limit,
-                        }),
-                    },
-                    Duration::from_secs(10),
-                ))
-                .await
-                .map_err(crate::decode_rpc_status)?
-                .into_inner();
-        match response.result.ok_or_else(invalid_response)? {
-            pb::read_session_history_response::Result::Turns(turns) => turns
-                .data
-                .into_iter()
-                .map(resources_pb::decode_history_turn)
-                .collect(),
-            pb::read_session_history_response::Result::Failure(failure) => {
-                Err(error_pb::decode_failure(failure)?)
-            }
-        }
     }
 
     async fn resolve_attachments(
@@ -251,63 +196,6 @@ impl AgentSessionDataClient {
             }
         }
         Err(invalid_response())
-    }
-
-    pub async fn processed_until_event_seq(&self, session_id: &str) -> TalosResult<u64> {
-        let response =
-            pb::agent_session_data_rpc_client::AgentSessionDataRpcClient::new(self.channel.clone())
-                .read_memory_progress(rpc_request(
-                    pb::ReadMemoryProgressRequest {
-                        caller: self.caller.clone(),
-                        auth: Some(node_pb::encode_auth(self.auth())),
-                        params: Some(pb::ReadMemoryProgressParams {
-                            session_id: session_id.to_owned(),
-                        }),
-                    },
-                    Duration::from_secs(10),
-                ))
-                .await
-                .map_err(crate::decode_rpc_status)?
-                .into_inner();
-        match response.result.ok_or_else(invalid_response)? {
-            pb::read_memory_progress_response::Result::Progress(progress) => {
-                Ok(progress.processed_until_event_seq)
-            }
-            pb::read_memory_progress_response::Result::Failure(failure) => {
-                Err(error_pb::decode_failure(failure)?)
-            }
-        }
-    }
-
-    pub async fn advance_processed_until_event_seq(
-        &self,
-        session_id: &str,
-        expected_until_seq: u64,
-        next_until_seq: u64,
-    ) -> TalosResult<()> {
-        let response =
-            pb::agent_session_data_rpc_client::AgentSessionDataRpcClient::new(self.channel.clone())
-                .advance_memory_progress(rpc_request(
-                    pb::AdvanceMemoryProgressRequest {
-                        caller: self.caller.clone(),
-                        auth: Some(node_pb::encode_auth(self.auth())),
-                        params: Some(pb::AdvanceMemoryProgressParams {
-                            session_id: session_id.to_owned(),
-                            expected_until_seq,
-                            next_until_seq,
-                        }),
-                    },
-                    Duration::from_secs(10),
-                ))
-                .await
-                .map_err(crate::decode_rpc_status)?
-                .into_inner();
-        match response.result.ok_or_else(invalid_response)? {
-            pb::advance_memory_progress_response::Result::Advanced(_) => Ok(()),
-            pb::advance_memory_progress_response::Result::Failure(failure) => {
-                Err(error_pb::decode_failure(failure)?)
-            }
-        }
     }
 
     async fn spawn_subagent(
@@ -559,24 +447,6 @@ impl AgentSessionDataClient {
     }
 }
 
-impl SessionHistoryReader for AgentSessionDataClient {
-    fn source_node_id(&self) -> Option<String> {
-        Some(self.current_auth().node_id)
-    }
-    fn append_supplement(
-        &self,
-        supplement: talos_agent_api::trajectory::SessionHistorySupplement,
-    ) -> AgentFuture<'_, AgentResult<()>> {
-        Box::pin(self.append_history_supplement(supplement))
-    }
-    fn read(
-        &self,
-        params: SessionHistoryReadParams,
-    ) -> AgentFuture<'_, AgentResult<Vec<SessionHistoryTurn>>> {
-        Box::pin(self.read_history(params))
-    }
-}
-
 impl AttachmentReader for AgentSessionDataClient {
     fn read<'a>(
         &'a self,
@@ -775,9 +645,6 @@ fn rpc_request<T>(body: T, timeout: Duration) -> tonic::Request<T> {
     request.set_timeout(timeout);
     request
 }
-
-#[path = "history_append.rs"]
-mod history_append;
 
 #[path = "automation_resource.rs"]
 mod automation;

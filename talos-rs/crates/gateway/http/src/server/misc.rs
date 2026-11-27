@@ -1,6 +1,7 @@
+use super::product_scope::ProductQuery;
 use std::sync::Arc;
 
-use axum::extract::{Extension, Path, Query, State};
+use axum::extract::{Extension, Path, State};
 use axum::response::Json;
 use axum::Json as BodyJson;
 use serde_json::{json, Value};
@@ -27,7 +28,7 @@ pub(super) async fn health_handler(State(state): State<Arc<HttpApiState>>) -> Js
 }
 
 pub(super) async fn list_models_handler(
-    Query(request): Query<ModelListRequest>,
+    ProductQuery(request): ProductQuery<ModelListRequest>,
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
 ) -> Result<JsonResponse<ModelListResponse>, ApiError> {
@@ -45,7 +46,7 @@ pub(super) async fn list_models_handler(
 pub(super) async fn get_llm_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
-    Query(target): Query<talos_types::WorkspaceInfoRequest>,
+    ProductQuery(target): ProductQuery<talos_types::WorkspaceInfoRequest>,
 ) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
         .map(|Extension(identity)| identity)
@@ -67,7 +68,7 @@ pub(super) async fn get_llm_handler(
 pub(super) async fn get_config_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
-    Query(target): Query<talos_types::WorkspaceInfoRequest>,
+    ProductQuery(target): ProductQuery<talos_types::WorkspaceInfoRequest>,
     Path(path): Path<String>,
 ) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
@@ -90,7 +91,7 @@ pub(super) async fn get_config_handler(
 pub(super) async fn put_config_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
-    Query(target): Query<talos_types::WorkspaceInfoRequest>,
+    ProductQuery(target): ProductQuery<talos_types::WorkspaceInfoRequest>,
     BodyJson(value): BodyJson<ConfigValue>,
 ) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
@@ -113,7 +114,7 @@ pub(super) async fn put_config_handler(
 pub(super) async fn put_llm_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
-    Query(target): Query<talos_types::WorkspaceInfoRequest>,
+    ProductQuery(target): ProductQuery<talos_types::WorkspaceInfoRequest>,
     BodyJson(llm): BodyJson<LlmConfig>,
 ) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
@@ -148,7 +149,7 @@ fn parse_config_path(path: &str) -> Result<ConfigPath, ApiError> {
 pub(super) async fn reload_config_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
-    Query(request): Query<talos_types::ConfigReloadRequest>,
+    ProductQuery(request): ProductQuery<talos_types::ConfigReloadRequest>,
 ) -> Result<JsonResponse<talos_types::ConfigReloadResponse>, ApiError> {
     let actor = actor
         .map(|Extension(identity)| identity)

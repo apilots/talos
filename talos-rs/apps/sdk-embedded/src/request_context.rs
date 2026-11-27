@@ -1,7 +1,7 @@
 use std::env;
 
+use super::EmbeddedRuntime;
 use talos_auth::RequestIdentity;
-use talos_base::TalosApplicationRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_service::Actor;
 use talos_types::{
@@ -9,9 +9,7 @@ use talos_types::{
     AuthSessionReadRequest, StartTurnRequest,
 };
 
-pub(super) async fn resolve_cached_actor(
-    runtime: &TalosApplicationRuntime,
-) -> TalosResult<Option<Actor>> {
+pub(super) async fn resolve_cached_actor(runtime: &EmbeddedRuntime) -> TalosResult<Option<Actor>> {
     let response = runtime
         .gateway
         .read_auth_session(&Actor::regular("anonymous"), AuthSessionReadRequest {})
@@ -38,7 +36,7 @@ fn actor_from_identity(identity: &RequestIdentity) -> Actor {
 }
 
 pub(super) async fn authenticated_actor_from_access_token(
-    runtime: &TalosApplicationRuntime,
+    runtime: &EmbeddedRuntime,
     access_token: &str,
 ) -> TalosResult<Actor> {
     let identity = runtime

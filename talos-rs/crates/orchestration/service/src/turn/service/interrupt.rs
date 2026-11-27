@@ -20,6 +20,12 @@ impl TurnService {
     ) -> TalosResult<AgentInterruptOutcome> {
         let _ownership = self.pin_session(&session.id)?;
         let identity = AgentTurnRef::new(&session.id, turn_id);
+        let scope = self
+            .execution
+            .sessions
+            .build_agent_session_context(session)
+            .await?;
+        self.execution.project_worker(&scope).await?;
         let Some(active) = self
             .execution
             .execution_store
@@ -116,47 +122,6 @@ impl TurnService {
     /// Recover an orphan only while holding the existing Session exclusion.
     /// Service live absence is not proof of Harness cleanup; the exact control
     /// outcome must authorize terminal persistence before product completion.
-    pub(super) async fn recover_terminal_turn(
-        &self,
-        session: &talos_store::session::SessionRecord,
-        identity: &AgentTurnRef,
-        failure: talos_agent::AgentRunFailure,
-        dispatch: bool,
-    ) -> TalosResult<AgentInterruptOutcome> {
-        let admission_guard = self
-            .execution_gate
-            .for_node(&session.execution_node_id)
-            .read_owned()
-            .await;
-        let ownership = self
-            .execution
-            .begin_session_maintenance(&identity.session_id)?;
-        let cleanup = match self
-            .execution
-            .coordinator
-            .interrupt(AgentInterruptParams {
-                agent_id: session.agent_id.clone(),
-                identity: identity.clone(),
-            })
-            .await
-        {
-            Ok(outcome) => outcome,
-            Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => {
-                AgentInterruptOutcome::Cancelled
-            }
-            Err(error) => return Err(error),
-        };
-        self.complete_recovered_turn(
-            identity,
-            failure,
-            cleanup,
-            ownership,
-            Some(admission_guard),
-            dispatch,
-        )
-        .await
-    }
-
     async fn complete_recovered_turn(
         &self,
         identity: &AgentTurnRef,
@@ -190,15 +155,8 @@ impl TurnService {
         // Waiting/orphan recovery has no live execution task to commit the
         // terminal cursor. Retain the original Service exclusion until the same
         // Worker has acknowledged the already-persisted terminal fact.
-        self.execution
-            .sessions
-            .commit_worker_history_cursor(identity, agent_protocol::SessionStateVisibility::Local)
-            .await?;
         drop(ownership);
         drop(admission_guard);
-        self.execution
-            .sessions
-            .schedule_shared_history_cursor(identity.session_id.clone());
         if let Err(error) = result {
             talos_logging::report_error(&error);
         }

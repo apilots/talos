@@ -42,6 +42,7 @@ pub fn decode_register(params: Option<pb::RegisterParams>) -> TalosResult<Regist
         });
     }
     Ok(RegisterParams {
+        product_owner: decode_product_owner(params.product_owner)?,
         deployments,
         system_info: params.system_info.map(decode_system_info).transpose()?,
     })
@@ -49,6 +50,7 @@ pub fn decode_register(params: Option<pb::RegisterParams>) -> TalosResult<Regist
 
 pub fn encode_register(params: RegisterParams) -> pb::RegisterParams {
     pb::RegisterParams {
+        product_owner: encode_product_owner(params.product_owner),
         system_info: params.system_info.map(encode_system_info),
         deployments: params
             .deployments
@@ -57,6 +59,21 @@ pub fn encode_register(params: RegisterParams) -> pb::RegisterParams {
                 agent_id: deployment.agent_id,
             })
             .collect(),
+    }
+}
+
+pub fn decode_product_owner(value: i32) -> TalosResult<talos_types::NodeProductOwner> {
+    match pb::NodeProductOwner::try_from(value) {
+        Ok(pb::NodeProductOwner::Computer) => Ok(talos_types::NodeProductOwner::Computer),
+        Ok(pb::NodeProductOwner::Server) => Ok(talos_types::NodeProductOwner::Server),
+        Ok(pb::NodeProductOwner::Unspecified) | Err(_) => Err(invalid_request()),
+    }
+}
+
+pub fn encode_product_owner(value: talos_types::NodeProductOwner) -> i32 {
+    match value {
+        talos_types::NodeProductOwner::Computer => pb::NodeProductOwner::Computer as i32,
+        talos_types::NodeProductOwner::Server => pb::NodeProductOwner::Server as i32,
     }
 }
 

@@ -149,6 +149,9 @@ async fn resume(
     let harness = create_agent_harness("agent-1".into(), provider.clone());
     let mut execution = harness
         .start(AgentRunParams {
+            subagent_limit: None,
+            command: None,
+            automation_origin: None,
             context: context.clone(),
             input: answer,
             checkpoint: Some(checkpoint),

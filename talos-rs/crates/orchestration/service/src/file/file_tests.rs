@@ -24,6 +24,7 @@ use crate::Actor;
 use super::{FileByteStream, FileService};
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+#[cfg(feature = "sync")]
 #[path = "peer_tests.rs"]
 mod peer_tests;
 const CSV: &[u8] = b"name,severity\nfire,high\nsmoke,medium\n";

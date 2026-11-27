@@ -19,22 +19,24 @@ fn pending_create(
 }
 
 async fn assert_created_cache_has_no_credential(fixture: &Fixture) {
-    let cached = fixture
+    assert!(fixture
         .runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .nodes
         .get("created")
         .await
         .unwrap()
-        .unwrap();
+        .is_none());
     assert_eq!(
-        (
-            cached.credential_hash,
-            cached.credential_expires_at,
-            cached.lease_token_hash
-        ),
-        (None, None, None)
+        fixture
+            .runtime
+            .host
+            .computer_directory
+            .read("account", "created")
+            .unwrap()
+            .node_id,
+        "created"
     );
 }
 
@@ -46,7 +48,7 @@ async fn committed_create_delivers_credential_when_overlap_confirmation_is_unava
     assert_eq!(fixture.entered.recv().await.unwrap(), "before-commit");
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor())
         .await
         .unwrap();
@@ -67,8 +69,8 @@ async fn committed_create_delivers_credential_when_overlap_confirmation_is_unava
     assert!(!created.node.available);
     assert!(fixture
         .runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .nodes
         .get("created")
         .await
@@ -77,7 +79,7 @@ async fn committed_create_delivers_credential_when_overlap_confirmation_is_unava
     *fixture.get_node_failure.write().unwrap() = None;
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor())
         .await
         .unwrap();
@@ -98,7 +100,7 @@ async fn committed_create_delivers_credential_when_overlap_confirmation_is_unava
 #[tokio::test]
 async fn committed_create_delivers_credential_when_local_cache_persistence_fails() {
     let fixture = Fixture::start().await;
-    let storage = &fixture.runtime.sync_host.sync_stores.storage;
+    let storage = &fixture.runtime.host.stores.storage;
     storage.execute("CREATE TRIGGER reject_created_cache BEFORE INSERT ON agent_nodes WHEN NEW.node_id='created' BEGIN SELECT RAISE(ABORT, 'controlled cache write failure'); END", &[]).await.unwrap();
     let created = fixture
         .runtime
@@ -108,11 +110,14 @@ async fn committed_create_delivers_credential_when_local_cache_persistence_fails
         .await
         .unwrap();
     assert_eq!(created.credential.token, "fixture-credential");
-    assert!(!created.node.available);
+    assert!(
+        created.node.available,
+        "remote metadata never enters the rejected local Store"
+    );
     assert!(fixture
         .runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .nodes
         .get("created")
         .await
@@ -124,7 +129,7 @@ async fn committed_create_delivers_credential_when_local_cache_persistence_fails
         .unwrap();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor())
         .await
         .unwrap();
@@ -156,8 +161,8 @@ async fn committed_create_delivers_credential_without_resurrecting_a_deleted_reg
     assert!(!created.node.available);
     assert!(fixture
         .runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .nodes
         .get("created")
         .await
@@ -201,8 +206,8 @@ async fn malformed_create_responses_do_not_deliver_credentials_or_enter_the_cach
         );
         assert!(fixture
             .runtime
-            .sync_host
-            .sync_stores
+            .host
+            .stores
             .nodes
             .get("created")
             .await
@@ -216,7 +221,7 @@ async fn resolves_overlap_confirmation(code: talos_error::ErrorCode) {
     let mut fixture = Fixture::start().await;
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor())
         .await
         .unwrap();
@@ -273,12 +278,19 @@ async fn resolves_overlap_confirmation(code: talos_error::ErrorCode) {
     assert!(error.is_code(expected));
     let cached = fixture
         .runtime
-        .sync_host
-        .sync_stores
+        .host
+        .computer_directory
+        .read("account", "fast")
+        .ok();
+    assert!(fixture
+        .runtime
+        .host
+        .stores
         .nodes
         .get("fast")
         .await
-        .unwrap();
+        .unwrap()
+        .is_none());
     let page = fixture
         .runtime
         .service
@@ -362,8 +374,8 @@ async fn creation_enforces_requested_owner_without_caching_admin_targets() {
     assert_eq!(created.credential.token, "fixture-credential");
     assert!(fixture
         .runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .nodes
         .get("created")
         .await

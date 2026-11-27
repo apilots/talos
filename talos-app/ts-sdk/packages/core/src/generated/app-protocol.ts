@@ -61,7 +61,9 @@ export type ClientInfo = { name: string, title: string | null, version: string, 
 
 export type ClientKind = "desktop" | "cli" | "sdk";
 
-export type ServerInfo = { name: string, version: string, auth_enabled: boolean, cloud_auth_url: string | null, };
+export type ServerInfo = { name: string, version: string, auth_enabled: boolean, cloud_auth_url: string | null, capabilities: ServerCapabilities, };
+
+export type ServerCapabilities = { sync: boolean, relay: boolean, };
 
 export type ClientCapabilities = { protocol_version: ProtocolVersion, supports_server_requests: boolean, supports_event_replay: boolean, };
 
@@ -1524,7 +1526,7 @@ export type RequestUserInputParams = { prompt: string, };
 
 export type RequestUserInputResponse = { text: string, };
 
-export type JsonRpcRequest = { jsonrpc: string, id: RequestId, method: string, actor_credentials: ActorCredentials | null, params: unknown, };
+export type JsonRpcRequest = { jsonrpc: string, id: RequestId, method: string, actor_credentials: ActorCredentials | null, computerId?: string, params: unknown, };
 
 export type JsonRpcResponse = { jsonrpc: string, id: RequestId, result: unknown, };
 

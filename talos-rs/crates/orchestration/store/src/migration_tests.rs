@@ -873,6 +873,8 @@ async fn execution_details_upgrade_preserves_main_history_with_null_details() {
         "sync_snapshots".to_owned(),
         "sync_capture_batches".to_owned(),
         "session_event_retention".to_owned(),
+        "worker_event_projection".to_owned(),
+        "worker_projection_cursors".to_owned(),
     ]);
     tables_before.sort();
 

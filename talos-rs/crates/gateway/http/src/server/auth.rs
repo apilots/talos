@@ -37,6 +37,28 @@ pub(super) async fn auth_middleware(
         return Ok(next.run(req).await);
     }
 
+    // Only the authenticated Host relay adapter can install this in-process extension.
+    // It has already matched this account to its current registration lease owner.
+    // Ordinary HTTP callers cannot supply extensions through headers or JSON.
+    if let Some(delegated) = req
+        .extensions_mut()
+        .remove::<talos_app_protocol::relay::RelayRequestIdentity>()
+    {
+        let actor = delegated.0;
+        if actor.auth_disabled || actor.access_token.is_some() {
+            return Ok(ApiError::new(ErrorCode::PermissionDenied).into_response());
+        }
+        req.extensions_mut().insert(RequestIdentity {
+            user_id: actor.user_id,
+            username: actor.username,
+            role: actor.role,
+            user_type: actor.user_type,
+            auth_disabled: false,
+            access_token: None,
+        });
+        return Ok(next.run(req).await);
+    }
+
     // auth_disabled is used for local/integration testing and bypasses all auth checks.
     if state.auth_disabled {
         req.extensions_mut()
@@ -75,6 +97,7 @@ pub(super) async fn auth_middleware(
 
 fn is_public_route(path: &str) -> bool {
     path == "/health"
+        || path == "/talos/product/connect"
         || path == "/v1/mcp/oauth/callback"
         || path == "/v1/desktop/stream"
         || is_cloud_login_route(path)

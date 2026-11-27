@@ -44,6 +44,7 @@ pub struct AppServerConfig {
     pub server_version: String,
     pub auth_enabled: bool,
     pub cloud_auth_url: Option<String>,
+    pub capabilities: talos_app_protocol::requests::ServerCapabilities,
 }
 
 impl Default for AppServerConfig {
@@ -56,6 +57,7 @@ impl Default for AppServerConfig {
             server_version: env!("CARGO_PKG_VERSION").to_string(),
             auth_enabled: false,
             cloud_auth_url: None,
+            capabilities: Default::default(),
         }
     }
 }
@@ -431,6 +433,7 @@ async fn handle_request(
 ) -> Result<(), ()> {
     let id = request.id.clone();
     let request_actor_credentials = request.actor_credentials.clone();
+    let computer_id = request.computer_id;
     let decoded = ClientRequest::decode(&request.method, request.params)
         .map_err(|error| send_error(outgoing_tx.clone(), Some(id.clone()), error));
     let decoded = match decoded {
@@ -484,6 +487,7 @@ async fn handle_request(
                     version: config.server_version.clone(),
                     auth_enabled: config.auth_enabled,
                     cloud_auth_url: config.cloud_auth_url.clone(),
+                    capabilities: config.capabilities.clone(),
                 },
             })
             .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()));
@@ -522,7 +526,11 @@ async fn handle_request(
             let prepare = state.requests.prepare(
                 app,
                 source,
-                ClientRequest { method, params },
+                ClientRequest {
+                    computer_id,
+                    method,
+                    params,
+                },
                 state.subscriptions.clone(),
                 id.clone(),
                 outgoing_tx.clone(),

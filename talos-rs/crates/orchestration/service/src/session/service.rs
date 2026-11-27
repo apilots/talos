@@ -6,8 +6,8 @@ use talos_agent_api::AgentTurnRef;
 use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectStore;
 use talos_store::session::{
-    AccumulateSessionUsageParams, PatchSessionParams, SessionQuery, SessionRecord,
-    SessionRecordPatch, SessionStore, SessionTreeIdentity, SessionTreeScope,
+    PatchSessionParams, SessionQuery, SessionRecord, SessionRecordPatch, SessionStore,
+    SessionTreeIdentity, SessionTreeScope,
 };
 use talos_types::{
     OptionalCurrentDirectoryPatch, SessionConfigOverridePolicy, SessionInfo, SessionPatch,
@@ -35,9 +35,9 @@ pub(crate) struct SessionService {
     project_store: Arc<dyn ProjectStore>,
     base_config: Arc<RwLock<TalosConfig>>,
     coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
-    sync: Arc<RwLock<execution_boundary::SessionSyncState>>,
+    ownership: Arc<RwLock<execution_boundary::SessionExecutionOwnership>>,
     embedded_admin_auth: Option<Arc<dyn talos_auth::AuthService>>,
-    managed_nodes: Option<crate::AgentNodeService>,
+    managed_nodes: Option<crate::ProductNodeAccess>,
 }
 
 impl SessionService {
@@ -81,13 +81,13 @@ impl SessionService {
             project_store,
             base_config: Arc::new(RwLock::new(base_config)),
             coordinator,
-            sync: Default::default(),
+            ownership: Default::default(),
             embedded_admin_auth: None,
             managed_nodes: None,
         }
     }
 
-    pub(crate) fn with_managed_nodes(mut self, nodes: crate::AgentNodeService) -> Self {
+    pub(crate) fn with_managed_nodes(mut self, nodes: crate::ProductNodeAccess) -> Self {
         self.managed_nodes = Some(nodes);
         self
     }
@@ -383,6 +383,7 @@ impl SessionService {
             .await?;
         let session_context = self.build_agent_session_context(record).await?;
         Ok(AgentContext {
+            tree_identity: record.tree_identity.clone(),
             history_cursor: self.session_store.get_history_cursor(&record.id).await?,
             session: session_context,
             turn_id: identity.turn_id,
@@ -395,39 +396,11 @@ impl SessionService {
         })
     }
 
-    pub(crate) async fn commit_worker_history_cursor(
+    pub(crate) async fn read_execution_payload(
         &self,
-        identity: &AgentTurnRef,
-        visibility: agent_protocol::SessionStateVisibility,
-    ) -> TalosResult<()> {
-        let Some(history_cursor) = self
-            .session_store
-            .get_history_cursor(&identity.session_id)
-            .await?
-        else {
-            return Ok(());
-        };
-        if history_cursor.completed_turn_id.as_deref() != Some(identity.turn_id.as_str()) {
-            return Ok(());
-        }
-        let record = self
-            .load_record(&identity.session_id)
-            .await?
-            .ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::SessionNotFound,
-                    "Session was not found",
-                )
-            })?;
-        let session = self.build_agent_session_context(&record).await?;
-        self.coordinator
-            .commit_session_execution_state(agent_protocol::CommitSessionExecutionStateParams {
-                session,
-                identity: Some(identity.clone()),
-                history_cursor,
-                visibility,
-            })
-            .await
+        params: agent_protocol::AgentExecutionPayloadParams,
+    ) -> TalosResult<agent_protocol::AgentExecutionPayloadResult> {
+        self.coordinator.read_execution_payload(params).await
     }
 
     pub(crate) async fn load_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
@@ -518,6 +491,7 @@ impl SessionService {
         Ok(record)
     }
 
+    #[cfg(test)]
     pub(crate) async fn record_compaction_usage(
         &self,
         record: SessionRecord,
@@ -530,7 +504,7 @@ impl SessionService {
             .unwrap_or_default();
         let session_id = record.id;
         self.session_store
-            .accumulate_session_usage(AccumulateSessionUsageParams {
+            .accumulate_session_usage(talos_store::session::AccumulateSessionUsageParams {
                 session_id: session_id.clone(),
                 tokens: usage.clone(),
                 last_activity,
