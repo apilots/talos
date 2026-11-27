@@ -1,8 +1,11 @@
 //! Resolve the existing packaged WebUI without changing startup policy.
+#[cfg(feature = "server")]
 use super::TALOS_WEBUI_DIR_ENV;
 use std::path::PathBuf;
+#[cfg(feature = "server")]
 use tracing::{info, warn};
 
+#[cfg(feature = "server")]
 pub(super) fn resolve_packaged_webui_dir() -> Option<PathBuf> {
     let resolution = resolve_webui_dir(WebuiLookupInput {
         env_dir: std::env::var_os(TALOS_WEBUI_DIR_ENV).map(PathBuf::from),
@@ -33,6 +36,7 @@ pub(super) fn resolve_packaged_webui_dir() -> Option<PathBuf> {
     }
 }
 
+#[cfg(any(feature = "server", test))]
 #[derive(Debug)]
 pub(super) struct WebuiLookupInput {
     pub(super) env_dir: Option<PathBuf>,
@@ -40,6 +44,7 @@ pub(super) struct WebuiLookupInput {
     pub(super) current_dir: Option<PathBuf>,
 }
 
+#[cfg(any(feature = "server", test))]
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum WebuiLookupResult {
     Found(PathBuf),
@@ -47,6 +52,7 @@ pub(super) enum WebuiLookupResult {
     Missing,
 }
 
+#[cfg(any(feature = "server", test))]
 pub(super) fn resolve_webui_dir(input: WebuiLookupInput) -> WebuiLookupResult {
     if let Some(path) = input.env_dir {
         return if is_webui_dir(&path) {
@@ -65,6 +71,7 @@ pub(super) fn resolve_webui_dir(input: WebuiLookupInput) -> WebuiLookupResult {
     WebuiLookupResult::Missing
 }
 
+#[cfg(any(feature = "server", test))]
 fn webui_dir_candidates(input: &WebuiLookupInput) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(exe_dir) = input
@@ -81,6 +88,7 @@ fn webui_dir_candidates(input: &WebuiLookupInput) -> Vec<PathBuf> {
     candidates
 }
 
+#[cfg(any(feature = "server", test))]
 fn is_webui_dir(path: &std::path::Path) -> bool {
     path.join("index.html").is_file()
 }

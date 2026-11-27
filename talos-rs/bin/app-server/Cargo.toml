@@ -9,6 +9,11 @@ license.workspace = true
 name = "app-server"
 path = "src/main.rs"
 
+[features]
+default = ["sync", "relay-client"]
+sync = ["talos-base/sync"]
+relay-client = ["talos-base/relay-client"]
+
 [dependencies]
 talos-base = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }

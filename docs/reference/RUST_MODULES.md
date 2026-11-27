@@ -56,7 +56,7 @@ than replacing the manifest.
 
 ## Composition and entry points
 
-- `crates/app/talos-base/`: shared runtime composition for product binaries and embedded clients.
+- `crates/app/talos-base/`: shared runtime composition for product binaries and embedded clients. `server` gates cloud authority/listeners; `relay` adds the Server relay, while `relay-client` and `sync` independently compose personal outbound publishing and replication. Personal entry points do not depend on Server implementation libraries.
 - `crates/app/talos-worker/`: shared Agent execution composition for embedded and standalone hosts.
 - `crates/app/talos-upgrade/`: release upgrade capability.
 - `apps/sdk/` and `apps/sdk-embedded/`: protocol and in-process Rust SDKs.

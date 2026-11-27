@@ -286,7 +286,7 @@ impl ApplicationHost {
                 }
             }
         }
-        #[cfg(feature = "relay")]
+        #[cfg(feature = "relay-client")]
         self.refresh_product_relay().await?;
         self.account_credential(actor)?;
         #[cfg(feature = "sync")]
@@ -308,7 +308,7 @@ impl ApplicationHost {
             .write()
             .expect("management tokens lock")
             .remove(account_id);
-        #[cfg(feature = "relay")]
+        #[cfg(feature = "relay-client")]
         self.stop_product_relay().await;
         self.computer_directory.clear_account(account_id).await;
         Ok(())

@@ -80,7 +80,7 @@ impl DesktopApplication {
     }
 
     pub(crate) async fn stop_registration(&self) -> TalosResult<()> {
-        #[cfg(feature = "relay")]
+        #[cfg(feature = "relay-client")]
         self.host.stop_product_relay().await;
         if let Some(worker) = self.worker.lock().await.take() {
             worker.shutdown().await?;

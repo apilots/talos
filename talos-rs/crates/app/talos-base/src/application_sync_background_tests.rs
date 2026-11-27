@@ -2,6 +2,7 @@ use super::*;
 use std::{path::Path, time::Duration};
 use talos_config::{Config, TalosPaths};
 
+#[cfg(feature = "server")]
 #[tokio::test]
 async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};

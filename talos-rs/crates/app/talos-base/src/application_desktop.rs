@@ -9,7 +9,7 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::{Actor, DesktopIngress};
 use talos_types::DesktopStreamBinding;
 
-use crate::agent_node_rpc::{guard_transport, DesktopRelay};
+use crate::desktop_relay::{guard_transport, DesktopRelay};
 
 pub(crate) struct ApplicationDesktopIngress {
     pub(crate) local: DesktopRelay,

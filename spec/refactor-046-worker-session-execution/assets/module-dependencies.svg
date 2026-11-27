@@ -24,7 +24,7 @@ text { fill:#f0f4f8; font-family:'PingFang SC','Microsoft YaHei',sans-serif; fon
   <rect x="40" y="150" width="1600" height="130" rx="18" class="box" />
   <text x="70" y="192" class="head">M1 产品入口与 API</text>
   <text x="70" y="230">TUI / Embedded SDK · Desktop / IPC · Server Web / HTTP · 统一领域类型和错误</text>
-  <text x="70" y="260" class="sub">产品 binary 与 talos-base 负责具体实例、Store、网络适配器和生命周期装配</text>
+  <text x="70" y="260" class="sub">TUI/Desktop：relay-client / sync 可选 · Server：server + relay / sync 可选 · talos-base 复用同一内核</text>
   <path d="M270 282V367" class="edge" />
   <path d="M830 282V367" class="edge" />
   <path d="M1100 282H1130V735H1070" class="edge" />

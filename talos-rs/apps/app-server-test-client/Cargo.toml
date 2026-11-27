@@ -14,7 +14,7 @@ anyhow = { workspace = true }
 serde_json = { workspace = true }
 talos-sdk = { workspace = true }
 talos-sdk-embedded = { workspace = true }
-talos-base = { workspace = true }
+talos-base = { workspace = true, features = ["sync", "relay-client"] }
 talos-app-protocol = { workspace = true }
 talos-agent = { workspace = true }
 talos-memory = { workspace = true }

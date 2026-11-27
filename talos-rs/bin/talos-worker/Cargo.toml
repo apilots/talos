@@ -26,7 +26,7 @@ chrono = { workspace = true }
 libc = { workspace = true }
 rcgen = "0.14"
 talos-auth = { workspace = true }
-talos-base = { workspace = true }
+talos-base = { workspace = true, features = ["server"] }
 talos-config = { workspace = true }
 talos-coordinator = { path = "../../crates/orchestration/coordinator" }
 talos-error = { workspace = true }

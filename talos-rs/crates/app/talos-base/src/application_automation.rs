@@ -3,19 +3,26 @@ use std::time::Duration;
 
 use talos_automation::{Automation, AutomationJob, AutomationJobControl};
 use talos_config::{DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig, TalosTimezone};
-use talos_coordinator::{AgentCoordinator, CoordinatorImpl};
+use talos_coordinator::AgentCoordinator;
+#[cfg(feature = "server")]
+use talos_coordinator::CoordinatorImpl;
 use talos_error::TalosResult;
+#[cfg(feature = "server")]
 use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
 use talos_service::ProfileUsageRetention;
 use talos_store::profile::ProfileStore;
+#[cfg(feature = "server")]
 use tokio::signal;
-use tracing::{error, info, warn};
+use tracing::error;
+#[cfg(feature = "server")]
+use tracing::{info, warn};
 
 use super::dream_memory_maintenance::DreamMemoryMaintenance;
 use super::TalosApplicationRuntime;
 
 const BACKGROUND_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 
+#[cfg(feature = "server")]
 pub(super) async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()
@@ -154,6 +161,7 @@ pub(super) fn combine(
     }
 }
 
+#[cfg(feature = "server")]
 pub(super) async fn shutdown_server(
     coordinator: &Arc<CoordinatorImpl>,
     automation: &Automation,

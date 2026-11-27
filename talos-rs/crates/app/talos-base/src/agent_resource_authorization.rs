@@ -1,5 +1,6 @@
 //! Authentication and original persisted binding checks shared by both carriers.
 use super::*;
+#[cfg(feature = "server")]
 use agent_protocol::NodeAuth;
 
 impl NodeSessionDataRpc {
@@ -18,6 +19,7 @@ impl NodeSessionDataRpc {
         .await
     }
 
+    #[cfg(feature = "server")]
     pub(super) async fn authorize_agent_caller(
         &self,
         auth: Option<pb::NodeAuth>,
@@ -41,6 +43,7 @@ impl NodeSessionDataRpc {
         Ok(())
     }
 
+    #[cfg(feature = "server")]
     pub(super) async fn authorize(
         &self,
         auth: Option<pb::NodeAuth>,
@@ -66,6 +69,7 @@ impl NodeSessionDataRpc {
             .await?;
         Ok(session)
     }
+    #[cfg(feature = "server")]
     pub(super) async fn authorize_owner(&self, auth: &NodeAuth) -> TalosResult<String> {
         self.nodes
             .as_ref()

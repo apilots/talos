@@ -16,8 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use tonic::{Request, Response, Status};
 
-#[path = "agent_node_resources_rpc.rs"]
-mod resources;
+use crate::agent_node_resources_rpc as resources;
 pub use resources::{
     NodeAutomationControlRpc, NodeSessionDataRpc, NodeSubagentControlRpc, NodeToolImageRpc,
 };
@@ -25,7 +24,6 @@ pub use resources::{
 mod connect;
 #[path = "agent_desktop_rpc.rs"]
 mod desktop;
-pub(crate) use desktop::relay::{guard_transport, DesktopRelay};
 
 /// Existing resource owners shared by TLS ingress and in-process Worker bindings.
 pub struct NodeResourceServices {
@@ -686,7 +684,7 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
     }
 }
 
-fn failure(error: TalosError) -> pb::Failure {
+pub(super) fn failure(error: TalosError) -> pb::Failure {
     talos_logging::report_error(&error);
     error_pb::encode_failure(&error)
 }

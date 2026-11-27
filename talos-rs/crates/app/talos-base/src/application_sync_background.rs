@@ -131,7 +131,7 @@ impl ApplicationHost {
     }
 
     /// Durable Computer imports wake registration reconciliation, never a read API.
-    #[cfg(any(feature = "sync", test))]
+    #[cfg(any(feature = "sync", all(test, feature = "server")))]
     pub(crate) fn notify_refresh(&self, account_id: &str) {
         if let Some(refresh) = self
             .background

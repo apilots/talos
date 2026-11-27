@@ -1,38 +1,48 @@
+#[cfg(feature = "server")]
 mod server_product_routing;
+#[cfg(feature = "server")]
+mod server_runtime;
+#[cfg(all(test, feature = "server"))]
+use server_runtime::start_server_after_startup;
+#[cfg(feature = "server")]
+pub use server_runtime::{run_server, TalosServerHandle, TalosServerRuntime};
 mod webui;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use webui::{canonical_or_original, resolve_packaged_webui_dir};
+use webui::canonical_or_original;
 #[cfg(test)]
 use webui::{resolve_webui_dir, WebuiLookupInput, WebuiLookupResult};
 
 use talos_app_server::BackgroundTaskDrain;
 use talos_auth::AuthService;
 use talos_automation::Automation;
-use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::Config;
 use talos_coordinator::{AgentCoordinator, CoordinatorImpl};
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::Gateway;
-use talos_gateway_http::{HttpServer, ServerLifecycle, ServerLifecycleState};
 use talos_logging::LogGuard;
-use talos_service::{AgentNodeService, PluginManagerService, TalosService, TimelineEventService};
+#[cfg(feature = "server")]
+use talos_service::AgentNodeService;
+use talos_service::{TalosService, TimelineEventService};
 use talos_tools::{AgentControl, AgentControlFuture, ToolRegistry};
 use talos_types::{
     AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, ListSubagentsRequest,
     SendMessageResult, SendSubagentMessageRequest, SpawnSubagentRequest, SubagentSnapshot,
     SubagentSpawnResult, WaitSubagentRequest,
 };
-use tokio::task::JoinSet;
-use tokio_util::sync::CancellationToken;
 use tracing::info;
 
+#[cfg(feature = "server")]
 const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 
+mod agent_node_resources_rpc;
+#[cfg(feature = "server")]
 mod agent_node_rpc;
 mod application_automation_control;
 mod application_native_jobs;
+mod desktop_relay;
+#[cfg(feature = "server")]
 pub use agent_node_rpc::{
     NodeResourceServices, NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc,
 };
@@ -40,6 +50,7 @@ mod application_automation;
 mod application_computer_directory;
 mod application_desktop;
 mod application_host;
+#[cfg(feature = "server")]
 mod application_managed_worker;
 mod application_management_host;
 mod application_runtime;
@@ -69,9 +80,9 @@ mod desktop_media;
 mod desktop_worker;
 mod dream_memory_maintenance;
 mod host_identity;
-#[cfg(feature = "relay")]
+#[cfg(feature = "relay-client")]
 mod relay_host;
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 #[path = "application_sync_server_tests.rs"]
 mod server_registration_tests;
 mod startup;
@@ -111,27 +122,6 @@ pub struct TalosServerOptions {
     pub session_ownership: Option<SessionOwnershipPolicy>,
 }
 
-pub struct TalosServerRuntime {
-    auth_service: Arc<dyn AuthService>,
-    host: Arc<application_host::ApplicationHost>,
-    http_server: HttpServer,
-    channel_server: Option<ChannelServer>,
-    node_rpc_server: Option<agent_node_rpc::NodeRpcServer>,
-    managed_worker: Option<(AgentNodeService, talos_fs::FileLock)>,
-    coordinator: Arc<CoordinatorImpl>,
-    gateway_url: String,
-    shutdown_token: CancellationToken,
-    lifecycle: Arc<ServerLifecycle>,
-    automation: Automation,
-    _native_job_host: Arc<dyn talos_service::NativeJobHost>,
-    plugins: PluginManagerService,
-    browser: Arc<talos_browser::BrowserRuntime>,
-    worker_rpc: Arc<talos_worker::WorkerRpcHost>,
-    resource_stop: tokio_util::sync::CancellationToken,
-    _resource_stop_guard: Arc<tokio_util::sync::DropGuard>,
-    worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
-}
-
 /// Owns the resources created for an in-process app-server runtime.
 ///
 /// This is the product-level embedded entrypoint result used by local clients such as the TUI.
@@ -163,7 +153,7 @@ pub struct TalosApplicationRuntime {
     pub(crate) worker: talos_worker::TalosWorker,
     pub(crate) worker_rpc: Arc<talos_worker::WorkerRpcHost>,
     pub(crate) resource_stop: tokio_util::sync::CancellationToken,
-    resource_stop_guard: Arc<tokio_util::sync::DropGuard>,
+    _resource_stop_guard: Arc<tokio_util::sync::DropGuard>,
     pub(crate) worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
     pub(crate) worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     pub config: Config,
@@ -172,12 +162,18 @@ pub struct TalosApplicationRuntime {
     pub auth_service: Arc<dyn AuthService>,
     pub gateway: Arc<dyn Gateway>,
     pub coordinator: Arc<CoordinatorImpl>,
+    #[cfg(feature = "server")]
     pub node_service: Option<AgentNodeService>,
     pub tool_registry: Arc<ToolRegistry>,
+    #[cfg(feature = "server")]
     pub(crate) session_store: Arc<dyn talos_store::session::SessionStore>,
+    #[cfg(feature = "server")]
     pub(crate) attachment_reader: Arc<dyn talos_agent::AttachmentReader>,
+    #[cfg(feature = "server")]
     pub(crate) agent_control: Arc<dyn talos_tools::AgentControl>,
+    #[cfg(feature = "server")]
     pub(crate) automation_control: Arc<dyn talos_tools::AutomationControl>,
+    #[cfg(feature = "server")]
     pub(crate) tool_image_store: Arc<dyn talos_tools::ToolImageStore>,
     automation: Automation,
     _native_job_host: Arc<dyn talos_service::NativeJobHost>,
@@ -235,9 +231,6 @@ impl AgentControl for ApplicationAgentControl {
     }
 }
 
-// Includes coordinator drain (60s), MCP drain/cleanup (130s), and gateway shutdown.
-const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(240);
-
 pub async fn run_app_server() -> TalosResult<()> {
     let logging_options = TalosServerOptions {
         logging_stdout: Some(false),
@@ -251,28 +244,6 @@ pub async fn run_app_server() -> TalosResult<()> {
         let startup_report = startup::finish_startup(&config)?;
 
         run_json_rpc_stdio_after_startup(config, &startup_report).await
-    }
-    .await
-    .inspect_err(talos_logging::report_error)
-}
-
-pub async fn run_server() -> TalosResult<()> {
-    let _log_guard = startup::prepare_startup(None)?;
-    async {
-        let config = load_runtime_config()?;
-        let config_source = resolve_config_source_path(&config);
-        let startup_report = startup::finish_startup(&config)?;
-        let mut server_options = TalosServerOptions::default();
-        log_config_source(config_source);
-        server_options.webui_dir = resolve_packaged_webui_dir();
-        info!(
-            "Starting Talos server at {}:{}",
-            config.gateway.host, config.gateway.port
-        );
-
-        let server =
-            start_server_after_startup(config, Some(server_options), &startup_report).await?;
-        server.run().await
     }
     .await
     .inspect_err(talos_logging::report_error)
@@ -369,289 +340,12 @@ impl BackgroundTaskDrain for CoordinatorDrain {
     }
 }
 
-#[derive(Clone)]
-pub struct TalosServerHandle {
-    shutdown_token: CancellationToken,
-    lifecycle: Arc<ServerLifecycle>,
-    wait_timeout: Duration,
-}
-
-impl TalosServerHandle {
-    pub async fn shutdown(&self) -> TalosResult<()> {
-        if self.lifecycle.current() == ServerLifecycleState::Stopped {
-            return Ok(());
-        }
-
-        self.shutdown_token.cancel();
-
-        let mut updates = self.lifecycle.subscribe();
-        let wait_timeout = self.wait_timeout;
-        tokio::time::timeout(wait_timeout, async move {
-            loop {
-                if *updates.borrow_and_update() == ServerLifecycleState::Stopped {
-                    return Ok(());
-                }
-                updates.changed().await.map_err(|_| {
-                    TalosError::internal(
-                        "server runtime stopped before reporting shutdown completion",
-                    )
-                })?;
-            }
-        })
-        .await
-        .map_err(|_| {
-            TalosError::internal("Server shutdown exceeded its configured timeout.").context(
-                format!(
-                    "server shutdown timed out after {} secs",
-                    wait_timeout.as_secs()
-                ),
-            )
-        })?
-    }
-}
-
-impl TalosServerRuntime {
-    pub fn handle(&self) -> TalosServerHandle {
-        TalosServerHandle {
-            shutdown_token: self.shutdown_token.clone(),
-            lifecycle: self.lifecycle.clone(),
-            wait_timeout: SERVER_SHUTDOWN_WAIT_TIMEOUT,
-        }
-    }
-
-    pub fn gateway_url(&self) -> &str {
-        &self.gateway_url
-    }
-
-    pub async fn run(self) -> TalosResult<()> {
-        let TalosServerRuntime {
-            auth_service,
-            host,
-            http_server,
-            channel_server,
-            node_rpc_server,
-            managed_worker,
-            coordinator,
-            gateway_url: _,
-            shutdown_token,
-            lifecycle,
-            automation,
-            plugins,
-            browser,
-            worker_rpc,
-            resource_stop,
-            _resource_stop_guard,
-            worker_registration,
-            _native_job_host,
-        } = self;
-
-        let signal_shutdown = shutdown_token.clone();
-        let signal_task = tokio::spawn(async move {
-            application_automation::shutdown_signal().await;
-            signal_shutdown.cancel();
-        });
-
-        let quiesce_lifecycle = lifecycle.clone();
-        let quiesce_shutdown = shutdown_token.clone();
-        let quiesce_task = tokio::spawn(async move {
-            quiesce_shutdown.cancelled().await;
-            if !quiesce_lifecycle.current().is_quiescing_or_later() {
-                quiesce_lifecycle.store(ServerLifecycleState::Quiescing);
-            }
-        });
-
-        let mut tasks = JoinSet::new();
-        if let Some((nodes, lock)) = managed_worker {
-            let shutdown = shutdown_token.clone();
-            tasks.spawn(async move {
-                let _lock = lock;
-                nodes.run_managed_workers(shutdown).await;
-                Ok(())
-            });
-        }
-        let shutdown_token_for_http = shutdown_token.clone();
-        tasks.spawn(async move { http_server.run_with_shutdown(shutdown_token_for_http).await });
-        if let Some(channel_server) = channel_server {
-            tasks.spawn(async move { channel_server.run().await });
-        }
-        if let Some(node_rpc_server) = node_rpc_server {
-            let shutdown_token_for_rpc = shutdown_token.clone();
-            tasks.spawn(async move { node_rpc_server.run(shutdown_token_for_rpc).await });
-        }
-        let transport = worker_rpc.clone();
-        tasks.spawn(async move {
-            transport.stopped().await;
-            transport.shutdown().await
-        });
-        let result = match tasks.join_next().await {
-            Some(Ok(result)) => result,
-            Some(Err(error)) => Err(TalosError::internal_with_source(
-                "server task join error; technical details were withheld.",
-                error,
-            )),
-            None => Ok(()),
-        };
-        shutdown_token.cancel();
-        host.shutdown_refreshes().await;
-        let registration = match worker_registration.lock().await.take() {
-            Some(registration) => registration.shutdown().await,
-            None => Ok(()),
-        };
-        tasks.abort_all();
-        while tasks.join_next().await.is_some() {}
-
-        signal_task.abort();
-        quiesce_task.abort();
-
-        let shutdown_result = application_automation::shutdown_server(
-            &coordinator,
-            &automation,
-            &lifecycle,
-            &plugins,
-        )
-        .await;
-        let result = application_automation::combine(result, registration);
-        let result = application_automation::combine(result, browser.shutdown().await);
-        let result = application_automation::combine(result, host.shutdown().await);
-        let result = application_automation::combine(result, shutdown_result);
-        let result = application_automation::combine(result, worker_rpc.shutdown().await);
-        auth_service.shutdown().await;
-        {
-            resource_stop.cancel();
-            result
-        }
-    }
-}
-
 pub fn init_logging(
     config: &Config,
     options: Option<&TalosServerOptions>,
 ) -> TalosResult<LogGuard> {
     let config = apply_runtime_options(config.clone(), options);
     talos_logging::init_with_config(config.logging, &config.timezone)
-}
-
-async fn start_server_after_startup(
-    config: Config,
-    options: Option<TalosServerOptions>,
-    startup_report: &startup::FinishStartupReport,
-) -> TalosResult<TalosServerRuntime> {
-    let config = apply_runtime_options(config, options.as_ref());
-    config.validate_runtime()?;
-    let runtime = build_application_runtime_after_startup(
-        config.clone(),
-        startup_report,
-        options.as_ref(),
-        talos_types::NodeProductOwner::Server,
-    )
-    .await?;
-
-    let nodes = runtime
-        .node_service
-        .as_ref()
-        .expect("Server product owns the control plane");
-    let managed_worker =
-        application_managed_worker::configure(&config, nodes, runtime.auth_service.clone()).await?;
-
-    let node_rpc_server = config
-        .agent_node
-        .control_plane
-        .as_ref()
-        .map(|node_config| {
-            let session_data = agent_node_rpc::NodeSessionDataRpc::new(
-                nodes.clone(),
-                runtime.session_store.clone(),
-                runtime.attachment_reader.clone(),
-            );
-            agent_node_rpc::NodeRpcServer::new(
-                node_config,
-                nodes.clone(),
-                runtime.auth_service.clone(),
-                runtime.coordinator.clone(),
-                agent_node_rpc::NodeResourceServices {
-                    session_data,
-                    agent_control: runtime.agent_control.clone(),
-                    automation_control: runtime.automation_control.clone(),
-                    tool_images: agent_node_rpc::NodeToolImageRpc::new(
-                        nodes.clone(),
-                        runtime.tool_image_store.clone(),
-                        runtime.config.storage.files.limits.max_upload_bytes,
-                    ),
-                },
-            )
-            .and_then(|server| {
-                server
-                    .with_worker_adapter(runtime.worker_rpc.adapter())
-                    .with_coordinator_id(runtime.host_id.as_str().into())
-            })
-        })
-        .transpose()?;
-
-    let mut http_server = HttpServer::new(
-        runtime.service.clone(),
-        runtime.event_service.clone(),
-        runtime.auth_service.clone(),
-        config.clone(),
-        config.gateway.host.clone(),
-        config.gateway.port,
-    )
-    .with_routes(product_capability_routes());
-
-    let auth_disabled = options
-        .as_ref()
-        .and_then(|value| value.auth_disabled)
-        .unwrap_or(!config.gateway.auth);
-
-    if auth_disabled {
-        http_server = http_server.with_auth_disabled(true);
-    }
-
-    if let Some(webui_dir) = options.as_ref().and_then(|value| value.webui_dir.clone()) {
-        http_server = http_server.with_webui_dir(webui_dir);
-    }
-
-    let shutdown_token = CancellationToken::new();
-    http_server = server_product_routing::ServerProductRouter::assemble(
-        http_server,
-        nodes.clone(),
-        runtime.service.clone(),
-        runtime.host_id.clone(),
-        shutdown_token.clone(),
-    );
-
-    let enable_channels = options
-        .as_ref()
-        .and_then(|value| value.enable_channels)
-        .unwrap_or(true);
-    let channel_server = if enable_channels {
-        let mut channel_server =
-            ChannelServer::new(Arc::new(config.clone()), runtime.service.clone());
-        channel_server.register(Box::new(TelegramChannel::new()));
-        Some(channel_server)
-    } else {
-        None
-    };
-
-    Ok(TalosServerRuntime {
-        auth_service: runtime.auth_service,
-        host: runtime.host,
-        coordinator: runtime.coordinator,
-        gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),
-        shutdown_token,
-        lifecycle: http_server.lifecycle(),
-        automation: runtime.automation,
-        _native_job_host: runtime._native_job_host,
-        plugins: runtime.worker.plugin_manager(),
-        browser: runtime.worker.browser(),
-        worker_rpc: runtime.worker_rpc,
-        resource_stop: runtime.resource_stop,
-        _resource_stop_guard: runtime.resource_stop_guard,
-        worker_registration: runtime.worker_registration,
-        http_server,
-        channel_server,
-        node_rpc_server,
-        managed_worker,
-    })
 }
 
 async fn run_json_rpc_stdio_after_startup(
@@ -732,7 +426,7 @@ async fn run_json_rpc_stdio_after_startup(
             desktop_host: desktop_host_bridge,
             capabilities: talos_app_protocol::requests::ServerCapabilities {
                 sync: cfg!(feature = "sync"),
-                relay: cfg!(feature = "relay"),
+                relay: cfg!(feature = "relay-client"),
             },
             auth_enabled: config.gateway.auth,
             cloud_auth_url: Some(config.cloud.web_base_url.clone()),
@@ -765,14 +459,19 @@ async fn run_json_rpc_stdio_after_startup(
 }
 
 /// Product capability discovery reports assembly, independently of account settings.
-pub(crate) fn product_capability_routes() -> axum::Router {
+#[cfg(any(feature = "server", feature = "relay-client", test))]
+pub(crate) fn product_capability_routes(owner: talos_types::NodeProductOwner) -> axum::Router {
+    let relay = match owner {
+        talos_types::NodeProductOwner::Computer => cfg!(feature = "relay-client"),
+        talos_types::NodeProductOwner::Server => cfg!(feature = "relay"),
+    };
     axum::Router::new().route(
         "/v1/capabilities",
-        axum::routing::get(|| async {
+        axum::routing::get(move || async move {
             axum::Json(talos_types::ApiResponse::success(
                 talos_app_protocol::requests::ServerCapabilities {
                     sync: cfg!(feature = "sync"),
-                    relay: cfg!(feature = "relay"),
+                    relay,
                 },
             ))
         }),

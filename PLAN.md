@@ -123,6 +123,7 @@ TalosServer = 共享产品运行时 + Server 控制面 + 可选 Relay/Sync + 内
 - 细化 Actor/SessionRecord/NodeAdmissionGates 等现有依赖的窄端口，防止控制面反向依赖产品服务；宿主注入唯一活动保护和资格接口。
 - Desktop/TUI 装配完整本机 Session、Goal、Loop、Memory 管理、Automation 和调度器。
 - 明确 AppServer/TUI 也启动共享产品运行时及产品库；从共同启动中分离控制面服务和可选接入，独立 Worker 保持只装配 Worker 与客户端。
+- 在同一 Base 组装库内裁剪 Server 生命周期/监听/托管依赖，产品入口逐项转发可选 feature；个人发布客户端不依赖 Server Relay。发行物逐入口构建和归档，防止 Cargo 联合构建合并 Server feature；CI 同时保护独立依赖图、个人无可选组件和完整 Server 测试。
 - Server 为 Native、Docker、Talo 装配对应产品服务、产品库、统一 API 和调度器。
 - 配置字段按节点/产品职责暴露窄端口，Server 产品配置、任务与结算保持原归属；独立 Worker 不装配完整产品管理，RegisteredWorker 接线不重建 Worker 服务。
 - 统一配置入口按类型分派，Llm/WebSearch 由目标 Worker ConfigStore/env 落盘并 reload；SessionMessageSendPolicy 由产品宿主原 ConfigStore 保存，移除 WorkerEnvironment 中产品策略旧分支，同步契约和消费者。
@@ -137,7 +138,7 @@ TalosServer = 共享产品运行时 + Server 控制面 + 可选 Relay/Sync + 内
 
 **验证**　控制面无环依赖、唯一节点状态/锁、注册/租约/撤销、托管生命周期；云端及 Sync 关闭时的本机全功能、双客户端云产品、配置节点隔离、幂等物化结算和全部任务。
 
-**状态**　已完成：个人产品通过原产品服务的窄端口装配，不创建 Server 控制面；共享产品服务可独立构建，唯一准入保护保持共享。talos-base 仍作为多入口组装库显式编译 Server 适配器，不将运行时隔离等同于整个组装库的依赖裁剪。
+**状态**　已完成：个人产品通过原产品服务的窄端口装配，不创建 Server 控制面；共享产品服务可独立构建，唯一准入保护保持共享。talos-base 的 server/relay 仅由 Server 入口显式装配，个人端的 relay-client/sync 独立可选；依赖图与独立产品构建验收编译期隔离。
 
 ## 阶段 4 — 可选 Relay、Sync 解耦与统一远程 API
 

@@ -275,7 +275,7 @@ impl Drop for ConnectionLifetime {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "relay"))]
 mod tests;
 
 fn product_endpoint(endpoint: &str) -> TalosResult<String> {

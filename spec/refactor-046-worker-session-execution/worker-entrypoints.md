@@ -63,7 +63,7 @@
 共享身份沿用已有稳定类型；产品资格与活动统计改为有限的类型化查询/许可端口，由宿主注入，禁止控制面依赖整个 talos-service。
 调用顺序、锁顺序、权限与撤销栅栏保持原行为，迁移后只保留一套节点状态。
 
-共享产品服务通过 ProductNodeAccess 消费既有节点能力。个人 Full/纯管理 CLI 只持有本机元数据及原 ComputerManagement 客户端，不构造 DatabaseAgentNodeStore、AgentNodeService 或托管管理状态；Server 分支才构造唯一控制面实现。NodeAdmissionGates 的唯一实现位于 agent-protocol，Server 控制面和产品服务共享同一个 Arc，本机产品复用同类 gate 与 Worker 的原执行保护。talos-base 仍是同时提供个人和 Server 入口的组装库，显式编译其 Server 适配器不等于在个人运行时实例化 M5。
+共享产品服务通过 ProductNodeAccess 消费既有节点能力。个人 Full/纯管理 CLI 只持有本机元数据及原 ComputerManagement 客户端，本机节点元数据仍复用原 Store，但不创建 Server 的 AgentNodeService、凭证/租约权威或托管管理状态；Server 分支才构造唯一控制面实现。NodeAdmissionGates 的唯一实现位于 agent-protocol，Server 控制面和产品服务共享同一个 Arc，本机产品复用同类 gate 与 Worker 的原执行保护。talos-base 保留同一组装库，Server 生命周期、监听、注册权威和托管驱动只在显式 server feature 下编译；个人入口的生产依赖图不引入控制面、托管 runtime 或 Server Relay。
 本机资源绑定直接使用原对象和本机授权构造，不通过构造 Server 控制面获取资源能力。退役的公开 loopback 客户端构造器删除；仅边界测试需要的本地通道限定在 crate 测试范围。
 
 
@@ -150,6 +150,21 @@ Docker/Native 共用入口与执行内核，配置和宿主能力区分部署。
 
 完整 Server 装配 Relay；云服务专用 Server 可不装配 Relay。二者均独立选择是否装配 Sync。
 Relay 与 Sync 使用独立 optional dependency/feature，关闭其中一个不关闭另一个。
+
+### 产品入口的编译装配
+
+| 入口 | 明确装配的 feature | 关闭可选组件后的能力 |
+| --- | --- | --- |
+| TUI、EmbeddedServerClient、AppServer/Desktop | 默认 sync、relay-client；入口向现有 talos-base 转发各自 feature，依赖关闭隐式默认 feature。 | --no-default-features 保留完整本机产品与 Worker，既不编译 Server 控制面，也不强制装入 Sync 或个人产品发布通道。 |
+| TalosServer | binary 始终装配 Base 的 server；默认 relay、sync 分别转发，二者独立可选。 | --no-default-features 仍有原控制面、云产品服务和 Worker 注册，移除 Server Relay 与 Sync。 |
+| Docker/Native Worker | 现有 Worker binary 与客户端；不装配 Base 或 Server 管理库。 | 保留原独立执行、注册、租约及重连；Server 相关集成测试才显式选择 Base server。 |
+
+Base 的 server 只装入现有 control-plane、worker-runtime、渠道和 TLS 监听适配器，并启用 Service 的 control-plane；relay 依赖 server 并装入现有 relay-server。relay-client 只装入原个人宿主的出站产品发布适配器，不依赖 Server Relay 或控制面库，也不替代原节点注册/目录客户端。sync 仍只控制原复制适配器，常驻捕获及 tombstone 不变。
+
+Server 代码在 Base 内部私有文件中按现有职责归拢，不新建 crate、SDK、管理器、注册表、协议或替代授权路径。本机与网络入口保留原资源鉴权、共享实例、准入锁和关闭保护。现有 relay 能力字段按产品归属报告：个人产品表示 relay-client 是否装配，云产品表示 Server Relay 是否装配；不因同一编译中包含另一种入口而误报，不新增 wire 字段。
+
+Cargo 同一调用会合并依赖 feature，因此产品发行物必须逐入口单独构建并立即归档，不能用一次包含 Server/TUI/AppServer 的联合构建生成个人产品包。现有 build.sh 和 Desktop 打包沿用各自入口；CI 发行物构建同样按产品隔离。workspace 联合检查可用于质量门禁，但不能作为个人编译依赖裁剪的证据。deps-check 校验每个个人入口及最小 Server 的独立 normal/build 依赖图；CI 另跑个人无可选组件、最小 Server 与完整 Server 的真实测试，不能复用默认 feature 的测试归档来冒充裁剪验收。
+
 不装配 Relay 时，云产品 API、Worker 注册、Node.Connect、调度与云产品读取完整可用，个人转发能力明确不可用。
 同账号目标目录与领域契约统一，保留个人 Computer 选择器与独立 Talo 入口。
 本次覆盖现有 Web/SDK，未来移动端复用 API。
@@ -316,7 +331,7 @@ Server 提供授权入口和选路，模型凭证沿实际节点的配置/凭证
 
 ## 实现落点与传输约束
 
-- Server 控制面库为 crates/orchestration/control-plane，Relay 库为 crates/gateway/relay-server；talos-base 通过独立 relay/sync feature 装配。talos-service 的 product feature 仅组合产品能力，control-plane feature 显式装入 Server 管理实现；独立 Worker 复用基础节点服务而不装入完整产品服务。
+- Server 控制面库为 crates/orchestration/control-plane，Relay 库为 crates/gateway/relay-server；talos-base 通过 server、relay、relay-client、sync 按产品入口分别装配。talos-service 的 product feature 仅组合产品能力，control-plane feature 显式装入 Server 管理实现；独立 Worker 复用基础节点服务而不装入完整产品服务。
 - NodeProductOwner 在既有注册契约中明确 Computer/Server 归属；权限与路由不从监听端口、载体或运行阶段推断。HostId 沿用原持久身份，Sync 只引用该值。
 - Relay 复用产品 HTTP Router，不要求个人 Host 监听 HTTP。每流使用 64 KiB 分块、8 帧信用窗口、最多 64 并发流；控制/交互/文件/媒体分 lane，单流背压不得阻塞 socket 读取。SDK 文件方法仅可通过传输提示降级至 File lane，不能提升到 Control，提示不会进入产品授权。
 - Relay socket 独立检测存活：15 秒 Ping，30 秒 Pong/写入超时；节点租约续期不替代产品 socket 活性。网络恢复复用现有租约及 Host 生命周期，不建立第二套注册或持久重放队列。

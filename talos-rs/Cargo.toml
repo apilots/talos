@@ -206,7 +206,7 @@ talos-storage = { path = "crates/infra/storage" }
 talos-channel = { path = "crates/perception/channels" }
 talos-sdk = { path = "apps/sdk" }
 talos-sdk-embedded = { path = "apps/sdk-embedded" }
-talos-base = { path = "crates/app/talos-base" }
+talos-base = { path = "crates/app/talos-base", default-features = false }
 talos-worker = { path = "crates/app/talos-worker" }
 talos-upgrade = { path = "crates/app/talos-upgrade" }
 

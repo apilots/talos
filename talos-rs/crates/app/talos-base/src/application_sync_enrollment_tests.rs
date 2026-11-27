@@ -404,7 +404,7 @@ async fn verify_suspend_interleaving(
         .read()
         .unwrap()
         .contains_key(&actor.user_id));
-    #[cfg(feature = "relay")]
+    #[cfg(feature = "relay-client")]
     assert!(source.host.product_relay.lock().await.is_none());
     assert!(source
         .sync

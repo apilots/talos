@@ -45,22 +45,33 @@ async fn host_identity_survives_storage_reopen_without_a_second_identity() {
 #[tokio::test]
 async fn capability_discovery_reports_assembled_modules_without_starting_them() {
     use tower::ServiceExt;
-    let response = crate::product_capability_routes()
-        .oneshot(
-            axum::http::Request::builder()
-                .uri("/v1/capabilities")
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let bytes = axum::body::to_bytes(response.into_body(), 4096)
-        .await
-        .unwrap();
-    let response: talos_types::ApiResponse<talos_app_protocol::requests::ServerCapabilities> =
-        serde_json::from_slice(&bytes).unwrap();
-    assert!(
-        matches!(response, talos_types::ApiResponse::Success { data }
-        if data.sync == cfg!(feature = "sync") && data.relay == cfg!(feature = "relay"))
-    );
+    for (owner, relay) in [
+        (
+            talos_types::NodeProductOwner::Computer,
+            cfg!(feature = "relay-client"),
+        ),
+        (
+            talos_types::NodeProductOwner::Server,
+            cfg!(feature = "relay"),
+        ),
+    ] {
+        let response = crate::product_capability_routes(owner)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/v1/capabilities")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let response: talos_types::ApiResponse<talos_app_protocol::requests::ServerCapabilities> =
+            serde_json::from_slice(&bytes).unwrap();
+        assert!(
+            matches!(response, talos_types::ApiResponse::Success { data }
+            if data.sync == cfg!(feature = "sync") && data.relay == relay)
+        );
+    }
 }

@@ -1,57 +1,29 @@
+use crate::agent_node_resources_rpc::tests::{session_record, TestAttachments};
 use std::path::Path;
 
 use agent_client::{AgentNodeClient, AgentNodeRunner, AgentSessionDataClient};
 use agent_pb as pb;
 use agent_pb::agent_node_control_server::AgentNodeControl;
 use agent_pb::agent_node_management_server::AgentNodeManagement;
-use talos_agent::{AttachmentReader, ResolvedAttachment, TurnFileScope};
+use talos_agent::{AttachmentReader, TurnFileScope};
 use talos_auth::{RequestIdentity, UserRole};
 use talos_coordinator::AgentCoordinator;
 use talos_error::TalosResult;
 use talos_llm_provider::{Attachment, AttachmentKind};
 use talos_storage::SqliteStorage;
 use talos_store::node::{AgentNodeStore, DatabaseAgentNodeStore};
-use talos_store::session::{
-    DatabaseSessionStore, SessionRecord, SessionStore, SessionTreeIdentity,
-};
+use talos_store::session::{DatabaseSessionStore, SessionRecord, SessionStore};
 use talos_tools::{AgentControl, AgentControlFuture, ToolImageStore};
-use talos_types::talos::{SessionSourceProvider, SessionSourceType};
 use talos_types::{
     AgentTreeSnapshot, FileInfo, FileScope, FollowUpSubagentRequest, InterruptSubagentRequest,
     ListSubagentsRequest, SendMessageResult, SendSubagentMessageRequest, SpawnSubagentRequest,
     SubagentSnapshot, SubagentSpawnResult, WaitSubagentRequest,
 };
-use talos_types::{SessionConf, SessionUsage};
 use tokio_util::sync::CancellationToken;
 
 use super::*;
 
 struct TestAuth;
-
-struct TestAttachments;
-
-impl AttachmentReader for TestAttachments {
-    fn read<'a>(
-        &'a self,
-        scope: &'a TurnFileScope,
-        file_ids: &'a [String],
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = TalosResult<Vec<ResolvedAttachment>>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            assert_eq!(scope.owner_user_id, "user-1");
-            assert_eq!(scope.project_id.as_deref(), Some("project-1"));
-            assert_eq!(file_ids, ["file-1"]);
-            Ok(vec![ResolvedAttachment {
-                file_id: "file-1".into(),
-                filename: "input.txt".into(),
-                media_type: "text/plain".into(),
-                size_bytes: 7,
-                bytes: bytes::Bytes::from_static(b"content"),
-            }])
-        })
-    }
-}
 
 struct TestAutomationControl;
 
@@ -529,43 +501,11 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     server_task.await.unwrap().unwrap();
 }
 
-fn session_record() -> SessionRecord {
-    SessionRecord {
-        session_kind: talos_types::SessionKind::Standard,
-        id: "session-1".into(),
-        agent_id: "talos".into(),
-        execution_node_id: "laptop-1".into(),
-        tree_identity: SessionTreeIdentity::Primary,
-        workspace_id: "default".into(),
-        title: "Session".into(),
-        user_id: "user-1".into(),
-        source_type: SessionSourceType::System,
-        source_provider: SessionSourceProvider::System,
-        channel_id: None,
-        thread_id: None,
-        environment: None,
-        created_at: 1,
-        last_activity: 1,
-        message_count: 0,
-        latest_turn_seq: 0,
-        memory_processed_until_event_seq: 0,
-        usage: SessionUsage::default(),
-        conf: SessionConf::default(),
-        project_id: None,
-        worktree_binding: None,
-        current_directory: None,
-        pinned: false,
-    }
-}
-
 #[path = "agent_node_lifecycle_tests.rs"]
 mod lifecycle;
 
 #[path = "desktop_registration_tests.rs"]
 mod desktop_registration_tests;
-
-#[path = "agent_resource_tests.rs"]
-mod resources;
 
 #[path = "agent_resource_automation_tests.rs"]
 mod automation_resources;

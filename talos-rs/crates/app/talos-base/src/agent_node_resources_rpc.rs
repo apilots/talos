@@ -1,53 +1,74 @@
 //! Authorized control-plane resources consumed through existing Worker ports.
 
+#[cfg(feature = "server")]
 use std::pin::Pin;
 use std::sync::Arc;
 
+#[cfg(feature = "server")]
 use agent_pb as pb;
+#[cfg(feature = "server")]
 use agent_protocol::{node_pb, resources_pb};
+#[cfg(feature = "server")]
 use futures_util::Stream;
+#[cfg(feature = "server")]
 use talos_agent::{AttachmentReader, TurnFileScope};
 use talos_error::{ErrorCode, TalosError, TalosResult};
+#[cfg(feature = "server")]
 use talos_llm_provider::{Attachment, AttachmentKind};
+#[cfg(feature = "server")]
 use talos_service::AgentNodeService;
 use talos_store::session::{SessionRecord, SessionStore};
+#[cfg(feature = "server")]
 use talos_tools::{AgentControl, ToolImageStore};
+#[cfg(feature = "server")]
 use tonic::{Request, Response, Status};
 
-use super::failure;
+#[cfg(feature = "server")]
+use crate::agent_node_rpc::failure;
 #[path = "agent_resource_authorization.rs"]
 mod authorization;
+#[cfg(feature = "server")]
 #[path = "agent_resource_automation.rs"]
 mod automation;
+#[cfg(feature = "server")]
 #[path = "agent_resource_images.rs"]
 mod images;
+#[cfg(feature = "server")]
 #[path = "agent_resource_subagents.rs"]
 mod subagents;
+#[cfg(feature = "server")]
 pub use automation::NodeAutomationControlRpc;
+#[cfg(feature = "server")]
 pub use images::NodeToolImageRpc;
+#[cfg(feature = "server")]
 pub use subagents::NodeSubagentControlRpc;
 
 /// Serves the control-plane-owned dependencies used by a remote Kernel. The
 /// node lease is checked against the persisted Session before any owner runs.
 #[derive(Clone)]
 pub struct NodeSessionDataRpc {
+    #[cfg(feature = "server")]
     nodes: Option<AgentNodeService>,
     sessions: Arc<dyn SessionStore>,
+    #[cfg(feature = "server")]
     attachments: Arc<dyn AttachmentReader>,
 }
 
 impl NodeSessionDataRpc {
     pub(crate) fn local(
         sessions: Arc<dyn SessionStore>,
-        attachments: Arc<dyn talos_agent::AttachmentReader>,
+        _attachments: Arc<dyn talos_agent::AttachmentReader>,
     ) -> Self {
         Self {
+            #[cfg(feature = "server")]
             nodes: None,
             sessions,
-            attachments,
+            #[cfg(feature = "server")]
+            attachments: _attachments,
         }
     }
 
+    #[cfg(feature = "server")]
     pub fn new(
         nodes: AgentNodeService,
         sessions: Arc<dyn SessionStore>,
@@ -61,9 +82,11 @@ impl NodeSessionDataRpc {
     }
 }
 
+#[cfg(feature = "server")]
 type AttachmentStream =
     Pin<Box<dyn Stream<Item = Result<pb::ResolveAttachmentsResponse, Status>> + Send>>;
 
+#[cfg(feature = "server")]
 #[tonic::async_trait]
 impl pb::agent_session_data_rpc_server::AgentSessionDataRpc for NodeSessionDataRpc {
     type ResolveAttachmentsStream = AttachmentStream;
@@ -147,6 +170,7 @@ impl pb::agent_session_data_rpc_server::AgentSessionDataRpc for NodeSessionDataR
     }
 }
 
+#[cfg(feature = "server")]
 fn invalid_resource_request() -> TalosError {
     TalosError::new(
         ErrorCode::InvalidRequest,
@@ -154,9 +178,14 @@ fn invalid_resource_request() -> TalosError {
     )
 }
 
+#[cfg(feature = "server")]
 fn resource_status() -> Status {
     agent_protocol::error_pb::encode_status(&TalosError::new(
         ErrorCode::InvalidRequest,
         "Resource RPC carrier is invalid",
     ))
 }
+
+#[cfg(test)]
+#[path = "agent_resource_tests.rs"]
+pub(crate) mod tests;

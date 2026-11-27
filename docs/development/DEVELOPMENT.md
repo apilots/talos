@@ -114,7 +114,9 @@ Rust PR/main quality tasks, pre-push and release source checks run scoped
 Clippy type-checks test/example targets and workspace default Clippy lints are
 errors, together with `dbg!` and `todo!`. Fix diagnostics in their owning source
 or generator. Do not enable all features or restriction lints without checking
-supported combinations. Cargo-machete rejects unused manifest dependencies;
+supported combinations. `just deps-check` also validates isolated normal/build product dependency graphs; personal entries must exclude Server authority, managed runtime and Server Relay. Build distributable products in separate Cargo invocations because workspace feature unification can include Server code in otherwise personal artifacts. The Base CI gate checks personal and Server feature combinations and runs both actual test suites without a default-feature test archive.
+
+Cargo-machete rejects unused manifest dependencies;
 generated protobuf/gRPC runtime dependencies have explicit package metadata.
 `just install-tools` installs the pinned dependency checker, and CI installs it
 with Clippy and the pinned Rust toolchain.

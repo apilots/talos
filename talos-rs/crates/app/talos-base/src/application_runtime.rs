@@ -8,14 +8,14 @@ use talos_error::TalosResult;
 use talos_gateway::{Gateway, ServiceGateway};
 use talos_llm_provider::LlmProviderRouter;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
-use talos_service::{
-    AgentNodeService, FileService, InnerModelClient, TalosService, TimelineEventService,
-};
+use talos_service::{FileService, InnerModelClient, TalosService, TimelineEventService};
 use talos_store::node::DatabaseAgentNodeStore;
 use talos_store::project::{ProjectStore, StorageProjectStore};
 use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionStore};
 
-use talos_tools::{AgentControl, ToolImageStore};
+#[cfg(feature = "server")]
+use talos_tools::AgentControl;
+use talos_tools::ToolImageStore;
 use talos_types::{resolve_default_model_selection, resolve_model_catalog};
 use talos_worker::{TalosWorker, TalosWorkerResources};
 
@@ -48,6 +48,13 @@ pub(crate) async fn build_application_runtime_with_policy(
     session_ownership: crate::SessionOwnershipPolicy,
     product_owner: talos_types::NodeProductOwner,
 ) -> TalosResult<TalosApplicationRuntime> {
+    #[cfg(not(feature = "server"))]
+    if product_owner == talos_types::NodeProductOwner::Server {
+        return Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This product does not include Server composition.",
+        ));
+    }
     let ProductStores {
         storage_connection,
         storage,
@@ -153,8 +160,10 @@ pub(crate) async fn build_application_runtime_with_policy(
             chrono::Utc::now().timestamp(),
         )
         .await?;
+    #[cfg(feature = "server")]
     let node_service = (product_owner == talos_types::NodeProductOwner::Server)
-        .then(|| AgentNodeService::new(node_store.clone()));
+        .then(|| talos_service::AgentNodeService::new(node_store.clone()));
+    #[cfg(feature = "server")]
     let product_nodes = match &node_service {
         Some(server) => talos_service::ProductNodeAccess::from(server.clone()),
         None => talos_service::ProductNodeAccess::computer(
@@ -162,6 +171,12 @@ pub(crate) async fn build_application_runtime_with_policy(
             Arc::new(agent_protocol::NodeAdmissionGates::default()),
         ),
     };
+
+    #[cfg(not(feature = "server"))]
+    let product_nodes = talos_service::ProductNodeAccess::computer(
+        embedded.into_info(),
+        Arc::new(agent_protocol::NodeAdmissionGates::default()),
+    );
 
     let cloud_auth = Arc::new(CloudAuthService::new(config.cloud.api_base_url.clone()));
     let auth_service: Arc<dyn AuthService> = cloud_auth.clone();
@@ -222,12 +237,14 @@ pub(crate) async fn build_application_runtime_with_policy(
         #[cfg(feature = "sync")]
         credentials: Default::default(),
     });
+    #[cfg(feature = "server")]
     let agent_control: Arc<dyn AgentControl> =
         Arc::new(ApplicationAgentControl::new(service.clone()));
+    #[cfg(feature = "server")]
     let automation_control: Arc<dyn talos_tools::AutomationControl> = Arc::new(
         super::application_automation_control::ApplicationAutomationControl::new(service.clone()),
     );
-    let local_data = super::agent_node_rpc::NodeSessionDataRpc::local(
+    let local_data = super::agent_node_resources_rpc::NodeSessionDataRpc::local(
         session_store.clone(),
         attachment_reader.clone(),
     );
@@ -267,7 +284,7 @@ pub(crate) async fn build_application_runtime_with_policy(
     });
     let resource_stop = tokio_util::sync::CancellationToken::new();
     let resource_stop_guard = std::sync::Arc::new(resource_stop.clone().drop_guard());
-    let media = super::agent_node_rpc::DesktopRelay::new(resource_stop.clone());
+    let media = super::desktop_relay::DesktopRelay::new(resource_stop.clone());
     service.set_desktop_ingress(Arc::new(
         super::application_desktop::ApplicationDesktopIngress {
             local: media.clone(),
@@ -355,7 +372,7 @@ pub(crate) async fn build_application_runtime_with_policy(
         self_weak: host.clone(),
         computer_directory: Default::default(),
         registration_retirement: Default::default(),
-        #[cfg(feature = "relay")]
+        #[cfg(feature = "relay-client")]
         product_router: talos_gateway_http::HttpServer::new(
             service.clone(),
             event_service.clone(),
@@ -364,12 +381,14 @@ pub(crate) async fn build_application_runtime_with_policy(
             "127.0.0.1",
             0,
         )
-        .with_routes(crate::product_capability_routes())
+        .with_routes(crate::product_capability_routes(
+            talos_types::NodeProductOwner::Computer,
+        ))
         .router(),
-        #[cfg(feature = "relay")]
+        #[cfg(feature = "relay-client")]
         product_relay: Default::default(),
         config: config.clone(),
-        #[cfg(feature = "relay")]
+        #[cfg(feature = "relay-client")]
         host_id: host_id.clone(),
         product_owner,
         #[cfg(feature = "sync")]
@@ -396,7 +415,7 @@ pub(crate) async fn build_application_runtime_with_policy(
         failures: Default::default(),
     });
     host.install_peer_access();
-    #[cfg(feature = "relay")]
+    #[cfg(feature = "relay-client")]
     host.refresh_product_relay().await?;
     #[cfg(feature = "sync")]
     for binding in sync.saved_bindings().await? {
@@ -432,6 +451,7 @@ pub(crate) async fn build_application_runtime_with_policy(
                 .with_access_token(session.access_token),
         );
     }
+    #[cfg(feature = "server")]
     if product_owner == talos_types::NodeProductOwner::Server {
         let management = Arc::downgrade(&management);
         node_service
@@ -451,7 +471,7 @@ pub(crate) async fn build_application_runtime_with_policy(
         worker,
         worker_rpc,
         resource_stop,
-        resource_stop_guard,
+        _resource_stop_guard: resource_stop_guard,
         worker_registration,
         worker_failures,
         config,
@@ -460,12 +480,18 @@ pub(crate) async fn build_application_runtime_with_policy(
         auth_service,
         gateway,
         coordinator,
+        #[cfg(feature = "server")]
         node_service,
         tool_registry,
+        #[cfg(feature = "server")]
         session_store,
+        #[cfg(feature = "server")]
         attachment_reader,
+        #[cfg(feature = "server")]
         agent_control,
+        #[cfg(feature = "server")]
         automation_control,
+        #[cfg(feature = "server")]
         tool_image_store,
         automation,
         _native_job_host: native_job_host,

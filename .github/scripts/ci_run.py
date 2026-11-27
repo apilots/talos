@@ -153,8 +153,9 @@ def check_product_features(packages: list[str]) -> None:
     """Keep optional product composition covered when its owning runtime changes."""
     if 'talos-base' not in packages:
         return
-    for features in ('', 'sync', 'relay', 'sync,relay'):
-        args = ['just', 'check', '--locked', '-p', 'talos-base', '--no-default-features']
+    for features in ('', 'sync', 'relay-client', 'sync,relay-client',
+                     'server', 'server,sync', 'server,relay', 'server,sync,relay'):
+        args = ['just', 'check', '--locked', '-p', 'talos-base', '--no-default-features', '--all-targets']
         if features:
             args.extend(['--features', features])
         run(*args)
@@ -163,6 +164,11 @@ def check_product_features(packages: list[str]) -> None:
     environment = dict(os.environ)
     environment.pop('TALOS_TEST_ARCHIVE', None)
     run('just', 'test', '--locked', '-p', 'talos-store', '--no-default-features', env=environment)
+    run('just', 'test', '--locked', '-p', 'talos-base', '--no-default-features', env=environment)
+    run('just', 'test', '--locked', '-p', 'talos-base', '--no-default-features',
+        '--features', 'server', env=environment)
+    run('just', 'test', '--locked', '-p', 'talos-base', '--no-default-features',
+        '--features', 'server,sync,relay,relay-client', env=environment)
 
 
 def execute(task: dict, directory: Path) -> None:
@@ -191,13 +197,13 @@ def execute(task: dict, directory: Path) -> None:
                     run('pnpm', '--dir', 'talos-app', '--filter', package,
                         'build:main' if package == 'talos-desktop' else 'build:bundle')
     elif task['kind'] == 'build':
-        args = [value for binary in task['binaries'] for value in
-                ('-p', BINARIES[binary][0], '--bin', BINARIES[binary][1])]
-        if args:
-            run('just', 'build', '--locked', *args)
         directory.mkdir(parents=True, exist_ok=True)
+        # Cargo unifies dependency features within one invocation. Build each product
+        # separately so Server authority cannot leak into personal artifacts.
         for binary in task['binaries']:
-            pack_binary(directory, binary, ROOT / 'talos-rs/target/debug' / BINARIES[binary][1])
+            package, name, _ = BINARIES[binary]
+            run('just', 'build', '--locked', '-p', package, '--bin', name)
+            pack_binary(directory, binary, ROOT / 'talos-rs/target/debug' / name)
         for owner, packages in task.get('tests', {}).items():
             archive = directory / f'tests-{owner}.tar.zst'
             package_args = [arg for package in packages for arg in ('-p', package)]

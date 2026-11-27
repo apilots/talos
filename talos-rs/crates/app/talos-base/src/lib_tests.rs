@@ -1,25 +1,21 @@
 use super::{
     apply_runtime_options, build_application_runtime_with_migration_dir, create_llm_provider,
-    resolve_webui_dir, TalosServerHandle, TalosServerOptions, WebuiLookupInput, WebuiLookupResult,
-    SERVER_SHUTDOWN_WAIT_TIMEOUT,
+    resolve_webui_dir, TalosServerOptions, WebuiLookupInput, WebuiLookupResult,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "server")]
+use std::sync::Arc;
 use talos_config::{
     AgentDefinitionConfig, AgentProviderConfig, Config, ProviderModelConfig, TalosPaths,
 };
 use talos_coordinator::AgentCoordinator;
-use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
 use talos_llm_provider::ChatRequest;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::Duration;
-use tokio_util::sync::CancellationToken;
 
 static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -417,77 +413,6 @@ async fn deepseek_provider_uses_chat_completions_path_and_concrete_provider() {
     assert_eq!(response.content, "ok");
 }
 
-#[tokio::test]
-async fn handle_shutdown_waits_for_stopped_state() {
-    let lifecycle = Arc::new(ServerLifecycle::new());
-    let handle = TalosServerHandle {
-        shutdown_token: CancellationToken::new(),
-        lifecycle: lifecycle.clone(),
-        wait_timeout: Duration::from_secs(1),
-    };
-
-    let token = handle.shutdown_token.clone();
-    let lifecycle_for_task = lifecycle.clone();
-    let waiter = tokio::spawn(async move { handle.shutdown().await });
-    token.cancelled().await;
-    lifecycle_for_task.store(ServerLifecycleState::Quiescing);
-    lifecycle_for_task.store(ServerLifecycleState::Draining);
-    lifecycle_for_task.store(ServerLifecycleState::Stopped);
-
-    waiter
-        .await
-        .expect("task should join")
-        .expect("shutdown should finish");
-}
-
-#[tokio::test]
-async fn handle_shutdown_times_out_without_stopped_state() {
-    let lifecycle = Arc::new(ServerLifecycle::new());
-    let handle = TalosServerHandle {
-        shutdown_token: CancellationToken::new(),
-        lifecycle,
-        wait_timeout: Duration::from_millis(50),
-    };
-
-    let err = handle
-        .shutdown()
-        .await
-        .expect_err("shutdown should time out");
-    assert!(err.is_internal());
-}
-
-#[tokio::test]
-async fn lifecycle_watch_reports_expected_state_order() {
-    let lifecycle = Arc::new(ServerLifecycle::new());
-    let mut updates = lifecycle.subscribe();
-
-    lifecycle.store(ServerLifecycleState::Quiescing);
-    updates
-        .changed()
-        .await
-        .expect("quiescing update should arrive");
-    assert_eq!(
-        *updates.borrow_and_update(),
-        ServerLifecycleState::Quiescing
-    );
-
-    lifecycle.store(ServerLifecycleState::Draining);
-    updates
-        .changed()
-        .await
-        .expect("draining update should arrive");
-    assert_eq!(*updates.borrow_and_update(), ServerLifecycleState::Draining);
-
-    lifecycle.store(ServerLifecycleState::Stopped);
-    updates
-        .changed()
-        .await
-        .expect("stopped update should arrive");
-    assert_eq!(*updates.borrow_and_update(), ServerLifecycleState::Stopped);
-
-    assert!(SERVER_SHUTDOWN_WAIT_TIMEOUT > Duration::from_secs(0));
-}
-
 #[cfg(unix)]
 #[path = "application_mcp_tests.rs"]
 mod mcp_tests;
@@ -498,7 +423,7 @@ mod mcp_credentials_tests;
 #[path = "mcp_oauth_tests.rs"]
 mod mcp_oauth_tests;
 
-#[cfg(feature = "relay")]
+#[cfg(all(feature = "relay", feature = "relay-client"))]
 #[path = "product_relay_tests.rs"]
 mod product_relay_tests;
 
@@ -516,6 +441,7 @@ async fn product_management_assembly_does_not_open_the_live_worker_namespace() {
         super::application_runtime::build_product_runtime(config.clone(), &test_migrations_dir())
             .await
             .unwrap();
+    #[cfg(feature = "server")]
     assert!(runtime.service.nodes.server().is_err());
     assert!(!execution_dir.join("execution.sqlite").exists());
     assert!(!execution_dir.join("execution-admission").exists());
@@ -587,8 +513,12 @@ async fn personal_product_assembly_has_no_registration_or_managed_worker_authori
     )
     .await
     .unwrap();
-    assert!(runtime.node_service.is_none());
-    assert!(runtime.service.nodes.server().is_err());
+    #[cfg(feature = "server")]
+    {
+        assert!(runtime.node_service.is_none());
+        #[cfg(feature = "server")]
+        assert!(runtime.service.nodes.server().is_err());
+    }
     let denied = runtime
         .service
         .nodes
@@ -615,6 +545,7 @@ async fn personal_product_assembly_has_no_registration_or_managed_worker_authori
     runtime.shutdown().await.unwrap();
 }
 
+#[cfg(feature = "server")]
 #[tokio::test]
 async fn server_product_assembly_shares_control_plane_admission_with_product_operations() {
     let mut config = Config::default();
@@ -646,4 +577,24 @@ async fn server_product_assembly_shares_control_plane_admission_with_product_ope
     drop(read);
     assert!(write.try_write().is_ok());
     runtime.shutdown().await.unwrap();
+}
+
+#[cfg(not(feature = "server"))]
+#[tokio::test]
+async fn personal_build_rejects_server_composition_before_opening_storage() {
+    let mut config = Config::default();
+    let workspace = isolate_runtime_workspace(&mut config, "unsupported-server");
+    let database = workspace.join("server.sqlite");
+    config.storage.connection_string = database.to_string_lossy().into();
+    let error = super::application_runtime::build_application_runtime_with_policy(
+        config,
+        &workspace.join("missing-migrations"),
+        Default::default(),
+        talos_types::NodeProductOwner::Server,
+    )
+    .await
+    .err()
+    .expect("personal build must not emulate Server authority");
+    assert!(error.is_code(talos_error::ErrorCode::ServiceUnavailable));
+    assert!(!database.exists());
 }

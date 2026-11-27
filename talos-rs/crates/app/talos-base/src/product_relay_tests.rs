@@ -8,6 +8,7 @@ use axum::{
     http::Request,
 };
 use std::fs;
+use tokio_util::sync::CancellationToken;
 
 use talos_gateway_http::{HttpServer, ProductRequestRouter, ProductRoute};
 use talos_types::*;

@@ -55,7 +55,7 @@ impl DesktopApplication {
         }
         .enroll(recover_node_id, None, request_actor)
         .await?;
-        #[cfg(feature = "relay")]
+        #[cfg(feature = "relay-client")]
         self.host.refresh_product_relay().await?;
         #[cfg(feature = "sync")]
         if let Some(actor) = request_actor {

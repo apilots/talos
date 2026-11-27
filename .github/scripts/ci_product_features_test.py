@@ -15,12 +15,26 @@ class ProductFeatureGateTests(unittest.TestCase):
         with patch.dict(os.environ, {'TALOS_TEST_ARCHIVE': '/archive/default.tar.zst'}):
             with patch.object(ci_run, 'run') as run:
                 ci_run.check_product_features(['talos-base'])
-        checks = [call.args for call in run.call_args_list[:4]]
-        base = ('just', 'check', '--locked', '-p', 'talos-base', '--no-default-features')
-        self.assertEqual(checks, [base, base + ('--features', 'sync'), base + ('--features', 'relay'), base + ('--features', 'sync,relay')])
-        capture = run.call_args_list[4]
-        self.assertEqual(capture.args, ('just', 'test', '--locked', '-p', 'talos-store', '--no-default-features'))
-        self.assertNotIn('TALOS_TEST_ARCHIVE', capture.kwargs['env'])
+        checks = [call.args for call in run.call_args_list[:8]]
+        base = ('just', 'check', '--locked', '-p', 'talos-base', '--no-default-features', '--all-targets')
+        self.assertEqual(checks, [
+            base, base + ('--features', 'sync'), base + ('--features', 'relay-client'),
+            base + ('--features', 'sync,relay-client'), base + ('--features', 'server'),
+            base + ('--features', 'server,sync'), base + ('--features', 'server,relay'),
+            base + ('--features', 'server,sync,relay'),
+        ])
+        suites = run.call_args_list[8:]
+        self.assertEqual([call.args for call in suites], [
+            ('just', 'test', '--locked', '-p', 'talos-store', '--no-default-features'),
+            ('just', 'test', '--locked', '-p', 'talos-base', '--no-default-features'),
+            ('just', 'test', '--locked', '-p', 'talos-base', '--no-default-features',
+             '--features', 'server'),
+            ('just', 'test', '--locked', '-p', 'talos-base', '--no-default-features',
+             '--features', 'server,sync,relay,relay-client'),
+        ])
+        for suite in suites:
+            self.assertNotIn('TALOS_TEST_ARCHIVE', suite.kwargs['env'])
+
 
 
 if __name__ == '__main__':

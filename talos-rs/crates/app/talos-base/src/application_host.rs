@@ -30,12 +30,12 @@ pub(crate) struct ApplicationHost {
     pub self_weak: std::sync::Weak<Self>,
     pub computer_directory: super::application_computer_directory::ComputerDirectory,
     pub registration_retirement: tokio::sync::Mutex<()>,
-    #[cfg(feature = "relay")]
+    #[cfg(feature = "relay-client")]
     pub product_router: axum::Router,
-    #[cfg(feature = "relay")]
+    #[cfg(feature = "relay-client")]
     pub product_relay: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     pub config: talos_config::Config,
-    #[cfg(feature = "relay")]
+    #[cfg(feature = "relay-client")]
     pub host_id: String,
     pub product_owner: talos_types::NodeProductOwner,
     #[cfg(feature = "sync")]
@@ -64,7 +64,7 @@ pub(crate) struct ApplicationHost {
 
 impl Drop for ApplicationHost {
     fn drop(&mut self) {
-        #[cfg(feature = "relay")]
+        #[cfg(feature = "relay-client")]
         if let Some(task) = self.product_relay.get_mut().take() {
             task.abort();
         }
@@ -94,7 +94,7 @@ impl crate::TalosApplicationRuntime {
 }
 
 impl ApplicationHost {
-    #[cfg(feature = "relay")]
+    #[cfg(feature = "relay-client")]
     pub(crate) async fn stop_product_relay(&self) {
         if let Some(task) = self.product_relay.lock().await.take() {
             task.abort();
@@ -109,7 +109,7 @@ impl ApplicationHost {
         }
     }
 
-    #[cfg(feature = "relay")]
+    #[cfg(feature = "relay-client")]
     pub(crate) async fn refresh_product_relay(&self) -> TalosResult<()> {
         if self.product_owner != talos_types::NodeProductOwner::Computer {
             return Ok(());
@@ -153,7 +153,7 @@ impl ApplicationHost {
 
     pub(crate) async fn shutdown(&self) -> TalosResult<()> {
         self.shutdown_refreshes().await;
-        #[cfg(feature = "relay")]
+        #[cfg(feature = "relay-client")]
         self.stop_product_relay().await;
         self.tokens.write().expect("management tokens lock").clear();
         #[cfg(feature = "sync")]

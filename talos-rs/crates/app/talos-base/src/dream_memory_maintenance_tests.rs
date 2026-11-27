@@ -206,9 +206,19 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             .build()
             .expect("inner model client"),
     );
-    let nodes = talos_service::AgentNodeService::new(Arc::new(
-        talos_store::node::DatabaseAgentNodeStore::new(&storage),
-    ));
+    use talos_store::node::AgentNodeStore;
+    let node_store = Arc::new(talos_store::node::DatabaseAgentNodeStore::new(&storage));
+    let nodes = talos_service::ProductNodeAccess::computer(
+        node_store
+            .upsert_embedded(
+                talos_types::NodeStatus::Enabled,
+                chrono::Utc::now().timestamp(),
+            )
+            .await
+            .unwrap()
+            .into_info(),
+        Arc::new(agent_protocol::NodeAdmissionGates::default()),
+    );
     let project_store = Arc::new(
         StorageProjectStore::new(storage.clone())
             .await
@@ -230,7 +240,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     let coordinator = Arc::new(CoordinatorImpl::new(
         Arc::new(talos_router::RouterImpl::new()),
         sessions.clone(),
-        Arc::new(talos_store::node::DatabaseAgentNodeStore::new(&storage)),
+        node_store,
     ));
     let runtime_home = tempfile::tempdir().unwrap();
     let mut worker_config = config.clone();
@@ -252,8 +262,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     .await
     .unwrap();
     worker.use_local_resources({
-        let data = crate::agent_node_rpc::NodeSessionDataRpc::new(
-            nodes.clone(),
+        let data = crate::agent_node_resources_rpc::NodeSessionDataRpc::local(
             sessions.clone(),
             file_service.clone(),
         );

@@ -175,7 +175,7 @@ pub(super) async fn verify_late_enrollment(
         talos_sync::SyncConnectionState::Connected
     );
     // Product transport lifecycle must not restart optional replication.
-    #[cfg(feature = "relay")]
+    #[cfg(feature = "relay-client")]
     {
         runtime.host.stop_product_relay().await;
         runtime.host.refresh_product_relay().await.unwrap();
