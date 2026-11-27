@@ -57,6 +57,9 @@ pub struct ManagedWorkerInfo {
     #[ts(type = "number")]
     pub memory_bytes: u64,
     pub disk_quota: ManagedWorkerDiskQuota,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub idle_timeout_seconds: Option<u32>,
     pub error: Option<ApiError>,
 }
 

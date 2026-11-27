@@ -29,12 +29,14 @@ function expectWebSearchConfig(
   return response;
 }
 
-export async function getLlmConfig(): Promise<LlmConfigResponse> {
-  return expectLlmConfig(await getTalosClient().llm.get());
+export async function getLlmConfig(nodeId?: string): Promise<LlmConfigResponse> {
+  const client = nodeId ? await getTalosClient({ nodeId }) : getTalosClient();
+  return expectLlmConfig(await client.llm.get());
 }
 
-export async function updateLlmConfig(config: LlmConfig): Promise<LlmConfigResponse> {
-  return expectLlmConfig(await getTalosClient().llm.update(config));
+export async function updateLlmConfig(config: LlmConfig, nodeId?: string): Promise<LlmConfigResponse> {
+  const client = nodeId ? await getTalosClient({ nodeId }) : getTalosClient();
+  return expectLlmConfig(await client.llm.update(config));
 }
 
 export async function getWebSearchConfig(): Promise<WebSearchConfigResponse> {

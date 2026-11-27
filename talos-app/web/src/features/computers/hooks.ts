@@ -1,11 +1,12 @@
 import { useEffect } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { createElectronAppServerClient } from "@talos/sdk-app-server/desktop";
 import { TalosApiError, AppProtocol } from "@talos/sdk-core";
 import { getTalosClient } from "@/shared/api/client";
 import { getDesktopBridge } from "@/shared/api/desktop-client";
 import { withManagementTimeout } from "@/shared/api/desktop-product-owner";
+import { managedWorkerKey } from "@/shared/api/product-queries";
 import { useAppStore } from "@/shared/store/app-store";
 import { connectionScope } from "@/shared/store/connection-scope";
 
@@ -41,11 +42,30 @@ export function useAccountSyncMetrics() {
 
 export function useComputerList(query = "") {
   const scope = useProductScope();
+  const queryClient = useQueryClient();
+  const managedNodeId = queryClient.getQueryData<AppProtocol.ManagedWorkerResponse>(managedWorkerKey(scope))?.instance?.nodeId;
   const list = useInfiniteQuery({
     queryKey: ["talos", scope, "computers", query], initialPageParam: null as string | null,
     queryFn: async ({ pageParam }) => {
       const server = await getTalosClient({ service: "server" });
       return withManagementTimeout((signal) => server.computers.list({ query: query || null, cursor: pageParam, limit: 20 }, signal));
+    },
+    select: (data) => {
+      let removed = 0;
+      const pages = data.pages.map((page) => {
+        const filtered = page.data.filter(
+          (node) => node.managedWorkerPhase == null && (!managedNodeId || node.nodeId !== managedNodeId),
+        );
+        removed += page.data.length - filtered.length;
+        return filtered.length === page.data.length ? page : { ...page, data: filtered };
+      });
+      if (removed === 0) return data;
+      return {
+        ...data,
+        pages: pages.map((page, index) =>
+          index === 0 ? { ...page, total: Math.max(0, page.total - removed) } : page,
+        ),
+      };
     },
     getNextPageParam: (page) => page.nextCursor ?? undefined, refetchInterval: 5_000, retry: false,
   });
@@ -123,18 +143,36 @@ export function useComputers() {
   }, [list.data, localId, nodes, scope, select, selectedId]);
   const selected = useComputer(selectedId, directoryNodes.find((node) => node.nodeId === selectedId));
   const clear = useAppStore((state) => state.clearComputer);
+  const queryClient = useQueryClient();
+  const managedNodeId = queryClient.getQueryData<AppProtocol.ManagedWorkerResponse>(managedWorkerKey(scope))?.instance?.nodeId;
+  const selectedIsManaged = Boolean(
+    selectedId && ((managedNodeId && selectedId === managedNodeId) || selected.data?.managedWorkerPhase != null),
+  );
   useEffect(() => {
-    if (!(bridge && identity.isPending) && !list.error && selectedId && selectedId !== localId && isDirectoryMiss(selected.error)) {
+    if (!selectedId) return;
+    if (selectedIsManaged) {
+      if (localId && localId !== selectedId) {
+        select(scope, localId);
+      } else {
+        clear(scope, selectedId);
+      }
+      return;
+    }
+    if (!(bridge && identity.isPending) && !list.error && selectedId !== localId && isDirectoryMiss(selected.error)) {
       clear(scope, selectedId);
     }
-  }, [bridge, clear, identity.isPending, list.error, localId, scope, selected.error, selectedId]);
-  const selectedNode = selectedId === localId && local
-    ? { ...local, ...(!list.error ? selected.data : undefined), available: local.available, systemInfo: local.systemInfo }
-    : list.data ? selected.data : undefined;
+  }, [bridge, clear, identity.isPending, list.error, localId, scope, select, selected.error, selectedId, selectedIsManaged]);
+  const selectedNode = selectedIsManaged
+    ? undefined
+    : selectedId === localId && local
+      ? { ...local, ...(!list.error ? selected.data : undefined), available: local.available, systemInfo: local.systemInfo }
+      : list.data ? selected.data : undefined;
+  const effectiveSelectedId = selectedIsManaged ? "" : selectedId;
   const quickNodes = [...new Map([selectedNode, ...nodes.filter((node) => node.nodeId !== selectedNode?.nodeId)]
-    .filter((node): node is AppProtocol.NodeInfo => Boolean(node)).map((node) => [node.nodeId, node])).values()]
+    .filter((node): node is AppProtocol.NodeInfo => node != null && node.managedWorkerPhase == null && (!managedNodeId || node.nodeId !== managedNodeId))
+    .map((node) => [node.nodeId, node])).values()]
     .sort((a, b) => Number(b.nodeId === localId) - Number(a.nodeId === localId)).slice(0, 3);
-  return { scope, selectedId, selected: selectedNode, localId, localNode: local, nodes, quickNodes,
+  return { scope, selectedId: effectiveSelectedId, selected: selectedNode, localId, localNode: local, nodes, quickNodes,
     total: list.data?.pages[0]?.total ?? nodes.length, list, runtime, identity,
     error: list.error ?? selected.error ?? identity.error, sync,
     select: (nodeId: string) => select(scope, nodeId),

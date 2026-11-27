@@ -109,8 +109,9 @@ export function createInitialTurnRequest(
   };
 }
 
-export async function suggestSkills(query: string, limit = 8) {
-  const response = await getTalosClient().skills.suggest({ query, limit });
+export async function suggestSkills(query: string, limit = 8, nodeId?: string) {
+  const client = nodeId ? await getTalosClient({ nodeId }) : getTalosClient();
+  const response = await client.skills.suggest({ query, limit });
   return response.data;
 }
 

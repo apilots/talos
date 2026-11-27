@@ -16,6 +16,7 @@ interface UseComposerSuggestionsOptions {
   cursorIndex: number;
   enabled: boolean;
   isComposing: boolean;
+  nodeId?: string;
   value: string;
 }
 
@@ -24,6 +25,7 @@ export function useComposerSuggestions({
   cursorIndex,
   enabled,
   isComposing,
+  nodeId,
   value,
 }: UseComposerSuggestionsOptions) {
   const [skills, setSkills] = useState<SkillSuggestion[]>([]);
@@ -49,7 +51,7 @@ export function useComposerSuggestions({
 
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void suggestSkills(trigger.query)
+      void (nodeId ? suggestSkills(trigger.query, 8, nodeId) : suggestSkills(trigger.query))
         .then((data) => {
           if (!cancelled) {
             setSkills(data);
@@ -70,7 +72,7 @@ export function useComposerSuggestions({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [open, trigger]);
+  }, [nodeId, open, trigger]);
 
   const suggestions = useMemo<ComposerSuggestion[]>(() => {
     if (!open || !trigger) {

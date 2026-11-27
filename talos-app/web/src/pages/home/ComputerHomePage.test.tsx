@@ -11,11 +11,11 @@ import { resetTalosClientFactory, setTalosClientFactory, type TalosWebClient } f
 import { connectionScope } from "@/shared/store/connection-scope";
 import { useAppStore } from "@/shared/store/app-store";
 import { topologyNodes } from "@/shared/test/computer-topology.fixture";
-import { TaloPanel } from "@/features/computers";
+import { TaloLifecycleMenu } from "@/features/computers";
 import { ComputerHomePage } from "./ComputerHomePage";
 
 const desktop = vi.hoisted(() => ({ active: false }));
-vi.mock("@/shared/api/desktop-client", () => ({ getDesktopBridge: () => desktop.active ? {} : undefined }));
+vi.mock("@/shared/api/desktop-client", () => ({ isDesktopRuntime: () => desktop.active, getDesktopBridge: () => desktop.active ? {} : undefined }));
 vi.mock("@talos/sdk-app-server/desktop", async (importOriginal) => ({
   ...await importOriginal<typeof import("@talos/sdk-app-server/desktop")>(),
   createElectronAppServerClient: () => ({ desktop: { workerIdentity: async () => ({ nodeId: "desktop-local", controlPlaneEndpoint: null, systemInfo: null }) } }),
@@ -57,6 +57,7 @@ beforeEach(() => {
         ? { ...topologyNodes[0], nodeId, displayName: "Talo", managedWorkerPhase: "ready" }
         : topologyNodes.find(node => node.nodeId === nodeId) ?? Promise.reject(new TypeError("Directory unavailable")),
     },
+    browser: { operate: async () => ({ enabled: false, host: "docker", selectedTargetId: null, targets: [], display: { kind: "dockerDesktop", targetId: "managed" }, control: { generation: "gen-1", revision: 1, epoch: 0, owner: { kind: "idle" } } }) },
     sync: { status: syncStatus },
   }) as unknown as TalosWebClient);
 });
@@ -219,14 +220,14 @@ it("keeps Talo out of the personal directory and resumes setup after leaving or 
   expect(createManagedWorker).toHaveBeenCalledTimes(1);
 });
 
-it("connects the ready Talo through the existing Computer workspace and shows its quota capability", async () => {
+it("connects the ready Talo in a desktop modal without adding a RightWorkspace tab", async () => {
   readManagedWorker.mockResolvedValue({ enabled: true, instance: { ...worker, phase: "ready", operation: null } });
   show("/talo");
   const connect = await screen.findByRole("button", { name: "Connect desktop" });
   expect(connect.parentElement).toHaveTextContent("This runtime does not enforce a disk quota.");
   fireEvent.click(connect);
-  await waitFor(() => expect(useAppStore.getState().workspaceWindows).toEqual([{ kind: "computer", nodeId: worker.nodeId }]));
-  expect(useAppStore.getState().selectedComputers[connectionScope(useAppStore.getState().connection)]).toBe(worker.nodeId);
+  expect(await screen.findByRole("dialog", { name: "Talo desktop" })).toBeVisible();
+  expect(useAppStore.getState().workspaceWindows).toHaveLength(0);
   expect(startManagedWorker).not.toHaveBeenCalled();
 });
 
@@ -273,13 +274,14 @@ it("wakes Talo on an explicit desktop request when it has gone to sleep since th
   expect(useAppStore.getState().workspaceWindows).toHaveLength(0);
   readManagedWorker.mockResolvedValue({ enabled: true, instance: { ...worker, phase: "sleeping", operation: null } });
   fireEvent.click(connect);
-  await waitFor(() => expect(useAppStore.getState().workspaceWindows).toEqual([{ kind: "computer", nodeId: worker.nodeId }]));
+  expect(await screen.findByRole("dialog", { name: "Talo desktop" })).toBeVisible();
+  expect(useAppStore.getState().workspaceWindows).toHaveLength(0);
   expect(startManagedWorker).toHaveBeenCalledExactlyOnceWith({ instanceId: worker.instanceId, expectedGeneration: worker.generation });
 });
 
 it("requires explicit confirmation for Talo deletion", async () => {
   readManagedWorker.mockResolvedValue({ enabled: true, instance: { ...worker, phase: "stopped", operation: null } });
-  show("/talo", <TaloPanel desktopNodeId={worker.nodeId} />);
+  show("/talo", <TaloLifecycleMenu desktopNodeId={worker.nodeId} />);
   const menu = await screen.findByRole("button", { name: "Manage Talo" });
   fireEvent.keyDown(menu, { key: "Enter" });
   fireEvent.click(await screen.findByRole("menuitem", { name: "Delete Talo" }));
@@ -312,7 +314,7 @@ it.each([
 it("allows an administrator with a Free type and hides a retained desktop panel after downgrade", async () => {
   useAppStore.getState().setConnection({ authRole: "admin", accountType: "Free" });
   readManagedWorker.mockResolvedValue({ enabled: true, instance: { ...worker, phase: "ready", operation: null } });
-  show("/talo", <TaloPanel desktopNodeId={worker.nodeId} />);
+  show("/talo", <TaloLifecycleMenu desktopNodeId={worker.nodeId} />);
   expect(await screen.findByRole("button", { name: "Manage Talo" })).toBeVisible();
   act(() => useAppStore.getState().setConnection({ authRole: "user" }));
   expect(screen.queryByRole("button", { name: "Manage Talo" })).not.toBeInTheDocument();

@@ -280,6 +280,7 @@ impl AgentNodeService {
                     cpu_cores: managed.config.resources(managed.config.kind).cpu_cores,
                     memory_bytes: managed.config.resources(managed.config.kind).memory_bytes,
                     disk_quota: managed.disk_quota(),
+                    idle_timeout_seconds: Some(managed.policy.idle_timeout_seconds),
                     error: None,
                 });
             }
@@ -749,6 +750,7 @@ fn worker_info(
             ManagedWorkerDiskQuota::Unsupported,
             ManagedWorkers::disk_quota,
         ),
+        idle_timeout_seconds: managed.map(|managed| managed.policy.idle_timeout_seconds),
         error: if phase == Phase::Ready {
             None
         } else {

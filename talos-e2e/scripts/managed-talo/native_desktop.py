@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from urllib.parse import urlsplit
 
 from playwright.sync_api import Error, expect, sync_playwright
@@ -123,6 +124,9 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 submit_automation(page, base, stage, report)
                 return
             if stage == 'chat':
+                talo_node = data(http(base + ASSISTANT))['instance']['nodeId']
+                selection = "() => Object.values(JSON.parse(localStorage.getItem('talos-web-ui')).state.selectedComputers)"
+                assert talo_node not in page.evaluate(selection)
                 page.get_by_text('TALO_WAKE_OK', exact=True).wait_for(timeout=30000)
                 attachment = 'native-talo.png'
                 image = page.screenshot(clip={'x': 0, 'y': 0, 'width': 8, 'height': 8})
@@ -166,34 +170,50 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 page.get_by_role('button', name='Choose an existing file').click()
                 page.get_by_role('button', name=attachment, exact=True).wait_for(timeout=15000)
                 page.keyboard.press('Escape')
+                personal_selection = page.evaluate(selection)
+                assert personal_selection and talo_node not in personal_selection
                 page.get_by_role('link', name='Files', exact=True).click()
-                page.locator('.files-page-content').get_by_text(document.name, exact=True).first.click()
+                expect(page.get_by_text('Upload an image or document to reuse it in a conversation.', exact=True)).to_be_visible()
+                expect(page.locator('.files-page-content').get_by_text(document.name, exact=True)).to_have_count(0)
+                assert page.evaluate(selection) == personal_selection
+                page.get_by_role('link', name='Talo', exact=True).click()
+                page.get_by_role('button', name='Open Talo controls', exact=True).click()
+                console = page.get_by_role('complementary', name='Manage Talo', exact=True)
+                console.get_by_role('tab', name='Files', exact=True).click()
+                console.get_by_role('button', name=document.name, exact=True).click()
                 expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text('Word preview first page', timeout=20000)
+                page.screenshot(path=report / 'electron-talo-console-files.png')
                 verify_web_history(playwright, base, session_id, prompt, report)
                 page.get_by_role('link', name='New chat', exact=True).click()
                 expect(page.get_by_role('heading', name='Start with one clear prompt', exact=True)).to_be_visible()
-                page.locator('textarea:visible').fill('native chat verification from Home')
-                with page.expect_request('talos-cloud://server/v1/turns/start') as admitted:
-                    page.get_by_role('button', name='Send', exact=True).click()
-                request = admitted.value.post_data_json
-                home_session = request['sessionId']
-                home_node = data(http(base + ASSISTANT))['instance']['nodeId']
-                assert home_session != session_id and request['nodeId'] == home_node
-                page.wait_for_url('**#/sessions/' + home_session, timeout=30000)
-                page.get_by_text('TALO_CHAT_OK', exact=True).wait_for(timeout=30000)
-                saved = data(http(base + '/v1/sessions/' + home_session))['session']
-                assert saved['sessionKind'] == 'talo' and saved['nodeId'] == home_node
+                assert page.evaluate(selection) == personal_selection
+                print('PASS personal Files and Home keep their Computer selection and exclude Talo files', flush=True)
 
-                def completed_home_turn():
-                    turns = data(http(base + '/v1/sessions/' + home_session + '/history?limit=10'))['data']
+                # Additional Talo chats require an explicit target, independent of personal Home.
+                data(http(base + f'/v1/fs/directory?nodeId={talo_node}&wakeIfSleeping=true'))
+                additional_session = str(uuid.uuid4())
+                data(http(base + '/v1/turns/start', {
+                    'sessionId': additional_session, 'nodeId': talo_node,
+                    'input': {'content': [{'type': 'text', 'text': 'native chat verification with an explicit Talo target'}]},
+                    'modelSelection': sent.value.post_data_json.get('modelSelection'),
+                    'clientRequestId': str(uuid.uuid4()),
+                }))
+                page.evaluate("id => { location.hash = '/sessions/' + encodeURIComponent(id) }", additional_session)
+                page.get_by_text('TALO_CHAT_OK', exact=True).wait_for(timeout=30000)
+                saved = data(http(base + '/v1/sessions/' + additional_session))['session']
+                assert saved['sessionKind'] == 'talo' and saved['nodeId'] == talo_node
+
+                def completed_additional_turn():
+                    turns = data(http(base + '/v1/sessions/' + additional_session + '/history?limit=10'))['data']
                     return len(turns) == 1 and turns[0]['result']['status'] == 'completed'
 
-                wait(completed_home_turn, 'Home first Turn persisted once')
+                wait(completed_additional_turn, 'Explicit Talo first Turn persisted once')
                 page.reload()
                 page.get_by_text('TALO_CHAT_OK', exact=True).wait_for(timeout=30000)
-                page.screenshot(path=report / 'electron-home-admitted-chat.png')
-                print('PASS Home admits one Server-owned Turn before opening its saved conversation; reload does not resubmit', flush=True)
-                print('PASS Files lists the selected Talo file store and opens its Server-only PDF', flush=True)
+                assert page.evaluate(selection) == personal_selection
+                page.screenshot(path=report / 'electron-explicit-talo-chat.png')
+                print('PASS explicit Talo target admits one Server-owned Turn; direct route and reload preserve personal selection', flush=True)
+                print('PASS Talo Console lists the Talo file store and opens its Server-only PDF', flush=True)
                 print('PASS native Talo attachment upload, streamed reply, remote PDF and Worker path preview, and reloaded image from both chat routes', flush=True)
                 return
             page.get_by_role('button', name='Initialize Talo', exact=True).click()

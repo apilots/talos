@@ -5,9 +5,8 @@ import type { CustomProviderConfig, LlmConfig, ProviderConfig } from "@talos/sdk
 import { useTranslation } from "react-i18next";
 
 import { updateLlmConfig, type LlmConfigResponse } from "@/features/settings/api";
-import { llmConfigKey, useLlmConfigQuery } from "@/features/settings/hooks/useLlmConfigQuery";
+import { llmConfigKey, useLlmConfigQuery, useLlmEnvironmentKey } from "@/features/settings/hooks/useLlmConfigQuery";
 import { chatKeys } from "@/features/chat";
-import { useEnvironmentKey } from "@/features/computers";
 import { Panel } from "@/shared/ui/Panel";
 import { createUuid } from "@/shared/lib/uuid";
 import { CustomProviderMenu } from "./CustomProviderMenu";
@@ -44,9 +43,9 @@ const PROVIDERS = Object.entries(PROVIDER_LABELS).map(([key, label]) => ({
 
 // ─── Main section ─────────────────────────────────────────────────────────────
 
-export function SettingsLlmConfigEditor() {
+export function SettingsLlmConfigEditor({ nodeId }: { nodeId?: string } = {}) {
   const { t } = useTranslation("settings");
-  const connectionKey = useEnvironmentKey();
+  const connectionKey = useLlmEnvironmentKey(nodeId);
   const queryClient = useQueryClient();
   const [activeProvider, setActiveProvider] = useState<string>("anthropic");
   const [draft, setDraft] = useState<LlmConfig | null>(null);
@@ -54,7 +53,7 @@ export function SettingsLlmConfigEditor() {
   const [providerToDelete, setProviderToDelete] = useState<{ id: string; name: string } | null>(null);
   const customTriggerRef = useRef<HTMLButtonElement>(null);
 
-  const { data: serverRead, isLoading, error } = useLlmConfigQuery();
+  const { data: serverRead, isLoading, error } = useLlmConfigQuery(nodeId);
   const serverConfig = serverRead?.config;
 
   // Keep draft in sync with server on initial load (but not on mutation success)
@@ -63,7 +62,7 @@ export function SettingsLlmConfigEditor() {
   }, [serverConfig, draft]);
 
   const mutation = useMutation({
-    mutationFn: updateLlmConfig,
+    mutationFn: (config: LlmConfig) => (nodeId ? updateLlmConfig(config, nodeId) : updateLlmConfig(config)),
     onSuccess: (updated: LlmConfigResponse) => {
       queryClient.setQueryData(llmConfigKey(connectionKey), updated);
       setDraft(updated.config);

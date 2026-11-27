@@ -15,7 +15,7 @@ import { useAppStore } from "@/shared/store/app-store";
 import { createUuid } from "@/shared/lib/uuid";
 
 import { useBrowser } from "./browser-query";
-import { TaloPanel } from "./TaloPanel";
+import { TaloLifecycleMenu } from "./talo-lifecycle";
 
 /** The Session shortcut requires remote desktop capability. The inspector also supports browser targets. */
 export function ComputerDesktopButton({ nodeId, online, shortcut = false }: { nodeId?: string; online: boolean; shortcut?: boolean }) {
@@ -189,7 +189,7 @@ export function ComputerDesktop({ nodeId, expanded, onExitInput }: { nodeId: str
       <h2 className="min-w-0 flex-1 truncate text-xs font-medium text-muted">{t("desktop.configuration.title")}</h2>
       {connected ? <Badge tone={ownController ? "warning" : "default"} className="shrink-0 px-2 py-0.5 normal-case tracking-normal">{t(ownController ? "desktop.controlling" : "desktop.readOnly")}</Badge> : null}
       {remote ? <Button variant="ghost" className="p-2" aria-label={t("desktop.configure")} aria-expanded={configurationOpen} title={t("desktop.configure")} onClick={() => setConfigurationOpen(value => !value)}><Settings2 aria-hidden="true" size={15} /></Button> : null}
-      {managed ? <TaloPanel desktopNodeId={nodeId} /> : null}
+      {managed ? <TaloLifecycleMenu desktopNodeId={nodeId} /> : null}
     </header>
     {remote ? <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface/25 p-4 sm:p-5">
       <div className="my-auto w-full shrink-0 self-center" style={expanded ? { maxWidth: "min(1440px, calc((100dvh - 312px) * 1.6))" } : undefined}>

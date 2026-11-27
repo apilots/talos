@@ -2,6 +2,7 @@ import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import type { ComponentProps, RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
+import { cn } from "@/shared/lib/cn";
 import { MessageList } from "@/widgets/message-list/MessageList";
 import { UserActionPanel } from "@/features/chat";
 import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
@@ -17,6 +18,8 @@ interface ChatSessionTimelineProps {
   pendingUserAction?: ComponentProps<typeof MessageList>["pendingUserAction"];
   userActionDisabled?: boolean;
   userActionError?: string;
+  onOpenFiles?: () => void;
+  onOpenSettings?: () => void;
   onUserActionSubmit?: ComponentProps<typeof UserActionPanel>["onSubmit"];
   onRetryResponse: () => Promise<void> | void;
   onRetryStream: () => Promise<void> | void;
@@ -26,6 +29,8 @@ interface ChatSessionTimelineProps {
   showMessageList: boolean;
   showReconnectControls: boolean;
   streamError?: string;
+  taloMode?: boolean;
+  topClearance?: boolean;
   viewportRef: RefObject<HTMLDivElement | null>;
 }
 
@@ -39,6 +44,8 @@ export function ChatSessionTimeline({
   pendingUserAction,
   userActionDisabled,
   userActionError,
+  onOpenFiles,
+  onOpenSettings,
   onUserActionSubmit,
   onRetryResponse,
   onRetryStream,
@@ -48,6 +55,8 @@ export function ChatSessionTimeline({
   showMessageList,
   showReconnectControls,
   streamError,
+  taloMode = false,
+  topClearance = false,
   viewportRef,
 }: ChatSessionTimelineProps) {
   const { t } = useTranslation("chat");
@@ -58,10 +67,10 @@ export function ChatSessionTimeline({
       onScroll={(event) => onScroll(event.currentTarget)}
       ref={viewportRef}
     >
-      <div className="mx-auto w-full max-w-[920px] space-y-4 px-7 pb-2 pt-5" ref={contentRef}>
+      <div className={cn("mx-auto w-full max-w-[920px] space-y-4 px-7 pb-2", topClearance ? "pt-20" : "pt-5")} ref={contentRef}>
         {showMessageList ? (
           <MessageList
-            actions={<ChatSessionMessageActions />}
+            actions={<ChatSessionMessageActions onOpenFiles={onOpenFiles} onOpenSettings={onOpenSettings} taloMode={taloMode} />}
             blocks={blocks}
             emptyDetail={t("emptyReadyDetail")}
             emptyTitle={t("emptyReadyTitle")}
