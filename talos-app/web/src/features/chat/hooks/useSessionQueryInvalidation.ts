@@ -10,21 +10,25 @@ export function useSessionQueryInvalidation(sessionId: string) {
     let requested = false;
     let inFlight: Promise<void> | undefined;
     async function refresh() {
-      while (requested) {
-        requested = false;
-        await queryClient.invalidateQueries({ queryKey: ["talos", connectionKey, "automation"] });
-        await queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "talos" && query.queryKey.includes("sessions") });
-        await Promise.all([
-          chatKeys.session(connectionKey, sessionId),
-          chatKeys.activeTurn(connectionKey, sessionId),
-          chatKeys.sessionHistory(connectionKey, sessionId),
-        ].map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+      try {
+        while (requested) {
+          requested = false;
+          await queryClient.invalidateQueries({ queryKey: ["talos", connectionKey, "automation"] });
+          await queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "talos" && query.queryKey.includes("sessions") });
+          await Promise.all([
+            chatKeys.session(connectionKey, sessionId),
+            chatKeys.activeTurn(connectionKey, sessionId),
+            chatKeys.sessionHistory(connectionKey, sessionId),
+          ].map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+        }
+      } finally {
+        inFlight = undefined;
       }
     }
     return () => {
       // Serialize notification bursts and retain changes arriving during a read.
       requested = true;
-      inFlight ??= refresh().finally(() => { inFlight = undefined; });
+      inFlight ??= Promise.resolve().then(refresh);
       return inFlight;
     };
   }, [connectionKey, queryClient, sessionId]);

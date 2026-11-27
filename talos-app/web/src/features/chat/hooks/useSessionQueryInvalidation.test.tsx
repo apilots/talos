@@ -60,3 +60,31 @@ it("keeps a new Session refresh independent from the previous Session's pending 
   await act(async () => { release(); await pending; });
   expect(client.getQueryData(chatKeys.sessionHistory(result.current.connectionKey, "session-b"))).toBe(2);
 });
+
+it("retains a notification delivered as the final read settles", async () => {
+  const client = new QueryClient();
+  const wrapper = ({ children }: PropsWithChildren) => createElement(QueryClientProvider, { client }, children);
+  let revision = 0;
+  let finish!: () => void;
+  const firstRead = new Promise<void>(resolve => { finish = resolve; });
+  const readRevisions: number[] = [];
+  vi.spyOn(client, "invalidateQueries").mockImplementation(filters => {
+    if (filters?.queryKey?.[2] !== "session-history") return Promise.resolve();
+    readRevisions.push(revision);
+    return readRevisions.length === 1 ? firstRead : Promise.resolve();
+  });
+  const { result } = renderHook(() => useSessionQueryInvalidation("session-a"), { wrapper });
+  let first!: Promise<void>;
+  act(() => { first = result.current.invalidateSessionQueries(); });
+  await waitFor(() => expect(readRevisions).toEqual([0]));
+  await act(async () => {
+    revision = 1;
+    finish();
+    await Promise.resolve();
+    let notification!: Promise<void>;
+    queueMicrotask(() => { notification = result.current.invalidateSessionQueries(); });
+    await first;
+    await notification;
+  });
+  expect(readRevisions).toEqual([0, 1]);
+});
