@@ -27,7 +27,7 @@ export function SidebarSessionRowActions({
   return (
     <div
       className={cn(
-        "absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 transition-opacity",
+        "absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5 transition-opacity",
         active && !running
           ? "opacity-100 pointer-events-auto"
           : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
