@@ -39,7 +39,7 @@ export function ComposerModelPicker({ disabled, models, selectedModel, reasoning
   const browsingProviderId = browsingProvider ?? activeModel?.provider ?? providers[0]?.id;
   const modelName = activeModel?.name ?? t("modelLabel");
   const control = activeModel?.selectionCapabilities?.reasoning ?? "none";
-  const effortLabel = control === "none" || reasoningLevel === "none" ? t("modelPicker.off") : control === "toggle" ? t("modelPicker.on") : t(reasoningLevel === "extra_high" ? "reasoningExtraHigh" : reasoningLevel === "light" ? "reasoningLight" : reasoningLevel === "medium" ? "reasoningMedium" : "reasoningHigh");
+  const effortLabel = control === "none" || reasoningLevel === "none" ? t("modelPicker.off") : control === "toggle" ? t("modelPicker.on") : t(reasoningLevel === "max" ? "reasoningMax" : reasoningLevel === "extra_high" ? "reasoningExtraHigh" : reasoningLevel === "light" ? "reasoningLight" : reasoningLevel === "medium" ? "reasoningMedium" : "reasoningHigh");
   const triggerLabel = t(fastPreview ? "modelPicker.fastTrigger" : "modelPicker.trigger", { model: modelName, effort: effortLabel });
 
   function navigate(next: View) { didNavigate.current = true; setView(next); }

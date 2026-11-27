@@ -11546,7 +11546,7 @@
         },
         "reasoning_efforts": {
           "default": null,
-          "description": "Accepted effort levels, independent of configured thinking switches. Omitted/null permits standard levels; [] explicitly disables graded effort.",
+          "description": "Accepted effort levels, independent of configured thinking switches. Omitted/null permits the four standard levels; Max requires an explicit entry. An empty list explicitly disables graded effort.",
           "items": {
             "$ref": "#/definitions/ReasoningEffort"
           },
@@ -11740,7 +11740,8 @@
         "light",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "type": "string"
     },

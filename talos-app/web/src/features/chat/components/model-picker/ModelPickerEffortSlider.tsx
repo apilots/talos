@@ -5,7 +5,7 @@ import type { CSSProperties } from "react";
 import type { ReasoningLevel } from "@/shared/types/ui";
 import styles from "./ModelPicker.module.css";
 
-const DURATIONS: Record<ReasoningLevel, string> = { none: "0s", light: "4.8s", medium: "3.2s", high: "2s", extra_high: "1.2s" };
+const DURATIONS: Record<ReasoningLevel, string> = { none: "0s", light: "4.8s", medium: "3.2s", high: "2s", extra_high: "1.2s", max: "0.8s" };
 
 interface ModelPickerEffortSliderProps {
   disabled: boolean;

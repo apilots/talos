@@ -278,3 +278,115 @@ async fn native_connections_classify_upstream_http_rejections() {
         task.await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn native_maximum_selections_survive_configuration_and_request_binding() {
+    use talos_types::{ModelRef, ModelSelection};
+    for (provider_id, protocol, model_id, effort, expected) in [
+        (
+            "anthropic",
+            "messages",
+            "claude-opus-5-5",
+            ReasoningEffort::Max,
+            "max",
+        ),
+        (
+            "anthropic",
+            "messages",
+            "claude-opus-5",
+            ReasoningEffort::XHigh,
+            "xhigh",
+        ),
+        (
+            "bailian",
+            "chat",
+            "qwen4-max",
+            ReasoningEffort::High,
+            "high",
+        ),
+        (
+            "bailian",
+            "chat",
+            "qwen4-max",
+            ReasoningEffort::XHigh,
+            "xhigh",
+        ),
+        (
+            "deepseek",
+            "chat",
+            "deepseek-flash",
+            ReasoningEffort::Max,
+            "max",
+        ),
+        (
+            "openrouter",
+            "chat",
+            "openai/gpt-6.2-sol",
+            ReasoningEffort::Max,
+            "max",
+        ),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_request(&mut socket).await;
+            let body = if protocol == "messages" {
+                serde_json::json!({"id":"msg","type":"message","role":"assistant","model":model_id,"content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}})
+            } else {
+                serde_json::json!({"model":model_id,"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}})
+            }.to_string();
+            let response = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+            socket.write_all(response.as_bytes()).await.unwrap();
+            request
+        });
+        let mut config = native_config(provider_id, protocol, &url);
+        config.llm.model = model_id.to_owned();
+        let selected = match provider_id {
+            "anthropic" => &mut config.llm.anthropic,
+            "bailian" => &mut config.llm.bailian,
+            "deepseek" => &mut config.llm.deepseek,
+            "openrouter" => &mut config.llm.openrouter,
+            _ => unreachable!(),
+        };
+        let model = &mut selected.models[0];
+        model.id = model_id.to_owned();
+        model.reasoning = true;
+        model.reasoning_efforts = Some(vec![ReasoningEffort::Medium, effort]);
+        if provider_id == "anthropic" {
+            model.request_parameters =
+                serde_json::from_value(serde_json::json!({"thinking":{"type":"adaptive"}}))
+                    .unwrap();
+        }
+        let selection = ModelSelection::new(
+            ModelRef {
+                provider: provider_id.to_owned(),
+                id: model_id.to_owned(),
+            },
+            Some(effort),
+        );
+        let restored: ModelSelection =
+            serde_json::from_value(serde_json::to_value(&selection).unwrap()).unwrap();
+        let provider = crate::create_llm_provider(&config).unwrap();
+        let mut request = ChatRequest::new_user("selected effort", model_id);
+        request.reasoning_effort = restored.reasoning_effort;
+        let bound = provider.bind_request(request).unwrap();
+        let repeated = provider.bind_request(bound).unwrap();
+        assert_eq!(repeated.reasoning_effort, Some(effort));
+        provider.chat(repeated).await.unwrap();
+        let (headers, body) = server.await.unwrap();
+        if protocol == "messages" {
+            assert!(headers.starts_with("POST /v1/messages"));
+            assert_eq!(body["thinking"], serde_json::json!({"type":"adaptive"}));
+            assert_eq!(
+                body["output_config"],
+                serde_json::json!({"effort":expected})
+            );
+        } else if provider_id == "openrouter" {
+            assert_eq!(body["reasoning"]["effort"], expected);
+        } else {
+            assert_eq!(body["reasoning_effort"], expected);
+        }
+        assert!(body.get("thinking_budget").is_none());
+    }
+}

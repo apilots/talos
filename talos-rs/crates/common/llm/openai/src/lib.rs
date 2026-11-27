@@ -152,6 +152,7 @@ impl OpenAIProvider {
             ReasoningEffort::Medium => "medium",
             ReasoningEffort::High => "high",
             ReasoningEffort::XHigh => "xhigh",
+            ReasoningEffort::Max => "max",
         }
         .to_string()
     }

@@ -155,3 +155,16 @@ it("selects a default from declared effort choices", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(saved).toHaveBeenCalledWith(expect.objectContaining({ reasoning_effort: "light", reasoning_efforts: ["light", "medium", "xhigh"] }));
 });
+
+it("saves Max as an explicit accepted default", async () => {
+  const saved = vi.fn<(model: ReturnType<typeof formToModel>) => void>();
+  function Harness() {
+    const [form, setForm] = useState<ModelFormState>({ ...emptyModelForm, id: "opaque", reasoning: true, reasoning_efforts: ["medium", "max"] });
+    return <SettingsModelModal mode="edit" form={form} saving={false} error="" onChange={setForm} onSave={() => saved(formToModel(form))} onClose={() => {}} />;
+  }
+  render(<Harness />);
+  await userEvent.click(screen.getByRole("combobox", { name: "Reasoning effort" }));
+  await userEvent.click(screen.getByRole("option", { name: /^Max$/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(saved).toHaveBeenCalledWith(expect.objectContaining({ reasoning_effort: "max", reasoning_efforts: ["medium", "max"] }));
+});

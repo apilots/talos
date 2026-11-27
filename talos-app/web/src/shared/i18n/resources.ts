@@ -200,6 +200,7 @@ export const resources = {
       reasoningMedium: "Medium",
       reasoningHigh: "High",
       reasoningExtraHigh: "Extra High",
+      reasoningMax: "Max",
       modelLabel: "Model",
     },
     memory: {
@@ -694,6 +695,7 @@ export const resources = {
       reasoningMedium: "中",
       reasoningHigh: "高",
       reasoningExtraHigh: "极高",
+      reasoningMax: "Max",
       modelLabel: "模型",
     },
     memory: {

@@ -92,7 +92,7 @@ class SyncCluster(Cluster):
         for desktop in self.desktops.values():
             wait_for(lambda d=desktop: self.call(d['host'], d['token'], 'sync/status', None)['connection'] == 'connected', 'Desktop WSS connected')
         models = data(http(self.url + '/v1/models?nodeId=' + self.nodes['Mac-Worker']['node_id'], token=self.users['alice']['access_token']))['models']
-        wanted = os.environ.get('TALOS_E2E_PREFERRED_MODELS', 'deepseek-v4-flash').split(',')
+        wanted = os.environ.get('TALOS_E2E_PREFERRED_MODELS', 'deepseek-flash').split(',')
         self.model = next((model for identifier in wanted for model in models if model['id'] == identifier), models[0])
 
     @staticmethod

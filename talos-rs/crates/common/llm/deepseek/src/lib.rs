@@ -152,6 +152,7 @@ impl DeepSeekProvider {
                 ReasoningEffort::Light => "low",
                 ReasoningEffort::Medium | ReasoningEffort::High => "high",
                 ReasoningEffort::XHigh => "max",
+                ReasoningEffort::Max => "max",
             }
             .to_string()
         })

@@ -12,7 +12,7 @@ use tokio::{
 
 fn provider(protocol: LlmProtocol, replay: ReasoningReplay) -> ProtocolProvider {
     let config: ProviderConfig = serde_json::from_value(json!({
-        "base_url":"http://127.0.0.1:9/private-prefix/v1", "models":[{"id":"same-model","reasoning":true,"reasoning_replay":replay}]
+        "base_url":"http://127.0.0.1:9/private-prefix/v1", "models":[{"id":"same-model","reasoning":true,"reasoning_efforts":["light","medium","high","xhigh","max"],"reasoning_replay":replay}]
     })).unwrap();
     ProtocolProvider::new("user-connection", protocol, &config, "same-model").unwrap()
 }
@@ -101,21 +101,24 @@ fn thinking_switches_and_effort_are_serialized_independently() {
         LlmProtocol::Responses,
         LlmProtocol::Messages,
     ] {
-        for effort in [None, Some(ReasoningEffort::XHigh)] {
+        for effort in [
+            None,
+            Some(ReasoningEffort::XHigh),
+            Some(ReasoningEffort::Max),
+        ] {
+            let expected = match effort {
+                Some(ReasoningEffort::Max) => "max",
+                Some(_) => "xhigh",
+                None => "none",
+            };
             let mut request = ChatRequest::new_user("hello", "same-model");
             request.reasoning_effort = effort;
             let (_, body) = provider(protocol, ReasoningReplay::ProtocolDefault)
                 .body(request.clone(), false)
                 .unwrap();
             match protocol {
-                LlmProtocol::Chat => assert_eq!(
-                    body["reasoning_effort"],
-                    if effort.is_some() { "xhigh" } else { "none" }
-                ),
-                LlmProtocol::Responses => assert_eq!(
-                    body["reasoning"]["effort"],
-                    if effort.is_some() { "xhigh" } else { "none" }
-                ),
+                LlmProtocol::Chat => assert_eq!(body["reasoning_effort"], expected),
+                LlmProtocol::Responses => assert_eq!(body["reasoning"]["effort"], expected),
                 LlmProtocol::Messages => {
                     assert_eq!(
                         body["thinking"],
@@ -123,7 +126,7 @@ fn thinking_switches_and_effort_are_serialized_independently() {
                     );
                     assert_eq!(
                         body.get("output_config"),
-                        effort.map(|_| json!({"effort":"max"})).as_ref()
+                        effort.map(|_| json!({"effort":expected})).as_ref()
                     );
                 }
             }
