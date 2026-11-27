@@ -145,3 +145,27 @@ fn explicit_efforts_project_defaults_and_supported_selections() {
     configured.reasoning_efforts = Some(vec![ReasoningEffort::Light]);
     configured.validate_selection_controls().unwrap();
 }
+
+#[test]
+fn maximum_effort_requires_an_explicit_model_declaration() {
+    let maximum: ReasoningEffort = serde_json::from_value(json!("max")).unwrap();
+    let mut configured = model(json!({}));
+    assert!(configured.validate_reasoning_effort(Some(maximum)).is_err());
+    configured.reasoning_effort = maximum;
+    assert!(configured.validate_selection_controls().is_err());
+    configured.reasoning_efforts = Some(vec![ReasoningEffort::High, maximum]);
+    configured.reasoning_effort = maximum;
+    configured.validate_selection_controls().unwrap();
+    assert_eq!(
+        configured.selection_capabilities(),
+        ModelSelectionCapabilities {
+            reasoning: ReasoningControl::Effort,
+            reasoning_efforts: vec![ReasoningEffort::High, maximum],
+            fast: false,
+            default_fast: false,
+            default_reasoning_effort: Some(maximum),
+        }
+    );
+    configured.validate_reasoning_effort(Some(maximum)).unwrap();
+    assert_eq!(serde_json::to_value(maximum).unwrap(), json!("max"));
+}

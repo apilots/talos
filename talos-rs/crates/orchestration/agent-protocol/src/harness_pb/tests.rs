@@ -247,3 +247,17 @@ fn block(id: &str, content: AgentMessageBlockContent) -> AgentMessageBlock {
         completed_at: Some(2),
     }
 }
+
+#[test]
+fn maximum_reasoning_selection_preserves_its_wire_value() {
+    let selection = talos_types::ModelSelection::new(
+        talos_types::ModelRef {
+            provider: "openai".to_owned(),
+            id: "gpt-6.2-sol".to_owned(),
+        },
+        Some(talos_types::ReasoningEffort::Max),
+    );
+    let wire = encode_model_selection(selection.clone());
+    assert_eq!(wire.reasoning_effort, Some(5));
+    assert_eq!(decode_model_selection(Some(wire)).unwrap(), selection);
+}

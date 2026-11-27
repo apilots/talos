@@ -4,7 +4,7 @@ const permissionModes = {
   askForApproval: true, approveForMe: true, fullAccess: true,
 } satisfies Record<UserPermissionMode, true>;
 const reasoningEfforts = {
-  light: true, medium: true, high: true, xhigh: true,
+  light: true, medium: true, high: true, xhigh: true, max: true,
 } satisfies Record<ReasoningEffort, true>;
 
 function isNullableEnum(value: unknown, values: Record<string, true>): boolean {

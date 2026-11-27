@@ -598,7 +598,8 @@ reasoning_replay?: ReasoningReplay,
 request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort,
 /**
  * Accepted effort levels, independent of configured thinking switches.
- * Omitted/null permits standard levels; [] explicitly disables graded effort.
+ * Omitted/null permits the four standard levels; Max requires an explicit entry.
+ * An empty list explicitly disables graded effort.
  */
 reasoning_efforts?: Array<ReasoningEffort> | null, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
@@ -731,13 +732,14 @@ reasoning_replay?: ReasoningReplay,
 request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort,
 /**
  * Accepted effort levels, independent of configured thinking switches.
- * Omitted/null permits standard levels; [] explicitly disables graded effort.
+ * Omitted/null permits the four standard levels; Max requires an explicit entry.
+ * An empty list explicitly disables graded effort.
  */
 reasoning_efforts?: Array<ReasoningEffort> | null, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
 export type LlmProtocol = "chat" | "responses" | "messages";
 
-export type ReasoningEffort = "light" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = "light" | "medium" | "high" | "xhigh" | "max";
 
 export type ModelSpeed = "standard" | "fast";
 

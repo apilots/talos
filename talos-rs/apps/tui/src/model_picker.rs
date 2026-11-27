@@ -41,7 +41,7 @@ impl ReasoningOption {
         label: "None",
         description: "Reasoning is not enabled for this model",
     }];
-    pub(crate) const SUPPORTED: [Self; 5] = [
+    pub(crate) const SUPPORTED: [Self; 6] = [
         Self {
             effort: None,
             label: "None",
@@ -66,6 +66,11 @@ impl ReasoningOption {
             effort: Some(ReasoningEffort::XHigh),
             label: "Extra high",
             description: "Extra high reasoning depth for complex problems",
+        },
+        Self {
+            effort: Some(ReasoningEffort::Max),
+            label: "Max",
+            description: "Maximum reasoning depth supported by this model",
         },
     ];
 
@@ -104,6 +109,7 @@ impl ReasoningOption {
             ReasoningEffort::Medium => "medium",
             ReasoningEffort::High => "high",
             ReasoningEffort::XHigh => "xhigh",
+            ReasoningEffort::Max => "max",
         }
     }
 }

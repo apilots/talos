@@ -181,7 +181,7 @@ Agent tool coverage. Fixture request records and event logs are retained with th
 normal scenario evidence.
 
 An additional Messages connection keeps explicit adaptive thinking while changing
-effort from medium to high in one session. Both tool-loop rounds must send the
+effort from xhigh to max in one session. Both tool-loop rounds must send the
 selected `output_config.effort`, retain thinking KV siblings and preserve signed
 history. This contract does not imply Chat/Responses endpoints accept adaptive.
 

@@ -519,7 +519,8 @@ pub struct ProviderModelConfig {
     #[serde(default)]
     pub reasoning_effort: ReasoningEffort,
     /// Accepted effort levels, independent of configured thinking switches.
-    /// Omitted/null permits standard levels; [] explicitly disables graded effort.
+    /// Omitted/null permits the four standard levels; Max requires an explicit entry.
+    /// An empty list explicitly disables graded effort.
     #[serde(default)]
     #[ts(optional = nullable)]
     pub reasoning_efforts: Option<Vec<ReasoningEffort>>,
@@ -550,6 +551,7 @@ pub enum ReasoningEffort {
     High,
     #[serde(rename = "xhigh")]
     XHigh,
+    Max,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
