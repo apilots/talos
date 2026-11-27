@@ -21,6 +21,8 @@ interface SidebarProjectSectionProps {
   groups: SidebarProjectGroup[];
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (session: SidebarSessionItem) => void;
+  onTogglePinSession?: (sessionId: string, pinned: boolean) => Promise<void> | void;
+  pendingPinSessionIds?: ReadonlySet<string>;
   onCreateProjectThread: (projectId: string) => void;
   onRemoveProject: (projectId: string) => Promise<void> | void;
   onRenameProject: (projectId: string, name: string) => Promise<void> | void;
@@ -32,6 +34,8 @@ export function SidebarProjectSection({
   groups,
   onSelectSession,
   onDeleteSession,
+  onTogglePinSession,
+  pendingPinSessionIds,
   onCreateProjectThread,
   onRemoveProject,
   onRenameProject,
@@ -109,6 +113,8 @@ export function SidebarProjectSection({
                 }}
                 onDeleteSession={onDeleteSession}
                 onSelectSession={onSelectSession}
+                onTogglePinSession={onTogglePinSession}
+                pendingPinSessionIds={pendingPinSessionIds}
                 onToggleProject={() => toggleProject(group.project.id)}
                 open={projectOpen}
                 sessionsExpanded={expandedSessionProjectIds.has(group.project.id)}
@@ -155,6 +161,8 @@ function ProjectGroup({
   onShowMoreSessions,
   onDeleteSession,
   onSelectSession,
+  onTogglePinSession,
+  pendingPinSessionIds,
   onToggleProject,
   open,
   sessionsExpanded,
@@ -170,6 +178,8 @@ function ProjectGroup({
   onShowMoreSessions: () => void;
   onDeleteSession: (session: SidebarSessionItem) => void;
   onSelectSession: (sessionId: string) => void;
+  onTogglePinSession?: (sessionId: string, pinned: boolean) => Promise<void> | void;
+  pendingPinSessionIds?: ReadonlySet<string>;
   onToggleProject: () => void;
   open: boolean;
   sessionsExpanded: boolean;
@@ -250,6 +260,8 @@ function ProjectGroup({
               key={session.id}
               onDeleteSession={onDeleteSession}
               onSelectSession={onSelectSession}
+              onTogglePinSession={onTogglePinSession}
+              pinPending={pendingPinSessionIds?.has(session.id) ?? false}
               session={session}
             />
           ))}

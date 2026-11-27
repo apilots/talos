@@ -264,6 +264,12 @@ impl TalosService {
         patch: SessionPatch,
     ) -> ServiceResult<SessionInfo> {
         let session = self.access.load_session(actor, session_id).await?;
+        if patch.is_pin_only() {
+            let updated = self.access.patch_session(session, patch).await?;
+            return self
+                .session_for_client(actor, self.sessions.session_info(&updated).await?)
+                .await;
+        }
         let _ownership = self.turns.pin_session(session_id)?;
         let _execution_guard = self
             .execution_gate
@@ -470,7 +476,7 @@ impl TalosService {
         session: SessionRecord,
         patch: SessionPatch,
     ) -> ServiceResult<SessionRecord> {
-        if patch.conf.is_none() && patch.current_directory.is_none() {
+        if patch.conf.is_none() && patch.current_directory.is_none() && patch.pinned.is_none() {
             return Ok(session);
         }
         if self.turns.session_owner().is_some() {

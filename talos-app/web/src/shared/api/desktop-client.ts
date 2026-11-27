@@ -108,6 +108,7 @@ export function createDesktopTalosClient(
           sessionId: request.sessionId,
           conf: toProtocolSessionConf(request.conf),
           currentDirectory: toProtocolDirectoryPatch(request.currentDirectory),
+          ...(request.pinned !== undefined ? { pinned: request.pinned } : {}),
         }),
       close: (request: Parameters<TalosWebClient["sessions"]["close"]>[0]) =>
         client.closeSession(request),

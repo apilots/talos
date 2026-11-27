@@ -39,6 +39,7 @@ pub(super) fn session_and_events(
             },
             project_id: None,
             current_directory: Some("/worker/work".into()),
+            pinned: false,
         },
         conf: SessionConf {
             model_selection: None,

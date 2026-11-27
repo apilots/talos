@@ -1,8 +1,9 @@
-import { LoaderCircle, Trash2 } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { formatRelativeTime } from "@/shared/lib/time";
 import type { SessionUiStatus } from "@/shared/types/ui";
+import { SidebarSessionRowActions } from "./SidebarSessionRowActions";
 import { sidebarInteractiveRowClass } from "./sidebarRowStyles";
 
 export interface SidebarSessionItem {
@@ -11,6 +12,7 @@ export interface SidebarSessionItem {
   status: SessionUiStatus;
   model: string;
   projectId?: string | null;
+  pinned?: boolean;
   lastActivityAt: number;
   createdAt: number;
 }
@@ -21,6 +23,8 @@ interface SidebarSessionRowProps {
   session: SidebarSessionItem;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (session: SidebarSessionItem) => void;
+  onTogglePinSession?: (sessionId: string, pinned: boolean) => Promise<void> | void;
+  pinPending?: boolean;
 }
 
 export function SidebarSessionRow({
@@ -29,9 +33,12 @@ export function SidebarSessionRow({
   session,
   onSelectSession,
   onDeleteSession,
+  onTogglePinSession,
+  pinPending = false,
 }: SidebarSessionRowProps) {
   const active = currentPath === `/sessions/${session.id}`;
   const running = session.status === "running";
+  const pinned = Boolean(session.pinned);
 
   return (
     <div className="group relative" key={`${session.id}-${session.createdAt}`}>
@@ -69,21 +76,18 @@ export function SidebarSessionRow({
           )}
         </span>
       </button>
-      <button
-        aria-label={`Delete ${session.label}`}
-        className={cn(
-          "absolute right-2 top-1/2 size-6 -translate-y-1/2 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-danger/10 hover:text-danger focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/30",
-          active && !running ? "flex" : "hidden group-hover:flex group-focus-within:flex",
-        )}
-        onClick={(event) => {
-          event.stopPropagation();
-          onDeleteSession(session);
-        }}
-        title={`Delete ${session.label}`}
-        type="button"
-      >
-        <Trash2 aria-hidden="true" size={14} />
-      </button>
+      <SidebarSessionRowActions
+        active={active}
+        onDelete={() => onDeleteSession(session)}
+        onTogglePin={
+          onTogglePinSession ? () => void onTogglePinSession(session.id, !pinned) : undefined
+        }
+        pinPending={pinPending}
+        pinned={pinned}
+        running={running}
+        sessionId={session.id}
+        sessionLabel={session.label}
+      />
     </div>
   );
 }

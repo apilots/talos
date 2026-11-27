@@ -136,6 +136,7 @@ pub(crate) async fn test_session_store(
             project_id: None,
             worktree_binding: None,
             current_directory: None,
+            pinned: false,
         })
         .await
         .unwrap();

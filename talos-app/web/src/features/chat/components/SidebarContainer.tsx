@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
@@ -8,6 +8,7 @@ import {
   useSessionsQuery,
   useUpdateProjectNameMutation,
 } from "../hooks/useChatQueries";
+import { useToggleSessionPinMutation } from "../hooks/useToggleSessionPinMutation";
 import { useLogout } from "@/features/auth";
 import { useAppStore } from "@/shared/store/app-store";
 import { getEffectiveSessionStatus, isUnboundProject } from "@/shared/types/domain";
@@ -28,6 +29,8 @@ export function SidebarContainer({ computer, computerEntry }: { computer?: impor
   const setSessionStatus = useAppStore((state) => state.setSessionStatus);
   const sessionsQuery = useSessionsQuery();
   const deleteSession = useDeleteSessionMutation();
+  const toggleSessionPin = useToggleSessionPinMutation();
+  const [pendingPinSessionIds, setPendingPinSessionIds] = useState<Set<string>>(() => new Set());
   const deleteProject = useDeleteProjectMutation();
   const updateProjectName = useUpdateProjectNameMutation();
   const projectsView = useProjectsView();
@@ -46,12 +49,15 @@ export function SidebarContainer({ computer, computerEntry }: { computer?: impor
         : session.hasActiveTurn ? "running" : "done",
       model: session.modelSelection.modelRef.id,
       projectId: session.projectId ?? null,
+      pinned: Boolean(session.pinned),
       lastActivityAt: session.lastActivity,
       createdAt: session.createdAt,
     };
   });
+  const pinnedSessions = threads.filter((thread) => thread.pinned);
+  const unpinnedThreads = threads.filter((thread) => !thread.pinned);
   const projectIds = new Set(projects.map((project) => project.id));
-  const chats = threads.filter(
+  const chats = unpinnedThreads.filter(
     (thread) =>
       isUnboundProject(thread.projectId) ||
       (thread.projectId !== null && thread.projectId !== undefined && !projectIds.has(thread.projectId)),
@@ -60,7 +66,7 @@ export function SidebarContainer({ computer, computerEntry }: { computer?: impor
     .filter((project) => !isUnboundProject(project.id))
     .map((project) => ({
       project,
-      sessions: threads.filter((thread) => thread.projectId === project.id),
+      sessions: unpinnedThreads.filter((thread) => thread.projectId === project.id),
     }));
 
   return (
@@ -68,6 +74,7 @@ export function SidebarContainer({ computer, computerEntry }: { computer?: impor
       computer={computer}
       computerEntry={computerEntry}
       showAccount={false}
+      pinnedSessions={pinnedSessions}
       chats={chats}
       connection={connection}
       currentPath={location.pathname}
@@ -88,6 +95,19 @@ export function SidebarContainer({ computer, computerEntry }: { computer?: impor
         setSessionStatus(sessionId, undefined);
         if (location.pathname === `/sessions/${sessionId}`) void navigate("/");
       }}
+      onTogglePinSession={async (sessionId, pinned) => {
+        setPendingPinSessionIds((current) => new Set(current).add(sessionId));
+        try {
+          await toggleSessionPin.mutateAsync({ sessionId, pinned });
+        } finally {
+          setPendingPinSessionIds((current) => {
+            const next = new Set(current);
+            next.delete(sessionId);
+            return next;
+          });
+        }
+      }}
+      pendingPinSessionIds={pendingPinSessionIds}
       onRenameProject={async (projectId, name) => {
         await updateProjectName.mutateAsync({ projectId, name });
       }}

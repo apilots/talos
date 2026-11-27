@@ -44,6 +44,7 @@ fn session_info() -> SessionInfo {
         },
         project_id: None,
         current_directory: Some(PathBuf::from("/tmp/talos-project")),
+        pinned: false,
     }
 }
 

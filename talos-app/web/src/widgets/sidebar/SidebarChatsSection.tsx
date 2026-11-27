@@ -9,6 +9,8 @@ interface SidebarChatsSectionProps {
   sessions: SidebarSessionItem[];
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (session: SidebarSessionItem) => void;
+  onTogglePinSession?: (sessionId: string, pinned: boolean) => Promise<void> | void;
+  pendingPinSessionIds?: ReadonlySet<string>;
 }
 
 export function SidebarChatsSection({
@@ -16,6 +18,8 @@ export function SidebarChatsSection({
   sessions,
   onSelectSession,
   onDeleteSession,
+  onTogglePinSession,
+  pendingPinSessionIds,
 }: SidebarChatsSectionProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const [open, setOpen] = useState(true);
@@ -33,6 +37,8 @@ export function SidebarChatsSection({
               key={session.id}
               onDeleteSession={onDeleteSession}
               onSelectSession={onSelectSession}
+              onTogglePinSession={onTogglePinSession}
+              pinPending={pendingPinSessionIds?.has(session.id) ?? false}
               session={session}
             />
           ))}

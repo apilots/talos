@@ -8,9 +8,10 @@ use talos_types::{AgentPath, ContextUsage, SessionUsage, DEFAULT_SESSION_TITLE};
 
 use super::{
     AccumulateSessionUsageParams, AgentExecutionStore, PatchSessionParams, SessionQuery,
-    SessionRecord, SessionRecordPatch, SessionSummary, SessionTreeIdentity, SessionTreeScope,
+    SessionRecord, SessionSummary, SessionTreeIdentity, SessionTreeScope,
 };
 
+mod patch;
 mod record;
 mod sync_binding;
 
@@ -273,6 +274,7 @@ impl SessionStore for DatabaseSessionStore {
                 "project_id".to_string(),
                 "current_directory".to_string(),
                 "worktree_binding_json".to_string(),
+                "pinned".to_string(),
             ],
             vec![
                 Value::String(record.id.clone()),
@@ -327,6 +329,7 @@ impl SessionStore for DatabaseSessionStore {
                     .transpose()?
                     .map(Value::String)
                     .unwrap_or(Value::Null),
+                Value::Number(serde_json::Number::from(i64::from(record.pinned))),
             ],
         );
         let mut transaction = self.begin_session_transaction(&record.id).await?;
@@ -382,7 +385,7 @@ impl SessionStore for DatabaseSessionStore {
         let rows = self
             .storage
             .query(
-                "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
+                "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json, pinned FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
                 &[tree_root_session_id, agent_path.as_str()],
             )
             .await?;
@@ -390,7 +393,7 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let mut sql = "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json FROM sessions".to_string();
+        let mut sql = "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json, pinned FROM sessions".to_string();
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);
@@ -565,53 +568,7 @@ impl SessionStore for DatabaseSessionStore {
         &self,
         params: PatchSessionParams,
     ) -> TalosResult<Option<SessionRecord>> {
-        let mut transaction = self
-            .begin_session_transaction(params.session_id.as_str())
-            .await?;
-        let active = transaction
-            .query(
-                "SELECT 1 AS active FROM agent_active_turns WHERE session_id = ? LIMIT 1",
-                &[params.session_id.as_str()],
-            )
-            .await?;
-        if !active.is_empty() {
-            transaction.rollback().await?;
-            return Err(TalosError::new(
-                talos_error::ErrorCode::ActiveTurnRunning,
-                format!("session `{}` already has an active turn", params.session_id),
-            ));
-        }
-
-        let last_activity = params.last_activity.to_string();
-        let affected = match params.change {
-            SessionRecordPatch::Settings {
-                conf,
-                current_directory,
-            } => {
-                let conf_json = Self::build_conf_json(&conf)?;
-                let directory = current_directory.map(|path| path.display().to_string());
-                transaction.execute(
-                    "UPDATE sessions SET conf_json = ?, current_directory = NULLIF(?, ''), last_activity = ? WHERE session_key = ?",
-                    &[&conf_json, directory.as_deref().unwrap_or_default(), &last_activity, &params.session_id],
-                ).await?
-            }
-            SessionRecordPatch::Worktree(binding) => {
-                let binding = Self::serialize_worktree_binding(&binding)?;
-                transaction.execute(
-                    "UPDATE sessions SET worktree_binding_json = ?, last_activity = ? WHERE session_key = ?",
-                    &[&binding, &last_activity, &params.session_id],
-                ).await?
-            }
-        };
-        if affected == 0 {
-            transaction.rollback().await?;
-            return Ok(None);
-        }
-        let record =
-            Self::fetch_session_in_transaction(transaction.as_mut(), params.session_id.as_str())
-                .await?;
-        transaction.commit().await?;
-        Ok(record)
+        self.patch_session_record(params).await
     }
 
     async fn accumulate_session_usage(

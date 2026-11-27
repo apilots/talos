@@ -258,5 +258,6 @@ fn session_record(execution_node_id: &str, user_id: &str) -> SessionRecord {
         project_id: None,
         worktree_binding: None,
         current_directory: None,
+        pinned: false,
     }
 }

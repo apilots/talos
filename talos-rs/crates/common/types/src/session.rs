@@ -269,6 +269,8 @@ pub struct SessionInfo {
     #[serde(default)]
     #[ts(type = "string | null")]
     pub current_directory: Option<PathBuf>,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
@@ -339,6 +341,9 @@ pub struct SessionPatchRequest {
     pub conf: Option<SessionConf>,
     #[serde(default)]
     pub current_directory: Option<OptionalCurrentDirectoryPatch>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub pinned: Option<bool>,
 }
 
 impl SessionPatchRequest {
@@ -346,6 +351,7 @@ impl SessionPatchRequest {
         SessionPatch {
             conf: self.conf,
             current_directory: self.current_directory,
+            pinned: self.pinned,
         }
     }
 }
@@ -391,12 +397,18 @@ pub struct SessionPatch {
     pub conf: Option<SessionConf>,
     #[serde(default)]
     pub current_directory: Option<OptionalCurrentDirectoryPatch>,
+    #[serde(default)]
+    pub pinned: Option<bool>,
 }
 
 impl SessionPatch {
     pub fn model_selection(&self) -> crate::TalosResult<Option<ModelSelection>> {
         let conf = self.conf.as_ref().cloned().unwrap_or_default();
         SessionConfigOverridePolicy::extract_model_selection(&conf)
+    }
+
+    pub fn is_pin_only(&self) -> bool {
+        self.pinned.is_some() && self.conf.is_none() && self.current_directory.is_none()
     }
 }
 

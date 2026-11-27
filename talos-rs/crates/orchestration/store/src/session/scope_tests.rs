@@ -43,6 +43,7 @@ fn record(
         project_id,
         worktree_binding: None,
         current_directory,
+        pinned: false,
     }
 }
 
@@ -361,6 +362,7 @@ async fn session_patch_updates_only_settings_owned_columns() {
             change: super::SessionRecordPatch::Settings {
                 conf: conf.clone(),
                 current_directory: Some(PathBuf::from("/tmp/updated")),
+                pinned: None,
             },
             last_activity: 42,
         })
@@ -657,4 +659,47 @@ async fn test_list_projects_returns_session_count() {
     let projects = project_store.list_projects().await.unwrap();
 
     assert_eq!(projects[0].session_count, 1);
+}
+
+#[tokio::test]
+async fn session_patch_pinned_preserves_last_activity_and_allows_active_turn() {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    run_migrations(storage.pool(), &test_migrations_dir())
+        .await
+        .unwrap();
+    let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
+    let mut session = record("session-pin", "user-1", None, None);
+    session.last_activity = 123;
+    store.insert_session_record(&session).await.unwrap();
+    storage
+        .execute(
+            "INSERT INTO agent_active_turns (session_id, turn_id, state, last_event_seq, updated_at) VALUES (?, 'turn-1', 'running', 1, 1)",
+            &["session-pin"],
+        )
+        .await
+        .unwrap();
+
+    let pinned = store
+        .patch_session(PatchSessionParams {
+            session_id: "session-pin".to_string(),
+            change: super::SessionRecordPatch::Pinned(true),
+            last_activity: 999,
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(pinned.pinned);
+    assert_eq!(pinned.last_activity, 123);
+
+    let unpinned = store
+        .patch_session(PatchSessionParams {
+            session_id: "session-pin".to_string(),
+            change: super::SessionRecordPatch::Pinned(false),
+            last_activity: 999,
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!unpinned.pinned);
+    assert_eq!(unpinned.last_activity, 123);
 }

@@ -214,6 +214,7 @@ impl ApplicationSyncHost {
                     usage: record.usage.clone(),
                     project_id: record.project_id.clone(),
                     current_directory: record.current_directory.clone(),
+                    pinned: record.pinned,
                 })
             }),
         ));

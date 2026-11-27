@@ -5,6 +5,7 @@ import {
   retryTimelineTurn,
   startTimelineTurn,
   subscribeTimelineEvents,
+  updateSessionPinned,
 } from "./api";
 import {
   resetTalosClientFactory,
@@ -147,4 +148,19 @@ describe("chat message api", () => {
       signal,
       { persistent: true },
     );
+  });
+
+  it("patches only the pinned state via sessions.patch", async () => {
+    const patch = vi.fn(() => Promise.resolve({ session: { id: "sess-1", pinned: true } }));
+    setTalosClientFactory(() => ({ sessions: { patch } }) as unknown as TalosWebClient);
+
+    const updated = await updateSessionPinned("sess-1", true);
+
+    expect(patch).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      conf: null,
+      currentDirectory: null,
+      pinned: true,
+    });
+    expect(updated).toEqual({ id: "sess-1", pinned: true });
   });
