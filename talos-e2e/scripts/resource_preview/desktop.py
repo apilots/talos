@@ -8,6 +8,7 @@ from desktop_resources import run, native_pages, invoke
 from fixture import REPORT, data, require, wait_for
 from format_matrix import FIXTURES, exercise_formats
 from web import HTML, PNG
+from resources import settle_workspace
 from playwright.sync_api import expect
 
 
@@ -91,6 +92,10 @@ def exercise(page, token, destination, markdown, endpoint, *, model):
     workspace.get_by_role('link', name='Embedded browser', exact=True).click()
     expect(workspace.get_by_role('tab')).to_have_count(count + 1)
     expect(workspace.get_by_role('textbox', name='Web address', exact=True)).to_have_value(destination)
+    embedded = wait_for(lambda: next((target for target in native_pages(page) if target.url == destination), None),
+                        'Native embedded webpage loaded')
+    expect(embedded.get_by_role('textbox', name='Draft', exact=True)).to_be_visible()
+    settle_workspace(workspace)
     expect(workspace.get_by_role('alert')).to_have_count(0)
     workspace.get_by_role('button', name='Open in options', exact=True).click()
     expect(page.get_by_role('menuitem', name='Talos', exact=True)).to_be_visible()

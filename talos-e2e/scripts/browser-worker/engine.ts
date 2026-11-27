@@ -200,7 +200,7 @@ try {
   await website.executeJavaScript(`window.open('http://127.0.0.1:${address.port}/popup')`);
   let popupState=await action({kind:'state'});
   for(let attempt=0;attempt<50&&popupState.page.tabs.length===before;attempt++){await new Promise(resolve=>setTimeout(resolve,20));popupState=await action({kind:'state'});}
-  assert.equal(popupState.page.tabs.length,before+1);assert.equal(BaseWindow.getAllWindows().length,windows);assert(office.isFocused());assert(product.isMinimized());
+  assert.equal(popupState.page.tabs.length,before+1);assert.equal(BaseWindow.getAllWindows().length,windows);assert(office.isFocused(),'Managed popup changed office focus');assert(product.isMinimized());
   for(let attempt=0;attempt<50&&!popupState.page.tabs.some(tab=>tab.url.endsWith('/popup'));attempt++){await new Promise(resolve=>setTimeout(resolve,20));popupState=await action({kind:'state'});}
   const popup=popupState.page.tabs.find(tab=>tab.url.endsWith('/popup'));assert(popup);
   const opened=await operation({kind:'execute',action:{kind:'state'},targetId:popup.tabId,element:null,upload:null});assert(opened.kind==='observation');assert.match(opened.page.text??'',/Ready/);
@@ -218,7 +218,7 @@ try {
   assert.equal(await restored.executeJavaScript('localStorage.getItem("talos_login")'),'retained');
   assert((await action({kind:'screenshot'})).screenshot,'A new target created while minimized must paint');
   assert.equal(typeof await restored.executeJavaScript('window.talos'),'undefined');
-  assert(office.isFocused());assert(product.isMinimized());
+  assert(office.isFocused(),'Reset and background target creation changed office focus');assert(product.isMinimized());
   console.log('MANAGED_POPUP_PROFILE_PASS');
  } finally {office.destroy();}
  const detached=webContents.fromId(Number(targetId));assert(detached);detached.debugger.detach();

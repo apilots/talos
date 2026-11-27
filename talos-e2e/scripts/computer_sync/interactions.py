@@ -10,7 +10,8 @@ from pathlib import Path
 import yaml
 from google.protobuf import json_format, message_factory
 from cluster import REPORT, ROOT, Desktop, free_port, require, wait_for
-from turn_helpers import submit, settled
+from turn_helpers import submit, settled, comparable_history
+
 
 
 def require_successful_wait(history, marker, child_session=None):
@@ -111,7 +112,7 @@ def abandoned_cross_coordinator_admission(cluster, node, session):
         user = cluster.desktop('Desktop-B', 'user/current')['user']
         require(user['user_id'] == cluster.users['alice']['user']['user_id'], 'Restarted Desktop-B restored the wrong account')
     wait_for(lambda: cluster.desktop('Desktop-B', 'sync/status')['connection'] == 'connected', 'B synchronization resumed')
-    wait_for(lambda: cluster.history('Desktop-A', session)['data'] == cluster.history('Desktop-B', session)['data'], 'Only executed history synchronized after recovery')
+    wait_for(lambda: comparable_history(cluster.history('Desktop-A', session)['data']) == comparable_history(cluster.history('Desktop-B', session)['data']), 'Only executed history synchronized after recovery')
     print('CASE sync_abandoned_cross_coordinator_admission_preserves_original_shared_history PASS', flush=True)
 
 
@@ -189,7 +190,7 @@ def commands(cluster):
     wait_for(lambda: cluster.desktop('Desktop-B', 'session/active_turn', {'sessionId': session})['activeTurn'] is None, 'Current coordinator cleanup settled')
     require(not list(home.rglob(forbidden)), 'Cancelled remote tool produced its delayed side effect')
     try:
-        wait_for(lambda: cluster.history('Desktop-A', session)['data'] == cluster.history('Desktop-B', session)['data'], 'Cancellation facts synchronized')
+        wait_for(lambda: comparable_history(cluster.history('Desktop-A', session)['data']) == comparable_history(cluster.history('Desktop-B', session)['data']), 'Cancellation facts synchronized')
     except AssertionError:
         (REPORT / 'cancellation-history.json').write_text(json.dumps({
             host: cluster.history(host, session) for host in ('Desktop-A', 'Desktop-B')
@@ -255,7 +256,7 @@ def question_and_child(cluster):
     children = cluster.database(cluster.desktops['Desktop-B']['home'], 'SELECT session_key, execution_node_id FROM sessions WHERE parent_session_id=?', (session,))
     require(len(children) == 1 and children[0][1] == node, 'Child was not persisted by current coordinator on the same Computer')
     for host in ('Desktop-A', 'G'):
-        wait_for(lambda host=host: cluster.history(host, session)['data'] == history, 'Full child/parent history synchronized')
+        wait_for(lambda host=host: comparable_history(cluster.history(host, session)['data']) == comparable_history(history), 'Full child/parent history synchronized')
     require(len(list(home.rglob(filename))) == 1, 'Child file did not land on Docker Worker')
     require_successful_wait(history, marker, children[0][0])
     (REPORT / 'resource-history.json').write_text(json.dumps(history, indent=2))
@@ -269,7 +270,7 @@ def question_and_child(cluster):
     reset = submit(cluster, 'Desktop-A', node, session, 'Reply exactly RESET_GENERATION_OK.')
     fresh = wait_for(lambda: settled(cluster, 'Desktop-A', session, reset['turnId']), 'Same Computer continued after reset', 120)
     require(len(fresh) == 1, 'Old generation reappeared after clear')
-    wait_for(lambda: cluster.history('Desktop-B', session)['data'] == fresh, 'New generation synchronized')
+    wait_for(lambda: comparable_history(cluster.history('Desktop-B', session)['data']) == comparable_history(fresh), 'New generation synchronized')
     cluster.desktop('Desktop-B', 'session/delete', {'sessionId': session})
     identities = [session] + [row[0] for row in children]
     for host in ('Desktop-A', 'Desktop-B'):
@@ -290,7 +291,7 @@ def waiting_plugin_mutations_with_sync_offline(cluster):
     session = str(uuid.uuid4())
     base = submit(cluster, 'Desktop-B', node, session, 'Reply exactly PLUGIN_GUARD_BASE.')
     wait_for(lambda: settled(cluster, 'Desktop-B', session, base['turnId']), 'Plugin guard base completed', 120)
-    wait_for(lambda: cluster.history('Desktop-A', session)['data'] == cluster.history('Desktop-B', session)['data'], 'Plugin guard base shared')
+    wait_for(lambda: comparable_history(cluster.history('Desktop-A', session)['data']) == comparable_history(cluster.history('Desktop-B', session)['data']), 'Plugin guard base shared')
     subprocess.run(['docker', 'stop', '--time', '10', cluster.hub_container], check=True, capture_output=True)
     installations = []
     try:
@@ -346,5 +347,5 @@ def waiting_plugin_mutations_with_sync_offline(cluster):
             require(not cleanup_errors, f'Offline publication cleanup failed: {cleanup_errors!r}')
         finally:
             subprocess.run(['docker', 'start', cluster.hub_container], check=True, capture_output=True)
-    wait_for(lambda: cluster.history('Desktop-A', session)['data'] == cluster.history('Desktop-B', session)['data'], 'Offline waiting facts recovered')
+    wait_for(lambda: comparable_history(cluster.history('Desktop-A', session)['data']) == comparable_history(cluster.history('Desktop-B', session)['data']), 'Offline waiting facts recovered')
     print('CASE sync_offline_waiting_plugin_publication_alias_uuid_isolation_and_cancellation PASS', flush=True)

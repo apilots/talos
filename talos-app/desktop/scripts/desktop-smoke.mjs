@@ -10,10 +10,14 @@ import { verifySidebarFocus } from "./desktop-smoke-focus.mjs";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(desktopDir, "../..");
-const artifactDir = path.resolve(repoRoot, ".tmp/desktop-smoke", timestamp());
-const smokeHome = path.join(artifactDir, "home");
+const artifactDir = process.env.TALOS_SCENARIO_REPORT_DIR
+  ? path.join(process.env.TALOS_SCENARIO_REPORT_DIR, "desktop-smoke")
+  : path.resolve(repoRoot, ".tmp/desktop-smoke", timestamp());
+const smokeHome = process.env.TALOS_E2E_TMP_ROOT
+  ? path.join(process.env.TALOS_E2E_TMP_ROOT, "desktop-smoke-home")
+  : path.join(artifactDir, "home");
 const talosHome = path.join(smokeHome, ".talos");
-const talosConfigTemplate = path.join(repoRoot, "conf/talos-dev.yaml");
+const talosConfigTemplate = process.env.TALOS_TEST_CONFIG_TEMPLATE ?? path.join(repoRoot, "conf/talos-dev.yaml");
 const talosConfig = path.join(talosHome, "conf/talos.yaml");
 const modeSmokeFiles = [1, 2, 3].map((index) =>
   path.join(talosHome, "workspace-talos", "anonymous", `desktop-mode-smoke-${index}.txt`)
@@ -192,7 +196,7 @@ try {
 
   await evaluate(cdp, "location.hash = '#/settings/server'; undefined");
   await waitForExpression(cdp, "location.hash === '#/settings/server'", 30_000);
-  await waitForExpression(cdp, "(document.body.textContent || '').includes('Desktop local runtime')", 30_000);
+  await waitForExpression(cdp, "(document.body.textContent || '').includes('Local runtime')", 30_000);
 
   await clickAnchorByHash(cdp, "#/settings/models");
   await waitForHash(cdp, "#/settings/models", 30_000);
@@ -234,6 +238,28 @@ try {
   cdp.close();
   cdp = undefined;
 } catch (error) {
+  if (cdp) {
+    try {
+      await captureScreenshot(cdp, path.join(artifactDir, "failure.png"));
+      const failureState = await evaluate(cdp, `(async () => {
+        const state = {
+          hash: location.hash,
+          composer: document.querySelector('[data-smoke="chat-composer-send"]')?.getAttribute('aria-label'),
+          actions: Array.from(document.querySelectorAll('[data-user-action]')).map(node => node.getAttribute('data-user-action')),
+        };
+        const sessionId = location.hash.startsWith('#/sessions/') ? location.hash.slice(11).split('/')[0] : undefined;
+        if (!sessionId || !window.__talosSmokeInvoke) return state;
+        const response = await window.__talosSmokeInvoke('session/active_turn', { sessionId });
+        const turn = response.activeTurn;
+        const action = turn?.pendingInput?.type === 'userAction' ? turn.pendingInput.action : null;
+        return { ...state, activeTurn: turn?.state ?? null,
+          pendingAction: action ? { actionId: action.actionId, itemId: action.itemId, type: action.params.type } : null };
+      })()`);
+      writeFileSync(path.join(artifactDir, "failure-state.json"), `${JSON.stringify(failureState, null, 2)}\n`);
+    } catch (captureError) {
+      logs.push(`Failure evidence capture failed: ${errorMessage(captureError)}`);
+    }
+  }
   writeFileSync(path.join(artifactDir, "desktop-smoke-error.log"), `${errorMessage(error)}\n\n${logs.join("")}`);
   throw error;
 } finally {
@@ -525,6 +551,10 @@ function installSmokeInvoke(cdp) {
 
 async function sendComposerMessage(cdp, message) {
   await setElementValue(cdp, '[data-smoke="chat-composer-input"]', message);
+  await waitForExpression(cdp, `(() => {
+    const button = document.querySelector('[data-smoke="chat-composer-send"]');
+    return Boolean(button && !button.disabled && button.getAttribute('aria-label') === 'Send');
+  })()`, 30_000);
   const sent = await evaluate(
     cdp,
     `(() => {

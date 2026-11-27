@@ -316,6 +316,7 @@ impl ApplicationSyncHost {
     }
     pub(crate) async fn refresh_computer_directory(&self, actor: &Actor) -> TalosResult<()> {
         let verified = self.verified_actor(actor).await?;
+        let local = self.local_computer(actor).await?;
         let client = self.gateway_client().await?;
         let started = Instant::now();
         let mut cursor = None;
@@ -412,6 +413,9 @@ impl ApplicationSyncHost {
                 }
             }
         }
+        let removed_local = local.filter(|id| {
+            id != "embedded" && merged.get(id).is_none_or(|value| value.info.is_none())
+        });
         let visible: Vec<_> = merged
             .values()
             .filter_map(|value| value.info.clone())
@@ -433,6 +437,11 @@ impl ApplicationSyncHost {
                     nodes: merged,
                 },
             );
+        // Retirement can restart account Sync; never hold the directory publication lock.
+        drop(_publish);
+        if let Some(id) = removed_local {
+            self.observe_registration_removal(&verified, &id).await?;
+        }
 
         Ok(())
     }

@@ -47,7 +47,7 @@ def registration(cluster):
     node = cluster.nodes['alice-a']
     renamed = cluster.manage('alice', 'UpdateNode', {
         'node_id': node['node_id'], 'display_name': 'Renamed laptop',
-        'endpoint': f'https://127.0.0.1:{node["port"]}', 'status': 'NODE_STATUS_ENABLED'})['node']
+        'status': 'NODE_STATUS_ENABLED'})['node']
     require(not renamed.get('available'), 'Rename scenario missed the pre-heartbeat window')
     require(renamed['node_id'] == before['node_id'], 'Rename changed node identity')
     cluster.healthy_all()
@@ -65,7 +65,6 @@ def registration(cluster):
     passed('server_restart_reregistration')
 
     node = cluster.nodes['alice-a']
-    endpoint = f'https://127.0.0.1:{node["port"]}'
     marker = uuid.uuid4().hex
     started_file, forbidden_file = f'started-{marker}.txt', f'forbidden-{marker}.txt'
     session, response = cluster.start_turn('alice',
@@ -74,7 +73,7 @@ def registration(cluster):
     wait_for(lambda: list(node['home'].rglob(started_file)), 'running tool before node disable', 45)
     side_effect_deadline = time.monotonic() + 27
     disabled = cluster.manage('alice', 'UpdateNode', {'node_id': cluster.nodes['alice-a']['node_id'], 'display_name': 'alice-a',
-                                                     'endpoint': endpoint, 'status': 'NODE_STATUS_DISABLED'})
+                                                     'status': 'NODE_STATUS_DISABLED'})
     require('node' in disabled and not disabled['node'].get('available'), 'Disable did not withdraw node')
     # The Worker must stop on the control-plane rejection itself. Killing it
     # here would conceal the missing lease-observer notification.
@@ -87,7 +86,7 @@ def registration(cluster):
     rotated = cluster.manage('alice', 'RotateCredential', {'node_id': cluster.nodes['alice-a']['node_id'], 'expires_at': int(time.time()) + 3600})
     require('credential' in rotated, 'RotateCredential failed')
     enabled = cluster.manage('alice', 'UpdateNode', {'node_id': cluster.nodes['alice-a']['node_id'], 'display_name': 'alice-a',
-                                                    'endpoint': endpoint, 'status': 'NODE_STATUS_ENABLED'})
+                                                    'status': 'NODE_STATUS_ENABLED'})
     require('node' in enabled, 'Enable failed')
     denied(cluster.rpc('AgentNodeControl', 'Register', {
         'auth': {'node_id': cluster.nodes['alice-a']['node_id'], 'token': old_token}, 'params': {}}), 'UNAUTHENTICATED')

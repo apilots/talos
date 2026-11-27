@@ -53,8 +53,8 @@ class Desktop:
             return response
         raise AssertionError(f'{self.name}: {method} timed out')
 
-    def call(self, method, params=None):
-        response = self.request(method, params)
+    def call(self, method, params=None, token=None):
+        response = self.request(method, params, token)
         require('result' in response, f'{self.name}: {method} failed code={response.get("error", {}).get("code")}')
         return response['result']
 
@@ -183,8 +183,12 @@ def run(cluster):
     first = Desktop(cluster, home, 'desktop-a')
     second = None
     try:
-        require(first.call('desktop/workerIdentity') == {'nodeId': 'embedded', 'controlPlaneEndpoint': cluster.ingress},
+        initial = first.call('desktop/workerIdentity')
+        require(initial['nodeId'] == 'embedded' and initial['controlPlaneEndpoint'] == cluster.ingress,
                 'Fresh Desktop must expose its unregistered identity and configured Server')
+        require(initial['controlPlaneTrustedCaPem'] == cluster.cert.read_text(), 'Desktop omitted its public trust roots')
+        require(initial['systemInfo']['architecture'] and initial['systemInfo']['logicalCpuCount'] > 0,
+                'Desktop omitted its local system information')
         first.login('alice')
         identity = first.enrolled_identity()
         node_id = identity['nodeId']
@@ -253,7 +257,8 @@ def run(cluster):
         time.sleep(12)
         data(public(cluster, f'/v1/computers/{node_id}/status', method='PUT',
                     body={'nodeId': node_id, 'status': 'enabled'}))
-        first.call('desktop/workerEnroll', {'nodeId': node_id})
+        saved_token = json.loads((home / 'auth/cloud-session.json').read_text())['access_token']
+        first.call('desktop/workerEnroll', {'nodeId': node_id}, token=saved_token)
         require(credential.read_text() != secrets[0], 'Explicit recovery did not rotate credential')
         secrets.append(credential.read_text())
         rejected = cluster.rpc('AgentNodeControl', 'Register', {
@@ -280,7 +285,8 @@ def run(cluster):
         require(first.call('auth/session/read', {})['session'] is None, 'Sign-out retained login')
         first.login('bob')
         require(info(cluster, node_id)['leaseExpiresAt'] is None, 'Other account resumed old owner Worker')
-        require('error' in first.request('desktop/workerEnroll', {'nodeId': None}), 'Other account reused stored identity')
+        require('error' in first.request('desktop/workerEnroll', {'nodeId': None}, token=first.login_tokens[-1]),
+                'Other account reused stored identity')
         first.call('auth/session/clear', {})
         first.login('alice')
         proof('account_switch_rejects_saved_owner_identity', registered(cluster, node_id))
