@@ -209,7 +209,7 @@ describe("useSessionCommands", () => {
       sessionId: "sess-1",
     }));
 
-    act(() => result.current.execute("clear"));
+    await act(async () => { await result.current.execute("clear"); });
     expect(result.current.clearConfirmationOpen).toBe(true);
     expect(mocks.clear).not.toHaveBeenCalled();
 
@@ -226,7 +226,7 @@ describe("useSessionCommands", () => {
       sessionId: "sess-1",
     }));
 
-    act(() => result.current.execute("clear"));
+    await act(async () => { await result.current.execute("clear"); });
     await act(async () => result.current.confirmClear());
 
     expect(result.current.clearConfirmationOpen).toBe(true);
@@ -234,12 +234,12 @@ describe("useSessionCommands", () => {
     expect(mocks.resetStream).not.toHaveBeenCalled();
   });
 
-  it("opens and dismisses the structured session status", () => {
+  it("opens and dismisses the structured session status", async () => {
     const { result } = renderHook(() => useSessionCommands({
       sessionId: "sess-1",
     }));
 
-    act(() => result.current.execute("status"));
+    await act(async () => { await result.current.execute("status"); });
     expect(result.current.response).toEqual({ kind: "status" });
 
     act(() => result.current.dismissResponse());

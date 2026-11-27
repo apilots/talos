@@ -68,7 +68,7 @@ it("opens clickable inline code file paths and URLs in session messages without 
   expect(useAppStore.getState().workspaceWindows).toEqual([
     { kind: "sessionFile", sessionId: "session-1", path: "output/report.html" },
     { kind: "sessionFile", sessionId: "session-1", path: "src/lib.rs", position: { kind: "text", resourcePath: null, line: 27, encoding: "utf-8" } },
-    expect.objectContaining({ kind: "webpage", url: "https://example.test/docs" }),
+    expect.objectContaining({ kind: "webpage", url: "https://example.test/docs" }) as unknown,
   ]);
 
   expect(screen.getAllByRole("link", { name: "linked.md" })).toHaveLength(1);

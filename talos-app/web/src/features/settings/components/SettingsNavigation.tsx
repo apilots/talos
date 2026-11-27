@@ -37,7 +37,7 @@ type ExternalSettingsNavigationItem = {
   external: true;
 };
 
-export type SettingsNavigationItem = InternalSettingsNavigationItem | ExternalSettingsNavigationItem;
+type SettingsNavigationItem = InternalSettingsNavigationItem | ExternalSettingsNavigationItem;
 
 type SettingsNavigationProps = {
   activeSection: SettingsSection;
@@ -63,12 +63,6 @@ const extensionNavigation: SettingsNavigationItem[] = [
 const advancedNavigation: SettingsNavigationItem[] = [
   { id: "runtime", icon: Cpu },
   { id: "server", icon: ServerCog },
-];
-
-export const settingsNavigation: SettingsNavigationItem[] = [
-  ...personalNavigation,
-  ...extensionNavigation,
-  ...advancedNavigation,
 ];
 
 export function SettingsNavigation({ activeSection, canManageConfig, canManageRuntime, canOpenAccount }: SettingsNavigationProps) {

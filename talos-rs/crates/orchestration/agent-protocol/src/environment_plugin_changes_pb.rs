@@ -12,10 +12,10 @@ pub fn encode_prepare_plugin_change_params(
     Ok(pb::PluginPrepareParams {
         change: Some(match value {
             WorkerPluginChange::Install(request) => {
-                Change::Install(wire::encode_install_plugin_params(request)?)
+                Change::Install(Box::new(wire::encode_install_plugin_params(request)?))
             }
             WorkerPluginChange::Update(request) => {
-                Change::Update(wire::encode_update_plugin_params(request)?)
+                Change::Update(Box::new(wire::encode_update_plugin_params(request)?))
             }
         }),
     })
@@ -29,10 +29,10 @@ pub fn decode_prepare_plugin_change_params(
         .ok_or_else(wire::invalid)?
     {
         Change::Install(request) => Ok(WorkerPluginChange::Install(
-            wire::decode_install_plugin_params(Some(request))?,
+            wire::decode_install_plugin_params(Some(*request))?,
         )),
         Change::Update(request) => Ok(WorkerPluginChange::Update(
-            wire::decode_update_plugin_params(Some(request))?,
+            wire::decode_update_plugin_params(Some(*request))?,
         )),
     }
 }

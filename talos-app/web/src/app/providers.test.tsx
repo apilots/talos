@@ -22,8 +22,9 @@ function ActorSettings() {
   const connection = useAppStore((state) => state.connection);
   const results = useQueries({ queries: settingsKeys(connectionScope(connection)).map((queryKey) => ({
     queryKey, queryFn: () => new Promise<string>((resolve) => {
-      if (connection.userId === "alice") resolve("alice");
-      else pending.push(() => resolve(connection.userId));
+      const userId = useAppStore.getState().connection.userId;
+      if (userId === "alice") resolve("alice");
+      else pending.push(() => resolve(userId));
     }),
   })) });
   return <p>{results.map((query) => query.data ?? "pending").join(":")}</p>;
@@ -37,7 +38,7 @@ it("clears old actor settings without cancelling the new actor's first requests"
   await screen.findByText("alice:alice:alice");
   act(() => useAppStore.getState().setConnection({ userId: "bob" }));
   await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(3));
-  await act(async () => { pending.forEach((resolve) => resolve()); });
+  await act(() => { pending.forEach((resolve) => resolve());  return Promise.resolve(); });
   await screen.findByText("bob:bob:bob");
   await waitFor(() => {
     for (const key of oldKeys) expect(client.getQueryState(key)).toBeUndefined();

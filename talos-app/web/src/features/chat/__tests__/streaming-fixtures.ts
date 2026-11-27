@@ -473,7 +473,7 @@ export function executionMetrics(
   };
 }
 
-export function usage() {
+function usage() {
   return {
     input_tokens: 0,
     output_tokens: 0,

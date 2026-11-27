@@ -88,7 +88,7 @@ describe("ChatHomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send Goal" }));
     await waitFor(() => expect(list).toHaveBeenCalledOnce());
     fireEvent.click(screen.getByRole("link", { name: "Leave Home" }));
-    await act(async () => { resolve({ data: [{ name: "goal", scope: "system", enabled: true, read_only: true, path: "/real/goal/SKILL.md" }] }); });
+    await act(() => { resolve({ data: [{ name: "goal", scope: "system", enabled: true, read_only: true, path: "/real/goal/SKILL.md" }] });  return Promise.resolve(); });
     expect(screen.getByText("Settings destination")).toBeInTheDocument();
     expect(screen.queryByTestId("location-state")).toBeNull();
   });
@@ -148,7 +148,7 @@ describe("ChatHomePage", () => {
         { type: "skillSelection", name: "loop", path: "/worker/loop/SKILL.md" },
         { type: "text", text: "5m Check the original task" }, { type: "file", fileId: "image-1" },
       ] } });
-    await act(async () => { accept({ turnId: "turn-1", messageId: "message-1" }); });
+    await act(() => { accept({ turnId: "turn-1", messageId: "message-1" });  return Promise.resolve(); });
     await waitFor(() => expect(screen.getByTestId("location-state")).toHaveTextContent("null"));
     expect(startTurn).toHaveBeenCalledTimes(2);
   });
@@ -157,15 +157,15 @@ describe("ChatHomePage", () => {
     composer.real = true;
     const accepted = new Map<string, string>();
     const keys: string[] = [];
-    const request = vi.fn<typeof fetch>(async (_url, init) => {
-      if (!String(_url).endsWith("/v1/turns/start")) return Response.json({ status: "success", data: { data: [] } });
+    const request = vi.fn<typeof fetch>( (_url, init) => {
+      if (!(_url instanceof Request ? _url.url : _url.toString()).endsWith("/v1/turns/start")) return Promise.resolve(Response.json({ status: "success", data: { data: [] } }));
       const key = new Headers(init?.headers).get("idempotency-key")!;
-      const body = String(init?.body);
+      const body = (typeof init?.body === "string" ? init.body : (() => { throw new Error("Expected a JSON request body."); })());
       keys.push(key);
       if (accepted.has(key)) expect(body).toBe(accepted.get(key));
       accepted.set(key, body);
-      if (keys.length === 1) throw new TypeError("Server response lost");
-      return Response.json({ status: "success", data: { turnId: "turn-1", messageId: "message-1" } });
+      if (keys.length === 1) return Promise.reject(new TypeError("Server response lost"));
+      return Promise.resolve(Response.json({ status: "success", data: { turnId: "turn-1", messageId: "message-1" } }));
     });
     setTalosClientFactory(() => createBrowserTalosClient({ baseUrl: "https://server.example", fetch: request }));
     render(<MemoryRouter initialEntries={[{ pathname: "/", state: { initialDraft: "Original task" } }]}><Routes>
@@ -196,10 +196,10 @@ describe("ChatHomePage", () => {
     const file = { fileId: "server-file", originalFilename: "report.png", mimeType: "image/png", sizeBytes: 8,
       scope: { type: "personal" as const }, tags: [], metadata: {}, createdAt: 1, updatedAt: 1 };
     const sent: Array<{ key: string | null; body: string }> = [];
-    const request = vi.fn<typeof fetch>(async (_url, init) => {
-      sent.push({ key: new Headers(init?.headers).get("idempotency-key"), body: String(init?.body) });
-      if (sent.length === 1) throw new TypeError("Server response lost after admission");
-      return Response.json({ status: "success", data: { turnId: "turn-1", messageId: "message-1" } });
+    const request = vi.fn<typeof fetch>( (_url, init) => {
+      sent.push({ key: new Headers(init?.headers).get("idempotency-key"), body: (typeof init?.body === "string" ? init.body : (() => { throw new Error("Expected a JSON request body."); })()) });
+      if (sent.length === 1) return Promise.reject(new TypeError("Server response lost after admission"));
+      return Promise.resolve(Response.json({ status: "success", data: { turnId: "turn-1", messageId: "message-1" } }));
     });
     setTalosClientFactory(() => ({ ...createBrowserTalosClient({ baseUrl: "https://server.example", fetch: request }),
       files: { upload: vi.fn().mockResolvedValue({ file }), read: vi.fn().mockResolvedValue({ file }) },
@@ -267,7 +267,7 @@ describe("ChatHomePage", () => {
     expect(useAppStore.getState().composerDrafts[key]).toBe("Original task");
     expect(screen.queryByTestId("location-state")).toBeNull();
     fireEvent.click(screen.getByRole("link", { name: "Leave Home" }));
-    await act(async () => { accept({ turnId: "turn-1", messageId: "message-1" }); });
+    await act(() => { accept({ turnId: "turn-1", messageId: "message-1" });  return Promise.resolve(); });
     expect(screen.getByText("Settings destination")).toBeVisible();
     expect(useAppStore.getState().composerDrafts[key]).toBeUndefined();
   });

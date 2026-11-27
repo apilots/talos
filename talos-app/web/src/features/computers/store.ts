@@ -1,4 +1,4 @@
-export interface ComposerRequest {
+interface ComposerRequest {
   sessionId: string;
   requestId: string;
   body: string;

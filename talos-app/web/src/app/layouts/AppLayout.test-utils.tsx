@@ -6,7 +6,7 @@ import { StrictMode, useEffect, type ReactNode } from "react";
 import "@/shared/i18n/setup";
 import { useAppStore } from "@/shared/store/app-store";
 import { AppLayout } from "./AppLayout";
-const fixture = vi.hoisted(() => ({ browserRequest: vi.fn(async()=>null), wide: true, selectedId: "selected-worker" as string | undefined, available: true, mounted: [] as string[], closed: [] as string[] }));
+const fixture = vi.hoisted(() => ({ browserRequest: vi.fn(()=>Promise.resolve(null)), wide: true, selectedId: "selected-worker" as string | undefined, available: true, mounted: [] as string[], closed: [] as string[] }));
 vi.mock("@/features/computers", () => ({
   SessionDesktopShortcut: () => null,
   useManagedWorkerStatus: () => ({ status: {} }),

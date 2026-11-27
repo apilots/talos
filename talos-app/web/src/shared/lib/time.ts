@@ -1,14 +1,4 @@
-export function formatDateTime(timestamp?: number | null) {
-  if (!timestamp) {
-    return "Unknown";
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(timestamp));
-}
+
 
 export function formatRelativeTime(timestamp?: number | null) {
   if (!timestamp) {

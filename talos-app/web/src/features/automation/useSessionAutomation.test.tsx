@@ -28,10 +28,23 @@ function deferred<T>() {
   const promise = new Promise<T>((complete) => { resolve = complete; });
   return { promise, resolve };
 }
+it("reloads the command catalog when the Session changes within the same account", async () => {
+  const commandCatalog = vi.fn<TalosWebClient["automation"]["commandCatalog"]>().mockResolvedValue({ data: [] });
+  const read = vi.fn<TalosWebClient["automation"]["read"]>().mockImplementation(({ sessionId }) =>
+    Promise.resolve({ sessionId, goal: null, loops: [] }));
+  install({ read, commandCatalog });
+  const { Wrapper } = wrapper();
+  const { rerender } = renderHook(({ id }) => useSessionAutomation(id, true), {
+    wrapper: Wrapper, initialProps: { id: "s1" },
+  });
+  await waitFor(() => expect(commandCatalog).toHaveBeenCalledTimes(1));
+  rerender({ id: "s2" });
+  await waitFor(() => expect(commandCatalog).toHaveBeenCalledTimes(2));
+});
 it("removes a stopped Loop immediately and after refresh without querying ended tasks", async () => {
   let active = true;
   const list = vi.fn();
-  const read = vi.fn(async () => ({ sessionId: "s1", goal: null, loops: active ? [loop()] : [] }));
+  const read = vi.fn(() => Promise.resolve(({ sessionId: "s1", goal: null, loops: active ? [loop()] : [] })));
   const execute = vi.fn(async () => {
     active = false;
     return { effect: "applied", createdObject: null, boundOrigin: null, snapshot: await read() };
@@ -56,7 +69,7 @@ it("excludes stopped Loops and keeps enabled Loops ordered", () => {
 });
 it.each(["goal", "loop"] as const)("removes a naturally ended %s on the original invalidation path", async (mode) => {
   let ended = false;
-  const read = vi.fn(async () => ({ sessionId: "s1", goal: mode === "goal" ? goal({ status: ended ? "complete" : "active" }) : null, loops: mode === "loop" && !ended ? [loop()] : [] }));
+  const read = vi.fn(() => Promise.resolve(({ sessionId: "s1", goal: mode === "goal" ? goal({ status: ended ? "complete" : "active" }) : null, loops: mode === "loop" && !ended ? [loop()] : [] })));
   install({ read });
   const { Wrapper, cache } = wrapper();
   const { result } = renderHook(() => useSessionAutomation("s1", true), { wrapper: Wrapper });
@@ -74,7 +87,7 @@ it("does not expose a late old Session reply after switching scope", async () =>
   scope.value = "scope-b";
   rerender({ id: "s2" });
   await waitFor(() => expect(result.current.tasks.map((task) => task.value.id)).toEqual(["new-goal"]));
-  await act(async () => { old.resolve({ sessionId: "s1", goal: goal({ id: "old-goal" }), loops: [] }); });
+  await act(() => { old.resolve({ sessionId: "s1", goal: goal({ id: "old-goal" }), loops: [] });  return Promise.resolve(); });
   expect(result.current.tasks.map((task) => task.value.id)).toEqual(["new-goal"]);
 });
 it("surfaces read authorization failure through the original error channel", async () => {

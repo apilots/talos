@@ -120,7 +120,7 @@ it("shows a deferred detail's list placeholder immediately without caching it fo
   expect(authoritative.result.current.isPending).toBe(true);
   await waitFor(() => expect(computers.read).toHaveBeenCalledTimes(1));
   const full: AppProtocol.NodeInfo = { ...listed, displayName: "Authoritative detail", updatedAt: 42 };
-  await act(async () => { detail.resolve(full); });
+  await act(() => { detail.resolve(full);  return Promise.resolve(); });
   await waitFor(() => expect(provisional.result.current.data).toEqual(full));
   expect(provisional.result.current.isPlaceholderData).toBe(false);
   expect(authoritative.result.current.data).toEqual(full);
@@ -132,7 +132,7 @@ it("does not show a listed node for a different ID", async () => {
   const { result } = show(() => useComputer(rows[2].nodeId, listed));
   expect(result.current.data).toBeUndefined();
   expect(result.current.isPending).toBe(true);
-  await act(async () => { detail.resolve(rows[2]); });
+  await act(() => { detail.resolve(rows[2]);  return Promise.resolve(); });
   await waitFor(() => expect(result.current.data).toEqual(rows[2]));
 });
 
@@ -141,7 +141,7 @@ it("withdraws both provisional and authoritative detail after a transient failur
   computers.read.mockReturnValue(detail.promise);
   const provisional = show(() => useComputer(listed.nodeId, listed));
   const authoritative = renderHook(() => useComputer(listed.nodeId), { wrapper: provisional.wrapper });
-  await act(async () => { detail.reject(networkError()); });
+  await act(() => { detail.reject(networkError());  return Promise.resolve(); });
   await waitFor(() => expect(provisional.result.current.isError).toBe(true));
   expect(provisional.result.current.data).toBeUndefined();
   expect(authoritative.result.current.isError).toBe(true);
@@ -193,12 +193,12 @@ it("never reuses an old account's directory as the new account's selected detail
   expect(result.current.selected).toBeUndefined();
   await waitFor(() => expect(computers.list).toHaveBeenCalledTimes(2));
   const bobNode: AppProtocol.NodeInfo = { ...listed, ownerUserId: "bob", displayName: "Bob directory" };
-  await act(async () => { bobPage.resolve(page([bobNode], 1, null)); });
+  await act(() => { bobPage.resolve(page([bobNode], 1, null));  return Promise.resolve(); });
   await waitFor(() => expect(result.current.selected).toEqual(bobNode));
-  await act(async () => { aliceDetail.resolve({ ...listed, displayName: "Late Alice detail" }); });
+  await act(() => { aliceDetail.resolve({ ...listed, displayName: "Late Alice detail" });  return Promise.resolve(); });
   expect(result.current.nodes).toEqual([bobNode]);
   expect(result.current.selected).toEqual(bobNode);
   const full: AppProtocol.NodeInfo = { ...bobNode, displayName: "Bob detail" };
-  await act(async () => { bobDetail.resolve(full); });
+  await act(() => { bobDetail.resolve(full);  return Promise.resolve(); });
   await waitFor(() => expect(result.current.selected).toEqual(full));
 });

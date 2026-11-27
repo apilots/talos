@@ -82,14 +82,13 @@ where
     D: serde::Deserializer<'de>,
 {
     let mut sources = Vec::<PluginSourceConfig>::deserialize(deserializer)?;
-    for official in [official_mcp_source()] {
-        if !sources.iter().any(|source| {
-            source.url == official.url
-                && source.reference == official.reference
-                && source.sparse_paths == official.sparse_paths
-        }) {
-            sources.push(official);
-        }
+    let official = official_mcp_source();
+    if !sources.iter().any(|source| {
+        source.url == official.url
+            && source.reference == official.reference
+            && source.sparse_paths == official.sparse_paths
+    }) {
+        sources.push(official);
     }
     Ok(sources)
 }

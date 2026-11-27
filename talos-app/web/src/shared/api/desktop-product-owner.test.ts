@@ -14,9 +14,9 @@ function endpoint() {
   return {
     sessions: { get: vi.fn().mockRejectedValue(missing) },
     computers: {
-      read: vi.fn(async ({ nodeId }: { nodeId: string }) => ({
+      read: vi.fn(({ nodeId }: { nodeId: string }) => Promise.resolve(({
         nodeId, managedWorkerPhase: nodeId === instance.nodeId ? "ready" : null,
-      })),
+      }))),
       readManagedWorker: vi.fn().mockResolvedValue({ instance }),
     },
   };

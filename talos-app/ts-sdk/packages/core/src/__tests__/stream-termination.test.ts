@@ -7,12 +7,12 @@ describe("TalosClient stream termination", () => {
   it("throws explicit termination errors for lagged timeline streams", async () => {
     const http: HttpAdapter = { request: vi.fn() };
     const stream = vi.fn().mockImplementation(
-      async (_url, _options, onMessage: (data: string) => void) => {
+       (_url, _options, onMessage: (data: string) => void) => Promise.resolve().then(() => {
         onMessage(JSON.stringify({
           reason: "lagged",
           message: "subscription lagged behind retained live events",
         }));
-      },
+       }),
     );
     const client = new TalosClient(http, { stream }, "http://localhost:8080");
 
@@ -27,12 +27,12 @@ describe("TalosClient stream termination", () => {
     const http: HttpAdapter = { request: vi.fn() };
     const onEvent = vi.fn();
     const stream = vi.fn().mockImplementation(
-      async (_url, _options, onMessage: (data: string) => void) => {
+       (_url, _options, onMessage: (data: string) => void) => Promise.resolve().then(() => {
         onMessage(JSON.stringify({
           reason: "completed",
           message: "event subscription completed",
         }));
-      },
+       }),
     );
     const client = new TalosClient(http, { stream }, "http://localhost:8080");
 

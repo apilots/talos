@@ -7,7 +7,7 @@ export function useLogout() {
   return async () => {
     try { await logoutUser(); } finally {
       useAppStore.getState().setConnection({ authToken: "", authStatus: "logged_out", authRole: "user", accountType: "Free", authUsername: "Anonymous", userId: "anonymous" });
-      navigate("/auth/logout");
+      void navigate("/auth/logout");
     }
   };
 }

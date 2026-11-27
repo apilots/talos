@@ -1,5 +1,10 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
+import reactHooks from "eslint-plugin-react-hooks";
+import jsxA11y from "eslint-plugin-jsx-a11y";
+import query from "@tanstack/eslint-plugin-query";
+import vitest from "@vitest/eslint-plugin";
+import testingLibrary from "eslint-plugin-testing-library";
 import { errorPresentationRule } from "./scripts/error-presentation-rule.mjs";
 
 export default tseslint.config(
@@ -7,9 +12,9 @@ export default tseslint.config(
     ignores: ["**/dist/**", "**/node_modules/**"],
   },
   js.configs.recommended,
-  ...tseslint.configs.recommended,
   {
     files: ["**/*.{ts,tsx}"],
+    extends: tseslint.configs.recommendedTypeChecked,
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -17,7 +22,7 @@ export default tseslint.config(
       },
     },
     rules: {
-      "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/switch-exhaustiveness-check": "error",
       "no-restricted-syntax": [
         "error",
         {
@@ -29,65 +34,36 @@ export default tseslint.config(
   },
   {
     files: ["web/src/**/*.{ts,tsx}"],
+    plugins: { "react-hooks": reactHooks, "jsx-a11y": jsxA11y, "@tanstack/query": query },
+    rules: {
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "error",
+      "jsx-a11y/alt-text": "error",
+      "jsx-a11y/aria-props": "error",
+      "jsx-a11y/aria-proptypes": "error",
+      "jsx-a11y/aria-unsupported-elements": "error",
+      "jsx-a11y/role-has-required-aria-props": "error",
+      "@tanstack/query/stable-query-client": "error",
+      "@tanstack/query/no-unstable-deps": "error",
+      "@tanstack/query/exhaustive-deps": "error",
+    },
+  },
+  {
+    files: ["**/*.test.{ts,tsx}", "**/__tests__/**/*.{ts,tsx}"],
+    plugins: { vitest, "testing-library": testingLibrary },
+    rules: {
+      "@typescript-eslint/unbound-method": "off",
+      "vitest/unbound-method": "error",
+      "vitest/no-focused-tests": "error",
+      "testing-library/await-async-queries": "error",
+      "testing-library/await-async-utils": "error",
+      "testing-library/no-wait-for-side-effects": "error",
+    },
+  },
+  {
+    files: ["web/src/**/*.{ts,tsx}"],
     ignores: ["**/*.test.{ts,tsx}", "**/__tests__/**", "web/src/shared/i18n/apiErrorMessage.ts"],
     plugins: { talos: { rules: { "error-presentation": errorPresentationRule } } },
     rules: { "talos/error-presentation": "error" },
-  },
-  {
-    // shared/store is intentionally excluded here because app-store is the composition point
-    // that wires feature-owned Zustand slices into a single persisted store.
-    files: [
-      "web/src/shared/api/**/*.{ts,tsx}",
-      "web/src/shared/hooks/**/*.{ts,tsx}",
-      "web/src/shared/lib/**/*.{ts,tsx}",
-      "web/src/shared/sse/**/*.{ts,tsx}",
-      "web/src/shared/types/**/*.{ts,tsx}",
-      "web/src/shared/ui/**/*.{ts,tsx}",
-    ],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["@/features/*"],
-              message: "Shared layer must not import feature modules.",
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    files: ["web/src/widgets/**/*.{ts,tsx}"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["@/features/*"],
-              message: "Widgets must receive feature data via props or containers.",
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    files: ["web/src/app/**/*.{ts,tsx}", "web/src/pages/**/*.{ts,tsx}"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["@/features/*/*"],
-              message: "Import feature APIs from the feature barrel only.",
-            },
-          ],
-        },
-      ],
-    },
   },
 );

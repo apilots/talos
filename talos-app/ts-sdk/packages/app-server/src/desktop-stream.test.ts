@@ -6,10 +6,10 @@ import {createNativeDesktopStream} from './desktop-stream';
 import {createElectronAppServerClient} from './desktop';
 import {TalosApiError} from '@talos/sdk-core';
 const grant={streamId:'stream',ticket:'one-use-ticket'} as AppProtocol.DesktopViewGrant;
-function fixture(){let receive:((frame:AppProtocol.DesktopMediaFrame)=>void)|undefined;const invoke=vi.fn(async()=>({status:'success',data:null}));const remove=vi.fn();const bridge={invoke,onDesktopFrame:(handler:typeof receive)=>{receive=handler;return remove;}} as unknown as DesktopRendererBridge;return{invoke,bridge,remove,receive:(frame:AppProtocol.DesktopMediaFrame)=>receive?.(frame)};}
+function fixture(){let receive:((frame:AppProtocol.DesktopMediaFrame)=>void)|undefined;const invoke=vi.fn(()=>Promise.resolve(({status:'success',data:null})));const remove=vi.fn();const bridge={invoke,onDesktopFrame:(handler:typeof receive)=>{receive=handler;return remove;}} as unknown as DesktopRendererBridge;return{invoke,bridge,remove,receive:(frame:AppProtocol.DesktopMediaFrame)=>receive?.(frame)};}
 describe('Desktop noVNC protected raw channel',()=>{
  it('binds admission to the current account and routes only its immutable stream',async()=>{
-  const f=fixture(),socket=createNativeDesktopStream(f.bridge,grant,{credential:{type:'existing_session_token',token:'account-token'}}),frames=vi.fn();socket.onmessage=frames;
+  const f=fixture(),socket=createNativeDesktopStream(f.bridge,grant,{credential:{type:'existing_session_token',token:'account-token'}}),frames=vi.fn<(event: MessageEvent<ArrayBuffer>) => void>();socket.onmessage=frames;
   await Promise.resolve();await Promise.resolve();
   expect(f.invoke).toHaveBeenCalledWith('desktop/streamOpen',{streamId:'stream',ticket:'one-use-ticket'},{actorCredentials:{credential:{type:'existing_session_token',token:'account-token'}}});
   f.receive({streamId:'other',dataBase64:'UkZC'});expect(frames).not.toHaveBeenCalled();
@@ -33,7 +33,7 @@ it('exposes the protected media lifecycle through the public Electron SDK and pr
  await Promise.resolve();await Promise.resolve();f.receive({streamId:'stream',dataBase64:'invalid%base64'});
  expect(failure).toHaveBeenCalledOnce();expect(socket.readyState).toBe(3);
  const second=fixture();second.invoke.mockResolvedValueOnce({status:'error',error:{code:'permissionDenied',message:'Desktop stream denied.',localization:null}} as never);
- const rejected=createElectronAppServerClient(second.bridge).desktop.connect(grant),error=vi.fn();rejected.onerror=error;
+ const rejected=createElectronAppServerClient(second.bridge).desktop.connect(grant),error=vi.fn<(event: Event & { error?: unknown }) => void>();rejected.onerror=error;
  await Promise.resolve();await Promise.resolve();await Promise.resolve();
  expect(error.mock.calls[0][0].error).toBeInstanceOf(TalosApiError);expect(rejected.readyState).toBe(3);
 });

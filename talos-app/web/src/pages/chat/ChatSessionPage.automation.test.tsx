@@ -73,7 +73,7 @@ describe("ChatSessionPage automation admission", () => {
     await waitFor(() => expect(apiMocks.list).toHaveBeenCalledOnce());
     mocks.session = { ...mocks.session as object, nodeId: "other-computer" };
     view.rerender(<MemoryRouter initialEntries={["/sessions/sess-1"]}><Routes><Route element={<ChatSessionPage />} path="/sessions/:sessionId" /></Routes></MemoryRouter>);
-    await act(async () => { release({ data: [{ name: "goal", scope: "system", enabled: true, read_only: true, path: "/actual-worker/goal/SKILL.md" }] }); });
+    await act(() => { release({ data: [{ name: "goal", scope: "system", enabled: true, read_only: true, path: "/actual-worker/goal/SKILL.md" }] });  return Promise.resolve(); });
     expect(await observed).toBe("AbortError");
     expect(mocks.sendTurn).not.toHaveBeenCalled();
   });
@@ -111,7 +111,7 @@ describe("ChatSessionPage automation admission", () => {
     mocks.draft = "Resume this conversation";
     mocks.realComposer = true;
     const view = renderSessionPage();
-    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole<HTMLButtonElement>("button", { name: "Send" })).disabled).toBe(true);
 
     mocks.session = session;
     mocks.sessionError = undefined;
@@ -119,7 +119,6 @@ describe("ChatSessionPage automation admission", () => {
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
     await waitFor(() => expect(mocks.sendTurn).toHaveBeenCalledOnce());
   });
-
 
 });
 function sessionMissing() {

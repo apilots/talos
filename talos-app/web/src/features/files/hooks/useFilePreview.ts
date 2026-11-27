@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import type { FilePreviewDescriptor, FilePreviewSource } from "@talos/sdk-core";
 import { getTalosClient } from "@/shared/api/client";
 
@@ -33,9 +33,11 @@ export function useFilePreview(source: FilePreviewSource, scope: string, instanc
 }
 
 export function usePreviewContent(descriptor: FilePreviewDescriptor | undefined, enabled: boolean, resourcePath = descriptor?.entryPath) {
+  const previewId = descriptor?.previewId;
   return useQuery({
-    queryKey: ["talos", "preview-content", descriptor?.previewId, resourcePath],
-    queryFn: () => getTalosClient().files.preview.content(descriptor!, resourcePath),
+    queryKey: ["talos", "preview-content", previewId, resourcePath],
+    queryFn: previewId !== undefined && resourcePath !== undefined
+      ? () => getTalosClient().files.preview.content({ previewId, entryPath: resourcePath }) : skipToken,
     enabled: !!descriptor && enabled, retry: false, refetchOnWindowFocus: false,
   });
 }

@@ -20,7 +20,6 @@ arboard = "3.6.1"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 talos-error = { workspace = true }
 talos-types = { workspace = true }
-talos-tools-policy = { workspace = true }
 talos-sdk = { path = "../sdk" }
 talos-sdk-embedded = { path = "../sdk-embedded" }
 talos-base = { workspace = true }

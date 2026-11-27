@@ -22,7 +22,7 @@ export function ComputerRail() {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => { setOpen(false); trigger.current?.focus(); }, []);
-  const select = (id: string) => { computers.select(id); navigate("/"); };
+  const select = (id: string) => { computers.select(id); void navigate("/"); };
   return <aside aria-label={t("title")} className="relative z-30 flex h-screen flex-col items-center gap-2 bg-surface px-2 py-4">
     <Link to="/" title="Talos" className="mb-3 flex size-10 items-center justify-center rounded-xl text-ink hover:bg-hover"><Home size={21} /></Link>
     {computers.quickNodes.map((node) => <ComputerItem key={node.nodeId} node={node} compact selected={node.nodeId === computers.selectedId} local={node.nodeId === computers.localNode?.nodeId} localRuntime={computers.runtime} onSelect={() => select(node.nodeId)} />)}

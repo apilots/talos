@@ -67,7 +67,7 @@ export function ComputersPage() {
     current?.service ?? (!inspectedId ? "controlPlane" : undefined);
   const open = (id: string) => {
     computers.select(id);
-    navigate("/");
+    void navigate("/");
   };
   const inspect = (id: string) =>
     setInspection({ scope: computers.scope, nodeId: id });

@@ -137,10 +137,11 @@ export function useTaloController(fallbackInstance?: AppProtocol.ManagedWorkerIn
     }
   }, [desktopIntent, instance?.instanceId, instance?.generation, instance?.nodeId, phase, status.isSuccess, onOpenDesktop]);
 
+  const mutateAction = action.mutate;
   const perform = useCallback((kind: TaloAction, current = instance) => {
     setDesktopIntent(undefined);
-    action.mutate({ kind, current });
-  }, [action, instance]);
+    mutateAction({ kind, current });
+  }, [mutateAction, instance]);
 
   const connectDesktop = useCallback(() => {
     if (!instance || phase === "deleting") return;

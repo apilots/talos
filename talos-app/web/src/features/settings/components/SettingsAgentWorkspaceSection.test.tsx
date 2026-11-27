@@ -9,9 +9,9 @@ import { i18n } from "@/shared/i18n/setup";
 import { SettingsPersonalizationSection } from "./SettingsPersonalizationSection";
 
 vi.mock("@/shared/api/client", () => ({
-  getTalosClient: () => ({ workspaceDocs: { info: async () => ({
+  getTalosClient: () => ({ workspaceDocs: { info:  () => Promise.resolve(({
     workspaceId: "team", rootPrefix: "/srv/talos/workspace-team", userWorkspaceDir: "/srv/talos/workspace-team/alice",
-  }) } }),
+  })) } }),
 }));
 
 vi.mock("@/features/connection", () => ({

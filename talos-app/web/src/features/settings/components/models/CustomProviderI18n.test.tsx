@@ -80,7 +80,7 @@ it.each(["en", "zh-CN"] as const)("localizes history policy and inserts only the
   const chinese = locale === "zh-CN";
   const instance = createInstance();
   await instance.init({ resources, lng: locale, fallbackLng: false, interpolation: { escapeValue: false } });
-  const saved = vi.fn();
+  const saved = vi.fn<(model: ReturnType<typeof formToModel>) => void>();
   function Harness() {
     const [form, setForm] = useState({ ...emptyModelForm, id: "local-model" });
     return <SettingsModelModal allowReasoningReplay mode="add" form={form} saving={false} error="" onChange={setForm} onSave={() => saved(formToModel(form))} onClose={vi.fn()} />;

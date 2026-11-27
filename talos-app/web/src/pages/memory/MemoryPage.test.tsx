@@ -8,8 +8,8 @@ import "@/shared/i18n/setup";
 import { i18n } from "@/shared/i18n/setup";
 import { MemoryPage } from "./MemoryPage";
 
-const useMemoryPageMock = vi.fn();
-const useConnectionSettingsMock = vi.fn();
+const useMemoryPageMock = vi.fn<typeof buildMemoryState>();
+const useConnectionSettingsMock = vi.fn<() => { connection: import("@/features/connection/store").ConnectionState }>();
 
 vi.mock("@/features/memory", () => ({
   formatMemoryDate: () => "Apr 21, 2026",
@@ -24,13 +24,13 @@ vi.mock("@/widgets/message-list/MarkdownRenderer", () => ({
   MarkdownRenderer: ({ text }: { text: string }) => <div data-testid="markdown-preview">{text}</div>,
 }));
 
-function buildMemoryState() {
+function buildMemoryState(): ReturnType<typeof import("@/features/memory").useMemoryPage> {
   return {
     query: "",
     setQuery: vi.fn(),
     files: [
       {
-        date: "2026-04-21",
+        date: "2026-04-21", section_count: 1, updated_at: 1776393847462, version_token: "token-1",
       },
     ],
     searchResults: [],
@@ -48,6 +48,7 @@ function buildMemoryState() {
     setEditorContent: vi.fn(),
     selectDate: vi.fn(),
     selectMemory: vi.fn(),
+    openToday: vi.fn(),
     saveCurrent: vi.fn(),
     isDirty: false,
     isLoadingList: false,
@@ -88,9 +89,9 @@ describe("MemoryPage", () => {
   it("loads a search hit by id and opens its source file explicitly", async () => {
     await i18n.changeLanguage("en");
     useConnectionSettingsMock.mockReturnValue({
-      connection: { authStatus: "authenticated" },
+      connection: { authStatus: "authenticated", authRole: "user", authToken: "", accountType: "Free", authUsername: "user", userId: "user" },
     });
-    const state = {
+    const state: ReturnType<typeof buildMemoryState> = {
       ...buildMemoryState(),
       query: "architecture",
       searchResults: [

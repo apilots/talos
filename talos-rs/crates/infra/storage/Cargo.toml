@@ -20,7 +20,6 @@ talos-error = { path = "../error" }
 talos-config = { path = "../config" }
 
 # Serialization
-serde = { workspace = true }
 serde_json = { workspace = true }
 
 # Logging

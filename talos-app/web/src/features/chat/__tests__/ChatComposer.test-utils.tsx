@@ -83,7 +83,7 @@ export function renderWithQueryClient(element: React.ReactElement) {
 }
 
 export function getComposerInput() {
-  return screen.getByRole("textbox") as HTMLTextAreaElement;
+  return screen.getByRole<HTMLTextAreaElement>("textbox");
 }
 
 export function getComposerValue(editor = getComposerInput()) {

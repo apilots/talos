@@ -14,10 +14,8 @@ export function useLlmEnvironmentKey(nodeId?: string) {
 }
 
 export function useLlmConfigQuery(nodeId?: string) {
-  const connectionKey = useLlmEnvironmentKey(nodeId);
-
   return useQuery({
-    queryKey: llmConfigKey(connectionKey),
+    queryKey: llmConfigKey(useLlmEnvironmentKey(nodeId)),
     queryFn: () => (nodeId ? getLlmConfig(nodeId) : getLlmConfig()),
   });
 }

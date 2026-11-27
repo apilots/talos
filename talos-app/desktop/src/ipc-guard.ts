@@ -68,19 +68,19 @@ const pluginSearchParams = (params: unknown) =>
   isRecord(params) &&
   (params.query === null || typeof params.query === "string") &&
   (params.source_id === null || typeof params.source_id === "string") &&
-  (params.kind === null || ["skill", "mcp_server", "package", "feature"].includes(String(params.kind))) &&
+  (params.kind === null || (typeof params.kind === "string" && ["skill", "mcp_server", "package", "feature"].includes(params.kind))) &&
   (params.status === null ||
-    ["any", "not_installed", "installed", "update_available", "conflict"].includes(String(params.status))) &&
-  ["cache_only", "refresh_stale", "force_refresh"].includes(String(params.refresh)) &&
+    (typeof params.status === "string" && ["any", "not_installed", "installed", "update_available", "conflict"].includes(params.status))) &&
+  (typeof params.refresh === "string" && ["cache_only", "refresh_stale", "force_refresh"].includes(params.refresh)) &&
   (params.limit === null || typeof params.limit === "number");
 const pluginKind = (value: unknown) =>
-  value === null || value === undefined || ["skill", "mcp_server", "package", "feature"].includes(String(value));
+  value === null || value === undefined || (typeof value === "string" && ["skill", "mcp_server", "package", "feature"].includes(value));
 const pluginListParams = (params: unknown) =>
   isRecord(params) &&
   pluginKind(params.kind) &&
   (params.status === null ||
     params.status === undefined ||
-    ["installed", "disabled", "update_available", "source_missing", "conflict"].includes(String(params.status))) &&
+    (typeof params.status === "string" && ["installed", "disabled", "update_available", "source_missing", "conflict"].includes(params.status))) &&
   (params.source_id === null || params.source_id === undefined || typeof params.source_id === "string") &&
   typeof params.include_disabled === "boolean";
 const pluginInstallParams = (params: unknown) => {

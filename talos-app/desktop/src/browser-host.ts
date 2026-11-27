@@ -11,6 +11,11 @@ type Operation = { cancelled: boolean; stop:AbortController; user: string; gener
 const keyCodes: Record<string, number> = { Enter:13, Tab:9, Escape:27, Backspace:8, Delete:46, ArrowLeft:37, ArrowUp:38, ArrowRight:39, ArrowDown:40, Home:36, End:35, PageUp:33, PageDown:34, Space:32 };
 
 /** Only dedicated website views are attached. The product renderer is never a target. */
+function browserText(value: unknown, fallback = ""): string {
+  if (value == null) return fallback;
+  if (typeof value !== "string") throw new Error("Invalid browser text response.");
+  return value;
+}
 export class DesktopBrowserHost {
   private readonly operations = new Map<string, Operation>();
   private readonly accounts = new Map<string, WebsiteAccount>();
@@ -169,7 +174,7 @@ export class DesktopBrowserHost {
           tab=tabs.find(t=>t.id===tabId);
           if(!tab) throw new Error("Unknown browser tab.");
           const selectedId=tab.id;
-          if (action.action==="close") {check();await wait(()=>owner.remove(selectedId));const remaining=await wait(()=>owner.tabs(check));tab=remaining.find(value=>value.id===operation.targetId)??remaining[0];}
+          if (action.action==="close") {check();await wait(()=>Promise.resolve(owner.remove(selectedId)));const remaining=await wait(()=>owner.tabs(check));tab=remaining.find(value=>value.id===operation.targetId)??remaining[0];}
           else if (connected) {check();await wait(()=>this.chrome!.focus(selectedId));}
         }
       }
@@ -192,7 +197,7 @@ export class DesktopBrowserHost {
         for(let attempt=0;attempt<50;attempt++) {const ready=await send("Runtime.evaluate",{expression:"document.readyState",returnByValue:true});if(object(ready.result).value==="complete")break;await new Promise(resolve=>setTimeout(resolve,50));check();}
       }
       const frameTree=object((await send("Page.getFrameTree")).frameTree);
-      const frame=object(frameTree.frame); const loaderId=String(frame.loaderId ?? "");
+      const frame=object(frameTree.frame); const loaderId=browserText(frame.loaderId);
       if (action.kind==="click" || action.kind==="fill" || action.kind==="upload") {
         const element=operation.element;
         if(!element || element.targetId!==current.id || element.loaderId!==loaderId) throw new Error("Stale browser element. Inspect the page again.");
@@ -267,7 +272,7 @@ export class DesktopBrowserHost {
       const screenshot=action.kind==="screenshot" ? connected ? String((await send("Page.captureScreenshot",{format:"png",captureBeyondViewport:false})).data) : await wait(()=>account.screenshot(current.id)) : null;
       if(screenshot && screenshot.length>6*1024*1024)throw new Error("Browser screenshot is too large.");
       tabs=await wait(()=>owner.tabs(check));
-      return {kind:"observation",page:{targetId:current.id,url:current.url()==="about:blank"?"about:blank":String(frame.url??current.url()),title:String(titleResult.value??current.title()),text:String(textResult.value??""),tabs:tabs.slice(0,32).map(t=>({tabId:t.id,title:t.title(),url:t.url()}))},loaderId,elements,screenshot,downloads};
+      return {kind:"observation",page:{targetId:current.id,url:current.url()==="about:blank"?"about:blank":browserText(frame.url,current.url()),title:browserText(titleResult.value,current.title()),text:browserText(textResult.value),tabs:tabs.slice(0,32).map(t=>({tabId:t.id,title:t.title(),url:t.url()}))},loaderId,elements,screenshot,downloads};
     } finally {
       try {
         // Cleanup uses the raw tracked sender: the cancelled operation's wrapper
@@ -283,7 +288,6 @@ export class DesktopBrowserHost {
   }
 }
 function object(value:unknown):RecordValue {return typeof value==="object"&&value!==null ? value as RecordValue : {};}
-
 
 /** Explicitly authorized, fixed loopback Chrome; never scans profiles or remote endpoints. */
 class ChromeConnection {

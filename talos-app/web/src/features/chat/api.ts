@@ -1,6 +1,5 @@
 import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 import type {
-  ModelInfo,
   ModelSelection,
   AgentUserContent,
   AgentUserInput,
@@ -187,10 +186,6 @@ export async function submitTurnInput(
   return (await getTalosClient({ sessionId: request.identity.sessionId })).turns.input(request);
 }
 
-export async function closeSession(sessionId: string) {
-  await (await getTalosClient({ sessionId })).sessions.close({ sessionId });
-}
-
 export async function deleteSession(sessionId: string) {
   await (await getTalosClient({ sessionId })).sessions.delete({ sessionId });
 }
@@ -269,16 +264,4 @@ export async function subscribeTimelineEvents(
     { ...options, persistent: true },
   );
 }
-
-export function belongsToProject(session: SessionInfo, project?: ProjectView) {
-  if (!project || isUnboundProject(project.id)) {
-    return !session.projectId;
-  }
-  return session.projectId === project.id;
-}
-
-export type ChatApiModel = ModelInfo;
-export type ChatApiSession = SessionInfo;
-export type ChatApiActiveTurn = Awaited<ReturnType<typeof getActiveTurn>>;
 export type ChatApiSessionHistory = SessionHistoryResponse;
-export type ChatApiSessionDetail = SessionInfo;

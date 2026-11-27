@@ -38,18 +38,18 @@ async function offlineOrdinaryWorker(verifyNode: boolean) {
     http.mockResolvedValueOnce(Response.json({ status: "success", data: { nodeId, managedWorkerPhase: null } }));
     await getTalosClient({ nodeId });
     expect(http).toHaveBeenCalledWith(expect.stringContaining(nodeId), expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: "Bearer alice-token" }),
+      headers: expect.objectContaining({ Authorization: "Bearer alice-token" }) as unknown,
     }));
     productQueries.clear();
   }
   http.mockReset().mockRejectedValue(new TypeError("Server offline"));
-  invoke.mockImplementation(async (method: string, params: AppProtocol.FileUploadParams) => {
-    if (method === "computer/read" || method === "model/list") return { status: "error", error: {
+  invoke.mockImplementation((method: string, params: AppProtocol.FileUploadParams) => {
+    if (method === "computer/read" || method === "model/list") return Promise.resolve({ status: "error", error: {
       code: "serviceUnavailable", message: "Computer directory offline.", localization: null,
-    } };
-    if (method === "file/upload") return { status: "success", data: { file: {
+    } });
+    if (method === "file/upload") return Promise.resolve({ status: "success", data: { file: {
       ...file, fileId: "staged", originalFilename: params.request.filename, scope: params.request.scope,
-    } } };
+    } } });
     const modelRef = { provider: "fixture", id: "document-model" };
     const modelSelection = { modelRef, reasoningEffort: null };
     const responses: Record<string, unknown> = {
@@ -62,7 +62,7 @@ async function offlineOrdinaryWorker(verifyNode: boolean) {
       "file/read": { file },
     };
     const data = responses[method];
-    return { status: "success", data };
+    return Promise.resolve({ status: "success", data });
   });
   const connection = useAppStore.getState().connection;
   useAppStore.getState().selectComputer(connectionScope(connection), nodeId);
@@ -80,21 +80,21 @@ it("lists and uploads Files for a verified ordinary Worker after an offline rest
   fireEvent.change(container.querySelector("input[type=file]")!, { target: { files: [new File(["notes"], "notes.txt")] } });
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("file/upload", expect.objectContaining({ request: expect.objectContaining({
     scope: { type: "personal" }, filename: "notes.txt",
-  }) }), expect.anything()));
+  }) as unknown }), expect.anything()));
   expect(http).not.toHaveBeenCalled();
 });
 
 it("stages a project attachment in a saved standard chat without prior online Computer verification", async () => {
   const { file, wrapper, invoke, sessionId } = await offlineOrdinaryWorker(false);
   const { container } = render(<MemoryRouter><ChatSessionContent sessionId={sessionId} /></MemoryRouter>, { wrapper });
-  await waitFor(() => expect((screen.getByRole("button", { name: "Add" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 4_000 });
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  await waitFor(() => expect((screen.getByRole<HTMLButtonElement>("button", { name: "Add" })).disabled).toBe(false), { timeout: 4_000 });
+  fireEvent.click(screen.getByRole<HTMLButtonElement>("button", { name: "Add" }));
   fireEvent.click(screen.getByRole("button", { name: "Choose an existing file" }));
   fireEvent.click(await screen.findByText(file.originalFilename));
   fireEvent.change(container.querySelector("input[type=file]")!, { target: { files: [new File(["draft"], "draft.txt")] } });
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("file/upload", expect.objectContaining({ request: expect.objectContaining({
     scope: file.scope, filename: "draft.txt",
-  }) }), expect.anything()));
+  }) as unknown }), expect.anything()));
   await screen.findByText("draft.txt");
-  expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole<HTMLButtonElement>("button", { name: "Send" })).disabled).toBe(true);
 });

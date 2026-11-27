@@ -61,16 +61,16 @@ pub(super) fn encode_plugin_definition(
     Ok(pb::PluginDefinition {
         value: Some(match value {
             d::PluginDefinition::Skill(value) => {
-                pb::plugin_definition::Value::Skill(encode_skill_plugin(value)?)
+                pb::plugin_definition::Value::Skill(Box::new(encode_skill_plugin(value)?))
             }
             d::PluginDefinition::McpServer(value) => {
-                pb::plugin_definition::Value::McpServer(encode_mcp_server_plugin(value)?)
+                pb::plugin_definition::Value::McpServer(Box::new(encode_mcp_server_plugin(value)?))
             }
             d::PluginDefinition::Package(value) => {
-                pb::plugin_definition::Value::Package(encode_package_plugin(value)?)
+                pb::plugin_definition::Value::Package(Box::new(encode_package_plugin(value)?))
             }
             d::PluginDefinition::Feature(value) => {
-                pb::plugin_definition::Value::Feature(encode_feature_plugin(value)?)
+                pb::plugin_definition::Value::Feature(Box::new(encode_feature_plugin(value)?))
             }
         }),
     })
@@ -80,16 +80,16 @@ pub(super) fn decode_plugin_definition(
 ) -> TalosResult<d::PluginDefinition> {
     Ok(match value.value.ok_or_else(invalid)? {
         pb::plugin_definition::Value::Skill(value) => {
-            d::PluginDefinition::Skill(decode_skill_plugin(value)?)
+            d::PluginDefinition::Skill(decode_skill_plugin(*value)?)
         }
         pb::plugin_definition::Value::McpServer(value) => {
-            d::PluginDefinition::McpServer(decode_mcp_server_plugin(value)?)
+            d::PluginDefinition::McpServer(decode_mcp_server_plugin(*value)?)
         }
         pb::plugin_definition::Value::Package(value) => {
-            d::PluginDefinition::Package(decode_package_plugin(value)?)
+            d::PluginDefinition::Package(decode_package_plugin(*value)?)
         }
         pb::plugin_definition::Value::Feature(value) => {
-            d::PluginDefinition::Feature(decode_feature_plugin(value)?)
+            d::PluginDefinition::Feature(decode_feature_plugin(*value)?)
         }
     })
 }

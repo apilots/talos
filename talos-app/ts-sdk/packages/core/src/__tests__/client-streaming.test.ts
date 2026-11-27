@@ -6,16 +6,15 @@ import type { AgentEvent, StartTurnRequest, TimelineEvent } from "../types";
 
 describe("TalosClient streaming", () => {
   it("uses ack plus events for streaming messages", async () => {
-    const http: HttpAdapter = {
-      request: vi.fn().mockResolvedValue({
+    const request = vi.fn<HttpAdapter["request"]>().mockResolvedValue({
         requestId: "req-1",
         messageId: "msg-1",
         sessionId: "session-1",
         turnId: "turn-1",
         status: "accepted",
-      }),
-    };
-    const stream = vi.fn().mockImplementation(async (_url, _options, onMessage) => {
+      });
+    const http: HttpAdapter = { request: request as HttpAdapter["request"] };
+    const stream = vi.fn<import("../adapters").StreamAdapter["stream"]>().mockImplementation((_url, _options, onMessage) => {
       onMessage(JSON.stringify(timelineEvent({
         identity: { sessionId: "session-1", turnId: "turn-1" },
         sequence: 1,
@@ -25,7 +24,7 @@ describe("TalosClient streaming", () => {
         },
         occurredAt: 1,
       })));
-    });
+     return Promise.resolve(); });
     const streamAdapter: StreamAdapter = { stream };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
     const startRequest: StartTurnRequest = {
@@ -49,10 +48,10 @@ describe("TalosClient streaming", () => {
         method: "POST",
       }),
     );
-    const [, startOptions] = vi.mocked(http.request).mock.calls[0];
-    expect(JSON.parse(String(startOptions?.body))).toEqual({
+    const [, startOptions] = request.mock.calls[0];
+    expect(JSON.parse((typeof startOptions?.body === "string" ? startOptions.body : ""))).toEqual({
       ...startRequest,
-      clientRequestId: expect.any(String),
+      clientRequestId: expect.any(String) as unknown,
     });
     expect(stream).toHaveBeenCalledWith(
       "http://localhost:8080/v1/sessions/session-1/events",
@@ -68,7 +67,7 @@ describe("TalosClient streaming", () => {
       request: vi.fn(),
     };
     const onEvent = vi.fn();
-    const stream = vi.fn().mockImplementation(async (_url, options, onMessage) => {
+    const stream = vi.fn<import("../adapters").StreamAdapter["stream"]>().mockImplementation((_url, options, onMessage) => {
       onMessage(JSON.stringify(timelineEvent({
         identity: { sessionId: "session-1", turnId: "turn-other" },
         sequence: 1,
@@ -87,8 +86,8 @@ describe("TalosClient streaming", () => {
         },
         occurredAt: 2,
       })));
-      expect(options.signal.aborted).toBe(true);
-    });
+      expect(options.signal?.aborted).toBe(true);
+     return Promise.resolve(); });
     const streamAdapter: StreamAdapter = { stream };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
@@ -100,7 +99,7 @@ describe("TalosClient streaming", () => {
       event: { type: "agent", data: expect.objectContaining({
         identity: { sessionId: "session-1", turnId: "turn-1" },
         payload: { type: "turnCompleted", data: { stopReason: "endTurn" } },
-      }) },
+      }) as unknown },
     }));
   });
 

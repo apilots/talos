@@ -7,13 +7,13 @@ import { createDesktopTalosClient } from "./desktop-client";
 describe("createDesktopTalosClient profile", () => {
   it("exposes profile reads through the desktop bridge", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-    const bridge = bridgeWithInvoke(async function <T>(
+    const bridge = bridgeWithInvoke( function <T>(
       method: AppProtocol.ClientMethod,
       params?: unknown,
     ): Promise<T> {
       calls.push({ method, params });
       if (method === "profile/read") {
-        return {
+        return Promise.resolve({
           sessionCount: 1,
           messageCount: 2,
           projectCount: 3,
@@ -29,9 +29,9 @@ describe("createDesktopTalosClient profile", () => {
           usageStartedAt: null,
           modelUsage: [],
           dailyUsage: [],
-        } as T;
+        } as T);
       }
-      throw new Error(`unexpected method: ${method}`);
+      return Promise.reject(new Error(`unexpected method: ${method}`));
     });
     const client = createDesktopTalosClient(bridge);
 

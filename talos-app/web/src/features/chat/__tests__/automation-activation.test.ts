@@ -6,7 +6,7 @@ import { useAppStore } from "@/shared/store/app-store";
 import type { AgentMessage, AutomationMode } from "@talos/sdk-browser";
 
 function selectMode(message: AgentMessage, mode: AutomationMode) {
-  message.blocks.push({ ...message.blocks[0]!, blockId: `selected-${mode}`, content: { type: "userContent", data: { type: "skillSelection", name: mode, path: `/actual-worker/${mode}/SKILL.md` } } });
+  message.blocks.push({ ...message.blocks[0], blockId: `selected-${mode}`, content: { type: "userContent", data: { type: "skillSelection", name: mode, path: `/actual-worker/${mode}/SKILL.md` } } });
 }
 function visibleBlocks(history = buildBlocksFromHistorySnapshot(undefined)) {
   return buildSessionBlocks({ sessionId: "sess-1", streamState: useAppStore.getState().streams["sess-1"], history,
@@ -30,7 +30,7 @@ it.each(["goal", "loop"] as const)("shows the original %s selection after admiss
   expect(live[0]).not.toHaveProperty("automationOrigin");
   expect(live[1]).not.toHaveProperty("activationMode");
   const history = sessionHistory([historyTextItem("first", "user_input", "input", "same text"), historyTextItem("steer", "user_input", "input", "same text")]);
-  selectMode(history.data[0]!.result.result.messages[0]!, mode);
+  selectMode(history.data[0].result.result.messages[0], mode);
   const restored = buildBlocksFromHistorySnapshot(history).blocks.filter((block) => block.kind === "user");
   expect(restored[0]).toMatchObject({ activationMode: mode });
   expect(restored[0]).not.toHaveProperty("automationOrigin");
@@ -41,9 +41,9 @@ it("fills only same-ID missing activation metadata while keeping original live c
   applyStreamEvent("sess-1", userInputStarted("first", "live text", 1, ["live-file"]));
   applyStreamEvent("sess-1", userInputStarted("steer", "live text", 2));
   const history = sessionHistory([historyTextItem("first", "user_input", "input", "older text"), historyTextItem("steer", "user_input", "input", "live text")]);
-  selectMode(history.data[0]!.result.result.messages[0]!, "goal");
+  selectMode(history.data[0].result.result.messages[0], "goal");
   const bound = { type: "goal" as const, goalId: "actual-goal", objectiveRevision: 1 };
-  history.data[0]!.automationInput = { messageId: "msg-first", origin: bound };
+  history.data[0].automationInput = { messageId: "msg-first", origin: bound };
   const blocks = visibleBlocks(buildBlocksFromHistorySnapshot(history));
   expect(blocks).toHaveLength(2);
   expect(blocks[0]).toMatchObject({ text: "live text", fileIds: ["live-file"], activationMode: "goal", automationOrigin: bound });
@@ -56,12 +56,11 @@ it("retains a learned selection on same-ID snapshot restore without copying it t
   selectMode(first.event.data.payload.data.message, "loop");
   applyStreamEvent("sess-1", first);
   const history = sessionHistory([historyTextItem("first", "user_input", "input", "canonical text"), historyTextItem("steer", "user_input", "input", "live text")]);
-  restoreActiveTurn("sess-1", activeTurn({ lastEventSeq: 3, messages: history.data[0]!.result.result.messages }));
+  restoreActiveTurn("sess-1", activeTurn({ lastEventSeq: 3, messages: history.data[0].result.result.messages }));
   const blocks = visibleBlocks();
   expect(blocks[0]).toMatchObject({ text: "canonical text", activationMode: "loop" });
   expect(blocks[1]).not.toHaveProperty("activationMode");
 });
-
 
 it("fills only the accepted pending message's canonical block without duplicate cards or Steer labels", () => {
   useAppStore.getState().setPendingInput("sess-1", { text: "original draft", fileIds: [], activationMode: "goal", clientMessageId: "local", phase: "local" });

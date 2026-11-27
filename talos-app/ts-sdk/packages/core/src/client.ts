@@ -506,7 +506,7 @@ export class TalosClient {
       if (request.query != null) query.set("query", request.query);
       if (request.cursor != null) query.set("cursor", request.cursor);
       if (request.limit != null) query.set("limit", String(request.limit));
-      const suffix = query.size ? `?${query}` : "";
+      const suffix = query.size ? `?${query.toString()}` : "";
       const url = this.url(`/v1/computers${suffix}`);
       return signal ? this.http.request<ComputerListResponse>(url, { signal }) : this.http.request<ComputerListResponse>(url);
     },

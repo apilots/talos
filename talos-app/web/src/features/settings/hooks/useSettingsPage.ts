@@ -14,7 +14,7 @@ export type SettingsSection =
   | "runtime"
   | "server";
 
-export const settingsSections: SettingsSection[] = [
+const settingsSections: SettingsSection[] = [
   "profile",
   "general",
   "appearance",

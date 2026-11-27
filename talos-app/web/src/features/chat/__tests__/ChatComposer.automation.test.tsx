@@ -84,7 +84,6 @@ it("labels the shared Add menu honestly for text-only models and keeps Goal/Loop
   expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
 });
 
-
 it.each(["goal", "loop"] as const)("offers %s through the same Home catalog for slash and Add without a Session controller", async (mode) => {
   const onSend = vi.fn().mockResolvedValue(undefined);
   renderControlledComposer({ initialDraft: "", supportedAttachmentKinds: [], automationCommands: [{ mode, command: `/${mode}`, description: "Shared command" }], onSend });
@@ -114,6 +113,6 @@ it.each(["Enter", "Send"])("retains a one-shot mode until admission and consumes
   expect(screen.getByTestId("automation-mode-chip")).toHaveTextContent("Goal");
   fireEvent.keyDown(getComposerInput(), { key: "Enter" });
   expect(onSend).toHaveBeenCalledTimes(1);
-  await act(async () => { accept(); });
+  await act(() => { accept();  return Promise.resolve(); });
   expect(screen.queryByTestId("automation-mode-chip")).not.toBeInTheDocument();
 });

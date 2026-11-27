@@ -13,7 +13,6 @@ import { SettingsModelModal } from "./SettingsModelModal";
 import { emptyModelForm, formToModel, modelToForm, type ModelFormState } from "./modelForm";
 import { parseRequestParameters } from "./requestParameters";
 
-
 installRadixTestEnvironment();
 
 afterEach(cleanup);
@@ -85,7 +84,7 @@ describe("custom provider configuration", () => {
   });
 
   it("reuses the model form, leaves advanced collapsed, and fills only requested KV examples", async () => {
-    const saved = vi.fn();
+    const saved = vi.fn<(model: ReturnType<typeof formToModel>) => void>();
     function Harness() {
       const [form, setForm] = useState({ ...emptyModelForm, id: "model" });
       return <SettingsModelModal mode="add" form={form} saving={false} error="" onChange={setForm} onSave={() => saved(formToModel(form))} onClose={() => {}} />;
@@ -130,7 +129,7 @@ it("preserves HTTP deadlines when editing a connection and explicit efforts when
 });
 
 it("edits accepted effort levels independently of the thinking parameter", async () => {
-  const saved = vi.fn();
+  const saved = vi.fn<(model: ReturnType<typeof formToModel>) => void>();
   function Harness() {
     const [form, setForm] = useState({ ...emptyModelForm, id: "opaque", reasoning: true, request_parameters: [{ key: "enable_thinking", value: "true" }] });
     return <SettingsModelModal mode="edit" form={form} saving={false} error="" onChange={setForm} onSave={() => saved(formToModel(form))} onClose={() => {}} />;
@@ -144,7 +143,7 @@ it("edits accepted effort levels independently of the thinking parameter", async
 });
 
 it("selects a default from declared effort choices", async () => {
-  const saved = vi.fn();
+  const saved = vi.fn<(model: ReturnType<typeof formToModel>) => void>();
   function Harness() {
     const [form, setForm] = useState<ModelFormState>({ ...emptyModelForm, id: "opaque", reasoning: true, reasoning_efforts: ["light", "medium", "xhigh"] });
     return <SettingsModelModal mode="edit" form={form} saving={false} error="" onChange={setForm} onSave={() => saved(formToModel(form))} onClose={() => {}} />;

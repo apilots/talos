@@ -81,10 +81,10 @@ pub struct McpToolDescriptor {
     #[ts(type = "unknown")]
     pub input_schema: Value,
     #[serde(default)]
-    #[ts(type = "unknown | null")]
+    #[ts(type = "unknown")]
     pub output_schema: Option<Value>,
     #[serde(default)]
-    #[ts(type = "unknown | null")]
+    #[ts(type = "unknown")]
     pub annotations: Option<Value>,
 }
 
@@ -198,7 +198,7 @@ pub struct McpCallToolResponse {
     #[serde(default)]
     pub is_error: bool,
     #[serde(default)]
-    #[ts(type = "unknown | null")]
+    #[ts(type = "unknown")]
     pub structured_content: Option<Value>,
 }
 

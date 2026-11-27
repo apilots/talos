@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { expect, it, vi } from "vitest";
 import { createBrowserTalosClient, type FileUploadProgress } from "@talos/sdk-browser";
@@ -10,9 +10,12 @@ it("reports the encoded bytes delivered through the fixed Desktop Server transpo
   let receivedBytes = 0;
   let receivedFile = "";
   let authorization: string | undefined;
-  const server = createServer(async (request, response) => {
+  async function handleRequest(request: IncomingMessage, response: ServerResponse) {
     const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    for await (const chunk of request) {
+      if (!(chunk instanceof Uint8Array)) throw new Error("Expected a binary request chunk.");
+      chunks.push(Buffer.from(chunk));
+    }
     const bytes = Buffer.concat(chunks);
     receivedBytes = bytes.byteLength;
     authorization = request.headers.authorization;
@@ -20,6 +23,9 @@ it("reports the encoded bytes delivered through the fixed Desktop Server transpo
     receivedFile = await (form.get("file") as Blob).text();
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ status: "success", data: { file: {} } }));
+  }
+  const server = createServer((request, response) => {
+    void handleRequest(request, response).catch((error: Error) => response.destroy(error));
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");

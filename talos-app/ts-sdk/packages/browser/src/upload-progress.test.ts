@@ -35,7 +35,7 @@ describe("selected fetch upload progress", () => {
     let attempts = 0;
     let completedBytes = 0;
     const send = vi.fn<typeof fetch>(async (input, init) => {
-      if (String(input).endsWith("/v1/user")) {
+      if ((input instanceof Request ? input.url : input.toString()).endsWith("/v1/user")) {
         return Response.json({ status: "success", data: { user: { user_id: "actor" } } });
       }
       const request = new Request(input, init);

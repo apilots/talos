@@ -98,12 +98,14 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const panel = dialog.current;
+    const currentToggle = () => toggleRef.current;
     return () => {
       if (panel?.isConnected) return;
       if (panel?.open) panel.close();
       const focused = document.activeElement;
       if (focused instanceof HTMLElement && focused !== document.body && !panel?.contains(focused)) return;
-      if (toggleRef.current && !toggleRef.current.disabled) toggleRef.current.focus();
+      const toggle = currentToggle();
+      if (toggle && !toggle.disabled) toggle.focus();
       else if (opener?.isConnected && !panel?.contains(opener)) opener.focus();
     };
   }, [toggleRef]);

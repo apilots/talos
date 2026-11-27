@@ -1,16 +1,10 @@
 export type {
-  AgentContextCompaction,
-  AgentMessage,
-  AgentMessageBlock,
-  AgentMessageBlockContent,
-  AgentMessageBlockStatus,
   AgentRunMetrics,
   ContextCompactionMetrics,
   ContextCompactionOutcome,
   ContextCompactionStage,
   ContextCompactionTrigger,
   PendingUserAction,
-  SessionInfo,
   TalosContentItem,
   TalosToolProgressKind,
 } from "@talos/sdk-browser";

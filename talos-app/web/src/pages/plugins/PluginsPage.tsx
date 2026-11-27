@@ -31,7 +31,7 @@ export function PluginsPage() {
     setMenuOpen(false);
     const skills = await listSkills(true);
     const creator = findSkillCreator(skills.data);
-    navigate("/", {
+    void navigate("/", {
       state: {
         initialDraft: creator ? `$${creator.name} ` : t("drafts.createSkill"),
       },
@@ -40,7 +40,7 @@ export function PluginsPage() {
 
   function createPlugin() {
     setMenuOpen(false);
-    navigate("/", { state: { initialDraft: t("drafts.createPlugin") } });
+    void navigate("/", { state: { initialDraft: t("drafts.createPlugin") } });
   }
 
   function addMarketplace() {

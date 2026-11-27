@@ -49,13 +49,13 @@ impl BrowserHostPort for Host {
                 ));
             }
             Ok(BrowserHostResponse::Observation {
-                page: BrowserHostPage {
+                page: Box::new(BrowserHostPage {
                     target_id: current.clone(),
                     url: "https://example.test/".into(),
                     title: "Current browser".into(),
                     tabs: vec![],
                     text: None,
-                },
+                }),
                 loader_id: Some("document".into()),
                 elements: if matches!(action, BrowserAction::State) {
                     vec![BrowserHostElement {

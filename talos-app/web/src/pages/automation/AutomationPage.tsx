@@ -29,7 +29,7 @@ function AutomationPageContent() {
     queryFn: async ({ pageParam }) => (await getTalosClient({ nodeId: computers.selectedId })).automation.list({ sessionId: null, scope: tab === "ended" ? "ended" : "unfinished", cursor: pageParam, limit: 30 }),
     getNextPageParam: (page) => page.nextCursor ?? undefined, enabled: tab !== "jobs", refetchInterval: 5_000, retry: false });
   const jobs = useQuery({ queryKey: ["talos", scope, "builtin-jobs", computers.selectedId],
-    queryFn: async () => (await getTalosClient({ nodeId: computers.selectedId })).builtinJobs.list({ computerId: computers.selectedId! }),
+    queryFn: async () => (await getTalosClient({ nodeId: computers.selectedId })).builtinJobs.list({ computerId: computers.selectedId }),
     enabled: tab === "jobs" && Boolean(computers.selectedId), refetchInterval: 5_000, retry: false });
   const mutation = useMutation({
     mutationFn: async (request: AppProtocol.AutomationRequest) => (await getTalosClient({ sessionId: request.sessionId })).automation.execute(request),

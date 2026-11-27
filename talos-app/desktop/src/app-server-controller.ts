@@ -22,7 +22,7 @@ export interface AppServerBridge {
   onExit(handler: (status: { code: number | null; signal: NodeJS.Signals | null }) => void): () => void;
   onStderr(handler: (chunk: string) => void): () => void;
   onServerRequest(
-    handler: (request: AppProtocol.JsonRpcRequest) => Promise<unknown> | unknown,
+    handler: (request: AppProtocol.JsonRpcRequest) => unknown,
   ): () => void;
 }
 
@@ -34,7 +34,7 @@ export interface DesktopAppServerControllerOptions extends AppServerClientOption
   onEvent?: (event: AppProtocol.TimelineEvent) => void;
   onSubscriptionTerminated?: (notification: AppProtocol.SubscriptionTerminatedNotification) => void;
   onRuntimeState?: (state: TalosRuntimeState) => void;
-  onServerRequest?: (request: AppProtocol.JsonRpcRequest) => Promise<unknown> | unknown;
+  onServerRequest?: (request: AppProtocol.JsonRpcRequest) => unknown;
   restartDelayMs?: number;
   /** Enable host enrollment only for the packaged Desktop composition. */
   desktopHost?: boolean;
@@ -239,7 +239,7 @@ export class DesktopAppServerController {
     this.sessionsBySubscriptionId.clear();
   }
 
-  private handleServerRequest(request: AppProtocol.JsonRpcRequest): Promise<unknown> | unknown {
+  private handleServerRequest(request: AppProtocol.JsonRpcRequest): unknown {
     if (!this.options.onServerRequest) {
       throw new Error(`Unsupported desktop server request: ${request.method}`);
     }

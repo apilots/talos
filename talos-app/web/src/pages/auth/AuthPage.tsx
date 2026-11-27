@@ -31,7 +31,7 @@ export function AuthPage() {
 
   useEffect(() => {
     if (connection.authStatus === "authenticated" || connection.authStatus === "open") {
-      navigate(nextPath, { replace: true });
+      void navigate(nextPath, { replace: true });
     }
   }, [connection.authStatus, navigate, nextPath]);
 
@@ -52,7 +52,7 @@ export function AuthPage() {
         const response = await getCloudLoginStatus(loginId);
         if (canceled) return;
         if (response.status === "pending") {
-          timeout = window.setTimeout(poll, response.interval_ms);
+          timeout = window.setTimeout(() => void poll(), response.interval_ms);
           return;
         }
         if (response.status === "authenticated") {
@@ -66,7 +66,7 @@ export function AuthPage() {
             accountType: accountTypeFromWire(response.user.type),
             userId: response.user.user_id,
           });
-          navigate(nextPath, { replace: true });
+          void navigate(nextPath, { replace: true });
           return;
         }
         setConnection({

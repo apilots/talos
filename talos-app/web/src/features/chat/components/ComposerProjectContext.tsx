@@ -4,7 +4,7 @@ import { ArrowLeft, ChevronDown, FolderOpen, FolderPlus, Plus, Search, TriangleA
 import { useTranslation } from "react-i18next";
 
 import { createFsDirectory, readFsDirectory } from "../api";
-import { ProjectDirectoryDialog, type ProjectDirectoryDialogMode } from "@/features/projects/components/ProjectDirectoryDialog";
+import { ProjectDirectoryDialog, type ProjectDirectoryDialogMode } from "@/features/projects";
 import { cn } from "@/shared/lib/cn";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
 import type { ProjectView } from "@/shared/types/ui";

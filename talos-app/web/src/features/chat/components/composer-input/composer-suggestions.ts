@@ -1,9 +1,8 @@
 import type { SkillSuggestion } from "@talos/sdk-browser";
 
-export const SESSION_COMMAND_IDS = ["compact", "clear", "status"] as const;
-export const COMPOSER_COMMAND_IDS = [...SESSION_COMMAND_IDS, "model", "goal", "loop"] as const;
+const SESSION_COMMAND_IDS = ["compact", "clear", "status"] as const;
 
-export type ComposerCommandId = (typeof COMPOSER_COMMAND_IDS)[number];
+export type ComposerCommandId = ComposerSessionCommandId | "model" | "goal" | "loop";
 export type ComposerSessionCommandId = (typeof SESSION_COMMAND_IDS)[number];
 
 export interface ComposerCommandSuggestion {
@@ -11,7 +10,7 @@ export interface ComposerCommandSuggestion {
   id: ComposerCommandId;
 }
 
-export interface ComposerSkillSuggestion {
+interface ComposerSkillSuggestion {
   type: "skill";
   skill: SkillSuggestion;
 }

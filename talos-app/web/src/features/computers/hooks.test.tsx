@@ -166,12 +166,12 @@ it("removes cached private metrics immediately when authentication ends", async 
     expect(result.current.data?.peers[0].peerId).toBe("private-peer"),
   );
   act(() =>
-    useAppStore.setState({
+    { useAppStore.setState({
       connection: {
         ...useAppStore.getState().connection,
         authStatus: "logged_out",
       },
-    }),
+    }); },
   );
   expect(result.current.data).toBeUndefined();
   expect(result.current.enabled).toBe(false);
@@ -204,18 +204,18 @@ it("keeps a late previous-account metrics reply out of the current account view"
   });
   await waitFor(() => expect(sync.metrics).toHaveBeenCalledTimes(1));
   act(() =>
-    useAppStore.setState({
+    { useAppStore.setState({
       connection: { ...useAppStore.getState().connection, userId: "bob" },
-    }),
+    }); },
   );
   expect(result.current.data).toBeUndefined();
   await waitFor(() => expect(sync.metrics).toHaveBeenCalledTimes(2));
-  await act(async () => finishBob({ peers: [{ peerId: "bob-peer" }] }));
+  await act(() => Promise.resolve(finishBob({ peers: [{ peerId: "bob-peer" }] })));
   await waitFor(() =>
     expect(result.current.data?.peers[0].peerId).toBe("bob-peer"),
   );
-  await act(async () =>
-    finishAlice({ peers: [{ peerId: "alice-private-peer" }] }),
+  await act(() =>
+    Promise.resolve(finishAlice({ peers: [{ peerId: "alice-private-peer" }] })),
   );
   expect(result.current.data?.peers[0].peerId).toBe("bob-peer");
 });
@@ -230,7 +230,7 @@ it("preserves a local UUID selection while Desktop identity is pending", async (
   const { result } = show();
   await waitFor(() => expect(result.current.error).toBeTruthy());
   expect(result.current.selectedId).toBe("desktop-worker");
-  await act(async () => finish({ nodeId: "desktop-worker" }));
+  await act(() => Promise.resolve(finish({ nodeId: "desktop-worker" })));
   await waitFor(() => expect(result.current.localId).toBe("desktop-worker"));
   expect(result.current.selectedId).toBe("desktop-worker");
 });
@@ -262,10 +262,10 @@ it("retains only the scoped endpoint after a failed refetch and replaces it on r
   expect(result.current.data?.peers).toEqual([]);
   // A different host/account starts without the previous endpoint even on failure.
   sync.metrics.mockRejectedValue(new Error("New scope unavailable"));
-  act(() => useAppStore.setState({ connection: { ...useAppStore.getState().connection, controlPlaneEndpoint: "https://other-host.example" } }));
+  act(() => { useAppStore.setState({ connection: { ...useAppStore.getState().connection, controlPlaneEndpoint: "https://other-host.example" } }); });
   expect(result.current.endpoint).toBeUndefined();
   await waitFor(() => expect(result.current.error).toBeTruthy());
   expect(result.current.endpoint).toBeUndefined();
-  act(() => useAppStore.setState({ connection: { ...useAppStore.getState().connection, userId: "bob" } }));
+  act(() => { useAppStore.setState({ connection: { ...useAppStore.getState().connection, userId: "bob" } }); });
   expect(result.current.endpoint).toBeUndefined();
 });

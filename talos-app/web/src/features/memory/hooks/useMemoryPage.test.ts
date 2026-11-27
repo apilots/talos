@@ -152,7 +152,7 @@ describe("useMemoryPage helpers", () => {
     await waitFor(() => {
       expect(searchMemory).toHaveBeenCalledWith(
         { query: "Talos", limit: 20 },
-        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) as unknown }),
       );
     });
 

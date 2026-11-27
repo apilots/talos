@@ -303,13 +303,13 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.89"
+version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.117",
+ "syn 3.0.8",
 ]
 
 [[package]]
@@ -877,7 +877,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
 dependencies = [
  "chrono",
- "phf 0.12.1",
+ "phf",
 ]
 
 [[package]]
@@ -1470,37 +1470,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_builder"
-version = "0.20.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "507dfb09ea8b7fa618fcf76e953f4f5e192547945816d5358edffe39f6f94947"
-dependencies = [
- "derive_builder_macro",
-]
-
-[[package]]
-name = "derive_builder_core"
-version = "0.20.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8"
-dependencies = [
- "darling 0.20.11",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "derive_builder_macro"
-version = "0.20.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab63b0e2bf4d5928aff72e83a7dace85d7bba5fe12dcc3c5a572d78caffd3f3c"
-dependencies = [
- "derive_builder_core",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "derive_more"
 version = "0.99.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1916,16 +1885,6 @@ name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
-
-[[package]]
-name = "futf"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df420e2e84819663797d1ec6544b13c5be84629e7bb00dc960d6917db2987843"
-dependencies = [
- "mac",
- "new_debug_unreachable",
-]
 
 [[package]]
 name = "futures"
@@ -2379,33 +2338,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
 dependencies = [
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "html2text"
-version = "0.12.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c66ee488a63a92237d5b48875b7e05bb293be8fb2894641c8118b60c08ab5ef"
-dependencies = [
- "html5ever",
- "markup5ever",
- "tendril",
- "thiserror 1.0.69",
- "unicode-width",
-]
-
-[[package]]
-name = "html5ever"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c13771afe0e6e846f1e67d038d4cb29998a6779f93c809212e4e9c32efd244d4"
-dependencies = [
- "log",
- "mac",
- "markup5ever",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -3488,26 +3420,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mac"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
-
-[[package]]
-name = "markup5ever"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16ce3abbeba692c8b8441d036ef91aea6df8da2c6b6e21c7e14d3c18e526be45"
-dependencies = [
- "log",
- "phf 0.11.3",
- "phf_codegen",
- "string_cache",
- "string_cache_codegen",
- "tendril",
-]
-
-[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3739,12 +3651,6 @@ name = "never"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c96aba5aa877601bb3f6dd6a63a969e1f82e60646e81e71b14496995e9853c91"
-
-[[package]]
-name = "new_debug_unreachable"
-version = "1.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nix"
@@ -4348,49 +4254,11 @@ dependencies = [
 
 [[package]]
 name = "phf"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
-dependencies = [
- "phf_shared 0.11.3",
-]
-
-[[package]]
-name = "phf"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
 dependencies = [
- "phf_shared 0.12.1",
-]
-
-[[package]]
-name = "phf_codegen"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aef8048c789fa5e851558d709946d6d79a8ff88c0440c587967f8e94bfb1216a"
-dependencies = [
- "phf_generator",
- "phf_shared 0.11.3",
-]
-
-[[package]]
-name = "phf_generator"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
-dependencies = [
- "phf_shared 0.11.3",
- "rand 0.8.5",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
-dependencies = [
- "siphasher",
+ "phf_shared",
 ]
 
 [[package]]
@@ -4531,12 +4399,6 @@ checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
 ]
-
-[[package]]
-name = "precomputed-hash"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
 name = "predicates"
@@ -6328,31 +6190,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "string_cache"
-version = "0.8.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf776ba3fa74f83bf4b63c3dcbbf82173db2632ed8452cb2d891d33f459de70f"
-dependencies = [
- "new_debug_unreachable",
- "parking_lot",
- "phf_shared 0.11.3",
- "precomputed-hash",
- "serde",
-]
-
-[[package]]
-name = "string_cache_codegen"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c711928715f1fe0fe509c53b43e993a9a557babc2d0a3567d0a3006f1ac931a0"
-dependencies = [
- "phf_generator",
- "phf_shared 0.11.3",
- "proc-macro2",
- "quote",
-]
-
-[[package]]
 name = "stringprep"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6556,7 +6393,6 @@ dependencies = [
  "talos-run-control",
  "talos-types",
  "tempfile",
- "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -6636,9 +6472,7 @@ dependencies = [
  "talos-agent-api",
  "talos-auth",
  "talos-error",
- "talos-skills",
  "talos-types",
- "thiserror 1.0.69",
  "ts-rs",
 ]
 
@@ -6656,18 +6490,14 @@ dependencies = [
  "talos-app-protocol",
  "talos-auth",
  "talos-browser",
- "talos-config",
  "talos-error",
  "talos-gateway",
  "talos-logging",
  "talos-service",
- "talos-skills",
- "talos-tools",
  "talos-types",
  "tempfile",
  "tokio",
  "tokio-util",
- "tracing",
  "uuid",
 ]
 
@@ -6676,7 +6506,6 @@ name = "talos-app-server-test-client"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "serde_json",
  "talos-agent",
  "talos-app-protocol",
@@ -6708,7 +6537,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "ts-rs",
- "uuid",
 ]
 
 [[package]]
@@ -6801,7 +6629,6 @@ dependencies = [
  "libc",
  "process-wrap",
  "rmcp",
- "schemars 0.8.22",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6821,18 +6648,15 @@ dependencies = [
 name = "talos-channel"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
- "anyhow",
  "async-trait",
  "chrono",
  "serde",
- "serde_json",
  "talos-agent-api",
  "talos-config",
  "talos-error",
  "talos-service",
  "talos-types",
  "teloxide",
- "thiserror 1.0.69",
  "tokio",
  "tokio-test",
  "tokio-util",
@@ -6934,7 +6758,6 @@ dependencies = [
  "base64 0.22.1",
  "mockall",
  "opendal",
- "serde",
  "serde_json",
  "talos-agent",
  "talos-agent-api",
@@ -6954,7 +6777,6 @@ dependencies = [
  "talos-tools-policy",
  "talos-types",
  "tempfile",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -6966,7 +6788,6 @@ dependencies = [
  "agent-protocol",
  "async-trait",
  "axum 0.7.9",
- "base64 0.22.1",
  "bytes",
  "chrono",
  "futures-util",
@@ -6986,13 +6807,11 @@ dependencies = [
  "talos-coordinator",
  "talos-error",
  "talos-gateway",
- "talos-llm-provider",
  "talos-logging",
  "talos-mcp",
  "talos-memory",
  "talos-plugin",
  "talos-service",
- "talos-skills",
  "talos-storage",
  "talos-store",
  "talos-types",
@@ -7045,9 +6864,7 @@ name = "talos-llm-anthropic"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
  "async-trait",
- "futures-util",
  "reqwest 0.12.28",
- "serde",
  "serde_json",
  "talos-error",
  "talos-llm-provider",
@@ -7099,9 +6916,7 @@ name = "talos-llm-openai"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
  "async-trait",
- "futures-util",
  "reqwest 0.12.28",
- "serde",
  "serde_json",
  "talos-error",
  "talos-llm-provider",
@@ -7129,7 +6944,6 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bytes",
- "derive_builder",
  "futures-util",
  "http 1.4.0",
  "reqwest 0.12.28",
@@ -7139,7 +6953,6 @@ dependencies = [
  "talos-types",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -7242,9 +7055,7 @@ dependencies = [
  "talos-skills",
  "talos-tools",
  "talos-types",
- "thiserror 1.0.69",
  "tokio",
- "tracing",
  "uuid",
 ]
 
@@ -7253,12 +7064,8 @@ name = "talos-router"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
  "async-trait",
- "chrono",
  "serde",
- "serde_json",
  "talos-error",
- "talos-types",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -7293,11 +7100,9 @@ dependencies = [
  "talos-agent-api",
  "talos-app-protocol",
  "talos-auth",
- "talos-config",
  "talos-error",
  "talos-types",
  "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -7391,7 +7196,6 @@ dependencies = [
  "talos-error",
  "talos-types",
  "tempfile",
- "walkdir",
 ]
 
 [[package]]
@@ -7399,7 +7203,6 @@ name = "talos-storage"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
  "async-trait",
- "serde",
  "serde_json",
  "sqlx",
  "talos-config",
@@ -7425,14 +7228,12 @@ dependencies = [
  "talos-auth",
  "talos-error",
  "talos-fs",
- "talos-llm-provider",
  "talos-memory",
  "talos-storage",
  "talos-sync",
  "talos-sync-sdk",
  "talos-types",
  "tempfile",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
  "uuid",
@@ -7537,14 +7338,11 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "dashmap",
- "dirs",
  "firecrawl",
  "futures-util",
  "globset",
- "html2text",
  "http 1.4.0",
  "libc",
- "regex",
  "reqwest 0.12.28",
  "schemars 0.8.22",
  "serde",
@@ -7574,13 +7372,8 @@ dependencies = [
 name = "talos-tools-policy"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
- "async-trait",
  "serde",
- "serde_json",
  "talos-error",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -7620,7 +7413,6 @@ dependencies = [
  "talos-logging",
  "talos-sdk",
  "talos-sdk-embedded",
- "talos-tools-policy",
  "talos-types",
  "tempfile",
  "tokio",
@@ -7634,14 +7426,12 @@ name = "talos-types"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
  "bytes",
- "chrono",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "talos-auth",
  "talos-config",
  "talos-error",
- "tokio",
  "ts-rs",
  "uuid",
 ]
@@ -7862,17 +7652,6 @@ dependencies = [
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "tendril"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d24a120c5fc464a3458240ee02c299ebcb9d67b5249c8848b09d639dca8d7bb0"
-dependencies = [
- "futf",
- "mac",
- "utf-8",
 ]
 
 [[package]]

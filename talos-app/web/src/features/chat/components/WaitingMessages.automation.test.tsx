@@ -20,7 +20,7 @@ it("merges a triggered Loop into its task row while retaining its canonical queu
   expect(screen.getByText("3/10")).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "Steer" })).toHaveLength(1);
   expect(screen.getAllByRole("button", { name: "More message actions" })).toHaveLength(2);
-  fireEvent.pointerDown(screen.getAllByRole("button", { name: "More message actions" })[0]!, { button: 0, ctrlKey: false });
+  fireEvent.pointerDown(screen.getAllByRole("button", { name: "More message actions" })[0], { button: 0, ctrlKey: false });
   fireEvent.click(await screen.findByRole("menuitem", { name: "Move down" }));
   expect(reorder).toHaveBeenCalledWith(["human-2", "human-1", "auto-1"]);
   fireEvent.click(screen.getByRole("button", { name: "Stop Loop" }));

@@ -12,9 +12,9 @@ describe("createDesktopTalosClient streaming", () => {
     const cleanup = vi.fn();
     const invoke = vi.fn();
     const bridge: DesktopRendererBridge = {
-      invoke: async <T,>(...args: Parameters<DesktopRendererBridge["invoke"]>) => {
+      invoke:  <T,>(...args: Parameters<DesktopRendererBridge["invoke"]>) => {
         invoke(...args);
-        return { status: "success", data: { subscriptionId: "sub-1" } as T };
+        return Promise.resolve({ status: "success", data: { subscriptionId: "sub-1" } as T });
       },
       onEvent: (handler) => { eventHandler = handler; return cleanup; },
       onSubscriptionTerminated: (handler) => { terminatedHandler = handler; return cleanup; },
@@ -52,16 +52,16 @@ describe("createDesktopTalosClient streaming", () => {
     let subscribeParams: AppProtocol.SubscribeTimelineRequest | undefined;
     const controller = new AbortController();
     const bridge: DesktopRendererBridge = {
-      invoke: async function <T>(method: AppProtocol.ClientMethod, params: unknown): Promise<AppProtocol.ApiResponse<T>> {
+      invoke:  function <T>(method: AppProtocol.ClientMethod, params: unknown): Promise<AppProtocol.ApiResponse<T>> {
         if (method === "event/subscribe") {
           subscribeParams = params as AppProtocol.SubscribeTimelineRequest;
           queueMicrotask(() => controller.abort());
-          return { status: "success", data: { subscriptionId: "sub-session" } as T };
+          return Promise.resolve({ status: "success", data: { subscriptionId: "sub-session" } as T });
         }
         if (method === "event/unsubscribe") {
-          return { status: "success", data: { unsubscribed: true } as T };
+          return Promise.resolve({ status: "success", data: { unsubscribed: true } as T });
         }
-        throw new Error(`unexpected method: ${method}`);
+        return Promise.reject(new Error(`unexpected method: ${method}`));
       },
       onEvent: () => () => undefined,
       onSubscriptionTerminated: () => () => undefined,

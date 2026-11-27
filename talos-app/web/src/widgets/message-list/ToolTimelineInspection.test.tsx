@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import type { ChatRenderBlock } from "@/shared/types/ui";
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -18,10 +20,11 @@ describe("Tool timeline inspection", () => {
       progress: [{ kind: "stdout", message: "live stream" }],
       startedAtMs: 1_000,
     };
-    const view = (
-      <MessageList blocks={[{ id: "timeline-inspected", kind: "timeline", live: true, items: [command] }]}
-        emptyDetail="" emptyTitle="" />
-    );
+    const view = createElement<{ blocks: Extract<ChatRenderBlock, { kind: "timeline" }>[]; emptyDetail: string; emptyTitle: string }>(MessageList, {
+blocks: [{ id: "timeline-inspected", kind: "timeline", live: true, items: [command] }],
+emptyDetail: "",
+emptyTitle: ""
+});
     const { rerender } = render(view);
     const tool = screen.getByRole("button", { name: /Bash.*sleep 30.*Running/ });
     fireEvent.click(tool);

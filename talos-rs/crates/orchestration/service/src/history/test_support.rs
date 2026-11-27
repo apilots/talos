@@ -77,7 +77,7 @@ impl Storage for CountingStorage {
             if let Some(pause) = pause {
                 if pause
                     .remaining
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
                         remaining.checked_sub(1)
                     })
                     .is_ok()

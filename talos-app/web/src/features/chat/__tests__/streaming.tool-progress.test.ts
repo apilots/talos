@@ -22,7 +22,7 @@ it("keeps queue progress on a live tool without repeating the old start notices"
 
 it("ignores only historical start notices, preserving queue status and same-text stdout", () => {
   const tools = historyToolItems("tool-1", "done");
-  const call = tools[0]!.content;
+  const call = tools[0].content;
   if (call.type !== "toolCall") throw new Error("Expected a tool call fixture");
   call.data.progress = [
     ...[queued, ...legacyNotices].map((text) => ({ kind: "status" as const, text, occurredAt: 1 })),

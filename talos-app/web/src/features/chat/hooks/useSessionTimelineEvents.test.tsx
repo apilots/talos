@@ -57,10 +57,10 @@ describe("useSessionTimelineEvents", () => {
   it("uses the same connection for queue open, notifications, and disconnect", async () => {
     vi.useFakeTimers();
     const queue = { onOpen: vi.fn(), onMessageQueueChanged: vi.fn(), onDisconnect: vi.fn() };
-    apiMocks.subscribeTimelineEvents.mockImplementationOnce(async (_sessionId, _onEvent, _signal, _cursor, options) => {
-      options.onOpen();
-      options.onMessageQueueChanged({ sessionId: "sess-1", revision: 2 });
-      throw new Error("connection lost");
+    apiMocks.subscribeTimelineEvents.mockImplementationOnce( (_sessionId, _onEvent, _signal, _cursor, options) => {
+      options!.onOpen!();
+      options!.onMessageQueueChanged!({ sessionId: "sess-1", revision: 2 });
+      return Promise.reject(new Error("connection lost"));
     });
     renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, queue, historyOptions));
     await act(async () => { await Promise.resolve(); });
@@ -91,9 +91,9 @@ describe("useSessionTimelineEvents", () => {
     const list = vi.fn().mockRejectedValueOnce(new Error("queue unavailable")).mockResolvedValue(queue);
     setTalosClientFactory(() => ({ messageQueue: { list } }) as unknown as TalosWebClient);
     apiMocks.subscribeTimelineEvents.mockImplementation((_sessionId, _onEvent, signal, _cursor, options) => {
-      options.onOpen();
+      options!.onOpen!();
       return new Promise((_resolve, reject) => {
-        signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+        signal!.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
       });
     });
     const { result } = renderHook(() => {
@@ -113,17 +113,17 @@ describe("useSessionTimelineEvents", () => {
     const failures: Array<(error: unknown) => void> = [];
     const queue = { onOpen: (fail: (error: unknown) => void) => failures.push(fail), onDisconnect: vi.fn(), onMessageQueueChanged: vi.fn() };
     apiMocks.subscribeTimelineEvents
-      .mockImplementationOnce(async (_id, _event, _signal, _cursor, options) => {
-        options.onOpen(); throw new Error("first connection closed");
+      .mockImplementationOnce( (_id, _event, _signal, _cursor, options) => {
+        options!.onOpen!(); return Promise.reject(new Error("first connection closed"));
       })
       .mockImplementationOnce((_id, _event, _signal, _cursor, options) => {
-        options.onOpen(); return new Promise(() => undefined);
+        options!.onOpen!(); return new Promise(() => undefined);
       });
     renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, queue, historyOptions));
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(failures).toHaveLength(2);
     act(() => failures[0](new Error("old queue request failed")));
-    expect(apiMocks.subscribeTimelineEvents.mock.calls[1]?.[2].aborted).toBe(false);
+    expect(apiMocks.subscribeTimelineEvents.mock.calls[1]?.[2]?.aborted).toBe(false);
   });
 
   it("does not reconcile stable history while a turn waits for user action", () => {
@@ -266,7 +266,7 @@ describe("useSessionTimelineEvents", () => {
     await act(async () => { await Promise.resolve(); });
     expect(apiMocks.getSessionHistory).toHaveBeenCalledOnce();
     hook.unmount();
-    await act(async () => { resolve(historyOptions.history); });
+    await act(() => { resolve(historyOptions.history);  return Promise.resolve(); });
     expect(apiMocks.getSessionHistory).toHaveBeenCalledOnce();
     expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledOnce();
   });

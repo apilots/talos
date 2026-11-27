@@ -46,11 +46,11 @@ describe("authenticated Server recovery", () => {
     vi.stubGlobal("window", { clearTimeout, setTimeout });
     let streamRequests = 0;
     const lastEventIds: Array<string | null> = [];
-    const request = vi.fn<typeof fetch>(async (input, init) => {
-      const url = new URL(String(input));
-      if (url.pathname === "/v1/user") return success({ user: { user_id: getUserId() } });
+    const request = vi.fn<typeof fetch>( (input, init) => {
+      const url = new URL((input instanceof Request ? input.url : input.toString()));
+      if (url.pathname === "/v1/user") return Promise.resolve(success({ user: { user_id: getUserId() } }));
       lastEventIds.push(new Headers(init?.headers).get("last-event-id"));
-      if (++streamRequests === 2) return unauthorized();
+      if (++streamRequests === 2) return Promise.resolve(unauthorized());
 
       // Match the gateway's query-first cursor selection during replay.
       const cursor = url.searchParams.get("after_event_id") ?? new Headers(init?.headers).get("last-event-id");
@@ -70,7 +70,7 @@ describe("authenticated Server recovery", () => {
           }
         },
       });
-      return new Response(body, { headers: { "content-type": "text/event-stream" } });
+      return Promise.resolve(new Response(body, { headers: { "content-type": "text/event-stream" } }));
     });
     const client = createBrowserTalosClient({ baseUrl: serverUrl, getToken, getUserId, fetch: request });
     const controller = new AbortController();
@@ -92,7 +92,7 @@ describe("authenticated Server recovery", () => {
       expect(onOpen).toHaveBeenCalledTimes(2);
       expect(request.mock.calls[0][0]).toBe(serverUrl + "/v1/sessions/session/events?after_event_id=ev_1&close_when_idle=false");
       expect(request.mock.calls[3]).toEqual(request.mock.calls[1]);
-      expect(new URL(String(request.mock.calls[3][0])).searchParams.get("after_event_id")).toBe("ev_3");
+      expect(new URL(((input) => input instanceof Request ? input.url : input.toString())(request.mock.calls[3][0])).searchParams.get("after_event_id")).toBe("ev_3");
       expect(lastEventIds).toEqual([null, "ev_3", "ev_3"]);
     } finally {
       controller.abort();

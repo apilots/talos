@@ -20,7 +20,7 @@ class ReleaseSourceStageTests(unittest.TestCase):
             for name in ["just", "pnpm", "python3"]:
                 path = bin_dir / name
                 path.write_text('#!/bin/sh\necho "$0 $*" >> "$CHECK_LOG"\n'
-                                'if [ "${FAIL_CHECK:-0}" = 1 ] && [ "$1" = check ]; then exit 17; fi\n')
+                                'if [ "${FAIL_CHECK:-0}" = 1 ] && [ "$1" = clippy ]; then exit 17; fi\n')
                 path.chmod(0o755)
             for name in ["scripts/check-release-version-tests.sh",
                          "deploy/install/tests/install_test.sh",
@@ -38,6 +38,7 @@ class ReleaseSourceStageTests(unittest.TestCase):
             calls = log.read_text()
             self.assertNotIn("build.sh", calls)
             self.assertIn("just fmt-check", calls)
+            self.assertIn("just clippy --locked --all-targets", calls)
             self.assertIn("pnpm --dir talos-app ci:frontend-app", calls)
             log.write_text("")
             failed = subprocess.run(["bash", str(root / "scripts/check-release.sh")],

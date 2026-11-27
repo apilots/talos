@@ -184,7 +184,7 @@ impl BrowserBackend for NativeBrowser {
                     operation: BrowserHostOperation::Execute {
                         action: action.clone(),
                         target_id: state.target.clone(),
-                        element,
+                        element: element.map(Box::new),
                         upload,
                     },
                 })

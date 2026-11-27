@@ -48,8 +48,8 @@ describe("authenticated Desktop restart recovery", () => {
     });
     const replacement = authenticatedBridge();
     const third = authenticatedBridge();
-    const events = vi.fn();
-    const states = vi.fn();
+    const events = vi.fn<(event: AppProtocol.TimelineEvent) => void>();
+    const states = vi.fn<(state: import("@talos/sdk-app-server/desktop").TalosRuntimeState) => void>();
     const controller = new DesktopAppServerController({
       restartDelayMs: 10, onEvent: events, onRuntimeState: states,
       bridgeFactory: vi.fn().mockReturnValueOnce(initial.bridge).mockReturnValueOnce(replacement.bridge).mockReturnValue(third.bridge),
@@ -99,7 +99,7 @@ describe("authenticated Desktop restart recovery", () => {
       });
     }
     const terminated = vi.fn();
-    const states = vi.fn();
+    const states = vi.fn<(state: import("@talos/sdk-app-server/desktop").TalosRuntimeState) => void>();
     const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const controller = new DesktopAppServerController({ restartDelayMs: 10, onRuntimeState: states, onSubscriptionTerminated: terminated,
       bridgeFactory: vi.fn().mockReturnValueOnce(initial.bridge).mockReturnValue(replacement.bridge) });
@@ -118,7 +118,7 @@ describe("authenticated Desktop restart recovery", () => {
     vi.useFakeTimers();
     const initial = authenticatedBridge();
     const replacement = authenticatedBridge("bob");
-    const events = vi.fn();
+    const events = vi.fn<(event: AppProtocol.TimelineEvent) => void>();
     const activeTurns = vi.fn();
     const queues = vi.fn();
     const automations = vi.fn();
@@ -160,7 +160,7 @@ describe("authenticated Desktop restart recovery", () => {
     vi.useFakeTimers();
     const initial = authenticatedBridge();
     const replacement = authenticatedBridge("bob");
-    const events = vi.fn();
+    const events = vi.fn<(event: AppProtocol.TimelineEvent) => void>();
     let release!: () => void;
     let entered!: () => void;
     const blocked = new Promise<void>((resolve) => { release = resolve; });
@@ -199,7 +199,7 @@ describe("authenticated Desktop restart recovery", () => {
       if (method === heldMethod) { entered.resolve(); await replay.promise; }
       return invoke(method, params, options) as Promise<T>;
     });
-    const events = vi.fn();
+    const events = vi.fn<(event: AppProtocol.TimelineEvent) => void>();
     const terminated = vi.fn();
     const controller = new DesktopAppServerController({ restartDelayMs: 10, onEvent: events, onSubscriptionTerminated: terminated,
       bridgeFactory: vi.fn().mockReturnValueOnce(initial.bridge).mockReturnValue(replacement.bridge) });
@@ -237,8 +237,8 @@ describe("authenticated Desktop restart recovery", () => {
     vi.spyOn(replacement.bridge, "connect").mockReturnValue(secondReady.promise);
     vi.spyOn(third.bridge, "connect").mockReturnValue(thirdReady.promise);
     const terminated = vi.fn();
-    const events = vi.fn();
-    const states = vi.fn();
+    const events = vi.fn<(event: AppProtocol.TimelineEvent) => void>();
+    const states = vi.fn<(state: import("@talos/sdk-app-server/desktop").TalosRuntimeState) => void>();
     const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const controller = new DesktopAppServerController({ restartDelayMs: 10, onEvent: events, onRuntimeState: states, onSubscriptionTerminated: terminated,
       bridgeFactory: vi.fn().mockReturnValueOnce(initial.bridge).mockReturnValueOnce(replacement.bridge).mockReturnValue(third.bridge) });

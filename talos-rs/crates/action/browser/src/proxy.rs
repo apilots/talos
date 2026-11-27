@@ -7,11 +7,29 @@ use tokio::net::TcpListener;
 use tokio_tungstenite::{
     accept_hdr_async_with_config, connect_async_with_config,
     tungstenite::{
-        handshake::server::{ErrorResponse, Request, Response},
+        handshake::server::{Callback, ErrorResponse, Request, Response},
         protocol::{Message, WebSocketConfig},
     },
 };
 use tokio_util::sync::CancellationToken;
+
+struct InvocationHandshake {
+    path: Arc<String>,
+}
+impl Callback for InvocationHandshake {
+    fn on_request(self, request: &Request, response: Response) -> Result<Response, ErrorResponse> {
+        if request.uri().path() != self.path.as_str()
+            || request.uri().query().is_some()
+            || request.headers().contains_key("origin")
+        {
+            let mut error = ErrorResponse::new(Some("Browser transport rejected.".into()));
+            *error.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
+            Err(error)
+        } else {
+            Ok(response)
+        }
+    }
+}
 
 pub(crate) struct InvocationProxy {
     pub url: String,
@@ -54,22 +72,7 @@ impl InvocationProxy {
                 if !peer.ip().is_loopback() {
                     return Err(denied());
                 }
-                let authorize = move |request: &Request,
-                                      response: Response|
-                      -> Result<Response, ErrorResponse> {
-                    if request.uri().path() != path.as_str()
-                        || request.uri().query().is_some()
-                        || request.headers().contains_key("origin")
-                    {
-                        let mut error =
-                            ErrorResponse::new(Some("Browser transport rejected.".into()));
-                        *error.status_mut() =
-                            tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
-                        Err(error)
-                    } else {
-                        Ok(response)
-                    }
-                };
+                let authorize = InvocationHandshake { path };
                 let mut client = accept_hdr_async_with_config(socket, authorize, Some(config()))
                     .await
                     .map_err(|error| {

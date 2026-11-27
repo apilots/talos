@@ -1,7 +1,7 @@
 import { cleanup } from "@testing-library/react";
 import { vi } from "vitest";
 
-const originalScroll = Element.prototype.scrollIntoView;
+const originalScroll = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
 
 export function installTracingDom({ narrow = true } = {}) {
   Element.prototype.scrollIntoView = vi.fn();
@@ -15,7 +15,7 @@ export function installTracingDom({ narrow = true } = {}) {
 
 export function cleanupTracingDom() {
   cleanup();
-  if (originalScroll) Element.prototype.scrollIntoView = originalScroll;
+  if (originalScroll) Object.defineProperty(Element.prototype, "scrollIntoView", originalScroll);
   else Reflect.deleteProperty(Element.prototype, "scrollIntoView");
   vi.unstubAllGlobals();
 }
