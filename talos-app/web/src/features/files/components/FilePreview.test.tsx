@@ -26,7 +26,7 @@ function setup(resource = source) {
 beforeEach(() => {
   vi.resetAllMocks();
   let count = 0;
-  api.prepare.mockImplementation(async () => ({ ...descriptor, previewId: `preview-${++count}` }));
+  api.prepare.mockImplementation(() => Promise.resolve(({ ...descriptor, previewId: `preview-${++count}` })));
   api.content.mockResolvedValue(new TextEncoder().encode("# Product\n\n| Feature | Evidence |\n| --- | --- |\n| Browser | Real task |\n\n<script>unsafe()</script>"));
   api.close.mockResolvedValue({ closed: true });
   api.resourceUrl.mockImplementation((preview: FilePreviewDescriptor, path = preview.entryPath) => `talos-preview://${preview.previewId}/${path}`);
@@ -41,7 +41,7 @@ it("renders through one prepared resource and releases its grant when the tab cl
   expect(screen.queryByRole("link", { name: "src/local.ts" })).toBeNull();
   expect(view.container.querySelector("script")).toBeNull();
   expect(api.prepare).toHaveBeenCalledWith({ source });
-  expect(api.content).toHaveBeenCalledWith(expect.objectContaining({ previewId: "preview-1" }), "Review.md");
+  expect(api.content).toHaveBeenCalledWith({ previewId: "preview-1", entryPath: "Review.md" });
   view.unmount();
   expect(api.close).toHaveBeenCalledWith({ previewId: "preview-1" });
 });
@@ -75,7 +75,7 @@ it("retries through preparation after permission failure", async () => {
   expect(await screen.findByRole("heading", { name: "Product" })).toBeInTheDocument();
 });
 it("refreshes only the owning context when two contexts preview the same file", async () => {
-  api.prepare.mockImplementation(async () => ({ ...descriptor, previewId: crypto.randomUUID(), metadata: { name: "report.html", mimeType: "text/html", sizeBytes: 20 } }));
+  api.prepare.mockImplementation(() => Promise.resolve(({ ...descriptor, previewId: crypto.randomUUID(), metadata: { name: "report.html", mimeType: "text/html", sizeBytes: 20 } })));
   const client = new QueryClient(); clients.push(client);
   render(<QueryClientProvider client={client}><div data-testid="one"><FilePreview source={source} connectionKey="actor" instanceKey="one" /></div><div data-testid="two"><FilePreview source={source} connectionKey="actor" instanceKey="two" /></div></QueryClientProvider>);
   const one = within(screen.getByTestId("one")); const two = within(screen.getByTestId("two"));
@@ -87,9 +87,9 @@ it("refreshes only the owning context when two contexts preview the same file", 
 
 it("resolves Markdown resources and retains their images until an explicit refresh", async () => {
   let documents = 0; let images = 0;
-  api.prepare.mockImplementation(async ({ source }: { source: FilePreviewSource }) => source.kind === "sessionPath"
+  api.prepare.mockImplementation(({ source }: { source: FilePreviewSource }) => Promise.resolve(source.kind === "sessionPath"
     ? { ...descriptor, previewId: `preview-${++documents}`, entryPath: "docs/report.md" }
-    : { ...descriptor, previewId: `picture-${++images}`, entryPath: "attached.png", metadata: { name: "attached.png", mimeType: "image/png", sizeBytes: 4 } });
+    : { ...descriptor, previewId: `picture-${++images}`, entryPath: "attached.png", metadata: { name: "attached.png", mimeType: "image/png", sizeBytes: 4 } }));
   api.content.mockResolvedValue(new TextEncoder().encode("[Next](next.md)\n\n[Sibling](sibling.rs:14)\n\nInspect `../src/main.rs:9`.\n\n[Source](/workspace/project/src/lib.rs#L27)\n\n![Chart](images/100%25%20done.png)\n\n![Attached](talos-file://image-1)"));
   const view = setup({ kind: "sessionPath", sessionId: "session-1", path: "docs/report.md" });
   fireEvent.click(await screen.findByRole("link", { name: "Next" }));

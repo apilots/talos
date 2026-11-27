@@ -7,7 +7,7 @@ import { cleanup } from "@testing-library/react";
 import { McpServerForm } from "./McpServerForm";
 import { McpCredentialsForm } from "./McpCredentialsForm";
 
-const api = vi.hoisted(() => ({ install: vi.fn(), import: vi.fn(), readAuthentication: vi.fn(), updateCredentials: vi.fn(), startAuthentication: vi.fn() }));
+const api = vi.hoisted(() => ({ install: vi.fn<(request: import("@talos/sdk-core").AppProtocol.PluginInstallRequest) => Promise<unknown>>(), import: vi.fn(), readAuthentication: vi.fn(), updateCredentials: vi.fn(), startAuthentication: vi.fn() }));
 vi.mock("@/shared/api/client", () => ({ getTalosClient: () => ({ plugin: { install: api.install }, mcp: api }) }));
 vi.mock("react-i18next", async (original) => ({ ...await original<typeof import("react-i18next")>(), useTranslation: () => ({ t: (key: string) => key }) }));
 const navigation = vi.hoisted(() => ({ prepareExternalAuthWindow: vi.fn(), redirectToExternalUrl: vi.fn(), closePreparedExternalWindow: vi.fn() }));
@@ -25,7 +25,8 @@ it("adds HTTP credentials without placing a token in the definition, and preserv
   fireEvent.click(screen.getByRole("button", { name: "mcpServers.save" }));
   await waitFor(() => expect(saved).toHaveBeenCalledOnce());
   const request = api.install.mock.calls[0][0];
-  expect(request.target.credentials.token).toBe("private-token");
+  expect(request.target).toMatchObject({ credentials: { token: "private-token" } });
+  if (request.target.kind !== "manual_mcp_server") throw new Error("Expected an MCP install target.");
   expect(JSON.stringify(request.target.server)).not.toContain("private-token");
   expect(screen.getByLabelText("mcpServers.secretValue")).toHaveValue("");
   view.unmount();
@@ -95,13 +96,12 @@ it("replaces an API key, wipes the input after saving, then clears credentials f
   client.clear();
 });
 
-
 it("opens a browser grant and refreshes the definition even when authorization completes before polling", async () => {
   const server = { type: "plugin" as const, installId: "install-oauth" };
   api.readAuthentication.mockResolvedValue({ server, authentication: { type: "oauth", config: { scopes: ["read"] } }, state: { type: "authenticated" } });
-  api.startAuthentication.mockImplementation(async () => {
+  api.startAuthentication.mockImplementation(() => {
     api.readAuthentication.mockResolvedValue({ server, authentication: { type: "oauth", config: { scopes: ["read"] } }, state: { type: "authenticated" } });
-    return { authorizationUrl: "https://issuer.example/authorize?state=private", attemptId: "attempt", expiresAt: 123, server };
+    return Promise.resolve({ authorizationUrl: "https://issuer.example/authorize?state=private", attemptId: "attempt", expiresAt: 123, server });
   });
   const updated = vi.fn().mockResolvedValue(undefined);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

@@ -11,6 +11,7 @@ help:
 install-tools:
     cargo install --locked just
     cargo install --locked cargo-nextest
+    bash -c 'source ../.github/ci-toolchain.env; cargo install --locked cargo-machete --version "$CI_MACHETE_VERSION"'
 
 # Enable the repository-managed Git hooks for this clone.
 setup-git-hooks:
@@ -83,6 +84,10 @@ test-archive *args:
 # Build the single-platform reusable sandbox environment, separately from PR tests.
 sandbox-base *args:
     docker buildx build --platform linux/amd64 --target runtime -f crates/action/linux-sandbox/tests/docker/ubuntu-24.04.Dockerfile "$@" ..
+
+# Reject unused Cargo dependencies across the workspace.
+deps-check:
+    cargo machete
 
 # Run fast Clippy checks for selected packages without linting path dependencies.
 clippy *args:

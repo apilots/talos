@@ -19,7 +19,7 @@ pub(super) fn api_success_with_status<T: Serialize>(status: StatusCode, data: T)
 #[derive(Debug)]
 pub(super) struct ApiError {
     status: StatusCode,
-    body: PublicApiError,
+    body: Box<PublicApiError>,
 }
 
 impl ApiError {
@@ -31,7 +31,7 @@ impl ApiError {
         talos_logging::report_error(&error);
         Self {
             status: status_for_error_code(error.error_code()),
-            body: error.to_api_error(),
+            body: Box::new(error.to_api_error()),
         }
     }
 }
@@ -155,6 +155,6 @@ pub(super) async fn normalize_extractor_rejection(request: Request, next: Next) 
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.status, Json(ApiResponse::<()>::error(self.body))).into_response()
+        (self.status, Json(ApiResponse::<()>::error(*self.body))).into_response()
     }
 }

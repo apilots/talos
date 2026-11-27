@@ -27,6 +27,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".talos.agent.v1.WorkerRpcResult.response")
         // Keep the typed automation receipt from inflating its result enum.
         .boxed(".talos.agent.v1.ExecuteAutomationResponse.result")
+        // Keep protocol oneof carriers small without changing their wire representation.
+        .boxed(".talos.agent.v1.CompactSessionParams.body")
+        .boxed(".talos.agent.v1.ConfigRead.value.llm")
+        .boxed(".talos.agent.v1.ConfigRead.value.web_search")
+        .boxed(".talos.agent.v1.ConfigUpdateParams.value.llm")
+        .boxed(".talos.agent.v1.ConfigUpdateParams.value.web_search")
+        .boxed(".talos.agent.v1.CreateNodeResponse.result")
+        .boxed(".talos.agent.v1.DisablePluginResponse.result")
+        .boxed(".talos.agent.v1.EnablePluginResponse.result")
+        .boxed(".talos.agent.v1.GetConfigResponse.result")
+        .boxed(".talos.agent.v1.GetNodeResponse.result")
+        .boxed(".talos.agent.v1.ImportMcpServerResponse.result")
+        .boxed(".talos.agent.v1.InstallPluginResponse.result")
+        .boxed(".talos.agent.v1.PluginDefinition.value")
+        .boxed(".talos.agent.v1.PluginInstallTarget.value")
+        .boxed(".talos.agent.v1.PluginPrepareParams.change")
+        .boxed(".talos.agent.v1.ReadPluginResponse.result")
+        .boxed(".talos.agent.v1.RunResponse.result")
+        .boxed(".talos.agent.v1.StartParams.body")
+        .boxed(".talos.agent.v1.UpdateConfigResponse.result")
+        .boxed(".talos.agent.v1.UpdatePluginResponse.result")
         .compile_protos(
             &[
                 "proto/auth.proto",

@@ -173,10 +173,10 @@ impl RemoteAgentClient {
         .await?;
         let admission = match first.result.ok_or_else(invalid_response)? {
             pb::run_response::Result::Admission(value) => {
-                harness_pb::decode_admission_events(value)?
+                harness_pb::decode_admission_events(*value)?
             }
             pb::run_response::Result::Failure(value) => {
-                return Err(error_pb::decode_failure(value)?)
+                return Err(error_pb::decode_failure(*value)?)
             }
             _ => return Err(invalid_response()),
         };
@@ -228,7 +228,7 @@ impl RemoteAgentClient {
             caller: Some(caller.clone()),
             auth: Some(node_pb::encode_auth(self.auth.clone())),
             params: Some(pb::StartParams {
-                body: Some(pb::start_params::Body::Run(params)),
+                body: Some(pb::start_params::Body::Run(Box::new(params))),
             }),
         })
         .await
@@ -241,7 +241,7 @@ impl RemoteAgentClient {
                 caller: Some(caller.clone()),
                 auth: Some(node_pb::encode_auth(self.auth.clone())),
                 params: Some(pb::StartParams {
-                    body: Some(pb::start_params::Body::Commit(pb::Empty {})),
+                    body: Some(pb::start_params::Body::Commit(Box::new(pb::Empty {}))),
                 }),
             },
             call,
@@ -262,7 +262,7 @@ impl RemoteAgentClient {
             caller: Some(caller.clone()),
             auth: Some(node_pb::encode_auth(self.auth.clone())),
             params: Some(pb::CompactSessionParams {
-                body: Some(pb::compact_session_params::Body::Context(context)),
+                body: Some(pb::compact_session_params::Body::Context(Box::new(context))),
             }),
         })
         .await
@@ -275,7 +275,9 @@ impl RemoteAgentClient {
                 caller: Some(caller.clone()),
                 auth: Some(node_pb::encode_auth(self.auth.clone())),
                 params: Some(pb::CompactSessionParams {
-                    body: Some(pb::compact_session_params::Body::Commit(pb::Empty {})),
+                    body: Some(pb::compact_session_params::Body::Commit(Box::new(
+                        pb::Empty {},
+                    ))),
                 }),
             },
             call,
@@ -688,7 +690,7 @@ async fn read_run(
                 let _ = accepted_tx.take().expect("checked").send(Ok(()));
             }
             pb::run_response::Result::Progress(value) if accepted_tx.is_none() => {
-                match harness_pb::decode_event(value) {
+                match harness_pb::decode_event(*value) {
                     Ok(event) => {
                         tokio::select! {
                             biased;
@@ -708,14 +710,14 @@ async fn read_run(
                 }
             }
             pb::run_response::Result::Settlement(value) if accepted_tx.is_none() => {
-                let outcome = harness_pb::decode_settlement(value);
+                let outcome = harness_pb::decode_settlement(*value);
                 if let Some(tx) = settlement_tx.take() {
                     let _ = tx.send(outcome);
                 }
                 return;
             }
             pb::run_response::Result::Failure(value) => {
-                let error = error_pb::decode_failure(value).unwrap_or_else(|error| error);
+                let error = error_pb::decode_failure(*value).unwrap_or_else(|error| error);
                 if let Some(tx) = accepted_tx.take() {
                     let _ = tx.send(Err(error.clone()));
                 }

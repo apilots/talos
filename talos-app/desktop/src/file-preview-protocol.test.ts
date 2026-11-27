@@ -5,16 +5,18 @@ import type { WebContents } from "electron";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { AppProtocol } from "@talos/sdk-core";
 import type { DesktopAppServerController } from "./app-server-controller";
-const electron = vi.hoisted(() => ({ handle: vi.fn(), registerSchemesAsPrivileged: vi.fn(), open: vi.fn() }));
+const electron = vi.hoisted(() => ({ handle: vi.fn(), registerSchemesAsPrivileged: vi.fn<typeof import("electron")["protocol"]["registerSchemesAsPrivileged"]>(), open: vi.fn<typeof import("./preview-applications")["openPreviewApplication"]>() }));
 vi.mock("electron", () => ({ protocol: electron, app: { getPath: () => tmpdir() } }));
-vi.mock("./preview-applications", () => ({ previewApplications: async () => [{ id: "system", label: "System default", kind: "system" }], openPreviewApplication: electron.open }));
+vi.mock("./preview-applications", () => ({ previewApplications:  () => Promise.resolve([{ id: "system", label: "System default", kind: "system" }]), openPreviewApplication: electron.open }));
 import { FilePreviewProtocol, registerDesktopSchemes } from "./file-preview-protocol";
 const descriptor: AppProtocol.FilePreviewDescriptor = { previewId: "preview-id", entryPath: "report.html", resourceBaseUrl: null, document: null,
   metadata: { name: "report.html", mimeType: "text/html", sizeBytes: 6 }, expiresAt: Math.floor(Date.now() / 1000) + 3600 };
 function setup(source = Buffer.from("report"), cloudClose?: () => Promise<AppProtocol.FilePreviewCloseResponse>) {
   const current = { ...descriptor, metadata: { ...descriptor.metadata, sizeBytes: source.byteLength } };
-  const invoke = vi.fn(async (_method, request) => ({ metadata: current.metadata, offset: request.offset,
-    dataBase64: source.subarray(request.offset, request.offset + request.limit).toString("base64") }));
+  const invoke = vi.fn<(method: string, request: AppProtocol.FilePreviewReadRequest, options?: unknown) => Promise<AppProtocol.FilePreviewContent>>((_method, request) => {
+    return Promise.resolve({ metadata: current.metadata, offset: request.offset,
+      dataBase64: source.subarray(request.offset, request.offset + request.limit).toString("base64") });
+  });
   const protocol = new FilePreviewProtocol({ invoke } as unknown as DesktopAppServerController);
   protocol.install();
   const owner = Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false }) as unknown as WebContents;
@@ -28,7 +30,7 @@ function setup(source = Buffer.from("report"), cloudClose?: () => Promise<AppPro
 beforeEach(() => vi.clearAllMocks());
 it("streams native resources through the authenticated canonical range API", async () => {
   registerDesktopSchemes();
-  expect(electron.registerSchemesAsPrivileged.mock.calls[0][0][0].privileges.standard).toBe(true);
+  expect(electron.registerSchemesAsPrivileged.mock.calls[0][0][0].privileges?.standard).toBe(true);
   const { respond, invoke, credentials } = setup();
   const response = await respond(new Request("talos-preview://preview-id/report.html", { headers: { range: "bytes=1-3" } }));
   expect(response.status).toBe(206);
@@ -57,6 +59,7 @@ it("opens a service-owned copy and removes it with its preview lifecycle", async
   const { protocol, owner, invoke } = setup(source);
   await protocol.open({ resource: { kind: "file", previewId: descriptor.previewId, resourcePath: descriptor.entryPath }, targetId: "system" }, owner);
   const copy = electron.open.mock.calls[0][2];
+  if (copy.kind !== "file") throw new Error("Expected a file preview copy.");
   expect(await readFile(copy.path)).toEqual(source);
   expect(invoke.mock.calls.filter(([method]) => method === "file/preview/read").map(([, request]) => request.limit)).toEqual([0, 1024 * 1024, 17]);
   await protocol.clear();
@@ -72,6 +75,7 @@ it("clears the native Open-in copy on sign-out while the Server release is pendi
   const { protocol, owner } = setup(Buffer.from("report"), close);
   await protocol.open({ resource: { kind: "file", previewId: descriptor.previewId, resourcePath: descriptor.entryPath }, targetId: "system" }, owner);
   const copy = electron.open.mock.calls[0][2];
+  if (copy.kind !== "file") throw new Error("Expected a file preview copy.");
   try {
     await protocol.clear();
     expect(close).toHaveBeenCalledOnce();

@@ -101,7 +101,7 @@ export class FilePreviewProtocol {
     const preview = this.previews.get(resource.previewId)!;
     const descriptor = { ...preview.descriptor, entryPath: resource.resourcePath };
     const client = createFilePreviewClient({
-      prepare: async () => descriptor,
+      prepare: () => Promise.resolve(descriptor),
       read: part => this.read(preview, part.previewId, part.resourcePath, part.offset, part.limit),
       close: part => this.close(preview, part.previewId),
     }, () => "");

@@ -67,7 +67,8 @@ export function blockText(block: API.AgentMessageBlock): string {
       return `${c.data.name}\n${toolArgumentsText(c.data.arguments)}\n${c.data.progress.map((p) => `[${p.kind} · ${p.occurredAt}] ${p.text}`).join("\n")}`;
     case "toolResult":
       return `${c.data.toolName}\n${c.data.content.map((c) => (c.type === "text" ? c.text : JSON.stringify(c, null, 2))).join("\n")}`;
-    default:
+    case "contextCompaction":
+    case "systemNotice":
       return JSON.stringify(c.data, null, 2);
   }
 }

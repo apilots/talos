@@ -201,9 +201,11 @@ pub fn encode_update_config_params(
 ) -> TalosResult<pb::ConfigUpdateParams> {
     Ok(pb::ConfigUpdateParams {
         value: Some(match value.value {
-            ConfigValue::Llm(value) => pb::config_update_params::Value::Llm(encode_llm(*value)),
+            ConfigValue::Llm(value) => {
+                pb::config_update_params::Value::Llm(Box::new(encode_llm(*value)))
+            }
             ConfigValue::WebSearch(value) => {
-                pb::config_update_params::Value::WebSearch(encode_search(*value))
+                pb::config_update_params::Value::WebSearch(Box::new(encode_search(*value)))
             }
             ConfigValue::SessionMessageSendPolicy(policy) => {
                 pb::config_update_params::Value::SessionMessageSendPolicy(encode_send_policy(
@@ -220,10 +222,10 @@ pub fn decode_update_config_params(
         node_id: None,
         value: match value.ok_or_else(invalid)?.value.ok_or_else(invalid)? {
             pb::config_update_params::Value::Llm(value) => {
-                ConfigValue::Llm(Box::new(decode_llm(value)?))
+                ConfigValue::Llm(Box::new(decode_llm(*value)?))
             }
             pb::config_update_params::Value::WebSearch(value) => {
-                ConfigValue::WebSearch(Box::new(decode_search(value)?))
+                ConfigValue::WebSearch(Box::new(decode_search(*value)?))
             }
             pb::config_update_params::Value::SessionMessageSendPolicy(policy) => {
                 ConfigValue::SessionMessageSendPolicy(decode_send_policy(policy)?)
@@ -259,7 +261,7 @@ pub fn encode_config_result(value: ConfigResponse) -> TalosResult<pb::ConfigRead
                 model_readiness,
                 provider_keys,
                 provider_capabilities,
-            } => pb::config_read::Value::Llm(pb::LlmConfigRead {
+            } => pb::config_read::Value::Llm(Box::new(pb::LlmConfigRead {
                 config: Some(encode_llm(*config)),
                 model_readiness: Some(pb::ModelReadiness {
                     ready: model_readiness.ready,
@@ -290,9 +292,9 @@ pub fn encode_config_result(value: ConfigResponse) -> TalosResult<pb::ConfigRead
                         )
                     })
                     .collect(),
-            }),
+            })),
             ConfigResponse::WebSearch { config } => {
-                pb::config_read::Value::WebSearch(encode_search(*config))
+                pb::config_read::Value::WebSearch(Box::new(encode_search(*config)))
             }
             ConfigResponse::SessionMessageSendPolicy { policy } => {
                 pb::config_read::Value::SessionMessageSendPolicy(encode_send_policy(policy))
@@ -344,7 +346,7 @@ pub fn decode_config_result(value: pb::ConfigRead) -> TalosResult<ConfigResponse
             }
         }
         pb::config_read::Value::WebSearch(value) => ConfigResponse::WebSearch {
-            config: Box::new(decode_search(value)?),
+            config: Box::new(decode_search(*value)?),
         },
         pb::config_read::Value::SessionMessageSendPolicy(policy) => {
             ConfigResponse::SessionMessageSendPolicy {

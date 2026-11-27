@@ -17,7 +17,7 @@ export interface HealthResponse {
   cloud_auth_url?: string | null;
 }
 
-const envCloudAuthUrl = import.meta.env.VITE_TALOS_CLOUD_AUTH_URL as string | undefined;
+const envCloudAuthUrl = import.meta.env.VITE_TALOS_CLOUD_AUTH_URL;
 
 export async function logoutUser(): Promise<void> {
   try {

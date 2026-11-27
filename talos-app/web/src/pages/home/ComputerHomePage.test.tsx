@@ -18,7 +18,7 @@ const desktop = vi.hoisted(() => ({ active: false }));
 vi.mock("@/shared/api/desktop-client", () => ({ isDesktopRuntime: () => desktop.active, getDesktopBridge: () => desktop.active ? {} : undefined }));
 vi.mock("@talos/sdk-app-server/desktop", async (importOriginal) => ({
   ...await importOriginal<typeof import("@talos/sdk-app-server/desktop")>(),
-  createElectronAppServerClient: () => ({ desktop: { workerIdentity: async () => ({ nodeId: "desktop-local", controlPlaneEndpoint: null, systemInfo: null }) } }),
+  createElectronAppServerClient: () => ({ desktop: { workerIdentity:  () => Promise.resolve(({ nodeId: "desktop-local", controlPlaneEndpoint: null, systemInfo: null })) } }),
 }));
 const list = vi.fn();
 const syncStatus = vi.fn();
@@ -57,7 +57,7 @@ beforeEach(() => {
         ? { ...topologyNodes[0], nodeId, displayName: "Talo", managedWorkerPhase: "ready" }
         : topologyNodes.find(node => node.nodeId === nodeId) ?? Promise.reject(new TypeError("Directory unavailable")),
     },
-    browser: { operate: async () => ({ enabled: false, host: "docker", selectedTargetId: null, targets: [], display: { kind: "dockerDesktop", targetId: "managed" }, control: { generation: "gen-1", revision: 1, epoch: 0, owner: { kind: "idle" } } }) },
+    browser: { operate:  () => Promise.resolve(({ enabled: false, host: "docker", selectedTargetId: null, targets: [], display: { kind: "dockerDesktop", targetId: "managed" }, control: { generation: "gen-1", revision: 1, epoch: 0, owner: { kind: "idle" } } })) },
     sync: { status: syncStatus },
   }) as unknown as TalosWebClient);
 });
@@ -118,7 +118,7 @@ it("does not confuse directory loading or failure with zero registered computers
   expect(within(screen.getByRole("region", { name: "Home" })).getByRole("status")).toHaveTextContent("Loading");
   expect(screen.queryByRole("heading", { name: "Connect a personal computer" })).not.toBeInTheDocument();
   await waitFor(() => expect(list).toHaveBeenCalled());
-  await act(async () => reject(new TalosApiError({ code: AppProtocol.ErrorCode.ServiceUnavailable, message: "Directory unavailable.", localization: null })));
+  await act(() => Promise.resolve(reject(new TalosApiError({ code: AppProtocol.ErrorCode.ServiceUnavailable, message: "Directory unavailable.", localization: null }))));
   expect(await screen.findByRole("alert")).toHaveTextContent(i18n.t("computers:networkError"));
   expect(screen.getByRole("alert")).toHaveClass("text-danger");
   expect(screen.queryByRole("heading", { name: "Connect a personal computer" })).not.toBeInTheDocument();
@@ -169,9 +169,9 @@ it.each([false, true])("keeps this Desktop selectable when an empty cloud direct
 
 it("searches beyond the initial computer list without treating no matches as an unregistered account", async () => {
   const more = { ...topologyNodes[0], nodeId: "remote", displayName: "Remote office" };
-  list.mockImplementation(async ({ query: search }) => search
+  list.mockImplementation(({ query: search }) => Promise.resolve(search
     ? { data: search === "office" ? [more] : [], total: search === "office" ? 1 : 0, nextCursor: null }
-    : { data: topologyNodes, total: 21, nextCursor: "next" });
+    : { data: topologyNodes, total: 21, nextCursor: "next" }));
   show();
   const search = await screen.findByRole("searchbox", { name: "Search personal computers" });
   expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();

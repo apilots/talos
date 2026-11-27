@@ -38,8 +38,8 @@ describe("timeline stream events", () => {
     expect(timeline).toMatchObject({
       kind: "timeline",
       items: [
-        expect.objectContaining({ itemId: "commentary-1", phase: "commentary", text: "working" }),
-        expect.objectContaining({ itemId: "final-1", phase: "final_answer", text: "done now" }),
+        expect.objectContaining({ itemId: "commentary-1", phase: "commentary", text: "working" }) as unknown,
+        expect.objectContaining({ itemId: "final-1", phase: "final_answer", text: "done now" }) as unknown,
       ],
     });
   });
@@ -59,9 +59,9 @@ describe("timeline stream events", () => {
             sourceItemId: "answer-1",
             phase: "final_answer", replayFinalAnswer: true,
             text: "final text",
-          }),
+          }) as unknown,
         ],
-      }),
+      }) as unknown,
     ]);
   });
 
@@ -70,7 +70,7 @@ describe("timeline stream events", () => {
     applyStreamEvent("sess-1", textDelta("answer-1", "first", 2));
     applyStreamEvent("sess-1", assistantTextCommitted("answer-1", "final_answer", 3));
     expect(useAppStore.getState().streams["sess-1"]?.blocks).toEqual([
-      expect.objectContaining({ kind: "timeline", live: true }),
+      expect.objectContaining({ kind: "timeline", live: true }) as unknown,
     ]);
     applyStreamEvent("sess-1", textDelta("answer-1", " second", 4));
     applyStreamEvent("sess-1", itemCompleted("answer-1", 5, "assistant_text", "finalAnswer"));
@@ -87,7 +87,7 @@ describe("timeline stream events", () => {
           phase: "final_answer",
           text: "first second",
           status: "completed",
-        }),
+        }) as unknown,
       ],
     });
   });
@@ -100,7 +100,7 @@ describe("timeline stream events", () => {
     const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find((block) => block.kind === "timeline");
     expect(timeline).toMatchObject({
       kind: "timeline",
-      items: [expect.objectContaining({ itemId: "thinking-1", phase: "commentary", text: "checking" })],
+      items: [expect.objectContaining({ itemId: "thinking-1", phase: "commentary", text: "checking" }) as unknown],
     });
   });
 
@@ -124,7 +124,7 @@ describe("timeline stream events", () => {
       (block) => block.kind === "timeline",
     );
     expect(runningTimeline).toMatchObject({
-      items: [expect.objectContaining({ itemId: "tool-1", status: "completed", executionMetrics: toolExecutionMetrics })],
+      items: [expect.objectContaining({ itemId: "tool-1", status: "completed", executionMetrics: toolExecutionMetrics }) as unknown],
     });
 
     applyStreamEvent("sess-1", itemCompleted("tool-1", 4, "tool_call"));
@@ -140,7 +140,7 @@ describe("timeline stream events", () => {
           status: "completed",
           output: "Example\nhttps://example.com\nExample snippet",
           progress: [{ kind: "status", message: "running" }],
-        }),
+        }) as unknown,
       ],
     });
   });
@@ -158,8 +158,8 @@ describe("timeline stream events", () => {
         state: "running",
         modelRounds: 1,
         toolCalls: 1,
-        usage: expect.objectContaining({ total_tokens: 42 }),
-      }),
+        usage: expect.objectContaining({ total_tokens: 42 }) as unknown,
+      }) as unknown,
     });
   });
 
@@ -179,13 +179,13 @@ describe("timeline stream events", () => {
             itemId: "answer-1",
             phase: "final_answer",
             text: "final text",
-          }),
+          }) as unknown,
         ],
         metrics: expect.objectContaining({
           state: "completed",
-          usage: expect.objectContaining({ total_tokens: 46 }),
-        }),
-      }),
+          usage: expect.objectContaining({ total_tokens: 46 }) as unknown,
+        }) as unknown,
+      }) as unknown,
     ]);
   });
 
@@ -203,11 +203,11 @@ describe("timeline stream events", () => {
     expect(timeline).toMatchObject({
       kind: "timeline",
       items: [
-        expect.objectContaining({ kind: "assistant_text", text: "Before tool." }),
-        expect.objectContaining({ kind: "tool_call", itemId: "tool-1", output: "glob output" }),
-        expect.objectContaining({ kind: "assistant_text", text: "After first tool." }),
-        expect.objectContaining({ kind: "tool_call", itemId: "tool-2", output: "read output" }),
-        expect.objectContaining({ kind: "assistant_text", text: "After second tool." }),
+        expect.objectContaining({ kind: "assistant_text", text: "Before tool." }) as unknown,
+        expect.objectContaining({ kind: "tool_call", itemId: "tool-1", output: "glob output" }) as unknown,
+        expect.objectContaining({ kind: "assistant_text", text: "After first tool." }) as unknown,
+        expect.objectContaining({ kind: "tool_call", itemId: "tool-2", output: "read output" }) as unknown,
+        expect.objectContaining({ kind: "assistant_text", text: "After second tool." }) as unknown,
       ],
     });
   });
@@ -237,7 +237,7 @@ describe("timeline stream events", () => {
           status: "completed",
           completedAtMs: 9000,
           text: "working",
-        }),
+        }) as unknown,
       ],
     });
   });
@@ -258,7 +258,7 @@ describe("timeline stream events", () => {
           sourceItemId: "reasoning-5",
           text: "<think>\n",
           status: "completed",
-        }),
+        }) as unknown,
       ],
     });
     expect(timeline?.kind === "timeline" ? timeline.items : []).toHaveLength(1);
@@ -274,8 +274,8 @@ describe("timeline stream events", () => {
     expect(timelines).toEqual([
       expect.objectContaining({
         id: "timeline-sess-1-turn-2",
-        items: [expect.objectContaining({ itemId: "reasoning-5", text: "second" })],
-      }),
+        items: [expect.objectContaining({ itemId: "reasoning-5", text: "second" }) as unknown],
+      }) as unknown,
     ]);
   });
 
@@ -301,9 +301,9 @@ describe("timeline stream events", () => {
     expect(blocks[1]).toMatchObject({
       kind: "timeline",
       items: [
-        expect.objectContaining({ itemId: "thinking-1", text: "I will inspect the module." }),
-        expect.objectContaining({ itemId: "tool-1", output: "lib.rs", startedAtMs: 1000, completedAtMs: 2000, executionMetrics: toolExecutionMetrics }),
-        expect.objectContaining({ itemId: "final-1", phase: "final_answer", text: "The module is layered." }),
+        expect.objectContaining({ itemId: "thinking-1", text: "I will inspect the module." }) as unknown,
+        expect.objectContaining({ itemId: "tool-1", output: "lib.rs", startedAtMs: 1000, completedAtMs: 2000, executionMetrics: toolExecutionMetrics }) as unknown,
+        expect.objectContaining({ itemId: "final-1", phase: "final_answer", text: "The module is layered." }) as unknown,
       ],
     });
   });
@@ -328,7 +328,7 @@ describe("timeline stream events", () => {
     });
 
     expect(blocks).toEqual([
-      expect.objectContaining({ kind: "user", text: "hello" }),
+      expect.objectContaining({ kind: "user", text: "hello" }) as unknown,
       expect.objectContaining({
         kind: "timeline",
         items: [
@@ -336,13 +336,13 @@ describe("timeline stream events", () => {
             itemId: "final-1",
             phase: "final_answer",
             text: "direct answer",
-          }),
+          }) as unknown,
         ],
         metrics: expect.objectContaining({
           state: "completed",
-          usage: expect.objectContaining({ total_tokens: 46 }),
-        }),
-      }),
+          usage: expect.objectContaining({ total_tokens: 46 }) as unknown,
+        }) as unknown,
+      }) as unknown,
     ]);
   });
 
@@ -377,12 +377,12 @@ describe("timeline stream events", () => {
     expect(blocks[1]).toMatchObject({
       kind: "timeline",
       live: false,
-      items: [expect.objectContaining({ itemId: "final-history", text: "previous answer" })],
+      items: [expect.objectContaining({ itemId: "final-history", text: "previous answer" }) as unknown],
     });
     expect(blocks.at(-1)).toMatchObject({
       kind: "timeline",
       live: true,
-      items: [expect.objectContaining({ itemId: "thinking-1", text: "Searching." })],
+      items: [expect.objectContaining({ itemId: "thinking-1", text: "Searching." }) as unknown],
     });
   });
 

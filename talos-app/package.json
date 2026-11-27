@@ -7,6 +7,13 @@
   "devDependencies": {
     "@eslint/js": "^9.25.0",
     "@napi-rs/canvas": "1.0.13",
+    "@tanstack/eslint-plugin-query": "5.108.4",
+    "@vitest/eslint-plugin": "1.6.27",
+    "dependency-cruiser": "18.9.0",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-testing-library": "7.16.3",
+    "knip": "6.48.0",
     "typescript-eslint": "^8.31.1"
   },
   "scripts": {
@@ -19,8 +26,11 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "check": "pnpm --filter talos-web check",
-    "check:repo": "node ./scripts/check-repo.mjs && node --test ./scripts/error-presentation-rule.test.mjs && python3 ../scripts/check_error_contract.py",
-    "ci:frontend-app": "pnpm lint && pnpm test && pnpm typecheck && pnpm build && pnpm check:repo"
+    "check:repo": "node ./scripts/check-repo.mjs && node --test ./scripts/error-presentation-rule.test.mjs ./scripts/static-analysis-rules.test.mjs ./scripts/architecture-rules.test.mjs && python3 ../scripts/check_error_contract.py && pnpm check:architecture && pnpm check:unused",
+    "ci:frontend-app": "pnpm typecheck && pnpm lint && pnpm check:repo && pnpm test && pnpm build:checked",
+    "check:architecture": "depcruise --config .dependency-cruiser.cjs web/src",
+    "check:unused": "knip",
+    "build:checked": "pnpm --filter talos-web build:bundle && pnpm --filter talos-desktop build:checked"
   },
   "pnpm": {
     "overrides": {

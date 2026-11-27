@@ -14,7 +14,7 @@ import {
   setComposerValue,
 } from "./ChatComposer.test-utils";
 
-const apiMocks = vi.hoisted(() => ({ suggestSkills: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ suggestSkills: vi.fn<typeof import("../api")["suggestSkills"]>() }));
 const scrollIntoViewMock = vi.fn();
 
 vi.mock("../api", () => ({ suggestSkills: apiMocks.suggestSkills }));

@@ -177,3 +177,8 @@ it("keeps managed browser updates and host closures in their owning session snap
   store.setWorkspaceContext(second, true); store.syncDesktopBrowser(nativeState(3, ["2"]));
   store.setWorkspaceContext(first, true); expect(useAppStore.getState().workspaceWindows).toEqual([]);
 });
+
+it("rejects persisted owners that imitate array indices without an array identity", () => {
+  const snapshot = { workspaceWindows: [{ kind: "computer", nodeId: "worker" }], workspaceOpen: true };
+  expect(restoreWorkspaces({ [JSON.stringify({ 0: "actor", 1: "general", 2: null, length: 3 })]: snapshot })).toEqual({});
+});

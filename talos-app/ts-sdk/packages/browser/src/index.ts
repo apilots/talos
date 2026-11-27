@@ -163,7 +163,7 @@ function xhrRequest(
         ok: xhr.status >= 200 && xhr.status < 300,
         status: xhr.status,
         statusText: xhr.statusText,
-        text: async () => xhr.responseText,
+        text: () => Promise.resolve(xhr.responseText),
       }));
     };
     xhr.onerror = () => finish(() => reject(new TypeError("Network request failed.")));

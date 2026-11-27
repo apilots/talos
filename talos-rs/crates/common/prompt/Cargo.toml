@@ -9,8 +9,6 @@ repository.workspace = true
 
 [dependencies]
 serde.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 talos-error = { workspace = true }
 talos-fs = { workspace = true }

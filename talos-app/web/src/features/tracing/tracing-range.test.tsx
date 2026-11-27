@@ -1,3 +1,4 @@
+import type { TalosWebClient } from "@/shared/api/client";
 // @vitest-environment jsdom
 import {
   act,
@@ -15,9 +16,9 @@ import { SessionTracingPanel } from "./components/SessionTracingPanel";
 import { history, request } from "./tracing.fixtures";
 
 const mocks = vi.hoisted(() => ({
-  capabilities: vi.fn(),
-  readTurn: vi.fn(),
-  readRequest: vi.fn(),
+  capabilities: vi.fn<TalosWebClient["trajectory"]["capabilities"]>(),
+  readTurn: vi.fn<TalosWebClient["trajectory"]["readTurn"]>(),
+  readRequest: vi.fn<TalosWebClient["trajectory"]["readRequest"]>(),
 }));
 vi.mock("@/shared/api/client", () => ({
   getTalosClient: () => ({ trajectory: mocks }),
@@ -31,7 +32,7 @@ beforeEach(async () => {
   mocks.capabilities.mockResolvedValue({
     supported: true,
   });
-  mocks.readTurn.mockImplementation(async ({ identity, cursor }) => ({
+  mocks.readTurn.mockImplementation(({ identity, cursor }) => Promise.resolve(({
     identity,
     clockSegments:
       identity.turnId === "turn-4"
@@ -67,16 +68,16 @@ beforeEach(async () => {
             },
           ],
     nextCursor: identity.turnId === "turn-1" && !cursor ? "more" : null,
-  }));
+  })));
   const missing = null;
-  mocks.readRequest.mockImplementation(async ({ identity, modelRequestId }) => ({
+  mocks.readRequest.mockImplementation(({ identity, modelRequestId }) => Promise.resolve(({
     identity,
     request: { ...request, modelRequestId },
     prompt: missing,
     tools: missing,
     parameters: missing,
     outputs: [],
-  }));
+  })));
 });
 afterEach(() => {
   cleanupTracingDom();

@@ -117,8 +117,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Config
-config = "0.14"
-toml = "0.8"
 infer = "0.22"
 csv = "1"
 calamine = "0.36"
@@ -127,7 +125,6 @@ calamine = "0.36"
 sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio", "migrate"] }
 opendal = { version = "0.57", default-features = false }
 croner = "2.2"
-redis = "0.24"
 
 # Networking
 futures-util = "0.3"
@@ -143,7 +140,6 @@ chrono-tz = "0.10"
 sha2 = "0.10"
 getrandom = "0.2"
 subtle = "2"
-moka = { version = "0.12", features = ["sync"] }
 okf-core = "=0.2.4"
 okf-validator = "=0.2.4"
 
@@ -212,6 +208,11 @@ talos-upgrade = { path = "crates/app/talos-upgrade" }
 
 [workspace.lints.rust]
 unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
 
 [profile.dev]
 # Keep source locations in local backtraces while minimizing debug artifacts.

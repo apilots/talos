@@ -7,12 +7,12 @@ const fixture=vi.hoisted(()=>({home:""}));
 vi.mock("electron",()=>({app:{getPath:()=>fixture.home},BaseWindow:class{},WebContentsView:class{},session:{},ipcMain:{on:vi.fn(),removeListener:vi.fn()}}));
 import {DesktopBrowserHost} from "./browser-host";
 import {WebsiteAccount,downloadRoot} from "./browser-website";
-import {BrowserHostSocket as Socket} from "./browser-host.fixture";
+import {BrowserHostSocket as Socket,parseBrowserHostCommand} from "./browser-host.fixture";
 const request=(kind:"connect"|"probe"):AppProtocol.BrowserHostRequest=>({userId:"alice",generation:"one",epoch:1,target:"connected",operation:{kind}});
 let host:DesktopBrowserHost;
 beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-chrome-"));host=new DesktopBrowserHost();Socket.all=[];Socket.targets=[];Socket.profileRoot=fixture.home;vi.stubGlobal("WebSocket",Socket);});
 afterEach(async()=>{vi.restoreAllMocks();await host.reset();vi.unstubAllGlobals();rmSync(fixture.home,{recursive:true,force:true});});
-function delayHandshake(){let finish!:()=>void;const pending=new Promise<Response>(resolve=>{finish=()=>resolve({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})} as Response);});return{pending,finish};}
+function delayHandshake(){let finish!:()=>void;const pending=new Promise<Response>(resolve=>{finish=()=>resolve({json:()=>Promise.resolve(({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"}))} as Response);});return{pending,finish};}
 it.each(["reset","cancel"])("closes a Chrome candidate completed after %s",async(action)=>{
   const delayed=delayHandshake();vi.stubGlobal("fetch",vi.fn(()=>delayed.pending));
   const operation=host.execute("old",request("connect"));const rejected=expect(operation).rejects.toThrow("cancelled");
@@ -32,7 +32,7 @@ it("retires the old handshake before a new connection configures Chrome",async()
 });
 
 it("rejects actions for a closed current tab instead of selecting another tab",async()=>{
-  vi.stubGlobal("fetch",vi.fn(async()=>({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})})));
+  vi.stubGlobal("fetch",vi.fn(()=>Promise.resolve(({json:()=>Promise.resolve(({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"}))}))));
   await host.execute("connect",request("connect"));
   Socket.targets=[{targetId:"other-tab",type:"page",url:"about:blank",title:"Other tab"}];
   const actions:AppProtocol.BrowserAction[]=[{kind:"navigate",url:"https://example.test"},{kind:"key",key:"Enter"},{kind:"scroll",deltaX:0,deltaY:100}];
@@ -44,7 +44,7 @@ it("rejects actions for a closed current tab instead of selecting another tab",a
 
 const downloadRequest=(target:"connected"|"managed"="connected"):AppProtocol.BrowserHostRequest=>({...request("probe"),target,operation:{kind:"execute",action:{kind:"download"},targetId:null,element:null,upload:null}});
 async function connectedDownloads() {
-  vi.stubGlobal("fetch",vi.fn(async()=>({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})})));
+  vi.stubGlobal("fetch",vi.fn(()=>Promise.resolve(({json:()=>Promise.resolve(({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"}))}))));
   await host.execute("connect",request("connect"));
   Socket.targets=[{targetId:"download-tab",type:"page",url:"about:blank",title:"Downloads"}];
   const socket=Socket.all[0],directory=downloadRoot("alice-chrome");
@@ -93,7 +93,7 @@ it("keeps a failed completion visible and retries its GUID on the next collectio
 it("returns legitimate UUID filenames from the bundled browser",async()=>{
   const filename="12345678-1234-1234-1234-123456789abc",directory=downloadRoot("alice");
   writeFileSync(path.join(directory,filename),"%PDF-1.7 bundled");
-  vi.spyOn(WebsiteAccount.prototype,"tabs").mockResolvedValue([{id:"bundled-tab",send:async()=>({}),url:()=>"about:blank",title:()=>"Downloads"}]);
+  vi.spyOn(WebsiteAccount.prototype,"tabs").mockResolvedValue([{id:"bundled-tab",send:()=>Promise.resolve(({})),url:()=>"about:blank",title:()=>"Downloads"}]);
   expect(await collect("managed")).toEqual([{filename,dataBase64:Buffer.from("%PDF-1.7 bundled").toString("base64")}]);
 });
 
@@ -116,10 +116,10 @@ it("keeps unfinished Chrome GUID sources private after reconnecting",async()=>{
 });
 
 it.each([null,"other"])("closes the current tab by default and respects explicit tab %s",async(tabId)=>{
-  const tab=(id:string)=>({id,send:async()=>({}),url:()=>"about:blank",title:()=>id});
+  const tab=(id:string)=>({id,send:()=>Promise.resolve(({})),url:()=>"about:blank",title:()=>id});
   let tabs=[tab("other"),tab("current")];
-  vi.spyOn(WebsiteAccount.prototype,"tabs").mockImplementation(async()=>tabs);
-  const remove=vi.spyOn(WebsiteAccount.prototype,"remove").mockImplementation(async(id)=>{tabs=tabs.filter(tab=>tab.id!==id);});
+  vi.spyOn(WebsiteAccount.prototype,"tabs").mockImplementation(()=>Promise.resolve(tabs));
+  const remove=vi.spyOn(WebsiteAccount.prototype,"remove").mockImplementation((id)=>{tabs=tabs.filter(tab=>tab.id!==id); });
   const operation:AppProtocol.BrowserHostRequest={...request("probe"),target:"managed",operation:{kind:"execute",targetId:"current",element:null,upload:null,action:{kind:"tab",action:"close",tabId,url:null}}};
   await host.execute("close",operation);
   expect(remove).toHaveBeenCalledWith(tabId??"current");
@@ -127,14 +127,15 @@ it.each([null,"other"])("closes the current tab by default and respects explicit
 });
 
 it("waits for Chrome to retire a closing target before inspecting remaining tabs",async()=>{
-  vi.stubGlobal("fetch",vi.fn(async()=>({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})})));
+  vi.stubGlobal("fetch",vi.fn(()=>Promise.resolve(({json:()=>Promise.resolve(({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"}))}))));
   Socket.targets=["other","current"].map(targetId=>({targetId,type:"page",url:"about:blank",title:targetId}));
-  const originalSend=Socket.prototype.send;
+  const originalSend=Object.getOwnPropertyDescriptor(Socket.prototype,"send")!.value as Socket["send"];
+  const sendSpy=vi.spyOn(Socket.prototype,"send");
   let closing:string|undefined,closingSnapshots=0,reattachAttempts=0;
-  vi.spyOn(Socket.prototype,"send").mockImplementation(function(this:Socket,text:string){
-    const command=JSON.parse(text);
+  sendSpy.mockImplementation(function(this:Socket,text:string){
+    const command=parseBrowserHostCommand(text);
     let result:Record<string,unknown>|undefined,error:Record<string,unknown>|undefined;
-    if(command.method==="Target.closeTarget") {closing=command.params.targetId;result={success:true};}
+    if(command.method==="Target.closeTarget") {if(typeof command.params.targetId!=="string")throw new Error("Expected target ID.");closing=command.params.targetId;result={success:true};}
     else if(command.method==="Target.getTargets"&&closing) {
       closingSnapshots++;
       if(closingSnapshots>1)Socket.targets=Socket.targets.filter(target=>target.targetId!==closing);
@@ -156,7 +157,7 @@ it("waits for Chrome to retire a closing target before inspecting remaining tabs
 });
 
 it("fails explicitly when Chrome never removes an acknowledged closing target",async()=>{
-  vi.stubGlobal("fetch",vi.fn(async()=>({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})})));
+  vi.stubGlobal("fetch",vi.fn(()=>Promise.resolve(({json:()=>Promise.resolve(({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"}))}))));
   Socket.targets=[{targetId:"current",type:"page",url:"about:blank",title:"Current"}];
   await host.execute("connect",request("connect"));
   let now=0;vi.spyOn(Date,"now").mockImplementation(()=>now+=1500);

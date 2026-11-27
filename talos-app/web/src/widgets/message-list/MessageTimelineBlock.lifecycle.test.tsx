@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import type { ChatRenderBlock } from "@/shared/types/ui";
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -26,18 +28,16 @@ describe("MessageTimelineBlock lifecycle", () => {
   });
 
   it("keeps waiting for the next item only after the latest steer", () => {
-    const view = (
-      <MessageList
-        blocks={[{
+    const view = createElement<{ blocks: Extract<ChatRenderBlock, { kind: "timeline" }>[]; emptyDetail: string; emptyTitle: string }>(MessageList, {
+blocks: [{
           id: "timeline-awaiting-next-item",
           kind: "timeline",
           live: true,
           items: [{ ...command, status: "completed", completedAtMs: 1_100 }],
-        }]}
-        emptyDetail=""
-        emptyTitle=""
-      />
-    );
+        }],
+emptyDetail: "",
+emptyTitle: ""
+});
 
     const { rerender } = render(view);
     const previous = screen.getByRole("status");
@@ -52,9 +52,8 @@ describe("MessageTimelineBlock lifecycle", () => {
   });
 
   it("keeps commentary in sequence and honors an explicit collapse during live updates", () => {
-    const view = (
-      <MessageList
-        blocks={[{
+    const view = createElement<{ blocks: Extract<ChatRenderBlock, { kind: "timeline" }>[]; emptyDetail: string; emptyTitle: string }>(MessageList, {
+blocks: [{
           id: "timeline-activity",
           kind: "timeline",
           live: true,
@@ -63,11 +62,10 @@ describe("MessageTimelineBlock lifecycle", () => {
             { itemId: "progress", kind: "assistant_text", phase: "commentary", status: "completed", text: "The first check passed.", startedAtMs: 1_101 },
             { ...command, itemId: "tool-2", arguments: { command: "printf ready" }, status: "completed", completedAtMs: 1_200 },
           ],
-        }]}
-        emptyDetail=""
-        emptyTitle=""
-      />
-    );
+        }],
+emptyDetail: "",
+emptyTitle: ""
+});
     const { container, rerender } = render(view);
     const firstCommand = screen.getByRole("button", { name: "Bash · sleep 30" });
     const progress = screen.getByText("The first check passed.");
@@ -108,11 +106,12 @@ describe("MessageTimelineBlock lifecycle", () => {
   it.each([false, true])("keeps an inspected input request on settlement (process collapsed: %s)", (collapsed) => {
     const commentary = { itemId: "progress", kind: "assistant_text", phase: "commentary",
       status: "completed", text: "Approval required.", startedAtMs: 900 } satisfies ChatTimelineItem;
-    const view = (
-      <MessageList blocks={[{ id: "timeline-inspected-input", kind: "timeline", live: true,
-        items: [commentary, { ...command, status: "waitingForInput" }] }]}
-        emptyDetail="" emptyTitle="" />
-    );
+    const view = createElement<{ blocks: Extract<ChatRenderBlock, { kind: "timeline" }>[]; emptyDetail: string; emptyTitle: string }>(MessageList, {
+blocks: [{ id: "timeline-inspected-input", kind: "timeline", live: true,
+        items: [commentary, { ...command, status: "waitingForInput" }] }],
+emptyDetail: "",
+emptyTitle: ""
+});
     const { rerender } = render(view);
     if (collapsed) fireEvent.click(screen.getByRole("button", { name: /^Working/ }));
     const tool = screen.getByRole("button", { name: /Bash.*sleep 30.*Waiting for input/ });
@@ -142,10 +141,11 @@ describe("MessageTimelineBlock lifecycle", () => {
   it("ticks while Bash is silent, exposes the latest output, and pauses live activity when disconnected", () => {
     vi.useFakeTimers();
     vi.setSystemTime(121_000);
-    const view = (
-      <MessageList blocks={[{ id: "timeline-running", kind: "timeline", live: true, items: [command] }]}
-        emptyDetail="" emptyTitle="" />
-    );
+    const view = createElement<{ blocks: Extract<ChatRenderBlock, { kind: "timeline" }>[]; emptyDetail: string; emptyTitle: string }>(MessageList, {
+blocks: [{ id: "timeline-running", kind: "timeline", live: true, items: [command] }],
+emptyDetail: "",
+emptyTitle: ""
+});
 
     const { container, rerender } = render(view);
     expect(screen.getByText("Running")).toBeTruthy();
@@ -155,7 +155,7 @@ describe("MessageTimelineBlock lifecycle", () => {
     const status = screen.getByRole("status");
     expect(status.textContent).toBe("Working");
     expect(status.parentElement?.parentElement?.querySelector("svg")?.classList.contains("motion-safe:animate-spin")).toBe(true);
-    act(() => vi.advanceTimersByTime(2_000));
+    act(() => { vi.advanceTimersByTime(2_000); });
     expect(screen.getByText("2m02s")).toBeTruthy();
     expect(screen.getByText("Working for 2m02s")).toBeTruthy();
 
@@ -293,7 +293,7 @@ describe("MessageTimelineBlock lifecycle", () => {
         { ...command, itemId: "mcp", callId: "mcp", toolName: "mcp__example__inspect", arguments: {}, status: "completed" },
       ] }]} emptyDetail="" emptyTitle="" />,
     );
-    const group = within(container.querySelector("[data-timeline-activity]")! as HTMLElement);
+    const group = within(container.querySelector("[data-timeline-activity]")!);
     const summary = group.getByText("Read files and Other tools", { exact: true });
     expect(group.queryByRole("button")).toBeNull();
     fireEvent.click(summary);

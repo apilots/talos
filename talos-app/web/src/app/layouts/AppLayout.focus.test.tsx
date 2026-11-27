@@ -46,7 +46,7 @@ it("restores a focused narrow drawer to its live navigation toggle when widening
 it.each(["address","iframe"])("retains live %s focus while the same workspace changes presentation", kind => {
   show();act(()=>useAppStore.getState().createWorkspaceWebpage());
   const address=screen.getByRole("textbox",{name:"Preview address"});
-  const frame=screen.getByTitle("Preview content") as HTMLIFrameElement;
+  const frame=screen.getByTitle<HTMLIFrameElement>("Preview content");
   frame.contentDocument!.body.innerHTML='<input aria-label="Frame draft">';
   const field=frame.contentDocument!.querySelector("input")!;
   const focusContext=vi.spyOn(frame.contentWindow!,"focus").mockImplementation(()=>frame.focus());

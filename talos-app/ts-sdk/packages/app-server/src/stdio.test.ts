@@ -43,7 +43,7 @@ describe("JsonRpcStdioTransport server requests", () => {
     }));
     await Promise.resolve();
 
-    expect(transport.writes.map((line) => JSON.parse(line))).toEqual([
+    expect(transport.writes.map((line) => JSON.parse(line) as unknown)).toEqual([
       {
         jsonrpc: "2.0",
         id: 7,
@@ -63,7 +63,7 @@ describe("JsonRpcStdioTransport server requests", () => {
     }));
     await Promise.resolve();
 
-    expect(transport.writes.map((line) => JSON.parse(line))).toEqual([
+    expect(transport.writes.map((line) => JSON.parse(line) as unknown)).toEqual([
       {
         jsonrpc: "2.0",
         id: 9,
@@ -89,7 +89,7 @@ describe("JsonRpcStdioTransport server requests", () => {
     }));
     await Promise.resolve();
 
-    expect(transport.writes.map((line) => JSON.parse(line))).toEqual([
+    expect(transport.writes.map((line) => JSON.parse(line) as unknown)).toEqual([
       {
         jsonrpc: "2.0",
         id: 10,
@@ -247,7 +247,7 @@ describe("JsonRpcStdioTransport notifications", () => {
     transport.instance.onError((error) => errors.push(error));
 
     expect(() => transport.handleLine("{")).not.toThrow();
-    expect(errors).toMatchObject([{ code: AppProtocol.ErrorCode.InternalError, message: "The backend returned invalid JSON.", cause: expect.any(SyntaxError) }]);
+    expect(errors).toMatchObject([{ code: AppProtocol.ErrorCode.InternalError, message: "The backend returned invalid JSON.", cause: expect.any(SyntaxError) as unknown }]);
   });
 
   it.each(["null", "SECRET_REMOTE_BODY", '{"method":42}'])("rejects pending calls for an invalid frame: %s", async (frame) => {

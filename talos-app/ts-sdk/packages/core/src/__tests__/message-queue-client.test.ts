@@ -4,9 +4,9 @@ import { TalosClient } from "../client";
 
 describe("TalosClient message queue", () => {
   it("maps queue management operations to the shared HTTP resource", async () => {
-    const request = vi.fn().mockResolvedValue({ revision: 0, maxMessages: 10, messages: [] });
+    const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue({ revision: 0, maxMessages: 10, messages: [] });
     const client = new TalosClient(
-      { request },
+      { request: request as import("../adapters").HttpAdapter["request"] },
       { stream: vi.fn().mockResolvedValue(undefined) },
       "http://localhost:8080",
     );
@@ -19,7 +19,7 @@ describe("TalosClient message queue", () => {
     await client.messageQueue.reorder({ sessionId: "s1", messageIds: ["q2", "q1"] });
     await client.messageQueue.start({ sessionId: "s1", messageId: null });
 
-    expect(request.mock.calls.map(([url, options]) => [url, JSON.parse(String(options.body))]))
+    expect(request.mock.calls.map(([url, options]) => [url, (JSON.parse((typeof options?.body === "string" ? options.body : "")) as unknown)]))
       .toEqual([
         ["http://localhost:8080/v1/message-queue/add", { sessionId: "s1", input }],
         ["http://localhost:8080/v1/message-queue/list", { sessionId: "s1" }],
@@ -33,9 +33,9 @@ describe("TalosClient message queue", () => {
   it("routes queue changes separately from timeline events", async () => {
     const onEvent = vi.fn();
     const onMessageQueueChanged = vi.fn();
-    const stream = vi.fn().mockImplementation(async (_url, _options, onMessage) => {
+    const stream = vi.fn<import("../adapters").StreamAdapter["stream"]>().mockImplementation((_url, _options, onMessage) => {
       onMessage(JSON.stringify({ sessionId: "s1", revision: 4 }), "messageQueue/changed");
-    });
+     return Promise.resolve(); });
     const client = new TalosClient({ request: vi.fn() }, { stream }, "http://localhost:8080");
 
     await client.turns.events("s1", undefined, onEvent, undefined, {
@@ -51,9 +51,9 @@ describe("TalosClient message queue", () => {
     const onEvent = vi.fn();
     const onActiveTurnChanged = vi.fn();
     const change = { sessionId: "s1", state: { activeTurn: null, latestEventId: "event:7" } };
-    const stream = vi.fn().mockImplementation(async (_url, _options, onMessage) => {
+    const stream = vi.fn<import("../adapters").StreamAdapter["stream"]>().mockImplementation((_url, _options, onMessage) => {
       onMessage(JSON.stringify(change), "session/activeTurnChanged");
-    });
+     return Promise.resolve(); });
     const client = new TalosClient({ request: vi.fn() }, { stream }, "http://localhost:8080");
     await client.turns.events("s1", undefined, onEvent, undefined, { onActiveTurnChanged });
     expect(onActiveTurnChanged).toHaveBeenCalledWith(change);

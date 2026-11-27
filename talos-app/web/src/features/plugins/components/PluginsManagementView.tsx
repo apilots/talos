@@ -63,16 +63,18 @@ export function PluginsManagementView({
     [installedPluginsQuery.data?.plugins],
   );
 
+  const refetchInstalled = installedPluginsQuery.refetch;
+  const refetchMarketplace = marketplaceQuery.refetch;
   const refresh = useCallback(async () => {
     if (!showCatalog) {
-      await installedPluginsQuery.refetch();
+      await refetchInstalled();
       return;
     }
     await Promise.all([
-      installedPluginsQuery.refetch(),
-      searchPluginsForKind(kind, query, "force_refresh").then(() => marketplaceQuery.refetch()),
+      refetchInstalled(),
+      searchPluginsForKind(kind, query, "force_refresh").then(() => refetchMarketplace()),
     ]);
-  }, [installedPluginsQuery.refetch, kind, marketplaceQuery.refetch, query, showCatalog]);
+  }, [refetchInstalled, kind, refetchMarketplace, query, showCatalog]);
 
   useEffect(() => {
     if (refreshVersion === 0) {

@@ -42,7 +42,7 @@ it.each([{}, { appIconId: "unknown" }])("restores the default icon for stored pr
   await useAppStore.persist.rehydrate();
   render(<Appearance />);
 
-  expect((screen.getByRole("radio", { name: "Portrait light" }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole<HTMLInputElement>("radio", { name: "Portrait light" })).checked).toBe(true);
 });
 
 it("passes icon IDs to Desktop and reports only failures for the active choice", async () => {
@@ -58,13 +58,13 @@ it("passes icon IDs to Desktop and reports only failures for the active choice",
   vi.stubGlobal("talos", { setAppIcon });
 
   render(<Appearance />);
-  await user.click(screen.getByRole("radio", { name: "Talos classic" }));
+  await user.click(screen.getByRole<HTMLInputElement>("radio", { name: "Talos classic" }));
   await user.click(screen.getByRole("radio", { name: "Portrait dark" }));
-  await act(async () => rejectFirstClassic());
+  await act(() => Promise.resolve(rejectFirstClassic()));
   expect(screen.queryByRole("alert")).toBeNull();
   expect(setAppIcon.mock.calls).toEqual([["portrait-light"], ["classic"], ["portrait"]]);
 
-  await user.click(screen.getByRole("radio", { name: "Talos classic" }));
+  await user.click(screen.getByRole<HTMLInputElement>("radio", { name: "Talos classic" }));
   await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Could not update the system app icon."));
-  expect((screen.getByRole("radio", { name: "Talos classic" }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole<HTMLInputElement>("radio", { name: "Talos classic" })).checked).toBe(true);
 });

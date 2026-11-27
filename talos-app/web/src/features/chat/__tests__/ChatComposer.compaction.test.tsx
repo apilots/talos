@@ -39,7 +39,7 @@ function Harness() {
     isStreaming automation={automationController()} supportedAttachmentKinds={["file"]} />;
 }
 beforeEach(() => {
-  setTalosClientFactory(() => ({ files: { list: async () => ({ data: [attachment], nextCursor: null }) } }) as unknown as TalosWebClient);
+  setTalosClientFactory(() => ({ files: { list:  () => Promise.resolve(({ data: [attachment], nextCursor: null })) } }) as unknown as TalosWebClient);
   useAppStore.setState({ streams: {}, composerDrafts: {} });
   backend.add.mockReset().mockResolvedValue(undefined); backend.start.mockClear(); backend.streamText.mockClear();
   applyStreamEvent("sess-1", contextCompactionStarted("compact-1", "summarizing", null, 1));

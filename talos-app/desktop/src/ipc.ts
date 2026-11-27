@@ -24,7 +24,7 @@ export const TALOS_IPC = {
   subscriptionTerminated: "talos:subscription-terminated",
 } as const;
 
-export type { TalosRuntimeStateKind, TalosRuntimeState } from "@talos/sdk-app-server/desktop";
+export type {  TalosRuntimeState } from "@talos/sdk-app-server/desktop";
 import type { TalosRuntimeState } from "@talos/sdk-app-server/desktop";
 
 export interface TalosDesktopBridge extends AppIconDesktopBridge {

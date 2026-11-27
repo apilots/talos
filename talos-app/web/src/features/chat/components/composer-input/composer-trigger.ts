@@ -1,4 +1,4 @@
-export type ComposerTriggerKind = "slash" | "skill";
+type ComposerTriggerKind = "slash" | "skill";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;

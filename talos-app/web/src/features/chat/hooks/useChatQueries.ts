@@ -51,20 +51,21 @@ export function useConnectionKey() {
 
 export function useModelsQuery(nodeId?: string) {
   const selected = useSelectedComputerId();
-  const connectionKey = JSON.stringify([useProductScope(), nodeId ?? selected]);
+  const scope = useProductScope();
+  const target = nodeId ?? selected;
   return useQuery({
-    queryKey: chatKeys.models(connectionKey),
-    queryFn: () => listModels(nodeId ?? selected),
-    enabled: Boolean(nodeId ?? selected),
+    queryKey: chatKeys.models(JSON.stringify([scope, target])),
+    queryFn: () => listModels(target),
+    enabled: Boolean(target),
     staleTime: 60_000,
   });
 }
 
 export function useSessionsQuery() {
   const nodeId = useSelectedComputerId();
-  const connectionKey = useEnvironmentKey();
+  const scope = useProductScope();
   const query = useQuery({
-    queryKey: chatKeys.sessions(connectionKey),
+    queryKey: chatKeys.sessions(JSON.stringify([scope, nodeId])),
     queryFn: () => listSessions(nodeId),
     refetchInterval: 5_000,
   });
@@ -82,9 +83,9 @@ export function useSessionsQuery() {
 export function useProjectsQuery(nodeId?: string) {
   const selected = useSelectedComputerId();
   const target = nodeId ?? selected;
-  const connectionKey = JSON.stringify([useProductScope(), target]);
+  const scope = useProductScope();
   return useQuery({
-    queryKey: chatKeys.projects(connectionKey),
+    queryKey: chatKeys.projects(JSON.stringify([scope, target])),
     queryFn: target ? () => listProjects(target) : skipToken,
   });
 }

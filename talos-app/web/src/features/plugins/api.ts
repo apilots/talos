@@ -12,7 +12,7 @@ export async function listSkills(includeDisabled = true) {
   return getTalosClient().skills.list({ include_disabled: includeDisabled });
 }
 
-export async function readLocalSkill(skill: SkillSummary) {
+export async function readLocalSkill(skill: Pick<SkillSummary, "name" | "path">) {
   return getTalosClient().skills.read({
     selector: {
       name: skill.name,
@@ -42,7 +42,7 @@ export async function searchPlugins(
   return searchPluginsByKind(null, query, refresh);
 }
 
-export async function searchPluginsByKind(
+async function searchPluginsByKind(
   kind: PluginKind | null,
   query: string,
   refresh: PluginSearchRefreshPolicy = "refresh_stale",
@@ -69,7 +69,7 @@ export async function listManagedPlugins() {
   return listManagedPluginsByKind(null);
 }
 
-export async function listManagedPluginsByKind(kind: PluginKind | null) {
+async function listManagedPluginsByKind(kind: PluginKind | null) {
   return getTalosClient().plugin.list({
     kind,
     status: null,
@@ -78,7 +78,7 @@ export async function listManagedPluginsByKind(kind: PluginKind | null) {
   });
 }
 
-export async function readPluginDocument(plugin: Plugin) {
+export async function readPluginDocument(plugin: Pick<Plugin, "id">) {
   return getTalosClient().plugin.read({ plugin_id: plugin.id });
 }
 

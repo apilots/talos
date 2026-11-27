@@ -7,8 +7,8 @@ import { createDesktopTalosClient } from "./desktop-client";
 describe("createDesktopTalosClient", () => {
   it("preserves the selected Worker across directory, environment and metadata calls", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-    const client = createDesktopTalosClient(bridgeWithInvoke(async function <T>(method: AppProtocol.ClientMethod, params?: unknown): Promise<T> {
-      calls.push({ method, params }); return {} as T;
+    const client = createDesktopTalosClient(bridgeWithInvoke( function <T>(method: AppProtocol.ClientMethod, params?: unknown): Promise<T> {
+      calls.push({ method, params }); return Promise.resolve({} as T);
     }));
     const target = { nodeId: "worker-b" };
     await client.fs.directory.read({ path: null, ...target });
@@ -24,16 +24,16 @@ describe("createDesktopTalosClient", () => {
 
   it("submits typed Turn input through the app-server transport", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-    const bridge = bridgeWithInvoke(async function <T>(
+    const bridge = bridgeWithInvoke( function <T>(
       method: AppProtocol.ClientMethod,
       params?: unknown,
     ): Promise<T> {
       calls.push({ method, params });
-      return {
+      return Promise.resolve({
         requestId: "request-1",
         identity: { sessionId: "session-1", turnId: "turn-1" },
         messageId: "message-1",
-      } as T;
+      } as T);
     });
     const client = createDesktopTalosClient(bridge);
     const request: AppProtocol.SubmitTurnInputRequest = {
@@ -53,28 +53,28 @@ describe("createDesktopTalosClient", () => {
 
   it("forwards request-object params without nesting session and project ids", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-    const bridge = bridgeWithInvoke(async function <T>(
+    const bridge = bridgeWithInvoke( function <T>(
       method: AppProtocol.ClientMethod,
       params?: unknown,
     ): Promise<T> {
         calls.push({ method, params });
         if (method === "session/get") {
-          return { session: { id: "session-1" } } as T;
+          return Promise.resolve({ session: { id: "session-1" } } as T);
         }
         if (method === "session/history") {
-          return {
+          return Promise.resolve({
             data: [],
             nextCursor: null,
             lastStableEventId: null,
-          } as T;
+          } as T);
         }
         if (method === "session/active_turn") {
-          return { activeTurn: null, latestEventId: null } as T;
+          return Promise.resolve({ activeTurn: null, latestEventId: null } as T);
         }
         if (method === "project/delete") {
-          return { success: true } as T;
+          return Promise.resolve({ success: true } as T);
         }
-        throw new Error(`unexpected method: ${method} ${JSON.stringify(params)}`);
+        return Promise.reject(new Error(`unexpected method: ${method} ${JSON.stringify(params)}`));
     });
     const client = createDesktopTalosClient(bridge);
 
@@ -169,15 +169,15 @@ describe("createDesktopTalosClient", () => {
 
   it("passes memory search filters to the desktop bridge", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-    const bridge = bridgeWithInvoke(async function <T>(
+    const bridge = bridgeWithInvoke( function <T>(
       method: AppProtocol.ClientMethod,
       params?: unknown,
     ): Promise<T> {
         calls.push({ method, params });
         if (method === "memory/search") {
-          return { data: [] } as T;
+          return Promise.resolve({ data: [] } as T);
         }
-        throw new Error(`unexpected method: ${method}`);
+        return Promise.reject(new Error(`unexpected method: ${method}`));
     });
     const client = createDesktopTalosClient(bridge);
 
@@ -203,18 +203,18 @@ describe("createDesktopTalosClient", () => {
 
   it("passes memory file request objects to the desktop bridge", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-    const bridge = bridgeWithInvoke(async function <T>(
+    const bridge = bridgeWithInvoke( function <T>(
       method: AppProtocol.ClientMethod,
       params?: unknown,
     ): Promise<T> {
         calls.push({ method, params });
         if (method === "memory/file/read") {
-          return { file: { date: "2026-06-24", content: "# Memory" } } as T;
+          return Promise.resolve({ file: { date: "2026-06-24", content: "# Memory" } } as T);
         }
         if (method === "memory/file/write") {
-          return { file: { date: "2026-06-24", content: "# Updated memory" } } as T;
+          return Promise.resolve({ file: { date: "2026-06-24", content: "# Updated memory" } } as T);
         }
-        throw new Error(`unexpected method: ${method}`);
+        return Promise.reject(new Error(`unexpected method: ${method}`));
     });
     const client = createDesktopTalosClient(bridge);
 
@@ -251,21 +251,21 @@ describe("createDesktopTalosClient", () => {
 
   it("forwards the canonical start-turn request without source metadata", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-    const bridge = bridgeWithInvoke(async function <T>(
+    const bridge = bridgeWithInvoke( function <T>(
       method: AppProtocol.ClientMethod,
       params?: unknown,
     ): Promise<T> {
         calls.push({ method, params });
         if (method === "turn/start") {
-          return {
+          return Promise.resolve({
             requestId: "req-1",
             messageId: "message-1",
             sessionId: "session-1",
             turnId: "turn-1",
             status: "accepted",
-          } as T;
+          } as T);
         }
-        throw new Error(`unexpected method: ${method}`);
+        return Promise.reject(new Error(`unexpected method: ${method}`));
     });
     const client = createDesktopTalosClient(bridge);
 
@@ -291,7 +291,7 @@ describe("createDesktopTalosClient", () => {
             modelRef: { provider: "bailian", id: "kimi-k2.5" },
             reasoningEffort: null,
           },
-        }),
+        }) as unknown,
       },
     ]);
   });
@@ -309,10 +309,10 @@ function bridgeWithInvoke(invoke: <T>(method: AppProtocol.ClientMethod, params?:
 function bridgeWithResponses(
   responses: Partial<Record<AppProtocol.ClientMethod, unknown>>,
 ): DesktopRendererBridge {
-  return bridgeWithInvoke(async function <T>(method: AppProtocol.ClientMethod, params?: unknown) {
+  return bridgeWithInvoke( function <T>(method: AppProtocol.ClientMethod, params?: unknown) {
     if (Object.prototype.hasOwnProperty.call(responses, method)) {
-      return responses[method] as T;
+      return Promise.resolve(responses[method] as T);
     }
-    throw new Error(`unexpected method: ${method} ${JSON.stringify(params)}`);
+    return Promise.reject(new Error(`unexpected method: ${method} ${JSON.stringify(params)}`));
   });
 }

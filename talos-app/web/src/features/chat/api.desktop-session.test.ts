@@ -8,8 +8,8 @@ import { getSession, updateSessionPermissionMode } from "./api";
 
 describe("Desktop session routing", () => {
   function desktopAccount() {
-    const invoke = vi.fn();
-    const http = vi.fn();
+    const invoke = vi.fn<(method: string) => Promise<unknown>>();
+    const http = vi.fn<typeof fetch>();
     Object.defineProperty(window, "talos", { configurable: true, value: { invoke } });
     vi.stubGlobal("fetch", http);
     useAppStore.getState().setConnection({
@@ -30,9 +30,9 @@ describe("Desktop session routing", () => {
     const session = { id: "web-chat", sessionKind: "standard", effectiveMode: "askForApproval" };
     const missing = { code: "resourceNotFound", message: "Session missing locally.", localization: null };
     invoke.mockResolvedValue({ status: "error", error: missing });
-    http.mockImplementation(async (_url, request) => Response.json({ status: "success", data: { session: {
-      ...session, effectiveMode: request.method === "PATCH" ? "approveForMe" : session.effectiveMode,
-    } } }));
+    http.mockImplementation((_url, request) => Promise.resolve(Response.json({ status: "success", data: { session: {
+      ...session, effectiveMode: request?.method === "PATCH" ? "approveForMe" : session.effectiveMode,
+    } } })));
 
     const scope = connectionScope(useAppStore.getState().connection);
     const detail = await productQueries.fetchQuery({
@@ -42,7 +42,7 @@ describe("Desktop session routing", () => {
     await expect(updateSessionPermissionMode(session.id, "approveForMe")).resolves.toEqual({ ...session, effectiveMode: "approveForMe" });
 
     expect(invoke.mock.calls.map(([method]) => method)).toEqual(["session/get"]);
-    expect(http.mock.calls.map(([, request]) => request.method)).toEqual(["GET", "PATCH"]);
+    expect(http.mock.calls.map(([, request]) => request?.method)).toEqual(["GET", "PATCH"]);
     expect(http).toHaveBeenLastCalledWith(DESKTOP_CLOUD_ORIGIN + "/v1/sessions/web-chat", expect.objectContaining({ method: "PATCH" }));
   });
 
@@ -57,7 +57,7 @@ describe("Desktop session routing", () => {
     expect(invoke.mock.calls.map(([method]) => method)).toEqual(["session/get"]);
     expect(http).toHaveBeenCalledTimes(1);
     expect(http).toHaveBeenCalledWith(DESKTOP_CLOUD_ORIGIN + "/v1/sessions/former-talo", expect.objectContaining({
-      method: "GET", headers: expect.objectContaining({ Authorization: "Bearer alice-token" }),
+      method: "GET", headers: expect.objectContaining({ Authorization: "Bearer alice-token" }) as unknown,
     }));
   });
 });

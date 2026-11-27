@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 
@@ -46,7 +46,7 @@ export function useSessionCommands({
     isContextCompactionRunning(contextCompaction)
     ? contextCompaction
     : undefined;
-  const response: ComposerCommandResponseState | undefined = activeManualCompaction ||
+  const response = useMemo<ComposerCommandResponseState | undefined>(() => activeManualCompaction ||
     manualCompactionStartingSessionId === sessionId
     ? {
         kind: "compact",
@@ -55,7 +55,7 @@ export function useSessionCommands({
       }
     : settledResponse?.sessionId === sessionId
       ? settledResponse.response
-      : undefined;
+      : undefined, [activeManualCompaction, manualCompactionStartingSessionId, sessionId, settledResponse]);
 
   useEffect(() => () => {
     const operation = manualCompactionRef.current;

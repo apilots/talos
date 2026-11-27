@@ -16,11 +16,11 @@ afterEach(() => { cleanup(); cleanupTimelineEventsTest(); });
 it("removes stopped Loops after reconnect even when their metadata notification was missed and no canonical event follows", async () => {
   vi.useFakeTimers();
   let stopped = false;
-  const read = vi.fn(async () => ({ sessionId: "sess-1", goal: null, loops: stopped ? [] : [loop({ sessionId: "sess-1" })] }));
+  const read = vi.fn(() => Promise.resolve(({ sessionId: "sess-1", goal: null, loops: stopped ? [] : [loop({ sessionId: "sess-1" })] })));
   setTalosClientFactory(() => ({ automation: { read, commandCatalog: vi.fn().mockResolvedValue({ data: [] }) } }) as unknown as TalosWebClient);
   const failures: Array<(error: Error) => void> = [];
   api.subscribeTimelineEvents.mockImplementation((_session, _onEvent, _signal, _cursor, options) => {
-    options.onOpen();
+    options!.onOpen!();
     return new Promise((_resolve, reject) => { failures.push(reject); });
   });
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -34,7 +34,7 @@ it("removes stopped Loops after reconnect even when their metadata notification 
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   expect(result.current.tasks[0]?.value.status).toBe("active");
   const initialReads = read.mock.calls.length;
-  await act(async () => { failures[0]!(new Error("connection lost")); await Promise.resolve(); });
+  await act(async () => { failures[0](new Error("connection lost")); await Promise.resolve(); });
   // The canonical terminal event was consumed already; ModelStop metadata is
   // lost while disconnected. Both reconnection streams deliver no events.
   stopped = true;
@@ -47,10 +47,10 @@ it("removes stopped Loops after reconnect even when their metadata notification 
 
 it.each(["goal", "loop"] as const)("refreshes a created %s definition before the running-Turn snapshot finishes", async (mode) => {
   let created = false;
-  const read = vi.fn(async () => ({ sessionId: "sess-1", goal: created && mode === "goal" ? {
+  const read = vi.fn(() => Promise.resolve(({ sessionId: "sess-1", goal: created && mode === "goal" ? {
     id: "goal-new", sessionId: "sess-1", objective: "New objective", objectiveRevision: 1, status: "active", pauseReason: null, reason: null,
     tokenBudget: null, tokensUsed: 0, latestTurnId: null, completionEvidence: null, createdAt: 1, updatedAt: 1,
-  } : null, loops: created && mode === "loop" ? [loop({ sessionId: "sess-1" })] : [] }));
+  } : null, loops: created && mode === "loop" ? [loop({ sessionId: "sess-1" })] : [] })));
   setTalosClientFactory(() => ({ automation: { read, commandCatalog: vi.fn().mockResolvedValue({ data: [] }) } }) as unknown as TalosWebClient);
   api.subscribeTimelineEvents.mockImplementation(() => new Promise(() => undefined));
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -65,17 +65,17 @@ it.each(["goal", "loop"] as const)("refreshes a created %s definition before the
   expect(result.current.tasks).toEqual([]);
   let finishActive!: (value: { activeTurn: null; lastCompletedEventSeq: number; latestEventId: null }) => void;
   let activeResolved = false;
-  const active = new Promise((resolve) => { finishActive = resolve; }).then((value) => { activeResolved = true; return value; });
+  const active = new Promise<import("@talos/sdk-core").SessionActiveTurnResponse>((resolve) => { finishActive = resolve; }).then((value) => { activeResolved = true; return value; });
   api.getActiveTurn.mockReturnValueOnce(active);
   created = true;
-  const options = api.subscribeTimelineEvents.mock.calls[0]![4];
+  const options = api.subscribeTimelineEvents.mock.calls[0][4];
   try {
-    act(() => options.onAutomationChanged({ sessionId: "sess-1" }));
+    act(() => { options!.onAutomationChanged!({ sessionId: "sess-1" }); });
     await waitFor(() => expect(result.current.tasks[0]?.type).toBe(mode));
     expect(activeResolved).toBe(false);
     expect(read).toHaveBeenCalledTimes(2);
   } finally {
-    await act(async () => { finishActive({ activeTurn: null, lastCompletedEventSeq: 0, latestEventId: null }); });
+    await act(() => { finishActive({ activeTurn: null, lastCompletedEventSeq: 0, latestEventId: null });  return Promise.resolve(); });
   }
 });
 
@@ -83,9 +83,9 @@ it("does not start metadata refresh from an open callback after its Session effe
   const refresh = vi.fn();
   api.subscribeTimelineEvents.mockImplementation(() => new Promise(() => undefined));
   const { unmount } = renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, refresh, undefined, historyOptions));
-  const options = api.subscribeTimelineEvents.mock.calls[0]![4];
+  const options = api.subscribeTimelineEvents.mock.calls[0][4];
   unmount();
-  act(() => options.onOpen());
+  act(() => { options!.onOpen!(); });
   expect(api.getActiveTurn).not.toHaveBeenCalled();
   expect(refresh).not.toHaveBeenCalled();
 });

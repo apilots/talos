@@ -40,7 +40,7 @@ describe("auth api", () => {
     await expect(request()).rejects.toMatchObject({
       code: "internalError",
       message: "The backend returned invalid JSON.",
-      cause: expect.any(SyntaxError),
+      cause: expect.any(SyntaxError) as unknown,
     });
   });
 

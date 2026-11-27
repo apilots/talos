@@ -23,7 +23,7 @@ it.each(["starting", "restarting", "stopped", "error", "ready", "unknown"] as co
     const i18n = createInstance();
     await i18n.init({ lng: "en", resources: { en: { computers: computerResources.en } } });
     const runtime = kind === "unknown" ? undefined : { kind, message: null };
-    const local = { ...topologyNodes[0]!, available: false, status: "disabled" as const };
+    const local = { ...topologyNodes[0], available: false, status: "disabled" as const };
     const { container } = render(<I18nextProvider i18n={i18n}>
       <ComputerGraph nodes={[local]} localId={local.nodeId} localRuntime={runtime}
         directoryAvailable={false} controlPlane="https://control.example" layer="all" onInspect={vi.fn()} onService={vi.fn()} />

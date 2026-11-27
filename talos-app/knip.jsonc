@@ -1,0 +1,18 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+  "ignoreBinaries": ["tiffutil"], // macOS system utility used by the icon generator.
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.test.mjs", "shared/app-icons/generate.mjs", "shared/browser-home/home.js"],
+      "project": ["scripts/**/*.mjs", "shared/**/*.{ts,tsx,js,mjs}", "!shared/**/*.d.mts"]
+    },
+    "desktop": {
+      "entry": ["scripts/computer-ui-driver.mjs"],
+      "project": ["src/**/*.{ts,tsx}", "scripts/**/*.mjs"]
+    },
+    "web": {
+      "project": ["src/**/*.{ts,tsx,css}"]
+    },
+    "ts-sdk/packages/*": {}
+  }
+}

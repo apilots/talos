@@ -15,8 +15,8 @@ import {
 } from "./ChatComposer.test-utils";
 
 const apiMocks = vi.hoisted(() => ({
-  readFsDirectory: vi.fn(),
-  suggestSkills: vi.fn(),
+  readFsDirectory: vi.fn<typeof import("../api")["readFsDirectory"]>(),
+  suggestSkills: vi.fn<typeof import("../api")["suggestSkills"]>(),
 }));
 
 vi.mock("../api", () => ({
@@ -34,7 +34,7 @@ describe("ChatComposer controls", () => {
         name: "data",
         path: "/Users/xujiang/data",
         kind: "directory",
-        is_symlink: false,
+        is_symlink: false, hidden: false,
         readable: true,
         writable: true,
       }],

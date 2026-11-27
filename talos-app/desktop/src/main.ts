@@ -32,7 +32,7 @@ const serverUrl = process.env.TALOS_DESKTOP_SERVER_URL?.trim();
 
 let controller: DesktopAppServerController | undefined;
 
-async function createController(): Promise<DesktopAppServerController> {
+function createController(): DesktopAppServerController {
   const env = resolveAppServerEnvironment({
     baseEnv: process.env,
     packagedResourcesPath: app.isPackaged ? process.resourcesPath : null,
@@ -95,21 +95,21 @@ async function createMainWindow(server?: URL): Promise<BaseWindow> {
 
 registerDesktopSchemes();
 
-app.whenReady().then(async () => {
+void app.whenReady().then(async () => {
   const server = serverUrl ? trustedServerUrl(serverUrl) : undefined;
   if (!server) {
-    controller = await createController();
+    controller = createController();
     registerDesktopIpcHandlers(controller, appIcons);
   }
   // The renderer owns initialization so startup failures remain visible through IPC.
   await createMainWindow(server);
 
-  app.on("activate", async () => {
+  app.on("activate", () => {
     if (desktopWindows.size === 0) {
-      await createMainWindow(server);
+      void createMainWindow(server).catch((error: unknown) => console.error("Desktop window creation failed", error));
     }
   });
-});
+}).catch((error: unknown) => console.error("Desktop startup failed", error));
 
 let quitState: "running" | "closing" | "closed" = "running";
 app.on("before-quit", (event) => {

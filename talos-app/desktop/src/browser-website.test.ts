@@ -10,7 +10,7 @@ vi.mock("electron",async()=>{
   const {EventEmitter}=await import("node:events");let nextId=0;
   class Contents extends EventEmitter {
     id=++nextId;url="";destroyed=false;
-    debugger={attach:vi.fn(),sendCommand:async()=>({})};
+    debugger={attach:vi.fn(),sendCommand:()=>Promise.resolve(({}))};
     capturePage=vi.fn(()=>fixture.capture?.()??Promise.resolve({isEmpty:()=>false,toPNG:()=>Buffer.from("fixture-image")}));
     navigationHistory={canGoBack:()=>false,canGoForward:()=>false};
     setIgnoreMenuShortcuts=vi.fn();
@@ -180,7 +180,7 @@ it.each(["darwin","linux"] as const)("preserves minimized targets and restores p
 it("releases native window ownership even for an account that is no longer bound",async()=>{
  const window=new BrowserWindow(),account=new WebsiteAccount("unbound-owner");account.attach(window);await account.open("about:blank");
  window.emit("closed");expect(window.listenerCount("minimize")).toBe(0);expect(window.contentView.children).toEqual([]);
- await expect(account.open("about:blank")).resolves.toMatchObject({title:expect.any(Function)});account.close();
+ await expect(account.open("about:blank")).resolves.toMatchObject({title:expect.any(Function) as unknown});account.close();
 });
 
 it("isolates Agent key accelerators only until their native dispatch settles",async()=>{

@@ -64,7 +64,7 @@ export function useWorkspaceDocsPage() {
       });
       return response.doc;
     },
-    onSuccess: async (detail) => {
+    onSuccess: (detail) => {
       queryClient.setQueryData(["talos", connectionKey, "workspace-doc", detail.kind], detail);
     },
   });

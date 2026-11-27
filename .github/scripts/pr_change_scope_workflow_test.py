@@ -110,7 +110,7 @@ class WorkflowTests(unittest.TestCase):
         selected = plan(['talos-rs/apps/tui/src/render/chat_lines.rs'])['categories']['tui']
         ci_run.execute(selected['quality'][0], self.root / 'cache')
         self.assertEqual([args for args, _ in self.calls], [
-            ('just', 'fmt-check'), ('just', 'check', '--locked', '-p', 'talos-tui'),
+            ('just', 'fmt-check'), ('just', 'deps-check'), ('just', 'clippy', '--locked', '--all-targets', '-p', 'talos-tui'),
             ('just', 'test', '--locked', '-p', 'talos-tui')])
         self.calls.clear()
         task = selected['scenarios']['include'][0]
@@ -120,6 +120,31 @@ class WorkflowTests(unittest.TestCase):
         args, kwargs = self.calls[-1]
         self.assertEqual(args[-3:], ('just', 'e2e-case', '08_tui/controlled_chat'))
         self.assertEqual(kwargs['env']['TALOS_E2E_CLI_BIN'], str(self.root / 'output/ci-binaries/talos'))
+
+    def test_rust_lint_failure_prevents_test_execution(self):
+        task = plan(['talos-rs/apps/tui/src/render/chat_lines.rs'])['categories']['tui']['quality'][0]
+
+        def run(*args, **kwargs):
+            if args[0:2] == ('just', 'clippy'):
+                raise subprocess.CalledProcessError(17, args)
+
+        with patch.object(ci_run, 'run', side_effect=run) as commands:
+            with self.assertRaises(subprocess.CalledProcessError):
+                ci_run.execute(task, self.root / 'cache')
+        self.assertFalse(any(call.args[:2] == ('just', 'test') for call in commands.call_args_list))
+
+    def test_unused_dependencies_prevent_compile_and_test(self):
+        task = plan(['talos-rs/apps/tui/src/render/chat_lines.rs'])['categories']['tui']['quality'][0]
+
+        def run(*args, **kwargs):
+            if args[:2] == ('just', 'deps-check'):
+                raise subprocess.CalledProcessError(17, args)
+
+        with patch.object(ci_run, 'run', side_effect=run) as commands:
+            with self.assertRaises(subprocess.CalledProcessError):
+                ci_run.execute(task, self.root / 'cache')
+        self.assertFalse(any(call.args[:2] in [('just', 'clippy'), ('just', 'test')]
+                             for call in commands.call_args_list))
 
     def test_build_union_is_compiled_once_and_archived(self):
         task = plan(['.github/release-toolchain.env'])['build']
@@ -144,6 +169,29 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Missing executable'):
             ci_run.execute(task, self.root / 'cache')
         self.assertEqual(self.calls, [])
+
+    def test_frontend_checks_fail_before_test_and_bundle(self):
+        task = dict(kind='quality', rust=[], frontend=['talos-web', 'talos-desktop'])
+        expected = [
+            ('pnpm', '--dir', 'talos-app', '-r', '--filter', 'talos-web', '--filter', 'talos-desktop', 'typecheck'),
+            ('pnpm', '--dir', 'talos-app', '-r', '--filter', 'talos-web', '--filter', 'talos-desktop', 'lint'),
+            ('pnpm', '--dir', 'talos-app', 'check:repo'),
+            ('pnpm', '--dir', 'talos-app', '-r', '--filter', 'talos-web', '--filter', 'talos-desktop', 'test'),
+            ('pnpm', '--dir', 'talos-app', '--filter', 'talos-web', 'build:bundle'),
+            ('pnpm', '--dir', 'talos-app', '--filter', 'talos-desktop', 'build:main'),
+        ]
+        ci_run.execute(task, self.root / 'cache')
+        self.assertEqual([args for args, _ in self.calls], expected)
+        for failure in ('typecheck', 'check:repo'):
+            with self.subTest(failure=failure):
+                def run(*args, **kwargs):
+                    if args[-1] == failure:
+                        raise subprocess.CalledProcessError(17, args)
+                with patch.object(ci_run, 'run', side_effect=run) as commands:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        ci_run.execute(task, self.root / 'cache')
+                self.assertFalse(any(call.args[-1] in ('test', 'build:bundle', 'build:main')
+                                     for call in commands.call_args_list))
 
     def test_frontend_quality_does_not_build_web_twice_for_desktop(self):
         task = plan(['talos-app/desktop/src/main.ts'])['categories']['desktop']['quality'][0]

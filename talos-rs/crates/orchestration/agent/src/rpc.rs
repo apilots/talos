@@ -751,7 +751,7 @@ fn transport_error(error: Status) -> TalosError {
 
 fn run_failure(error: TalosError) -> pb::RunResponse {
     pb::RunResponse {
-        result: Some(pb::run_response::Result::Failure(failure(&error))),
+        result: Some(pb::run_response::Result::Failure(Box::new(failure(&error)))),
     }
 }
 

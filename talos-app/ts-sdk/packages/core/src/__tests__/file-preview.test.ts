@@ -7,8 +7,8 @@ const descriptor: FilePreviewDescriptor = { previewId: "p", entryPath: "folder/r
   metadata: { name: "report.html", mimeType: "text/html", sizeBytes: 1024 * 1024 + 3 }, expiresAt: 123 };
 it("assembles bounded chunks once for every transport", async () => {
   const source = new Uint8Array(descriptor.metadata.sizeBytes).fill(65);
-  const read = vi.fn(async ({ offset, limit }) => ({ metadata: descriptor.metadata, offset,
-    dataBase64: Buffer.from(source.subarray(offset, offset + limit)).toString("base64") }));
+  const read = vi.fn(({ offset, limit }: import("../types").FilePreviewReadRequest) => Promise.resolve(({ metadata: descriptor.metadata, offset,
+    dataBase64: Buffer.from(source.subarray(offset, offset + limit)).toString("base64") })));
   const preview = createFilePreviewClient({ prepare: vi.fn(), read, close: vi.fn() }, (p, path) => `native://${p.previewId}/${path}`);
   expect(await preview.content(descriptor)).toEqual(source);
   expect(read.mock.calls.map(([part]) => part)).toEqual([
@@ -29,7 +29,7 @@ it("adapts identical DTOs to HTTP and app-server without reconstructing source s
 });
 
 it("reads current size for changed session files and rejects changes during assembly", async () => {
-  const read = vi.fn().mockResolvedValueOnce({ metadata: { ...descriptor.metadata, sizeBytes: 6 }, offset: 0, dataBase64: "" })
+  const read = vi.fn<(request: import("../types").FilePreviewReadRequest) => Promise<import("../types").FilePreviewContent>>().mockResolvedValueOnce({ metadata: { ...descriptor.metadata, sizeBytes: 6 }, offset: 0, dataBase64: "" })
     .mockResolvedValueOnce({ metadata: { ...descriptor.metadata, sizeBytes: 7 }, offset: 0, dataBase64: Buffer.from("report").toString("base64") });
   const preview = createFilePreviewClient({ prepare: vi.fn(), read, close: vi.fn() }, () => "");
   await expect(preview.content(descriptor)).rejects.toThrow("Preview content changed");

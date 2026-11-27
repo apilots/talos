@@ -28,17 +28,17 @@ jobs:
           fetch-tags: true
 
       - name: Load release toolchain versions
-        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+        run: cat .github/release-toolchain.env .github/ci-toolchain.env >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RELEASE_RUST_VERSION }}
-          components: rustfmt
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: talos-rs
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,cargo-nextest
+          tool: just@${{ env.CI_JUST_VERSION }},cargo-nextest@${{ env.CI_NEXTEST_VERSION }},cargo-machete@${{ env.CI_MACHETE_VERSION }}
       - name: Prepare Linux source-check prerequisites
         run: |
           echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"

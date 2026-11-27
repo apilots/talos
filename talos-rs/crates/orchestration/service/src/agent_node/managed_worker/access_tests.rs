@@ -359,8 +359,10 @@ async fn managed_worker_publication_uses_its_lease_while_user_management_stays_r
 #[tokio::test]
 async fn managed_worker_info_reports_configured_idle_timeout_seconds() {
     let (service, _record) = seeded_service().await;
-    let mut policy = ServerRuntimePolicy::default();
-    policy.idle_timeout_seconds = 600;
+    let policy = ServerRuntimePolicy {
+        idle_timeout_seconds: 600,
+        ..Default::default()
+    };
     service
         .install_managed_worker_runtime(
             Arc::new(UnusedRuntime),

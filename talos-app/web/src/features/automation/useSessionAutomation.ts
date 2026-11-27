@@ -23,7 +23,7 @@ export function useSessionAutomation(sessionId: string, enabled: boolean) {
   const query = useQuery({ queryKey: ["talos", scope, "automation", sessionId],
     queryFn: async () => (await getTalosClient({ sessionId, readOnly: true })).automation.read({ sessionId }), enabled,
     refetchInterval: 5_000, retry: false });
-  const catalog = useQuery({ queryKey: ["talos", scope, "automation-commands"],
+  const catalog = useQuery({ queryKey: ["talos", scope, "automation-commands", sessionId],
     queryFn: async () => (await getTalosClient({ sessionId, readOnly: true })).automation.commandCatalog({}), enabled, staleTime: Infinity });
   const refresh = async () => {
     if (ownerRef.current !== owner) return;

@@ -60,10 +60,10 @@ macro_rules! environment_rpc {
                 wire::$encode(value)
             }.await;
             Ok(Response::new(pb::$response { result: Some(match result {
-                Ok(value) => pb::$result::Result::$variant(value),
+                Ok(value) => pb::$result::Result::$variant(value.into()),
                 Err(error) => {
                     talos_logging::report_error(&error);
-                    pb::$result::Result::Failure(error_pb::encode_failure(&error))
+                    pb::$result::Result::Failure(error_pb::encode_failure(&error).into())
                 }
             }) }))
             })

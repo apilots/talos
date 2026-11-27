@@ -86,14 +86,16 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
             .clone()
             .unwrap_or(node);
         Ok(Response::new(pb::CreateNodeResponse {
-            result: Some(pb::create_node_response::Result::Created(pb::CreatedNode {
-                node: Some(agent_protocol::node_pb::encode_info(node)),
-                credential: Some(pb::NodeCredential {
-                    node_id: "created".into(),
-                    token: "fixture-credential".into(),
-                    expires_at: request.credential_expires_at,
-                }),
-            })),
+            result: Some(pb::create_node_response::Result::Created(Box::new(
+                pb::CreatedNode {
+                    node: Some(agent_protocol::node_pb::encode_info(node)),
+                    credential: Some(pb::NodeCredential {
+                        node_id: "created".into(),
+                        token: "fixture-credential".into(),
+                        expires_at: request.credential_expires_at,
+                    }),
+                },
+            ))),
         }))
     }
     async fn get_node(
@@ -103,9 +105,9 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
         let node_id = request.into_inner().node_id;
         if let Some(error) = self.get_node_failure.read().unwrap().as_ref() {
             return Ok(Response::new(pb::GetNodeResponse {
-                result: Some(pb::get_node_response::Result::Failure(
+                result: Some(pb::get_node_response::Result::Failure(Box::new(
                     agent_protocol::error_pb::encode_failure(error),
-                )),
+                ))),
             }));
         }
         let node = self
@@ -118,16 +120,16 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
         if node.is_some() || ["fast", "slow", "resumed", "created"].contains(&node_id.as_str()) {
             return Ok(Response::new(pb::GetNodeResponse {
                 result: Some(match node {
-                    Some(node) => pb::get_node_response::Result::Node(
+                    Some(node) => pb::get_node_response::Result::Node(Box::new(
                         agent_protocol::node_pb::encode_info(node),
-                    ),
-                    None => pb::get_node_response::Result::Failure(
+                    )),
+                    None => pb::get_node_response::Result::Failure(Box::new(
                         agent_protocol::error_pb::encode_failure(
                             &talos_error::TalosError::localized(
                                 talos_error::ErrorLocalization::ComputerRegistrationRemoved,
                             ),
                         ),
-                    ),
+                    )),
                 }),
             }));
         }
@@ -159,9 +161,9 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
             system_info: None,
         };
         Ok(Response::new(pb::GetNodeResponse {
-            result: Some(pb::get_node_response::Result::Node(
+            result: Some(pb::get_node_response::Result::Node(Box::new(
                 agent_protocol::node_pb::encode_info(node),
-            )),
+            ))),
         }))
     }
     async fn verify_saved_registration(
@@ -250,9 +252,9 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
             self.release.acquire().await.unwrap().forget();
         }
         Ok(Response::new(pb::GetNodeResponse {
-            result: Some(pb::get_node_response::Result::Node(
+            result: Some(pb::get_node_response::Result::Node(Box::new(
                 agent_protocol::node_pb::encode_info(node),
-            )),
+            ))),
         }))
     }
     async fn set_computer_status(

@@ -11,10 +11,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsMcpServersSection } from "./SettingsMcpServersSection";
 
 const apiMocks = vi.hoisted(() => ({
-  disablePlugin: vi.fn(),
-  enablePlugin: vi.fn(),
-  listManagedMcpPlugins: vi.fn(),
-  uninstallPlugin: vi.fn(),
+  disablePlugin: vi.fn<typeof import("@/features/plugins/api")["disablePlugin"]>(),
+  enablePlugin: vi.fn<typeof import("@/features/plugins/api")["enablePlugin"]>(),
+  listManagedMcpPlugins: vi.fn<typeof import("@/features/plugins/api")["listManagedMcpPlugins"]>(),
+  uninstallPlugin: vi.fn<typeof import("@/features/plugins/api")["uninstallPlugin"]>(),
   listConnections: vi.fn().mockResolvedValue({ data: [], nextCursor: null }),
   readAuthentication: vi.fn().mockResolvedValue({ authentication: { type: "none" }, state: { type: "unconfigured" } }),
 }));
@@ -172,7 +172,7 @@ describe("SettingsMcpServersSection", () => {
       plugins: [mcpPlugin(true)],
       warnings: [],
     });
-    apiMocks.disablePlugin.mockResolvedValue({});
+    apiMocks.disablePlugin.mockResolvedValue({ plugin: mcpPlugin(false) });
 
     render(<SettingsMcpServersSection />, { wrapper: createWrapper() });
 

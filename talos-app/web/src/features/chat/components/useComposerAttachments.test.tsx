@@ -94,8 +94,8 @@ describe("useComposerAttachments", () => {
       },
       image,
       {
-        signal: expect.any(AbortSignal),
-        onProgress: expect.any(Function),
+        signal: expect.any(AbortSignal) as unknown,
+        onProgress: expect.any(Function) as unknown,
       },
     );
     expect(fileApi.selectClient).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "talo-chat" }));
@@ -128,7 +128,7 @@ describe("useComposerAttachments", () => {
     });
     const itemId = result.current.items[0]?.id;
     expect(result.current.items).toEqual([
-      expect.objectContaining({ id: itemId, status: "uploading", progress: null }),
+      expect.objectContaining({ id: itemId, status: "uploading", progress: null }) as unknown,
     ]);
 
     await waitFor(() => expect(options?.onProgress).toBeDefined());
@@ -146,7 +146,7 @@ describe("useComposerAttachments", () => {
       await pending;
     });
     expect(result.current.items).toEqual([
-      expect.objectContaining({ id: itemId, status: "ready", file: PERSONAL_IMAGE }),
+      expect.objectContaining({ id: itemId, status: "ready", file: PERSONAL_IMAGE }) as unknown,
     ]);
   });
 
@@ -202,7 +202,7 @@ describe("useComposerAttachments", () => {
       pending = result.current.upload([image]);
     });
     await waitFor(() => expect(signal).toBeDefined());
-    act(() => result.current.remove(result.current.items[0]!.id));
+    act(() => result.current.remove(result.current.items[0].id));
     await act(async () => pending);
 
     expect(signal?.aborted).toBe(true);
@@ -229,7 +229,7 @@ describe("useComposerAttachments", () => {
     expect(result.current.items).toEqual([
       expect.objectContaining({ status: "failed", error: {
         code: "internalError", message: "network lost", localization: null,
-      } }),
+      } }) as unknown,
     ]);
     expect(result.current.hasFailedUploads).toBe(true);
     expect(result.current.fileIds).toEqual([]);

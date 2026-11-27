@@ -40,8 +40,8 @@ describe("timeline user action events", () => {
       expect.objectContaining({
         kind: "timeline",
         live: true,
-        items: expect.arrayContaining([expect.objectContaining({ itemId: "tool-1", status: "waitingForInput" })]),
-      }),
+        items: expect.arrayContaining([expect.objectContaining({ itemId: "tool-1", status: "waitingForInput" }) as unknown]) as unknown,
+      }) as unknown,
     ]);
 
     applyStreamEvent("sess-1", turnCompleted(3));
@@ -110,7 +110,7 @@ describe("timeline user action events", () => {
     const timeline = stream?.blocks.find((block) => block.kind === "timeline");
     expect(timeline).toMatchObject({
       kind: "timeline",
-      items: expect.arrayContaining([expect.objectContaining({ itemId: "tool-1", status: "waitingForInput" })]),
+      items: expect.arrayContaining([expect.objectContaining({ itemId: "tool-1", status: "waitingForInput" }) as unknown]) as unknown,
     });
   });
 
@@ -141,7 +141,7 @@ describe("timeline user action events", () => {
         callId: "call-tool-1",
         output: "exit 0",
         status: "completed",
-      })],
+      }) as unknown],
     });
     expect(useAppStore.getState().streams["sess-1"]?.pendingUserAction).toBeUndefined();
   });
@@ -155,8 +155,8 @@ describe("timeline user action events", () => {
     expect(useAppStore.getState().streams["sess-1"]?.blocks).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "timeline",
-        items: expect.arrayContaining([expect.objectContaining({ text: "done" })]),
-      }),
+        items: expect.arrayContaining([expect.objectContaining({ text: "done" }) as unknown]) as unknown,
+      }) as unknown,
     ]));
   });
 });

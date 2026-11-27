@@ -32,7 +32,7 @@ jobs:
         if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
         with:
           toolchain: ${{ env.RELEASE_RUST_VERSION }}
-          components: rustfmt
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
         with:
@@ -41,7 +41,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         if: steps.cache.outputs.hit != 'true'
         with:
-          tool: just@${{ env.CI_JUST_VERSION }},cargo-nextest@${{ env.CI_NEXTEST_VERSION }}
+          tool: just@${{ env.CI_JUST_VERSION }},cargo-nextest@${{ env.CI_NEXTEST_VERSION }}${{ matrix.ecosystem == 'rust' && format(',cargo-machete@{0}', env.CI_MACHETE_VERSION) || '' }}
       - name: Prepare Rust test prerequisites
         if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
         run: |

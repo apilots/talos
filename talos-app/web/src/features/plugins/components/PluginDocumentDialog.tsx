@@ -2,7 +2,7 @@ import { documentOverlayClasses } from "@/shared/ui/overlayStyles";
 import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useEnvironmentKey } from "@/features/computers";
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Plugin } from "@talos/sdk-browser";
@@ -25,10 +25,11 @@ export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogPr
   const environmentKey = useEnvironmentKey();
   const { t } = useTranslation("plugins");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const pluginId = plugin?.id;
   const documentQuery = useQuery({
     enabled: Boolean(plugin),
-    queryKey: ["talos", environmentKey, "plugins", "document", plugin?.id],
-    queryFn: () => readPluginDocument(plugin as Plugin),
+    queryKey: ["talos", environmentKey, "plugins", "document", pluginId],
+    queryFn: pluginId ? () => readPluginDocument({ id: pluginId }) : skipToken,
   });
 
   useEffect(() => {

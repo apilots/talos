@@ -274,6 +274,7 @@ pub struct SnapshotMessage {
 pub struct SnapshotToolDefinition {
     pub name: String,
     pub description: String,
+    #[ts(type = "JsonContentValue")]
     pub parameters: Option<JsonContentValue>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]

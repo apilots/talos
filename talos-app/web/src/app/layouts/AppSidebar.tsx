@@ -22,13 +22,15 @@ export function AppSidebar({ modal, visible, width, resizing, topBar, toggleRef,
   }, [modal, visible, toggleRef]);
   useEffect(() => {
     const panel = dialog.current;
+    // Responsive layout can replace the opener before this modal is retired.
+    const restoreLatestToggle = () => toggleRef.current?.focus();
     return () => {
       // A StrictMode effect replay does not retire the connected modal surface.
       if (panel?.isConnected) return;
       const focused = document.activeElement;
       const restoreFocus = panel?.open && (focused === document.body || (focused instanceof Node && panel.contains(focused)));
       if (panel?.open) panel.close();
-      if (modal && restoreFocus) toggleRef.current?.focus();
+      if (modal && restoreFocus) restoreLatestToggle();
     };
   }, [modal, toggleRef]);
   const style = { "--sidebar-open-width": `${width}px` } as CSSProperties;

@@ -12,27 +12,27 @@ const failure = new TalosApiError({
   code: "providerUnavailable", message: "The selected model is absent from the provider configuration.",
   localization: { type: "modelNotConfigured", provider: "local", model: "alpha" },
 });
-const reject = async () => { throw failure; };
+const reject =  () => { return Promise.reject(failure); };
 const noop = () => undefined;
 
 afterEach(async () => { cleanup(); await i18n.changeLanguage("en"); });
 
 it.each([
-  ["sidebar operation", async () => {
+  ["sidebar operation",  () => {
     render(<SidebarSessionDeleteDialog deleting={false} sessionTitle="example" onClose={noop} onDelete={reject} />);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-  }],
-  ["directory request", async () => {
+   return Promise.resolve(); }],
+  ["directory request",  () => {
     render(<ProjectDirectoryDialog mode="existing" onClose={noop} onCreateProject={reject}
       readDirectory={reject} createDirectory={reject} />);
-  }],
-  ["failed attachment", async () => {
+   return Promise.resolve(); }],
+  ["failed attachment",  () => {
     render(<ComposerAttachmentTray disabled={false} error={null} onRemove={noop}
       items={[{ id: "upload", status: "failed", file: new File([], "upload.txt"), error: failure.apiError }]} />);
-  }],
-  ["model command", async () => {
+   return Promise.resolve(); }],
+  ["model command",  () => {
     render(<ComposerCommandResponse response={{ kind: "model", model: "alpha", state: "error", error: failure.apiError }} />);
-  }],
+   return Promise.resolve(); }],
 ] as const)("%s renders stored failures in the current locale", async (_name, show) => {
   await show();
   await waitFor(() => expect(document.body.textContent).toContain('Model "alpha" is not configured for provider "local".'));

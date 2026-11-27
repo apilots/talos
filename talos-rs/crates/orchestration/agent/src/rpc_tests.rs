@@ -327,9 +327,9 @@ async fn waiting_rpc_cancellation_and_failed_continuation_keep_the_original_boun
             ..Default::default()
         }),
         params: Some(agent_pb::StartParams {
-            body: Some(agent_pb::start_params::Body::Run(
+            body: Some(agent_pb::start_params::Body::Run(Box::new(
                 agent_protocol::harness_pb::encode_run_params(resume).unwrap(),
-            )),
+            ))),
         }),
     };
     let mut unfinished = agent_pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(channel)

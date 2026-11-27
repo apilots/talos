@@ -31,7 +31,6 @@ ts-rs = { workspace = true }
 tracing = { workspace = true }
 
 # Utils
-uuid = { workspace = true }
 
 [dev-dependencies]
 axum = "0.7"

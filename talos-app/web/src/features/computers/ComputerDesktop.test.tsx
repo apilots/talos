@@ -1,3 +1,4 @@
+import type { TalosWebClient } from "@/shared/api/client";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -5,14 +6,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { BrowserSnapshot, DesktopViewGrant } from "@talos/sdk-core";
 import { i18n } from "@/shared/i18n/setup";
-import { ComputerDesktopButton } from "./ComputerDesktop";
+import { ComputerDesktop, ComputerDesktopButton } from "./ComputerDesktop";
 import { useAppStore } from "@/shared/store/app-store";
 import { RightWorkspace } from "@/app/layouts/RightWorkspace";
 import { AppNavigation, AppTopBar, WorkspaceControls } from "@/app/layouts/AppTopBar";
-import { useRef } from "react";
+import { startTransition, Suspense, use, useRef, useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 
-const fixture=vi.hoisted(()=>({scope:"alice",connectRfb:true,operate:vi.fn(),open:vi.fn(),socket:vi.fn(),rfbs:[] as Array<EventTarget & {disconnect:ReturnType<typeof vi.fn>;viewOnly:boolean;focus:ReturnType<typeof vi.fn>}>}));
+const fixture=vi.hoisted(()=>({scope:"alice",connectRfb:true,operate:vi.fn<TalosWebClient["browser"]["operate"]>(),open:vi.fn<TalosWebClient["desktop"]["open"]>(),socket:vi.fn<() => Pick<WebSocket, "binaryType" | "onopen" | "onerror" | "close">>(),rfbs:[] as Array<EventTarget & {disconnect:ReturnType<typeof vi.fn>;viewOnly:boolean;focus:ReturnType<typeof vi.fn>}>}));
 vi.mock("./hooks",()=>({useProductScope:()=>fixture.scope,useComputers:()=>({localId:"worker"}),useComputer:(nodeId:string)=>({data:{displayName:nodeId,available:true}}),useSelectedComputerId:()=>"worker"}));
 vi.mock("@/features/chat",()=>({useSessionQuery:()=>({data:undefined}),useProjectsQuery:()=>({data:[]})}));
 function WorkspaceHarness() {
@@ -48,7 +49,7 @@ function show(value:BrowserSnapshot) {
   fixture.operate.mockResolvedValue(value);
   fixture.open.mockResolvedValue(grant("readOnly"));
   fixture.socket.mockImplementation(()=>{
-    const socket={binaryType:"",onopen:null as null|(()=>void),onerror:null,close:vi.fn()};
+    const socket={binaryType:"arraybuffer" as const,onopen:null as null|(()=>void),onerror:null,close:vi.fn()};
     queueMicrotask(()=>socket.onopen?.());return socket;
   });
   const query=new QueryClient({defaultOptions:{queries:{retry:false}}});
@@ -63,7 +64,7 @@ it("opens the computer without randomUUID on an HTTP origin", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Desktop" }));
   await screen.findByText("Agent can operate");
   expect(fixture.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    viewerId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+    viewerId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/) as unknown,
     inputMode: "readOnly",
   }));
   query.clear();
@@ -74,7 +75,7 @@ it("reports a disconnect before the first frame and can request a fresh view", a
   const { query } = show(snapshot());
   fireEvent.click(await screen.findByRole("button", { name: "Desktop" }));
   await waitFor(() => expect(fixture.rfbs).toHaveLength(1));
-  act(() => fixture.rfbs[0].dispatchEvent(new Event("disconnect")));
+  act(() => { fixture.rfbs[0].dispatchEvent(new Event("disconnect")); });
   expect(await screen.findByRole("alert")).toHaveTextContent("The view disconnected");
   fixture.connectRfb = true;
   fixture.open.mockResolvedValueOnce(grant("readOnly", 1));
@@ -113,15 +114,15 @@ it("requests a fresh immutable stream for takeover instead of upgrading the old 
   const value=snapshot();const {query}=show(value);
   fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));
   await screen.findByText("Agent can operate");
-  fixture.operate.mockImplementation(async({operation})=>{
+  fixture.operate.mockImplementation(({operation})=>{
     if(operation.kind==="takeControl") {
       value.control={...value.control,revision:2,epoch:1,owner:{kind:"handingOver",controllerId:"controller"}};
-      return structuredClone(value);
+      return Promise.resolve(structuredClone(value));
     }
     if(fixture.rfbs.length===2)value.control.owner={kind:"human",controllerId:"controller"};
-    return structuredClone(value);
+    return Promise.resolve(structuredClone(value));
   });
-  fixture.open.mockImplementation(async(request)=>grant(request.inputMode,1));
+  fixture.open.mockImplementation((request)=>Promise.resolve(grant(request.inputMode,1)));
   fireEvent.click(screen.getByRole("button",{name:"Take control"}));
   await screen.findByRole("button",{name:"Return to agent"});
   expect(fixture.open).toHaveBeenLastCalledWith(expect.objectContaining({nodeId:"worker",inputMode:"control",controllerId:"controller",inputEpoch:1}));
@@ -149,17 +150,17 @@ it("ignores an old generation grant that finishes after the current grant",async
  const {query}=show(first);const old=deferred<DesktopViewGrant>(),current=deferred<DesktopViewGrant>();
  fixture.open.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
  fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));await waitFor(()=>expect(fixture.open).toHaveBeenCalledTimes(1));
- fixture.operate.mockResolvedValue(second);act(()=>query.setQueryData(["talos","alice","browser","worker"],second));
+ fixture.operate.mockResolvedValue(second);act(()=>{ query.setQueryData(["talos","alice","browser","worker"],second); });
  await waitFor(()=>expect(fixture.open).toHaveBeenCalledTimes(2));
- await act(async()=>current.resolve({...grant("readOnly",2),generation:"new-generation"}));await screen.findByText("Agent can operate");
- await act(async()=>old.resolve(grant("readOnly",1)));
+ await act(()=>Promise.resolve(current.resolve({...grant("readOnly",2),generation:"new-generation"})));await screen.findByText("Agent can operate");
+ await act(()=>Promise.resolve(old.resolve(grant("readOnly",1))));
  expect(fixture.rfbs).toHaveLength(1);expect(fixture.rfbs[0].disconnect).not.toHaveBeenCalled();query.clear();
 });
 it("retires a pending grant when Browser is disabled",async()=>{
  const value=snapshot();const {query}=show(value);const pending=deferred<DesktopViewGrant>();fixture.open.mockReturnValueOnce(pending.promise);
  fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));await waitFor(()=>expect(fixture.open).toHaveBeenCalledTimes(1));
- const disabled={...value,enabled:false};fixture.operate.mockResolvedValue(disabled);act(()=>query.setQueryData(["talos","alice","browser","worker"],disabled));
- await screen.findByText("Desktop unavailable");await act(async()=>pending.resolve(grant("readOnly")));
+ const disabled={...value,enabled:false};fixture.operate.mockResolvedValue(disabled);act(()=>{ query.setQueryData(["talos","alice","browser","worker"],disabled); });
+ await screen.findByText("Desktop unavailable");await act(()=>Promise.resolve(pending.resolve(grant("readOnly"))));
  expect(fixture.socket).not.toHaveBeenCalled();query.clear();
 });
 it("keeps the same stream through expand/collapse and restores keyboard focus on close",async()=>{
@@ -178,10 +179,10 @@ it("keeps the same stream through expand/collapse and restores keyboard focus on
 it("keeps pause/resume in the session viewer and preserves read-only pixels while pausing",async()=>{
  const value=snapshot();const {query}=show(value);
  fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));await screen.findByText("Agent can operate");
- fixture.operate.mockImplementation(async({operation})=>{
+ fixture.operate.mockImplementation(({operation})=>{
   if(operation.kind==="pause")value.control={...value.control,revision:2,epoch:1,owner:{kind:"suspended",reason:"userPaused"}};
   if(operation.kind==="resume")value.control={...value.control,revision:3,epoch:2,owner:{kind:"idle"}};
-  return structuredClone(value);
+  return Promise.resolve(structuredClone(value));
  });
  fireEvent.click(screen.getByRole("button",{name:"Pause agent"}));await screen.findByRole("button",{name:"Resume agent"});
  expect(fixture.rfbs).toHaveLength(1);expect(fixture.rfbs[0].disconnect).not.toHaveBeenCalled();
@@ -198,7 +199,6 @@ it("keeps Desktop browser choice and local actions in the computer page without 
  expect(fixture.open).not.toHaveBeenCalled();expect(fixture.socket).not.toHaveBeenCalled();query.clear();
 });
 
-
 it("retires a pending stream on tab switch and reauthorizes the original Computer on return",async()=>{
  const {query}=show(snapshot());const old=deferred<DesktopViewGrant>();fixture.open.mockReturnValueOnce(old.promise);
  fireEvent.click(await screen.findByRole("button",{name:"Desktop"}));
@@ -206,7 +206,7 @@ it("retires a pending stream on tab switch and reauthorizes the original Compute
  act(()=>useAppStore.getState().openWorkspaceWindow({kind:"computer",nodeId:"second-worker"}));
  await screen.findByText("Agent can operate");
  expect(fixture.rfbs).toHaveLength(1);expect(fixture.open).toHaveBeenCalledTimes(2);
- await act(async()=>old.resolve(grant("readOnly",8)));
+ await act(()=>Promise.resolve(old.resolve(grant("readOnly",8))));
  expect(fixture.rfbs).toHaveLength(1);
  fireEvent.click(screen.getByRole("tab",{name:"worker"}));
  await waitFor(()=>expect(fixture.rfbs).toHaveLength(2));
@@ -251,4 +251,46 @@ it("renders secondary inspector button variants with localized labels and preser
   expect(shortcutButton).toHaveClass("size-7");
   expect(shortcutButton.querySelector("span")).toBeNull();
   thirdQuery.clear();
+});
+
+
+it("keeps a committed grant when another Computer render suspends", async () => {
+  const value = snapshot();
+  const { query, rerender } = show(value);
+  const pending = deferred<DesktopViewGrant>();
+  fixture.open.mockReturnValue(pending.promise);
+  query.setQueryData(["talos", "alice", "browser", "worker"], value);
+  query.setQueryData(["talos", "alice", "browser", "uncommitted-worker"], value);
+  const suspended = new Promise<void>(() => undefined);
+  let changeTarget!: (nodeId: string) => void;
+  let attempted = false;
+  function PendingComputer({ nodeId }: { nodeId: string }) {
+    if (nodeId === "uncommitted-worker") {
+      attempted = true;
+      use(suspended);
+    }
+    return null;
+  }
+  function ConcurrentComputer() {
+    const [nodeId, setNodeId] = useState("worker");
+    changeTarget = setNodeId;
+    return <Suspense fallback={<span>Loading Computer</span>}>
+      <ComputerDesktop nodeId={nodeId} expanded={false} onExitInput={() => undefined} />
+      <PendingComputer nodeId={nodeId} />
+    </Suspense>;
+  }
+  try {
+    rerender(<QueryClientProvider client={query}><ConcurrentComputer /></QueryClientProvider>);
+    await waitFor(() => expect(fixture.open).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      startTransition(() => changeTarget("uncommitted-worker"));
+      await Promise.resolve();
+    });
+    expect(attempted).toBe(true);
+    await act(() => Promise.resolve(pending.resolve(grant("readOnly"))));
+    await waitFor(() => expect(fixture.rfbs).toHaveLength(1));
+    expect(fixture.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ nodeId: "worker" }));
+  } finally {
+    query.clear();
+  }
 });

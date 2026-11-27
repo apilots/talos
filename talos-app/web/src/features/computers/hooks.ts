@@ -72,7 +72,7 @@ export function useComputerList(query = "") {
   // Directory observations are memory-only and unusable after a failed read.
   return { ...list, data: list.error ? undefined : list.data };
 }
-export function isDirectoryMiss(error: unknown) {
+function isDirectoryMiss(error: unknown) {
   return error instanceof TalosApiError && (
     error.code === AppProtocol.ErrorCode.ResourceNotFound ||
     error.code === AppProtocol.ErrorCode.ResourceExpired ||
@@ -99,7 +99,7 @@ export function useLocalComputer() {
   const bridge = getDesktopBridge();
   const runtime = useAppStore((state) => state.connection.workerRuntimeState);
   const identity = useQuery({ queryKey: ["talos", scope, "local-computer"], enabled: Boolean(bridge),
-    queryFn: () => createElectronAppServerClient(bridge!).desktop.workerIdentity(), refetchInterval: 5_000, retry: false });
+    queryFn: () => createElectronAppServerClient(getDesktopBridge()!).desktop.workerIdentity(), refetchInterval: 5_000, retry: false });
   return { nodeId: bridge && identity.data ? identity.data.nodeId ?? "embedded" : undefined, runtime, identity };
 }
 
@@ -132,15 +132,17 @@ export function useComputers() {
   const nodes = local
     ? [local, ...directoryNodes.filter((node) => node.nodeId !== localId)]
     : directoryNodes;
+  const singleNode = nodes.length === 1 ? nodes[0] : undefined;
+  const singleNodeId = singleNode?.managedWorkerPhase == null ? singleNode?.nodeId : undefined;
   useEffect(() => {
     if (selectedId === "") return;
     if (selectedId && !(selectedId === "embedded" && localId && localId !== "embedded")) return;
     if (localId) {
       select(scope, localId);
-    } else if (list.data?.pages[0]?.total === 1 && nodes.length === 1 && nodes[0].managedWorkerPhase == null) {
-      select(scope, nodes[0].nodeId);
+    } else if (list.data?.pages[0]?.total === 1 && singleNodeId) {
+      select(scope, singleNodeId);
     }
-  }, [list.data, localId, nodes, scope, select, selectedId]);
+  }, [list.data, localId, singleNodeId, scope, select, selectedId]);
   const selected = useComputer(selectedId, directoryNodes.find((node) => node.nodeId === selectedId));
   const clear = useAppStore((state) => state.clearComputer);
   const queryClient = useQueryClient();

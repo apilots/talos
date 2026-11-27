@@ -19,7 +19,7 @@ it("assembles immutable UTF-8 pages and preserves exact raw parameter strings", 
     const raw = '{ "text": "你好" }\n';
     const value = { kind: "response", parts: [{ type: "toolCall", call: { callId: "c", name: "Read", arguments: { text: "你好" }, argumentsText: raw } }] };
     const body = JSON.stringify(value), split = body.indexOf("你好");
-    const read = vi.fn().mockResolvedValueOnce({ payloadId: "p", encoding: "utf8Json", data: body.slice(0, split), nextCursor: "next" })
+    const read = vi.fn<TrajectoryTransport["readPayload"]>().mockResolvedValueOnce({ payloadId: "p", encoding: "utf8Json", data: body.slice(0, split), nextCursor: "next" })
         .mockResolvedValueOnce({ payloadId: "p", encoding: "utf8Json", data: body.slice(split), nextCursor: null });
     expect(await createTrajectoryClient(transport(read)).payload(identity, ref)).toEqual(value);
     expect(read.mock.calls[1][0].cursor).toBe("next");

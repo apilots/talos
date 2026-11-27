@@ -533,10 +533,10 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
         .await;
         Ok(Response::new(pb::CreateNodeResponse {
             result: Some(match result {
-                Ok(created) => {
-                    pb::create_node_response::Result::Created(node_pb::encode_created(created))
-                }
-                Err(error) => pb::create_node_response::Result::Failure(failure(error)),
+                Ok(created) => pb::create_node_response::Result::Created(Box::new(
+                    node_pb::encode_created(created),
+                )),
+                Err(error) => pb::create_node_response::Result::Failure(Box::new(failure(error))),
             }),
         }))
     }
@@ -554,8 +554,10 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
         .await;
         Ok(Response::new(pb::GetNodeResponse {
             result: Some(match result {
-                Ok(info) => pb::get_node_response::Result::Node(node_pb::encode_info(info)),
-                Err(error) => pb::get_node_response::Result::Failure(failure(error)),
+                Ok(info) => {
+                    pb::get_node_response::Result::Node(Box::new(node_pb::encode_info(info)))
+                }
+                Err(error) => pb::get_node_response::Result::Failure(Box::new(failure(error))),
             }),
         }))
     }
@@ -572,8 +574,10 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
         .await;
         Ok(Response::new(pb::GetNodeResponse {
             result: Some(match result {
-                Ok(node) => pb::get_node_response::Result::Node(node_pb::encode_info(node)),
-                Err(error) => pb::get_node_response::Result::Failure(failure(error)),
+                Ok(node) => {
+                    pb::get_node_response::Result::Node(Box::new(node_pb::encode_info(node)))
+                }
+                Err(error) => pb::get_node_response::Result::Failure(Box::new(failure(error))),
             }),
         }))
     }
@@ -635,8 +639,10 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
         .await;
         Ok(Response::new(pb::GetNodeResponse {
             result: Some(match result {
-                Ok(info) => pb::get_node_response::Result::Node(node_pb::encode_info(info)),
-                Err(error) => pb::get_node_response::Result::Failure(failure(error)),
+                Ok(info) => {
+                    pb::get_node_response::Result::Node(Box::new(node_pb::encode_info(info)))
+                }
+                Err(error) => pb::get_node_response::Result::Failure(Box::new(failure(error))),
             }),
         }))
     }
@@ -660,8 +666,10 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
         .await;
         Ok(Response::new(pb::GetNodeResponse {
             result: Some(match result {
-                Ok(info) => pb::get_node_response::Result::Node(node_pb::encode_info(info)),
-                Err(error) => pb::get_node_response::Result::Failure(failure(error)),
+                Ok(info) => {
+                    pb::get_node_response::Result::Node(Box::new(node_pb::encode_info(info)))
+                }
+                Err(error) => pb::get_node_response::Result::Failure(Box::new(failure(error))),
             }),
         }))
     }
@@ -678,8 +686,10 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
         .await;
         Ok(Response::new(pb::GetNodeResponse {
             result: Some(match result {
-                Ok(info) => pb::get_node_response::Result::Node(node_pb::encode_info(info)),
-                Err(error) => pb::get_node_response::Result::Failure(failure(error)),
+                Ok(info) => {
+                    pb::get_node_response::Result::Node(Box::new(node_pb::encode_info(info)))
+                }
+                Err(error) => pb::get_node_response::Result::Failure(Box::new(failure(error))),
             }),
         }))
     }

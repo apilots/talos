@@ -119,7 +119,7 @@ export function ProjectDirectoryDialog({
     await loadDirectory(entry.path);
   }
 
-  async function useExistingDirectory() {
+  async function selectExistingDirectory() {
     if (!snapshot) {
       return;
     }
@@ -208,7 +208,7 @@ export function ProjectDirectoryDialog({
               onNewDirectoryNameChange={setNewDirectoryName}
               onNewProjectNameChange={setNewProjectName}
               onResetCreatedDirectoryPath={() => setCreatedDirectoryPath(null)}
-              onUseExistingDirectory={() => void useExistingDirectory()}
+              onUseExistingDirectory={() => void selectExistingDirectory()}
               snapshot={snapshot}
               submitting={submitting}
             />

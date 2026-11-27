@@ -4,6 +4,11 @@ import type { AppProtocol } from "@talos/sdk-core";
 import { assertDesktopRendererInvoke, isDesktopRendererMethod } from "./ipc-guard";
 
 describe("desktop IPC guard", () => {
+  it("rejects objects that coerce to a valid plugin kind", () => {
+    expect(() => assertDesktopRendererInvoke("plugin/list", {
+      kind: { toString: () => "skill" }, status: null, source_id: null, include_disabled: false,
+    })).toThrow("Invalid desktop renderer params");
+  });
   it("allows account metrics without letting the renderer select another account", () => {
     expect(() => assertDesktopRendererInvoke("sync/metrics", null)).not.toThrow();
     expect(() => assertDesktopRendererInvoke("sync/metrics", { accountId: "other" })).toThrow();

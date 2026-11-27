@@ -8,7 +8,7 @@ vi.mock("electron",()=>({app:{getPath:()=>fixture.home},BaseWindow:class{},WebCo
 import {DesktopBrowserHost} from "./browser-host";
 import {WebsiteAccount} from "./browser-website";
 import {trackInputs,release,type RecordValue} from "./browser-input";
-import {BrowserHostSocket as Socket} from "./browser-host.fixture";
+import {BrowserHostSocket as Socket,parseBrowserHostCommand} from "./browser-host.fixture";
 const request=(kind:"connect"|"probe"):AppProtocol.BrowserHostRequest=>({userId:"alice",generation:"one",epoch:1,target:"connected",operation:{kind}});
 let host:DesktopBrowserHost;
 beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-input-"));host=new DesktopBrowserHost();Socket.all=[];Socket.targets=[];Socket.profileRoot=fixture.home;vi.stubGlobal("WebSocket",Socket);});
@@ -29,12 +29,13 @@ async function inputFixture(target:"managed"|"connected",intercept:(method:strin
   vi.spyOn(WebsiteAccount.prototype,"tabs").mockResolvedValue([{id:"input-tab",send,url:()=>"about:blank",title:()=>"Inputs"}]);
   vi.spyOn(WebsiteAccount.prototype,"releaseInputs").mockImplementation(()=>release(send));
   if(target==="connected") {
-    vi.stubGlobal("fetch",vi.fn(async()=>({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})})));
+    vi.stubGlobal("fetch",vi.fn(()=>Promise.resolve(({json:()=>Promise.resolve(({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"}))}))));
     await host.execute("connect",request("connect"));
     Socket.targets=[{targetId:"input-tab",type:"page",url:"about:blank",title:"Inputs"}];
-    const original=Socket.prototype.send;
-    vi.spyOn(Socket.prototype,"send").mockImplementation(function(this:Socket,text:string){
-      const command=JSON.parse(text);
+    const original=Object.getOwnPropertyDescriptor(Socket.prototype,"send")!.value as Socket["send"];
+    const sendSpy=vi.spyOn(Socket.prototype,"send");
+    sendSpy.mockImplementation(function(this:Socket,text:string){
+      const command=parseBrowserHostCommand(text);
       if(command.method.startsWith("Target.")||command.method.startsWith("Browser.")){original.call(this,text);return;}
       this.commands.push(command);
       void respond(command.method,command.params).then(
@@ -58,7 +59,7 @@ it.each(["managed","connected"] as const)("releases %s mouse input when cancelle
 it.each(["managed","connected"] as const)("releases %s keyboard input after a failed key-down command",async(target)=>{
   const {inputs,execute}=await inputFixture(target,(_method,params)=>{if(params.type==="keyDown")throw Error("Injected CDP failure");});
   await expect(execute("interrupted",{kind:"key",key:"Shift+Enter"})).rejects.toThrow();
-  expect(inputs).toEqual([expect.objectContaining({type:"keyDown",key:"Enter",modifiers:8}),expect.objectContaining({type:"keyUp",key:"Enter",modifiers:0})]);
+  expect(inputs).toEqual([expect.objectContaining({type:"keyDown",key:"Enter",modifiers:8}) as unknown,expect.objectContaining({type:"keyUp",key:"Enter",modifiers:0}) as unknown]);
 });
 
 function deferred() {let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};}
@@ -185,9 +186,8 @@ it.each(["managed","connected"] as const)("releases cancelled %s input while its
   } finally {acknowledged.resolve();await interrupted;}
 });
 
-
 it.each(["connect","releaseInputs","disconnect","shutdown"] as const)("recovers through %s after the prepared Chrome socket closes",async(kind)=>{
-  vi.stubGlobal("fetch",vi.fn(async()=>({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})})));
+  vi.stubGlobal("fetch",vi.fn(()=>Promise.resolve(({json:()=>Promise.resolve(({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"}))}))));
   await host.execute("connect",request("connect"));
   Socket.all[0].close();
   expect(await host.execute("probe",request("probe"))).toEqual({kind:"readiness",connected:false});

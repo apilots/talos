@@ -47,7 +47,7 @@ describe("ChatComposer attachments", () => {
   });
 
   it("uploads a pasted image and sends an attachment-only input", async () => {
-    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onSend = vi.fn<(files: Pick<FileInfo, "fileId">[]) => Promise<void>>().mockResolvedValue(undefined);
     renderControlledComposer({
       onSend,
       supportedAttachmentKinds: ["image"],
@@ -59,7 +59,7 @@ describe("ChatComposer attachments", () => {
     expect(await screen.findByText("pasted.png")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0]?.[0].map((file: FileInfo) => file.fileId)).toEqual(["file-image"]);
+    expect(onSend.mock.calls[0]?.[0].map((file: Pick<FileInfo, "fileId">) => file.fileId)).toEqual(["file-image"]);
     await waitFor(() => expect(screen.queryByText("pasted.png")).not.toBeInTheDocument());
   });
 
@@ -77,7 +77,7 @@ describe("ChatComposer attachments", () => {
           uploads.set(data.name, { options, resolve });
         }),
     );
-    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onSend = vi.fn<(files: Pick<FileInfo, "fileId">[]) => Promise<void>>().mockResolvedValue(undefined);
     const { container } = renderControlledComposer({
       onSend,
       supportedAttachmentKinds: ["file"],
@@ -108,26 +108,26 @@ describe("ChatComposer attachments", () => {
       "50",
     );
 
-    await act(async () => {
+    await act(() => {
       uploads.get("data.csv")?.resolve({
         file: fileInfo("file-csv", "data.csv", "text/csv", 3),
       });
       uploads.get("notes.docx")?.resolve({
         file: fileInfo("file-docx", "notes.docx", docx.type, 4),
       });
-    });
+     return Promise.resolve(); });
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0]?.[0].map((file: FileInfo) => file.fileId)).toEqual([
+    expect(onSend.mock.calls[0]?.[0].map((file: Pick<FileInfo, "fileId">) => file.fileId)).toEqual([
       "file-docx",
       "file-csv",
     ]);
   });
 
   it("selects an existing compatible file without uploading it again", async () => {
-    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onSend = vi.fn<(files: Pick<FileInfo, "fileId">[]) => Promise<void>>().mockResolvedValue(undefined);
     renderControlledComposer({
       initialDraft: "Summarize this",
       onSend,

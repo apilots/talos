@@ -14,9 +14,9 @@ import { useComputers } from "./hooks";
 
 export const readManagedWorker = vi.fn();
 export const startManagedWorker = vi.fn();
-export const stopManagedWorker = vi.fn();
+const stopManagedWorker = vi.fn();
 export const resetManagedWorker = vi.fn();
-export const deleteManagedWorker = vi.fn();
+const deleteManagedWorker = vi.fn();
 export const listComputers = vi.fn();
 export const listFiles = vi.fn();
 export const readAutomation = vi.fn();
@@ -99,29 +99,29 @@ export function setupTaloConsoleTests() {
         stopManagedWorker,
         resetManagedWorker,
         deleteManagedWorker,
-        read: async ({ nodeId }: { nodeId: string }) => nodeId === taloInstance.nodeId
+        read:  ({ nodeId }: { nodeId: string }) => Promise.resolve(nodeId === taloInstance.nodeId
           ? { ...topologyNodes[0], nodeId, displayName: "Talo", available: true, managedWorkerPhase: "ready" }
-          : topologyNodes.find((node) => node.nodeId === nodeId),
+          : topologyNodes.find((node) => node.nodeId === nodeId)),
       },
       files: { list: listFiles },
-      llm: { get: async () => ({
+      llm: { get:  () => Promise.resolve(({
         type: "llm",
         config: { provider: "anthropic", model: "fixture", anthropic: { api_key: "", base_url: null, models: [] } },
         provider_keys: {},
         provider_capabilities: { anthropic: { default_protocol: "messages", protocols: ["messages"] } },
-      }) },
+      })) },
       automation: { read: readAutomation },
       browser: {
-        operate: async () => ({
+        operate:  () => Promise.resolve(({
           enabled: false,
           host: "docker",
           selectedTargetId: null,
           targets: [],
           display: { kind: "dockerDesktop", targetId: "managed" },
           control: { generation: "gen-1", revision: 1, epoch: 0, owner: { kind: "idle" } },
-        }),
+        })),
       },
-      sync: { status: async () => ({ localComputerId: null }) },
+      sync: { status:  () => Promise.resolve(({ localComputerId: null })) },
     }) as unknown as TalosWebClient);
   });
 

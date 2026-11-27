@@ -26,11 +26,9 @@ export function useSessionTracing(
   turnIds: string[],
 ) {
   const connection = useConnectionKey();
-  const scope = ["trajectory", connection, sessionId] as const;
   const api = async () => (await getTalosClient({ sessionId, readOnly: true })).trajectory;
-  const identity = { sessionId, turnId: turnId ?? "" };
   const capability = useQuery({
-    queryKey: [...scope, "capabilities"],
+    queryKey: ["trajectory", connection, sessionId, "capabilities"],
     queryFn: async () => (await api()).capabilities(),
     enabled: visible,
     retry: false,
@@ -50,7 +48,7 @@ export function useSessionTracing(
   const timelines = useQueries({
     combine: combineTimelines,
     queries: turnIds.map((id) => ({
-      queryKey: [...scope, "turn", id],
+      queryKey: ["trajectory", connection, sessionId, "turn", id],
       queryFn: async ({ signal }: { signal: AbortSignal }) => {
         const pages: API.TrajectoryReadTurnResponse[] = [];
         let cursor: string | null = null;
@@ -81,7 +79,7 @@ export function useSessionTracing(
   }, [cache, connection, sessionId, visible]);
   const tool = useQuery({
     queryKey: [
-      ...scope,
+      "trajectory", connection, sessionId,
       "tool",
       turnId,
       selection?.kind === "tool" ? selection.callId : null,
@@ -89,7 +87,7 @@ export function useSessionTracing(
     queryFn: async ({ signal }) => {
       try {
         return await (await api()).readTool(
-          { identity, callId: selection?.kind === "tool" ? selection.callId : "" },
+          { identity: { sessionId, turnId: turnId ?? "" }, callId: selection?.kind === "tool" ? selection.callId : "" },
           signal,
         );
       } catch (error) {
@@ -121,9 +119,9 @@ export function useSessionTracing(
             : undefined
         : undefined;
   const request = useQuery({
-    queryKey: [...scope, "request", turnId, modelRequestId],
+    queryKey: ["trajectory", connection, sessionId, "request", turnId, modelRequestId],
     queryFn: async ({ signal }) =>
-      (await api()).readRequest({ identity, modelRequestId: modelRequestId! }, signal),
+      (await api()).readRequest({ identity: { sessionId, turnId: turnId ?? "" }, modelRequestId: modelRequestId! }, signal),
     enabled: enabled && Boolean(modelRequestId),
     retry: false,
   });
@@ -171,9 +169,9 @@ export function useSessionTracing(
   ];
   const bodies = useQueries({
     queries: uniqueRefs.map((ref) => ({
-      queryKey: [...scope, "payload", turnId, ref.payloadId],
+      queryKey: ["trajectory", connection, sessionId, "payload", turnId, ref.payloadId],
       queryFn: async ({ signal }: { signal: AbortSignal }) =>
-        (await api()).payload(identity, ref, signal),
+        (await api()).payload({ sessionId, turnId: turnId ?? "" }, ref, signal),
       enabled:
         enabled &&
         (bodyWanted || ref.payloadId === request.data?.parameters?.payloadId),
@@ -184,18 +182,18 @@ export function useSessionTracing(
   });
   const loadedRequests = cache
     .getQueriesData<API.TrajectoryReadModelRequestResponse>({
-      queryKey: [...scope, "request", turnId],
+      queryKey: ["trajectory", connection, sessionId, "request", turnId],
     })
     .flatMap(([, value]) => (value ? [value] : []));
   const loadedTools = cache
     .getQueriesData<API.TrajectoryReadToolResponse>({
-      queryKey: [...scope, "tool", turnId],
+      queryKey: ["trajectory", connection, sessionId, "tool", turnId],
     })
     .flatMap(([, value]) => (value ? [value] : []));
   const loadedPayloads = new Map(
     cache
       .getQueriesData<API.TrajectoryPayload>({
-        queryKey: [...scope, "payload", turnId],
+        queryKey: ["trajectory", connection, sessionId, "payload", turnId],
       })
       .flatMap(([key, value]) =>
         value && typeof key.at(-1) === "string"
@@ -219,7 +217,7 @@ export function useSessionTracing(
     loadedRequests,
     loadedTools,
     loadedPayloads,
-    retryRead: () => cache.invalidateQueries({ queryKey: scope }),
+    retryRead: () => cache.invalidateQueries({ queryKey: ["trajectory", connection, sessionId] }),
     capability,
     turn,
     request,

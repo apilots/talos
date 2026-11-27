@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-
 import { renderHook } from "@testing-library/react";
 import type { AppProtocol } from "@talos/sdk-browser";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -75,7 +74,7 @@ describe("buildSessionBlocks", () => {
     });
 
     expect(blocks.filter((block) => block.kind === "user")).toEqual([
-      expect.objectContaining({ id: "user-turn-1-msg-input-1", text: "single input" }),
+      expect.objectContaining({ id: "user-turn-1-msg-input-1", text: "single input" }) as unknown,
     ]);
   });
 
@@ -103,16 +102,16 @@ describe("buildSessionBlocks", () => {
     });
 
     expect(blocks).toEqual([
-      expect.objectContaining({ id: "user-turn-1-msg-input-1", text: "initial" }),
+      expect.objectContaining({ id: "user-turn-1-msg-input-1", text: "initial" }) as unknown,
       expect.objectContaining({
         id: "timeline-sess-1-turn-1-msg-input-1",
-        items: [expect.objectContaining({ text: "before steer" })],
-      }),
-      expect.objectContaining({ id: "user-turn-1-msg-input-2", text: "steer" }),
+        items: [expect.objectContaining({ text: "before steer" }) as unknown],
+      }) as unknown,
+      expect.objectContaining({ id: "user-turn-1-msg-input-2", text: "steer" }) as unknown,
       expect.objectContaining({
         id: "timeline-sess-1-turn-1-msg-input-2",
-        items: [expect.objectContaining({ text: "after steer" })],
-      }),
+        items: [expect.objectContaining({ text: "after steer" }) as unknown],
+      }) as unknown,
     ]);
   });
 

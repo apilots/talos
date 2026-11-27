@@ -8,6 +8,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChatComposer,
   generateSessionId,
+  restoreComposerRequest,
   createInitialTurnRequest,
   startTimelineTurn,
   modelSelectionForRef,
@@ -68,7 +69,7 @@ function ChatHomeForm({ computers, scope, draftKey }: {
     : managedPhase === "ready" || managedPhase === "sleeping";
   const [restored] = useState<StartTurnRequest | undefined>(() => {
     const pending = useAppStore.getState().composerRequests[draftKey];
-    return pending ? JSON.parse(pending.body) : undefined;
+    return pending ? restoreComposerRequest(pending.body) : undefined;
   });
   const restoredFileIds = useMemo(() => restored?.input.content.flatMap(item => item.type === "file" ? [item.fileId] : []) ?? [], [restored]);
   const restoredMode = restored?.input.content.find(item => item.type === "skillSelection")?.name;
@@ -80,7 +81,7 @@ function ChatHomeForm({ computers, scope, draftKey }: {
   const ownerRef = useRef<typeof admission | undefined>(admission);
   ownerRef.current = admission;
   useEffect(() => { ownerRef.current = admission; return () => { ownerRef.current = undefined; }; }, [admission]);
-  const commands = useQuery({ queryKey: ["talos", scope, "automation-commands"],
+  const commands = useQuery({ queryKey: ["talos", scope, "automation-commands", computers.selectedId],
     queryFn: async () => (await getTalosClient({ nodeId: computers.selectedId })).automation.commandCatalog({}),
     enabled: canSend, staleTime: Infinity });
   const savedDraft = useAppStore((state) => state.composerDrafts[draftKey] ?? "");
@@ -116,7 +117,7 @@ function ChatHomeForm({ computers, scope, draftKey }: {
       return;
     }
     saveDraft(draftKey, locationState.initialDraft);
-    navigate(location.pathname, { replace: true, state: null });
+    void navigate(location.pathname, { replace: true, state: null });
   }, [draftKey, saveDraft, location.pathname, locationState?.initialDraft, navigate]);
 
   async function handleStartSession(
@@ -129,7 +130,7 @@ function ChatHomeForm({ computers, scope, draftKey }: {
     const pending = useAppStore.getState().composerRequests[admission.draftKey];
     const sessionId = pending?.sessionId ?? generateSessionId();
     let request: StartTurnRequest;
-    if (pending) request = JSON.parse(pending.body);
+    if (pending) request = restoreComposerRequest(pending.body);
     else {
       const prepared = await prepareAutomationMessage(initialPrompt ?? "", mode, computers.selectedId, managedPhase != null);
       if (ownerRef.current !== admission) return;
@@ -152,7 +153,7 @@ function ChatHomeForm({ computers, scope, draftKey }: {
       current.saveComposerRequest(admission.draftKey);
       if (current.composerDrafts[admission.draftKey] === initialPrompt) saveDraft(admission.draftKey, "");
     }
-    if (ownerRef.current === admission) navigate(`/sessions/${sessionId}`);
+    if (ownerRef.current === admission) void navigate(`/sessions/${sessionId}`);
   }
 
   async function handleCreateProject(input: string | { directory: string; name?: string }) {

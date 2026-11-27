@@ -67,7 +67,7 @@ export class BrowserWorkspace {
       const tab = await account.open("about:blank", check);check();this.publish(binding.user, tab.id);
     } else if (request.kind === "present") {
       account.present(request.tabId, request.bounds ? this.bounds(request.bounds) : null);
-    } else if (request.kind === "close") await account.remove(request.tabId);
+    } else if (request.kind === "close") account.remove(request.tabId);
     else if (["navigate", "back", "forward", "reload"].includes(request.kind)) {
       await account.navigate(request.tabId, request.kind, request.kind === "navigate" ? request.url : undefined);
     } else throw new Error("Unknown browser presentation action.");

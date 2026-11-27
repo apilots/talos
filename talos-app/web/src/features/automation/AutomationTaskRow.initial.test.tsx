@@ -22,9 +22,9 @@ it.each(tasks)("counts the first ten seconds for $type, then waits for actual ad
   const view = render(<AutomationTaskRow {...handlers} task={task} />);
   expect(screen.getByText("Starts in 10s")).toBeVisible();
   expect(screen.getByRole("time")).toHaveAttribute("datetime", new Date(1_010_000).toISOString());
-  act(() => vi.advanceTimersByTime(1_000));
+  act(() => { vi.advanceTimersByTime(1_000); });
   expect(screen.getByText("Starts in 9s")).toBeVisible();
-  act(() => vi.advanceTimersByTime(9_000));
+  act(() => { vi.advanceTimersByTime(9_000); });
   expect(screen.getByText("Waiting")).toBeVisible();
   expect(screen.queryByText("Starts in 0s")).not.toBeInTheDocument();
   expect(handlers.onAction).not.toHaveBeenCalled();
@@ -47,14 +47,14 @@ it.each(tasks)("cancels a waiting $type with exactly one Clear action", (task) =
 });
 
 it("gives an exact running Loop Turn priority over stale initial scheduling facts", () => {
-  render(<AutomationTaskRow {...actions()} task={tasks[1]!} activeTurn={{ turnId: "first-work", startedAt: 998, origin: { type: "loop", loopId: "loop-1", occurrenceId: "o1", configRevision: 3 } }} />);
+  render(<AutomationTaskRow {...actions()} task={tasks[1]} activeTurn={{ turnId: "first-work", startedAt: 998, origin: { type: "loop", loopId: "loop-1", occurrenceId: "o1", configRevision: 3 } }} />);
   expect(screen.getByText("2s")).toBeVisible();
   expect(screen.queryByText(/Starts in/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Cancel Loop" })).not.toBeInTheDocument();
 });
 
 it("keeps the Goal grace period while its registration Turn already carries the bound origin", () => {
-  render(<AutomationTaskRow {...actions()} task={tasks[0]!} activeTurn={{ turnId: "registration", startedAt: 995, origin: { type: "goal", goalId: "goal-1", objectiveRevision: 2 } }} />);
+  render(<AutomationTaskRow {...actions()} task={tasks[0]} activeTurn={{ turnId: "registration", startedAt: 995, origin: { type: "goal", goalId: "goal-1", objectiveRevision: 2 } }} />);
   expect(screen.getByText("Starts in 10s")).toBeVisible();
   expect(screen.getByRole("button", { name: "Cancel Goal" })).toBeVisible();
 });
@@ -78,23 +78,23 @@ it("keeps later Loop cadence and paused Goal semantics without restarting the gr
   view.rerender(<AutomationTaskRow {...handlers} task={{ type: "goal", value: goal({ status: "paused", createdAt: 1000 }) }} />);
   expect(screen.getByRole("button", { name: "Resume Goal" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Cancel Goal" })).not.toBeInTheDocument();
-  act(() => vi.advanceTimersByTime(11_000));
+  act(() => { vi.advanceTimersByTime(11_000); });
   view.rerender(<AutomationTaskRow {...handlers} task={{ type: "goal", value: goal({ createdAt: 1000 }) }} />);
   expect(screen.getByText("Waiting")).toBeVisible();
   expect(screen.queryByText("Starts in 10s")).not.toBeInTheDocument();
 });
 
 it("leaves management controls on the original Clear action unless cancellation is explicitly requested", () => {
-  render(<AutomationTaskControls {...actions()} task={tasks[0]!} />);
+  render(<AutomationTaskControls {...actions()} task={tasks[0]} />);
   expect(screen.getByRole("button", { name: "Clear Goal" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Cancel Goal" })).not.toBeInTheDocument();
 });
 
 it("localizes the countdown, wait and cancellation labels", () => {
   const language = i18n.cloneInstance({ lng: "zh-CN", initAsync: false });
-  render(<I18nextProvider i18n={language}><AutomationTaskRow {...actions()} task={tasks[0]!} /></I18nextProvider>);
+  render(<I18nextProvider i18n={language}><AutomationTaskRow {...actions()} task={tasks[0]} /></I18nextProvider>);
   expect(screen.getByText("10 秒后开始")).toBeVisible();
   expect(screen.getByRole("button", { name: "取消 Goal" })).toBeVisible();
-  act(() => vi.advanceTimersByTime(10_000));
+  act(() => { vi.advanceTimersByTime(10_000); });
   expect(screen.getByText("等待中")).toBeVisible();
 });

@@ -200,7 +200,7 @@ describe("ChatSessionPage", () => {
         modelRef: { provider: "mock", id: "model-1" },
         reasoningEffort: "high",
       },
-      expect.objectContaining({ onError: expect.any(Function), onSuccess: expect.any(Function) }),
+      expect.objectContaining({ onError: expect.any(Function) as unknown, onSuccess: expect.any(Function) as unknown }),
     );
   });
 

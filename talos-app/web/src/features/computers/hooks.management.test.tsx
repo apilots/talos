@@ -107,7 +107,7 @@ it.each([
   await waitFor(() => expect(query.getQueryState(["talos", scope, "computer", selectedId])?.status).toBe("error"));
   expect(query.getQueryState(["talos", scope, "local-computer"])?.status).toBe("pending");
   expect(result.current).toBeUndefined();
-  await act(async () => { resolveIdentity({ nodeId: "desktop-worker", controlPlaneEndpoint: null }); });
+  await act(() => { resolveIdentity({ nodeId: "desktop-worker", controlPlaneEndpoint: null });  return Promise.resolve(); });
   await waitFor(() => expect(result.current).toBe(allowed));
 });
 
@@ -167,7 +167,6 @@ it("does not grant access to the center private Computer", async () => {
   });
   await waitFor(() => expect(result.current).toBe(false));
 });
-
 
 it("retains local identity and configuration across a failed identity poll, then accepts recovery", async () => {
   desktop.active = true;

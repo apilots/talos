@@ -15,12 +15,12 @@ import { emptyModelForm, formToModel } from "./modelForm";
 
 installRadixTestEnvironment();
 
-const getLlmConfig = vi.fn();
-const updateLlmConfig = vi.fn();
+const getLlmConfig = vi.fn<typeof import("@/features/settings/api")["getLlmConfig"]>();
+const updateLlmConfig = vi.fn<typeof import("@/features/settings/api")["updateLlmConfig"]>();
 
 vi.mock("@/features/settings/api", () => ({
   getLlmConfig: () => getLlmConfig(),
-  updateLlmConfig: (...args: unknown[]) => updateLlmConfig(...args),
+  updateLlmConfig: (...args: Parameters<typeof updateLlmConfig>) => updateLlmConfig(...args),
 }));
 
 vi.mock("@/features/chat", () => ({
@@ -42,10 +42,12 @@ function createWrapper() {
   };
 }
 
-function customProviderFixture() {
+function customProviderFixture(): Awaited<ReturnType<typeof getLlmConfig>> {
   const connection = { api_key: "", base_url: "http://localhost:8000/v1", protocol: "chat" as const, models: [], http_timeouts: { connect_secs: 5, response_secs: 30, stream_idle_secs: 45, stream_total_secs: 120 } };
-  const capabilities = { default_protocol: "chat", protocols: ["chat"] };
+  const capabilities: import("@talos/sdk-core").AppProtocol.ProviderProtocolCapabilities = { default_protocol: "chat", protocols: ["chat"] };
   return {
+    type: "llm",
+    model_readiness: { ready: true, provider: "deepseek", model: "model", issues: [] },
     config: {
       provider: "deepseek", model: "model",
       anthropic: { ...connection, protocol: "messages" as const }, openai: connection, bailian: connection,
@@ -78,7 +80,7 @@ describe("SettingsLlmConfigEditor", () => {
     vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
     const response = customProviderFixture();
     getLlmConfig.mockResolvedValue(response);
-    updateLlmConfig.mockImplementation(async (config) => ({ ...response, config }));
+    updateLlmConfig.mockImplementation((config) => Promise.resolve(({ ...response, config })));
     render(<SettingsLlmConfigEditor />, { wrapper: createWrapper() });
     await userEvent.click(await screen.findByRole("button", { name: "Custom" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Add Provider" }));
@@ -117,6 +119,7 @@ describe("SettingsLlmConfigEditor", () => {
     getLlmConfig.mockResolvedValue({
       type: "llm",
       config: {
+        custom_providers: {},
         provider: "deepseek",
         model: "deepseek-v4-pro",
         anthropic: provider("messages"),
@@ -170,10 +173,12 @@ describe("SettingsLlmConfigEditor", () => {
   });
 
   it("restores focus to the custom provider edit action after Escape in Strict Mode", async () => {
-    const connection = { api_key: "", base_url: "http://localhost:8000/v1", protocol: "chat", models: [] };
-    const providerCapabilities = { default_protocol: "chat", protocols: ["chat"] };
+    const connection = { api_key: "", base_url: "http://localhost:8000/v1", protocol: "chat" as const, models: [] };
+    const providerCapabilities: import("@talos/sdk-core").AppProtocol.ProviderProtocolCapabilities = { default_protocol: "chat", protocols: ["chat"] };
     getLlmConfig.mockResolvedValue({
+      ...customProviderFixture(),
       config: {
+        ...customProviderFixture().config,
         ...Object.fromEntries(["anthropic", "openai", "bailian", "deepseek", "ollama", "openrouter"].map((id) => [id, connection])),
         provider: "deepseek", model: "model",
         custom_providers: { "llm-gateway": { ...connection, name: "LLM Gateway" } },
@@ -195,7 +200,7 @@ describe("SettingsLlmConfigEditor", () => {
   it("cancels provider deletion and stages confirmation until the page Save action", async () => {
     const response = customProviderFixture();
     getLlmConfig.mockResolvedValue(response);
-    updateLlmConfig.mockImplementation(async (config) => ({ ...response, config }));
+    updateLlmConfig.mockImplementation((config) => Promise.resolve(({ ...response, config })));
     const nativeConfirm = vi.spyOn(window, "confirm");
     await showCustomProvider();
     const trigger = screen.getByRole("button", { name: "Delete Provider" });
@@ -217,7 +222,7 @@ describe("SettingsLlmConfigEditor", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Custom" })).toHaveFocus());
     expect(screen.queryByRole("option", { name: "LLM Gateway" })).not.toBeInTheDocument();
     expect(updateLlmConfig).not.toHaveBeenCalled();
-    expect(response.config.custom_providers["llm-gateway"].models).toHaveLength(1);
+    expect(response.config.custom_providers["llm-gateway"]!.models).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     await waitFor(() => expect(updateLlmConfig).toHaveBeenCalledOnce());
     expect(updateLlmConfig.mock.calls[0][0].custom_providers).toEqual({});
@@ -228,7 +233,7 @@ describe("SettingsLlmConfigEditor", () => {
   it("uses the same dialog for model deletion and focuses the retained Add model action", async () => {
     const response = customProviderFixture();
     getLlmConfig.mockResolvedValue(response);
-    updateLlmConfig.mockImplementation(async (config) => ({ ...response, config }));
+    updateLlmConfig.mockImplementation((config) => Promise.resolve(({ ...response, config })));
     await showCustomProvider();
     const trigger = screen.getByRole("button", { name: "Delete model" });
     fireEvent.click(trigger);
@@ -244,15 +249,15 @@ describe("SettingsLlmConfigEditor", () => {
     expect(updateLlmConfig).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     await waitFor(() => expect(updateLlmConfig).toHaveBeenCalledOnce());
-    expect(updateLlmConfig.mock.calls[0][0].custom_providers["llm-gateway"].models).toEqual([]);
+    expect(updateLlmConfig.mock.calls[0][0].custom_providers["llm-gateway"]!.models).toEqual([]);
     expect(updateLlmConfig.mock.calls[0][0].deepseek.models).toHaveLength(1);
   });
 
   it("edits Chat history before switching protocol and persists both only through page Save", async () => {
     const response = customProviderFixture();
-    response.config.custom_providers["llm-gateway"].models[0].reasoning_replay = "reasoning_content";
+    response.config.custom_providers["llm-gateway"]!.models[0].reasoning_replay = "reasoning_content";
     getLlmConfig.mockResolvedValue(response);
-    updateLlmConfig.mockImplementation(async (config) => ({ ...response, config }));
+    updateLlmConfig.mockImplementation((config) => Promise.resolve(({ ...response, config })));
     await showCustomProvider();
     const protocol = screen.getByRole("combobox", { name: "Protocol" });
     fireEvent.change(protocol, { target: { value: "responses" } });
@@ -274,7 +279,7 @@ describe("SettingsLlmConfigEditor", () => {
     expect(updateLlmConfig).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     await waitFor(() => expect(updateLlmConfig).toHaveBeenCalledOnce());
-    expect(updateLlmConfig.mock.calls[0][0].custom_providers["llm-gateway"]).toEqual(expect.objectContaining({ protocol: "responses", models: [expect.objectContaining({ reasoning_replay: "protocol_default" })] }));
+    expect(updateLlmConfig.mock.calls[0][0].custom_providers["llm-gateway"]).toEqual(expect.objectContaining({ protocol: "responses", models: [expect.objectContaining({ reasoning_replay: "protocol_default" }) as unknown] }));
     expect(updateLlmConfig.mock.calls[0][0].custom_providers["llm-gateway"]).not.toHaveProperty("adapter");
   });
 

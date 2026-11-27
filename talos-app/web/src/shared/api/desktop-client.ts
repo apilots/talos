@@ -273,7 +273,7 @@ function streamUntilTerminal(
       for (const cleanup of cleanupFns.splice(0)) {
         cleanup();
       }
-      reject(error);
+      reject(error instanceof Error ? error : new Error("Desktop event subscription failed.", { cause: error }));
     };
 
     const cleanupSubscription = () => {
@@ -385,7 +385,6 @@ function toProtocolStartTurnRequest(
     clientRequestId,
   };
 }
-
 
 function expectedVersionToken(request: DocUpdateRequest): string | null {
   return request.base_version.mode === "match" ? request.base_version.version_token : null;

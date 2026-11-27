@@ -1,3 +1,4 @@
+import type { TalosWebClient } from "@/shared/api/client";
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -15,11 +16,11 @@ import { i18n } from "@/shared/i18n/setup";
 import { SessionTracingPanel } from "./components/SessionTracingPanel";
 import { history, identity, request, ref, prompt } from "./tracing.fixtures";
 const mocks = vi.hoisted(() => ({
-  capabilities: vi.fn(),
-  readTurn: vi.fn(),
-  readRequest: vi.fn(),
-  readTool: vi.fn(),
-  payload: vi.fn(),
+  capabilities: vi.fn<TalosWebClient["trajectory"]["capabilities"]>(),
+  readTurn: vi.fn<TalosWebClient["trajectory"]["readTurn"]>(),
+  readRequest: vi.fn<TalosWebClient["trajectory"]["readRequest"]>(),
+  readTool: vi.fn<TalosWebClient["trajectory"]["readTool"]>(),
+  payload: vi.fn<TalosWebClient["trajectory"]["payload"]>(),
 }));
 vi.mock("@/shared/api/client", () => ({
   getTalosClient: () => ({ trajectory: mocks }),
@@ -82,7 +83,7 @@ describe("Session tracing", () => {
     const metadataSignal = mocks.readTurn.mock.calls[0][1] as AbortSignal;
     setVisible(false);
     await waitFor(() => expect(metadataSignal.aborted).toBe(true));
-    await act(async () => finishMetadata({ identity, clockSegments: [], data: [], nextCursor: "next" }));
+    await act(() => Promise.resolve(finishMetadata({ identity, clockSegments: [], data: [], nextCursor: "next" })));
     expect(mocks.readTurn).toHaveBeenCalledTimes(1);
     setVisible(true);
     fireEvent.click(

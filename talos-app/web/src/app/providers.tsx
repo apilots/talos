@@ -28,7 +28,7 @@ export function AppProviders() {
       void queryClient.cancelQueries({ queryKey: ["talos"] });
       queryClient.removeQueries({ queryKey: ["talos"] });
     }
-  }), [queryClient]);
+  }), []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = uiTheme;

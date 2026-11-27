@@ -27,7 +27,7 @@ pub enum BrowserHostOperation {
     Execute {
         action: BrowserAction,
         target_id: Option<String>,
-        element: Option<BrowserHostElement>,
+        element: Option<Box<BrowserHostElement>>,
         upload: Option<BrowserHostUpload>,
     },
     AcknowledgeDownloads {
@@ -78,7 +78,7 @@ pub enum BrowserHostResponse {
     },
     Done,
     Observation {
-        page: BrowserHostPage,
+        page: Box<BrowserHostPage>,
         loader_id: Option<String>,
         elements: Vec<BrowserHostElement>,
         screenshot: Option<String>,

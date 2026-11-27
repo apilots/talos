@@ -20,12 +20,12 @@ it("uses the canonical triggering message time and ignores a later human Steer",
 });
 it("recovers the same canonical start from a loaded snapshot without another query", () => {
   const history = sessionHistory([historyTextItem("first", "user_input", "input", "check")]);
-  history.data[0]!.result.result.messages[0]!.createdAt = 700;
-  const snapshot = activeTurn({ automationInput: { messageId: "msg-first", origin }, messages: history.data[0]!.result.result.messages });
+  history.data[0].result.result.messages[0].createdAt = 700;
+  const snapshot = activeTurn({ automationInput: { messageId: "msg-first", origin }, messages: history.data[0].result.result.messages });
   expect(automationTurnTiming("sess-1", "turn-1", undefined, snapshot)).toEqual({ turnId: "turn-1", origin, startedAt: 700 });
   restoreActiveTurn("sess-1", snapshot);
   expect(automationTurnTiming("sess-1", "turn-1", useAppStore.getState().streams["sess-1"], undefined)).toEqual({ turnId: "turn-1", origin, startedAt: 700 });
-  expect(useAppStore.getState().streams["sess-1"]!.turnMetrics?.modelRounds).toBe(1);
+  expect(useAppStore.getState().streams["sess-1"].turnMetrics?.modelRounds).toBe(1);
 });
 it("does not use a previous Turn or invent a start when the exact message has not arrived", () => {
   const snapshot = activeTurn({ automationInput: { messageId: "msg-first", origin } });
@@ -39,12 +39,12 @@ it("retains current metrics across same-Turn provenance updates and human Steer"
   applyStreamEvent("sess-1", turnMetrics(2, { total_tokens: 42 }));
   applyActiveTurnSnapshot("sess-1", snapshot);
   applyStreamEvent("sess-1", userInputStarted("steer", "continue", 3));
-  expect(useAppStore.getState().streams["sess-1"]!.turnMetrics).toMatchObject({ state: "running", usage: { total_tokens: 42 } });
+  expect(useAppStore.getState().streams["sess-1"].turnMetrics).toMatchObject({ state: "running", usage: { total_tokens: 42 } });
 });
 
 it.each(["completed", "failed"])("rejects an old running snapshot after the same Turn is %s, including after active cleanup", (outcome) => {
   const history = sessionHistory([historyTextItem("first", "user_input", "input", "check")]);
-  const snapshot = activeTurn({ lastEventSeq: 1, automationInput: { messageId: "msg-first", origin }, messages: history.data[0]!.result.result.messages });
+  const snapshot = activeTurn({ lastEventSeq: 1, automationInput: { messageId: "msg-first", origin }, messages: history.data[0].result.result.messages });
   restoreActiveTurn("sess-1", snapshot);
   const terminal = turnCompleted(2);
   if (outcome === "failed") terminal.event.data.payload = { type: "turnFailed", data: { error: { code: AppProtocol.ErrorCode.InternalError, message: "Execution failed", localization: null }, retryable: false } };
@@ -52,7 +52,7 @@ it.each(["completed", "failed"])("rejects an old running snapshot after the same
   expect(automationTurnTiming("sess-1", "turn-1", useAppStore.getState().streams["sess-1"], snapshot)).toBeUndefined();
   clearInactiveTurnSnapshot("sess-1");
   expect(automationTurnTiming("sess-1", "turn-1", useAppStore.getState().streams["sess-1"], snapshot)).toBeUndefined();
-  const next = activeTurn({ identity: { sessionId: "sess-1", turnId: "turn-2" }, automationInput: { messageId: "msg-next", origin: { ...origin, occurrenceId: "occ-next" } }, messages: [{ ...snapshot.messages[0]!, turnId: "turn-2", messageId: "msg-next", createdAt: 1000 }] });
+  const next = activeTurn({ identity: { sessionId: "sess-1", turnId: "turn-2" }, automationInput: { messageId: "msg-next", origin: { ...origin, occurrenceId: "occ-next" } }, messages: [{ ...snapshot.messages[0], turnId: "turn-2", messageId: "msg-next", createdAt: 1000 }] });
   expect(automationTurnTiming("sess-1", "turn-2", useAppStore.getState().streams["sess-1"], next)).toEqual({ turnId: "turn-2", origin: next.automationInput!.origin, startedAt: 1000 });
   applyActiveTurnSnapshot("sess-1", next);
   expect(automationTurnTiming("sess-1", "turn-2", useAppStore.getState().streams["sess-1"], next)).toEqual({ turnId: "turn-2", origin: next.automationInput!.origin, startedAt: 1000 });
@@ -61,7 +61,7 @@ it.each(["completed", "failed"])("rejects an old running snapshot after the same
   input.event.data.payload.data.message.createdAt = 1000;
   applyStreamEvent("sess-1", input);
   applyStreamEvent("sess-1", withMessage(itemStarted("next-thinking", "assistant_text", "commentary", 4), "msg-agent-next", "turn-2"));
-  const stream = useAppStore.getState().streams["sess-1"]!;
+  const stream = useAppStore.getState().streams["sess-1"];
   expect(automationTurnTiming("sess-1", "turn-2", stream, next)).toEqual({ turnId: "turn-2", origin: next.automationInput!.origin, startedAt: 1000 });
   expect(stream.blocks.find((block) => block.kind === "timeline" && block.id === "timeline-sess-1-turn-2-msg-next")).not.toHaveProperty("metrics", expect.anything());
   expect(stream.blocks.find((block) => block.kind === "timeline" && block.id === "timeline-sess-1-turn-1-msg-first")).toHaveProperty("metrics.state", outcome);

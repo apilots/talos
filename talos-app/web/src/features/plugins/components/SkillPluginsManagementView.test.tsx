@@ -10,10 +10,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SkillPluginsManagementView } from "./SkillPluginsManagementView";
 
 const apiMocks = vi.hoisted(() => ({
-  listSkills: vi.fn(),
-  listManagedSkillPlugins: vi.fn(),
-  readLocalSkill: vi.fn(),
-  searchSkillPlugins: vi.fn(),
+  listSkills: vi.fn<typeof import("@/features/plugins/api")["listSkills"]>(),
+  listManagedSkillPlugins: vi.fn<typeof import("@/features/plugins/api")["listManagedSkillPlugins"]>(),
+  readLocalSkill: vi.fn<typeof import("@/features/plugins/api")["readLocalSkill"]>(),
+  searchSkillPlugins: vi.fn<typeof import("@/features/plugins/api")["searchSkillPlugins"]>(),
 }));
 
 vi.mock("@/features/plugins/api", () => ({
@@ -55,7 +55,7 @@ describe("SkillPluginsManagementView", () => {
       short_description: null,
       root: "/Users/xujiang/.agents/skills/find-skills",
       path: "/Users/xujiang/.agents/skills/find-skills/SKILL.md",
-      scope: "external",
+      scope: "external" as const,
       source_plugin: null,
       source_install: null,
       enabled: true,
@@ -71,7 +71,7 @@ describe("SkillPluginsManagementView", () => {
           short_description: null,
           root: "/Users/xujiang/.codex/skills/algorithmic-art",
           path: "/Users/xujiang/.codex/skills/algorithmic-art/SKILL.md",
-          scope: "external",
+          scope: "external" as const,
           source_plugin: null,
           source_install: null,
           enabled: true,
@@ -123,7 +123,7 @@ describe("SkillPluginsManagementView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Find Skills" }));
 
     await waitFor(() => {
-      expect(apiMocks.readLocalSkill).toHaveBeenCalledWith(findSkills);
+      expect(apiMocks.readLocalSkill).toHaveBeenCalledWith({ name: findSkills.name, path: findSkills.path });
       expect(screen.getByText("Preview body.")).toBeInTheDocument();
     });
   });

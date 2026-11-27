@@ -1,3 +1,4 @@
+import type * as ChatApi from "../api";
 import { vi } from "vitest";
 import type { SessionHistoryResponse } from "@talos/sdk-core";
 import { resetTalosClientFactory } from "@/shared/api/client";
@@ -15,9 +16,9 @@ vi.hoisted(() => {
 });
 
 const apiMocks = vi.hoisted(() => ({
-  getSessionHistory: vi.fn(),
-  getActiveTurn: vi.fn(),
-  subscribeTimelineEvents: vi.fn().mockResolvedValue(undefined),
+  getSessionHistory: vi.fn<typeof ChatApi.getSessionHistory>(),
+  getActiveTurn: vi.fn<typeof ChatApi.getActiveTurn>(),
+  subscribeTimelineEvents: vi.fn<typeof ChatApi.subscribeTimelineEvents>().mockResolvedValue(undefined),
 }));
 
 vi.mock("../api", () => ({

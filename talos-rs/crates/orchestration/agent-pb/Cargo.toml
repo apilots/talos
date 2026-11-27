@@ -16,3 +16,7 @@ tonic-prost-build = { workspace = true }
 
 [lints]
 workspace = true
+
+# Generated protobuf and gRPC implementations reference these runtime crates.
+[package.metadata.cargo-machete]
+ignored = ["prost", "tonic-prost"]

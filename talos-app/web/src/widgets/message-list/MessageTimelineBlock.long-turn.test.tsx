@@ -44,7 +44,7 @@ it("keeps an unanswered question visible and preserves its draft when activity i
   }} pendingUserAction={action}
     renderUserAction={() => <textarea aria-label="Answer" defaultValue="" />}
     copiedLabel="Copied" copyLabel="Copy" helpfulLabel="Helpful" notHelpfulLabel="Not helpful" />);
-  const answer = screen.getByRole("textbox", { name: "Answer" }) as HTMLTextAreaElement;
+  const answer = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Answer" });
   expect(answer.closest("details")).toBeNull();
   expect(screen.getByText("Waiting for input")).toBeTruthy();
   expect(screen.queryByRole("status")).toBeNull();
@@ -53,7 +53,7 @@ it("keeps an unanswered question visible and preserves its draft when activity i
   await screen.findByText("Check with the user.");
   fireEvent.click(screen.getByRole("button", { name: /^Working/ }));
   expect(screen.queryByText("Thinking")).toBeNull();
-  expect(screen.getByRole("textbox", { name: "Answer" })).toBe(answer);
+  expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Answer" })).toBe(answer);
   expect(answer.value).toBe("Keep my draft");
 });
 

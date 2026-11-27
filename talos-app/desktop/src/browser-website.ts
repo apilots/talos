@@ -122,7 +122,7 @@ export class WebsiteAccount {
       // permanently also disables the human's native editing shortcuts.
       const keyEvent=method==="Input.dispatchKeyEvent";
       if(keyEvent && keyDispatches++===0)wc.setIgnoreMenuShortcuts(true);
-      try {return await wc.debugger.sendCommand(method,params);}
+      try {const result:unknown=await wc.debugger.sendCommand(method,params);if(!result||typeof result!=="object"||Array.isArray(result))throw new Error("Invalid browser command response.");return result as Record<string,unknown>;}
       finally {if(keyEvent && --keyDispatches===0 && !wc.isDestroyed())wc.setIgnoreMenuShortcuts(false);}
     };
     const tab:WebsiteTab={id,view,send:trackInputs(send),url:()=>wc.getURL()===homeUrl?"about:blank":wc.getURL(),title:()=>wc.getTitle()};
@@ -181,7 +181,7 @@ export class WebsiteAccount {
       return image.toPNG().toString("base64");
     } finally {clearTimeout(timer);}
   }
-  async remove(id:string):Promise<void> {
+  remove(id:string):void {
     const tab=this.views.get(id);if(tab?.view){if(this.window && !this.window.isDestroyed())this.window.contentView.removeChildView(tab.view);tab.view.webContents.close({waitForBeforeUnload:false});this.views.delete(id);}
     this.changed();
   }

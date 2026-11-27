@@ -1,3 +1,4 @@
+import type { TalosWebClient } from "@/shared/api/client";
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -10,8 +11,8 @@ import { RequestSnapshotView } from "./components/RequestSnapshotView";
 import { history, identity, request, prompt } from "./tracing.fixtures";
 
 const mocks = vi.hoisted(() => ({
-  capabilities: vi.fn(), readTurn: vi.fn(), readRequest: vi.fn(),
-  readTool: vi.fn(), payload: vi.fn(),
+  capabilities: vi.fn<TalosWebClient["trajectory"]["capabilities"]>(), readTurn: vi.fn<TalosWebClient["trajectory"]["readTurn"]>(), readRequest: vi.fn<TalosWebClient["trajectory"]["readRequest"]>(),
+  readTool: vi.fn<TalosWebClient["trajectory"]["readTool"]>(), payload: vi.fn<TalosWebClient["trajectory"]["payload"]>(),
 }));
 vi.mock("@/shared/api/client", () => ({ getTalosClient: () => ({ trajectory: mocks }) }));
 vi.mock("@/features/chat", () => ({ useConnectionKey: () => "details-connection" }));
@@ -57,26 +58,26 @@ beforeEach(async () => {
     identity, tool, preparedResult: ref("prepared"),
     usages: [{ modelRequestId: "consumer", messageIndex: 8, usage: "direct" }],
   });
-  mocks.readRequest.mockImplementation(async ({ modelRequestId }) => ({
+  mocks.readRequest.mockImplementation(({ modelRequestId }) => Promise.resolve(({
     identity, request: { ...request, modelRequestId }, prompt: ref("prompt"),
     tools: null,
     parameters: null,
     outputs: [{ callRecordId: "a", response: ref("response") }],
-  }));
-  mocks.payload.mockImplementation(async (_identity, ref) => {
-    if (ref.payloadId === "response") return {
+  })));
+  mocks.payload.mockImplementation((_identity, ref) => {
+    if (ref?.payloadId === "response") return Promise.resolve({
       kind: "response", parts: [{ type: "toolCall", call: {
         callId: "call-read", name: "Read", arguments: { path: "checkout.py" },
         argumentsText: rawArguments,
       } }],
-    };
-    if (ref.payloadId === "prepared") return {
+    });
+    if (ref?.payloadId === "prepared") return Promise.resolve({
       kind: "preparedResult", message: {
         ...toolMessage, index: 0, content: "prepared tool body",
         attachments: [{ fileId: "saved-image", filename: null, kind: "image", mimeType: null, sizeBytes: null, availability: "available" }],
       },
-    };
-    return { kind: "prompt", messages: [toolMessage] };
+    });
+    return Promise.resolve({ kind: "prompt", messages: [toolMessage] });
   });
 });
 afterEach(() => {
@@ -131,7 +132,7 @@ it("reads exact tool arguments, canonical error status and the chosen consuming 
   expect(mocks.readRequest).toHaveBeenCalledWith({ identity, modelRequestId: "consumer" }, expect.any(AbortSignal));
 });
 
-it("preserves unknown Prompt origins and the identity of recorded response tool calls", async () => {
+it("preserves unknown Prompt origins and the identity of recorded response tool calls",  () => {
   const { rerender } = render(<RequestSnapshotView value={prompt} reference={{ payloadId: "snapshot", complete: true }} />);
   expect(screen.getByText("SYSTEM")).toBeTruthy();
   expect(screen.getByText("部分消息未保存上下文来源，正文仍按原文展示。")).toBeTruthy();

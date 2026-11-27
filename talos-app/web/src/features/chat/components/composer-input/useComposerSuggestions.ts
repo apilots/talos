@@ -41,7 +41,6 @@ export function useComposerSuggestions({
   const triggerKey = composerTriggerKey(trigger);
   const open = Boolean(trigger && triggerKey !== cancelledKey);
   const loading = Boolean(open && trigger !== resolvedTrigger);
-  const currentSkills = trigger === resolvedTrigger ? skills : [];
   const currentError = trigger === resolvedTrigger ? error : undefined;
 
   useEffect(() => {
@@ -78,6 +77,7 @@ export function useComposerSuggestions({
     if (!open || !trigger) {
       return [];
     }
+    const currentSkills = trigger === resolvedTrigger ? skills : [];
     const commandSuggestions = trigger.kind === "slash"
       ? filterComposerCommands(commands, trigger.query)
       : [];
@@ -85,7 +85,7 @@ export function useComposerSuggestions({
       ...commandSuggestions,
       ...currentSkills.filter((skill) => !(skill.scope === "system" && commands.some((command) => (command === "goal" || command === "loop") && command === skill.name))).map((skill): ComposerSuggestion => ({ type: "skill", skill })),
     ];
-  }, [commands, currentSkills, open, trigger]);
+  }, [commands, skills, resolvedTrigger, open, trigger]);
 
   useEffect(() => {
     setSelectedIndex(0);

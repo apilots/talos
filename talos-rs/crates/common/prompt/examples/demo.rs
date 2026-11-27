@@ -67,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tool_result = tool_template.render(&tool_context)?;
     println!(
         "   Tool prompt preview (first 200 chars): {}",
-        &tool_result.chars().take(200).collect::<String>()
+        tool_result.chars().take(200).collect::<String>()
     );
     println!("   ...\n");
 

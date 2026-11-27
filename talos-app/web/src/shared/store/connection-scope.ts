@@ -5,7 +5,7 @@ export function defaultProductEndpoint() {
   return import.meta.env.VITE_API_BASE_URL?.trim()
     || (typeof window !== "undefined" && window.location.origin !== "null" ? window.location.origin : "http://localhost:8080");
 }
-export function normalizeEndpoint(endpoint: string) {
+function normalizeEndpoint(endpoint: string) {
   return new URL(endpoint).href.replace(/\/$/, "");
 }
 /** Actor and control-plane identity, excluding rotating credentials. */

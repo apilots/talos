@@ -8,11 +8,11 @@ import { useAppStore } from "@/shared/store/app-store";
 import { useAuthBootstrap } from "./useAuthBootstrap";
 import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 
-const getGatewayHealthMock = vi.fn();
-const getCurrentUserMock = vi.fn();
-const getCurrentUserWithTokenMock = vi.fn();
-const readDesktopCloudSessionMock = vi.fn();
-const clearDesktopCloudSessionMock = vi.fn();
+const getGatewayHealthMock = vi.fn<typeof import("../api")["getGatewayHealth"]>();
+const getCurrentUserMock = vi.fn<typeof import("../api")["getCurrentUser"]>();
+const getCurrentUserWithTokenMock = vi.fn<typeof import("../api")["getCurrentUserWithToken"]>();
+const readDesktopCloudSessionMock = vi.fn<typeof import("../api")["readDesktopCloudSession"]>();
+const clearDesktopCloudSessionMock = vi.fn<typeof import("../api")["clearDesktopCloudSession"]>();
 
 vi.mock("../api", () => ({
   clearDesktopCloudSession: () => clearDesktopCloudSessionMock(),
@@ -60,7 +60,7 @@ describe("useAuthBootstrap", () => {
   });
 
   it("restores desktop cloud session cache after token passes user verification", async () => {
-    const user = {
+    const user: Awaited<ReturnType<typeof getCurrentUserMock>> = {
       user_id: "user-1",
       username: "ada",
       email: "ada@example.com",
@@ -70,13 +70,15 @@ describe("useAuthBootstrap", () => {
       created_at: 0,
       updated_at: 0,
     };
-    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true });
+    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true, status: "ok", service: "Talos", timestamp: "2026-11-27T00:00:00Z" });
     readDesktopCloudSessionMock.mockResolvedValue({
+      schema_version: 1, token_type: "Bearer", expires_at_ms: null, last_used_at_ms: "0",
       access_token: "cached-token",
       cloud_api_base_url: "http://127.0.0.1:8787",
       user: {
         user_id: "user-1",
         username: "ada",
+        email: "ada@example.com",
         role: "admin",
         type: "max",
       },
@@ -96,7 +98,7 @@ describe("useAuthBootstrap", () => {
   });
 
   it("verifies an in-memory browser bearer token", async () => {
-    const user = {
+    const user: Awaited<ReturnType<typeof getCurrentUserMock>> = {
       user_id: "user-2",
       username: "linus",
       email: null,
@@ -107,7 +109,7 @@ describe("useAuthBootstrap", () => {
       updated_at: 0,
     };
     useAppStore.getState().setConnection({ authToken: "memory-token" });
-    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true });
+    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true, status: "ok", service: "Talos", timestamp: "2026-11-27T00:00:00Z" });
     readDesktopCloudSessionMock.mockResolvedValue(null);
     getCurrentUserWithTokenMock.mockResolvedValue(user);
 
@@ -124,7 +126,7 @@ describe("useAuthBootstrap", () => {
   });
 
   it("restores and verifies a browser token from session storage", async () => {
-    const user = {
+    const user: Awaited<ReturnType<typeof getCurrentUserMock>> = {
       user_id: "user-3",
       username: "grace",
       email: null,
@@ -135,7 +137,7 @@ describe("useAuthBootstrap", () => {
       updated_at: 0,
     };
     window.sessionStorage.setItem("talos-web-auth-token", "stored-web-token");
-    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true });
+    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true, status: "ok", service: "Talos", timestamp: "2026-11-27T00:00:00Z" });
     readDesktopCloudSessionMock.mockResolvedValue(null);
     getCurrentUserWithTokenMock.mockResolvedValue(user);
 
@@ -149,7 +151,7 @@ describe("useAuthBootstrap", () => {
   });
 
   it("marks the connection unauthenticated when bearer verification fails", async () => {
-    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true });
+    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true, status: "ok", service: "Talos", timestamp: "2026-11-27T00:00:00Z" });
     readDesktopCloudSessionMock.mockResolvedValue(null);
     getCurrentUserMock.mockRejectedValue(new TalosApiError({
       code: AppProtocol.ErrorCode.Unauthenticated, message: "The login session expired.", localization: null,

@@ -12,7 +12,10 @@ check_stage() {
       python3 scripts/check_error_contract_tests.py
       ;;
     rust-format) just fmt-check ;;
-    rust-check) just check ;;
+    rust-check)
+      just deps-check
+      just clippy --locked --all-targets
+      ;;
     rust-tests) just test ;;
     frontend) pnpm --dir talos-app ci:frontend-app ;;
     installer)
