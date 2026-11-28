@@ -40,6 +40,12 @@ pub(crate) enum AutomationAssembly {
     DefinitionsOnly,
 }
 
+/// A completed product decision is distinct from a retryable persistence failure.
+pub(crate) enum AutomationSettlement {
+    Applied,
+    MissingRegistration(AutomationMode),
+}
+
 #[derive(Clone)]
 pub struct SessionAutomationService {
     assembly: AutomationAssembly,

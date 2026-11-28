@@ -457,3 +457,6 @@ async fn compaction_usage_and_original_purpose_project_once_without_counting_a_t
         agent_protocol::AgentExecutionPurpose::Compaction
     );
 }
+
+#[path = "worker_settlement_notice_tests.rs"]
+mod notice_tests;

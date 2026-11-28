@@ -17,7 +17,7 @@ impl SessionAutomationService {
         session: &SessionRecord,
         event: &AgentEvent,
         metrics: Option<&AgentRunMetrics>,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<super::AutomationSettlement> {
         let _gate = self.lock(&session.id).await;
         self.settle_locked(session, event, metrics).await
     }
@@ -27,7 +27,7 @@ impl SessionAutomationService {
         session: &SessionRecord,
         event: &AgentEvent,
         metrics: Option<&AgentRunMetrics>,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<super::AutomationSettlement> {
         let _changed = SettlementChanged {
             sender: self.changed.clone(),
             session: session.id.clone(),
@@ -56,7 +56,7 @@ impl SessionAutomationService {
         };
         let normal = matches!(event.payload, AgentEventPayload::TurnCompleted(_));
         if !waiting && !normal && failed.is_none() {
-            return Ok(());
+            return Ok(super::AutomationSettlement::Applied);
         }
         if normal && origin.is_none() {
             if let Some(input) = self.store.initial_user_input(&event.identity).await? {
@@ -64,18 +64,12 @@ impl SessionAutomationService {
                     if mode == AutomationMode::Loop
                         && self.store.has_loop_activation(&event.identity).await?
                     {
-                        return Ok(());
+                        return Ok(super::AutomationSettlement::Applied);
                     }
                     // The execution outcome is already committed. The original
-                    // completion owner publishes this missing product effect as
-                    // a notice without rewriting the Turn or creating a task.
-                    return Err(TalosError::new(
-                        ErrorCode::ToolExecutionFailed,
-                        match mode {
-                            AutomationMode::Goal => "No Goal was created in this Turn.",
-                            AutomationMode::Loop => "No Loop was created in this Turn.",
-                        },
-                    ));
+                    // completion owner commits this notice with its receipt
+                    // without rewriting the Turn or creating a task.
+                    return Ok(super::AutomationSettlement::MissingRegistration(mode));
                 }
             }
         }
@@ -114,7 +108,7 @@ impl SessionAutomationService {
                 if goal.status != GoalStatus::Active
                     || goal.objective_revision != objective_revision
                 {
-                    return Ok(());
+                    return Ok(super::AutomationSettlement::Applied);
                 }
                 // Registration is bound to the Input but has admitted no work yet.
                 let registered = goal.latest_turn_id.is_none();
@@ -130,7 +124,7 @@ impl SessionAutomationService {
                         next.completion_evidence = Some(evidence);
                         next.updated_at = now;
                         self.store.replace_goal(&goal, &next).await?;
-                        return Ok(());
+                        return Ok(super::AutomationSettlement::Applied);
                     }
                 }
                 if Self::goal_budget_exhausted(&goal, now) {
@@ -151,13 +145,15 @@ impl SessionAutomationService {
             }) => {
                 let task = match self.store.loop_task(&loop_id).await {
                     Ok(task) => task,
-                    Err(e) if e.is_code(ErrorCode::ResourceNotFound) => return Ok(()),
+                    Err(e) if e.is_code(ErrorCode::ResourceNotFound) => {
+                        return Ok(super::AutomationSettlement::Applied)
+                    }
                     Err(e) => return Err(e),
                 };
                 if task.status != LoopStatus::Active
                     || task.latest_turn_id.as_deref() != Some(event.identity.turn_id.as_str())
                 {
-                    return Ok(());
+                    return Ok(super::AutomationSettlement::Applied);
                 }
                 if waiting || failed.is_some() {
                     self.stop(
@@ -173,7 +169,7 @@ impl SessionAutomationService {
                         now,
                     )
                     .await?;
-                    return Ok(());
+                    return Ok(super::AutomationSettlement::Applied);
                 }
                 if normal {
                     // A duplicate terminal callback cannot replace a known schedule
@@ -181,7 +177,7 @@ impl SessionAutomationService {
                     if task.next_due_at.is_some() || self.queue.list(&session.id)?.messages.iter()
                         .any(|message| matches!(&message.source, QueuedMessageSource::Loop { loop_id, .. } if loop_id == &task.id))
                     {
-                        return Ok(());
+                        return Ok(super::AutomationSettlement::Applied);
                     }
                     let mut next = task.clone();
                     next.updated_at = now;
@@ -226,7 +222,7 @@ impl SessionAutomationService {
             }
             _ => {}
         }
-        Ok(())
+        Ok(super::AutomationSettlement::Applied)
     }
     /// Inspect existing committed facts only. Control reads/decisions are not
     /// business progress; ordinary Tool calls retain the original progress policy.

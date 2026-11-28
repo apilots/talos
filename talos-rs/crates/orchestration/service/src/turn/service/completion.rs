@@ -153,6 +153,7 @@ impl TurnService {
                 occurred_at: fact.event.occurred_at,
                 payload: fact.event.payload.clone(),
             };
+            let mut completion_notice = None;
             if fact.execution_purpose == agent_protocol::AgentExecutionPurpose::Compaction {
                 self.record_worker_compaction_usage(&session, &fact).await?;
             } else {
@@ -187,6 +188,7 @@ impl TurnService {
                 let finish_result = self.finish_turn(&event, None, Some(metrics), false).await;
                 let failed =
                     profile_result.is_err() || memory_result.is_err() || finish_result.is_err();
+                let finish_result = finish_result.map(|notice| completion_notice = notice);
                 for result in [profile_result, memory_result, finish_result] {
                     if let Err(error) = result {
                         self.execution.report_warning(&event.identity, error).await;
@@ -207,10 +209,32 @@ impl TurnService {
                     continue;
                 }
             }
-            self.execution
-                .execution_store
-                .complete_worker_settlement(&fact.cursor)
-                .await?;
+            if let Some(error) = completion_notice {
+                let created = self
+                    .execution
+                    .complete_worker_settlement_with_notice(
+                        &fact.cursor,
+                        talos_agent_api::TimelineSystemNotice {
+                            identity: event.identity.clone(),
+                            occurred_at: event.occurred_at,
+                            notice: talos_agent_api::AgentSystemNotice {
+                                level: talos_types::TalosTimelineNoticeLevel::Warning,
+                                content: talos_agent_api::SystemNoticeContent::Error(
+                                    error.to_api_error(),
+                                ),
+                            },
+                        },
+                    )
+                    .await?;
+                if created {
+                    talos_logging::report_error(&error);
+                }
+            } else {
+                self.execution
+                    .execution_store
+                    .complete_worker_settlement(&fact.cursor)
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -354,7 +378,8 @@ impl TurnService {
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
         automation_metrics: Option<&AgentRunMetrics>,
         dispatch: bool,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<Option<TalosError>> {
+        let mut completion_notice = None;
         let mut automation_result = Ok(());
         if self.automation.get().is_some()
             || self
@@ -378,10 +403,17 @@ impl TurnService {
                         }
                     }
                     if let Some(automation) = self.automation.get() {
-                        automation
-                            .settle(&session, event, automation_metrics)
-                            .await
-                            .map_err(|error| error.context("settle Session automation"))?;
+                        let outcome = automation.settle(&session, event, automation_metrics)
+                            .await.map_err(|error| error.context("settle Session automation"))?;
+                        if let crate::automation::goal_loop::AutomationSettlement::MissingRegistration(mode) = outcome {
+                            completion_notice = Some(TalosError::new(
+                                talos_error::ErrorCode::ToolExecutionFailed,
+                                match mode {
+                                    talos_types::AutomationMode::Goal => "No Goal was created in this Turn.",
+                                    talos_types::AutomationMode::Loop => "No Loop was created in this Turn.",
+                                },
+                            ));
+                        }
                     }
                 }
                 Ok(())
@@ -407,11 +439,11 @@ impl TurnService {
             _ => Ok(()),
         };
         if !dispatch {
-            return profile_result;
+            return profile_result.map(|()| completion_notice);
         }
         self.dispatch_finished_turn(event, auto_dispatch_ready)
             .await?;
-        profile_result
+        profile_result.map(|()| completion_notice)
     }
     async fn dispatch_finished_turn(
         &self,

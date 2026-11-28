@@ -225,6 +225,19 @@ pub trait AgentExecutionStore: Send + Sync {
         ))
     }
 
+    /// Atomically commit a terminal product notice and acknowledge its source receipt.
+    /// A repeated receipt returns None without adding another Timeline event.
+    async fn complete_worker_settlement_with_notice(
+        &self,
+        _cursor: &agent_protocol::AgentSessionEventCursor,
+        _notice: talos_agent_api::TimelineSystemNotice,
+    ) -> TalosResult<Option<TimelineEventRecord>> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Worker settlement notices are unavailable",
+        ))
+    }
+
     /// Observe the Session reset generation around multi-query canonical history reads.
     /// Stores without destructive resets may leave this unsupported. Persistent
     /// implementations must advance it atomically with removal of canonical facts.

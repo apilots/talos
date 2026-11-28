@@ -235,6 +235,23 @@ impl TimelineEventService {
         Ok(event)
     }
 
+    /// Publish only the notice newly committed with this settlement receipt.
+    pub(crate) async fn complete_worker_settlement_with_notice(
+        &self,
+        cursor: &agent_protocol::AgentSessionEventCursor,
+        notice: talos_agent_api::TimelineSystemNotice,
+    ) -> TalosResult<bool> {
+        let Some(record) = self
+            .execution_store
+            .complete_worker_settlement_with_notice(cursor, notice)
+            .await?
+        else {
+            return Ok(false);
+        };
+        let _ = self.live_tx.send(map_timeline_record(record));
+        Ok(true)
+    }
+
     pub(crate) async fn display_active_turn(
         &self,
         session_id: &str,

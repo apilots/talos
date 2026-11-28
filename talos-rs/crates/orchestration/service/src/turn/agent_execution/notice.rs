@@ -6,6 +6,16 @@ use talos_error::TalosError;
 use super::AgentExecutionDriver;
 
 impl AgentExecutionDriver {
+    pub(in crate::turn) async fn complete_worker_settlement_with_notice(
+        &self,
+        cursor: &agent_protocol::AgentSessionEventCursor,
+        notice: TimelineSystemNotice,
+    ) -> talos_error::TalosResult<bool> {
+        self.event_service
+            .complete_worker_settlement_with_notice(cursor, notice)
+            .await
+    }
+
     /// Completion and delivery owners report once, then publish the safe notice.
     /// Persistence failure is a separate diagnostic; never fabricate a durable cursor.
     pub(in crate::turn) async fn report_warning(&self, identity: &AgentTurnRef, error: TalosError) {

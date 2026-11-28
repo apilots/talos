@@ -482,6 +482,20 @@ async fn explicit_automation_without_registration_keeps_completion_and_publishes
             .unwrap();
         let first = service.try_dispatch_next("s1").await.unwrap().unwrap();
         wait_for_stream_requests(execution.as_ref(), 2).await;
+        service
+            .recover_worker_settlements("s1", false)
+            .await
+            .unwrap();
+        service
+            .recover_worker_settlements("s1", false)
+            .await
+            .unwrap();
+        assert!(store
+            .pending_worker_settlements("s1")
+            .await
+            .unwrap()
+            .iter()
+            .all(|fact| fact.event.identity.turn_id != first.turn_id));
 
         let history = crate::SessionHistoryService::new(timeline.clone())
             .read("s1", None, None)
@@ -524,7 +538,14 @@ async fn explicit_automation_without_registration_keeps_completion_and_publishes
 
 #[tokio::test]
 async fn product_transaction_failure_retains_original_worker_receipt_until_cursor_replay() {
-    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    // Failed transactions close their connection; keep the durable database alive.
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("projection.sqlite");
+    let storage = Arc::new(
+        SqliteStorage::new(database.to_str().unwrap())
+            .await
+            .unwrap(),
+    );
     let execution = Arc::new(RecordingAgentExecution::default());
     let (service, _, store, queue) = test_service_with_storage(
         execution.clone(),

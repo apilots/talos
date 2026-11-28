@@ -160,7 +160,7 @@ impl TurnService {
         if let Err(error) = result {
             talos_logging::report_error(&error);
         }
-        self.finish_turn(&event, None, None, dispatch).await?;
+        let _notice = self.finish_turn(&event, None, None, dispatch).await?;
         Ok(cleanup)
     }
 

@@ -49,6 +49,14 @@ impl AgentExecutionStore for DatabaseSessionStore {
         Ok(())
     }
 
+    async fn complete_worker_settlement_with_notice(
+        &self,
+        cursor: &agent_protocol::AgentSessionEventCursor,
+        notice: talos_agent_api::TimelineSystemNotice,
+    ) -> TalosResult<Option<super::TimelineEventRecord>> {
+        super::notice::complete_worker_settlement(self, cursor, notice).await
+    }
+
     async fn history_generation(&self, session_id: &str) -> TalosResult<Option<u64>> {
         let rows = self
             .storage
