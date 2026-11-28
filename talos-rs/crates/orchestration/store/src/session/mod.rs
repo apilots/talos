@@ -14,11 +14,9 @@ mod types;
 mod scope_tests;
 
 pub use agent_execution::{
-    AgentActiveTurnRecord, AgentCancellationAdmission, AgentContinuationBindingRecord,
-    AgentContinuationBindingStatus, AgentEventCommit, AgentEventRecord, AgentExecutionStore,
-    ClaimContinuationParams, CommandLease, CommandReservation, CommitInitialAdmissionParams,
-    CommitRunningInputAdmissionParams, CommitTerminalSettlementParams, IdempotencyRecord,
-    IdempotencyReservation, IdempotentCommand, TimelineEventRecord,
+    AgentActiveTurnRecord, AgentCancellationAdmission, AgentEventRecord, AgentExecutionStore,
+    CommandLease, CommandReservation, IdempotencyRecord, IdempotencyReservation, IdempotentCommand,
+    TimelineEventRecord,
 };
 pub use mock_store::MockSessionStore;
 pub use store::{DatabaseSessionStore, SessionStore};

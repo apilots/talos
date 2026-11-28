@@ -15,8 +15,10 @@ async fn every_existing_child_operation_rejects_a_stale_caller_turn() {
         .unwrap();
     let child = spawned.subagent;
     settle_canonical_turn(
+        services.sessions.as_ref(),
         services.store.as_ref(),
         services.timeline.as_ref(),
+        services.journal.as_ref(),
         &parent.session_id,
         &parent.turn_id,
         CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {

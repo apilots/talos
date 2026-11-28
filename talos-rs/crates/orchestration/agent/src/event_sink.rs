@@ -85,7 +85,7 @@ impl AgentEventPipeline {
 
     /// Close open message and block state after abnormal Provider cleanup.
     ///
-    /// Closure snapshots are delivered as progress so Service persists every
+    /// Closure snapshots are delivered as progress so the Worker persists every
     /// lower sequence before committing the terminal settlement.
     pub(crate) async fn close_open_lifecycle(
         &self,
@@ -127,7 +127,7 @@ impl AgentEventPipeline {
         crate::event_admission::apply_user_message(&mut state.reducer, message)
     }
 
-    /// Reserve one User message while Service persists its admission facts.
+    /// Reserve one User message while the Worker persists its admission facts.
     ///
     /// Provider progress waits behind this reservation. Committing preserves
     /// the staged reducer state; dropping or aborting restores it.

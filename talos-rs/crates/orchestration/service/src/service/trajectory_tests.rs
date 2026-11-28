@@ -1,6 +1,5 @@
 use super::*;
 use talos_agent_api::trajectory::*;
-use talos_store::session::{AgentExecutionStore, CommitTerminalSettlementParams};
 
 async fn fixture() -> (
     TalosService,
@@ -38,8 +37,14 @@ async fn fixture() -> (
         1,
     )
     .unwrap();
-    crate::test_support::commit_test_running_turn(store.as_ref(), id.clone(), message).await;
-    seed_worker_fixture(&service, store.as_ref(), journal.as_ref(), &id.session_id).await;
+    crate::test_worker::seed_running_worker(
+        service.sessions.as_ref(),
+        store.as_ref(),
+        journal.as_ref(),
+        id.clone(),
+        message,
+    )
+    .await;
     (service, store, actor, id, journal)
 }
 fn request(id: &AgentTurnRef, n: u32) -> TrajectoryReadModelRequestResponse {
@@ -60,39 +65,10 @@ fn request(id: &AgentTurnRef, n: u32) -> TrajectoryReadModelRequestResponse {
     }
 }
 async fn finish(
-    store: &DatabaseSessionStore,
+    _store: &DatabaseSessionStore,
     id: &AgentTurnRef,
     journal: &talos_store::execution::WorkerExecutionStore,
 ) {
-    let active = store
-        .get_agent_active_turn(&id.session_id)
-        .await
-        .unwrap()
-        .unwrap();
-    let last = store
-        .list_agent_turn_events(id, 100)
-        .await
-        .unwrap()
-        .last()
-        .unwrap()
-        .sequence;
-    store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: talos_agent_api::AgentEvent {
-                identity: id.clone(),
-                sequence: last + 1,
-                occurred_at: 2,
-                payload: talos_agent_api::AgentEventPayload::TurnCompleted(
-                    talos_agent_api::AgentTurnCompleted {
-                        stop_reason: talos_agent_api::AgentStopReason::EndTurn,
-                    },
-                ),
-            },
-            expected_event_seq: active.last_event_seq,
-            completed_turn_metrics: None,
-        })
-        .await
-        .unwrap();
     let checkpoint = journal.checkpoint(id).await.unwrap().unwrap();
     let mut reducer =
         talos_agent::AgentEventReducer::from_checkpoint(id.clone(), checkpoint).unwrap();

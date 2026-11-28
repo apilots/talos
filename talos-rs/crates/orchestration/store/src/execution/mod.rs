@@ -52,8 +52,12 @@ impl WorkerExecutionStore {
         session: &AgentSessionContext,
     ) -> TalosResult<(u64, Option<String>)> {
         let row: Option<(String, i64, Option<String>)> = sqlx::query_as(
-            "SELECT binding_json, generation, active_turn_id FROM worker_sessions WHERE session_id = ?",
-        ).bind(&session.session_id).fetch_optional(&mut **tx).await.map_err(database_error)?;
+            "SELECT binding_json, generation, active_turn_id FROM sessions WHERE session_id = ?",
+        )
+        .bind(&session.session_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(database_error)?;
         let (binding, generation, active) = row.ok_or_else(|| {
             TalosError::new(
                 ErrorCode::SessionNotFound,

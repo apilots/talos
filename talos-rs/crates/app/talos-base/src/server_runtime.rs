@@ -180,10 +180,6 @@ impl TalosServerRuntime {
         };
         shutdown_token.cancel();
         host.shutdown_refreshes().await;
-        let registration = match worker_registration.lock().await.take() {
-            Some(registration) => registration.shutdown().await,
-            None => Ok(()),
-        };
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
 
@@ -192,6 +188,7 @@ impl TalosServerRuntime {
 
         let background_result = host.worker.shutdown_background_tasks().await;
         let shutdown_result = application_automation::shutdown_server(
+            &host.worker,
             &coordinator,
             &automation,
             &service,
@@ -199,6 +196,10 @@ impl TalosServerRuntime {
             &plugins,
         )
         .await;
+        let registration = match worker_registration.lock().await.take() {
+            Some(registration) => registration.shutdown().await,
+            None => Ok(()),
+        };
         let result = application_automation::combine(result, registration);
         let result = application_automation::combine(result, background_result);
         let result = application_automation::combine(result, browser.shutdown().await);

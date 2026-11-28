@@ -256,7 +256,7 @@ fn build_agent(
         provider: Arc::new(TwoRoundProvider::default()),
     });
     let user_workspace_memory = Arc::new(talos_service::UserWorkspaceMemoryService::new());
-    let history = Arc::new(FreshWorkerHistory(journal));
+    let history = Arc::new(FreshWorkerHistory(journal.clone()));
     let provider = KernelAgentProvider::new(KernelAgentProviderParams {
         agent_id: AGENT_ID.to_string(),
         name: "Context Usage Agent".to_string(),
@@ -274,7 +274,7 @@ fn build_agent(
         rich_input: vec![AgentUserContentKind::File],
     })
     .expect("integration Provider should build");
-    create_agent_harness(AGENT_ID.to_string(), provider)
+    create_agent_harness(AGENT_ID.to_string(), provider, journal)
 }
 
 #[tokio::test]

@@ -6420,6 +6420,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sqlx",
  "subtle",
  "talos-agent-api",
  "talos-config",
@@ -6478,6 +6479,7 @@ dependencies = [
 name = "talos-agent-provider-kernel"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
+ "agent-protocol",
  "async-trait",
  "chrono",
  "serde",
@@ -6493,6 +6495,7 @@ dependencies = [
  "talos-memory",
  "talos-prompt",
  "talos-skills",
+ "talos-store",
  "talos-tools",
  "talos-types",
  "tempfile",

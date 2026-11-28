@@ -12,8 +12,13 @@ async fn waiting_interrupt_discards_usage_without_dispatching_the_queue() {
     )
     .await;
     create_test_session_record(store.clone()).await;
-    insert_pending_dynamic_action(store.as_ref(), None).await;
-    seed_worker_fixture(&service, store.as_ref(), execution.as_ref()).await;
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        execution.as_ref(),
+        pending_dynamic_action_events(None),
+    )
+    .await;
     let profile = DatabaseProfileStore::new(&storage);
     let session = test_session();
     profile
@@ -73,8 +78,13 @@ async fn interrupt_admits_the_exact_canonical_turn_before_harness_control() {
         1,
     )
     .unwrap();
-    commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
-    seed_worker_fixture(&service, store.as_ref(), agent_execution.as_ref()).await;
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        agent_execution.as_ref(),
+        canonical_user_admission(identity.clone(), input, 1, true),
+    )
+    .await;
 
     let mut session = test_session();
     session.conf.model_selection = None;
@@ -122,8 +132,13 @@ async fn rejected_harness_interrupt_restores_the_canonical_running_state() {
         1,
     )
     .unwrap();
-    commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
-    seed_worker_fixture(&service, store.as_ref(), agent_execution.as_ref()).await;
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        agent_execution.as_ref(),
+        canonical_user_admission(identity.clone(), input, 1, true),
+    )
+    .await;
 
     let error = service
         .interrupt_canonical_turn(&test_session(), &identity.turn_id)

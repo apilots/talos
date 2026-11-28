@@ -4,6 +4,7 @@ use super::*;
 
 #[derive(Clone)]
 pub(super) struct ProfileTurnContext {
+    execution_node_id: String,
     user_id: String,
     request_id: String,
     model_ref: ModelRef,
@@ -17,6 +18,7 @@ impl TurnService {
         request_id: String,
     ) -> ProfileTurnContext {
         ProfileTurnContext {
+            execution_node_id: session.execution_node_id.clone(),
             user_id: session.user_id.clone(),
             request_id,
             model_ref: session
@@ -33,15 +35,23 @@ impl TurnService {
     pub(super) fn spawn_turn_completion(
         &self,
         identity: AgentTurnRef,
-        _profile_context: ProfileTurnContext,
+        profile_context: ProfileTurnContext,
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
         completion: oneshot::Receiver<TalosResult<AgentRunSettlement>>,
         ownership: Option<talos_agent::SessionLease>,
     ) {
+        let observation_stop = self
+            .execution
+            .observation_stop(&profile_context.execution_node_id);
         let turn_service = self.clone();
         self.execution.spawn_delivery(async move {
             let _ownership = ownership;
-            let settlement = match completion.await {
+            let completed = tokio::select! {
+                biased;
+                _ = observation_stop.cancelled() => return,
+                completed = completion => completed,
+            };
+            let settlement = match completed {
                 Ok(Ok(settlement)) => settlement,
                 Ok(Err(error)) => {
                     turn_service
@@ -195,6 +205,7 @@ impl TurnService {
                     }
                 }
                 let dispatch_current = dispatch
+                    && !self.execution.delivery_is_stopping()
                     && idle
                     && latest_terminal
                         .as_ref()
@@ -438,7 +449,7 @@ impl TurnService {
             (Err(error), _) | (_, Err(error)) => Err(error),
             _ => Ok(()),
         };
-        if !dispatch {
+        if !dispatch || self.execution.delivery_is_stopping() {
             return profile_result.map(|()| completion_notice);
         }
         self.dispatch_finished_turn(event, auto_dispatch_ready)

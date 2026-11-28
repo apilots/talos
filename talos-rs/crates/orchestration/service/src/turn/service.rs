@@ -69,6 +69,16 @@ struct TurnSubmission {
 }
 
 impl TurnService {
+    pub(crate) fn track_admission(
+        &self,
+    ) -> TalosResult<tokio_util::task::task_tracker::TaskTrackerToken> {
+        self.execution.track_admission()
+    }
+
+    pub(crate) fn begin_execution_drain(&self) {
+        self.execution.begin_delivery_drain();
+    }
+
     pub(crate) async fn drain_execution_delivery(&self) {
         self.execution.drain_delivery().await;
     }
@@ -138,7 +148,7 @@ impl TurnService {
         identity: AgentTurnRef,
     ) -> TalosResult<SessionInfo> {
         let service = self.clone();
-        await_admission(async move {
+        await_admission(self.execution.track_admission()?, async move {
             service
                 .compact_session_owned(session, request_id, identity)
                 .await
@@ -292,7 +302,7 @@ impl TurnService {
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
     ) -> TalosResult<StartTurnResponse> {
         let service = self.clone();
-        await_admission(async move {
+        await_admission(self.execution.track_admission()?, async move {
             service
                 .submit_turn_owned(
                     session,
@@ -523,8 +533,7 @@ impl TurnService {
                 automation_origin: None,
                 context,
                 input,
-                checkpoint: None,
-                continuation: None,
+                intent: agent_protocol::AgentRunIntent::Start,
             })
         };
         let automation_object = submission
@@ -750,9 +759,11 @@ impl TurnService {
 /// Keep Service admission and its completion handoff alive if the request is dropped.
 /// This task owns only product submission; Harness continues to own execution cleanup.
 pub(crate) async fn await_admission<T: Send + 'static>(
+    admission_guard: tokio_util::task::task_tracker::TaskTrackerToken,
     admission: impl std::future::Future<Output = TalosResult<T>> + Send + 'static,
 ) -> TalosResult<T> {
     tokio::spawn(async move {
+        let _admission = admission_guard;
         let result = admission.await;
         if let Err(error) = &result {
             error!(error = %error, "Agent admission failed");

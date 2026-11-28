@@ -858,6 +858,8 @@ async fn execution_details_upgrade_preserves_main_history_with_null_details() {
         .fetch_all(&pool)
         .await
         .unwrap();
+    // Product storage no longer owns Provider continuation state.
+    tables_before.retain(|name| name != "agent_continuation_bindings");
     // Later migrations add independent tables without rewriting existing facts.
     tables_before.extend([
         "session_goals".to_owned(),

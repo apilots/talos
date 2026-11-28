@@ -12,3 +12,8 @@ pub(crate) mod capture;
 pub mod sync;
 
 pub mod execution;
+
+#[cfg(test)]
+extern crate self as talos_store;
+#[cfg(test)]
+mod test_support;

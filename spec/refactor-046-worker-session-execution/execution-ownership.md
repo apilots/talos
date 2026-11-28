@@ -44,7 +44,7 @@ Sync 恢复装配和授权后，已有导出器读取已提交本地记录，按
 记录安全回收须依据既有消费语义，未消费修改和 tombstone 不能因关闭功能或登出而丢失。
 这属于产品事实记录，与执行事件交付的“无逐事件 ACK/Worker outbox”契约分别适用。
 
-产品库和执行库分别管理 schema、连接和事务。Worker 执行库固定为本节点 talos_home 下的 worker/execution.sqlite，由 WorkerExecutionStore 独立打开；不复用产品库连接。
+产品库和执行库分别管理 schema、连接和事务。Worker 执行库固定为本节点 data_dir 下的 worker/execution.sqlite，由 WorkerExecutionStore 独立打开；不复用产品库连接。
 跨边界通过 Worker API 和已提交事件交互，禁止直接读取或写入对方表。
 AppServer/TUI 和 TalosServer 复用共享产品运行时及产品持久化能力，内嵌或远端 Worker 提供执行端口。
 控制面客户端只处理登录/接入、凭证和连接恢复，不代替本机产品管理者，也不持有 Server 多节点权威状态。
@@ -83,6 +83,41 @@ Store 实现复用按能力和记录范围进行，不能据 DatabaseSessionStor
 产品物化保留来源执行事件身份和 Worker 游标，产品自生通知不能写回执行日志或推进 Worker 来源游标。
 Worker 启动、续跑、压缩和 Memory 形成从自身执行库及原 Provider 私有存储读取，不向 Server 获取历史或进度。
 
+### 执行事实与产品投影的结构
+
+WorkerExecutionStore 与 DatabaseSessionStore 分别服务执行层和产品管理层，不是两套对等执行 owner。
+Worker 的权威事件与检查点供本地执行使用；产品服务消费同一 AgentEvent，保留事件副本并构建查询和管理视图。
+
+| 数据 | Worker 执行库 | 产品库及消费用途 |
+| --- | --- | --- |
+| 执行 Session | 绑定、历史代数、活动 Turn、Memory 处理进度 | 产品 Session 身份、标题、归属、项目、模型选择及统计；不是完整执行 Session 的镜像。 |
+| 执行事件 | 原 AgentEvent、来源游标、执行结算事实 | 原 identity/sequence/occurred_at/payload 保持一致，展开为产品行，增加产品 event_seq 和 persisted_at；产品序号不替代 Worker 来源游标。 |
+| 活跃状态 | Worker 原子提交的执行状态 | 由来源事件派生的查询索引，允许落后，不能替代 Worker 的最终执行校验。 |
+| 准入记录、检查点及 Provider 续跑状态 | Worker 持久化并用于幂等、上下文、续跑和中断处理 | 不做对应完整复制，也不作为产品侧管理的执行状态。产品自己的请求幂等和排队记录不等同于 Worker 准入。 |
+| 历史补充和轨迹载荷 | 完整载荷留在 Worker | 已封存的展示元数据按原契约物化，大载荷通过授权、有界 Worker 读取提供。 |
+| 摄取与产品结算 | 不新增交付 outbox 或逐事件 ACK | 产品库保留来源游标、事件映射及业务消费进度，用于去重、补读、用量归账和后续调度。 |
+
+这是同一事件模型的持久化展开及产品投影，不引入第二套业务事件类型，也不要求两边表结构相同。
+事件副本用于产品历史查询；Worker 检查点用于本地执行，两者的重复数据有明确消费者。
+产品执行事件写入口只保留 Worker 事实摄取；已被替代的 commit_initial_admission、commit_progress_event(s)、commit_running_input_admission 及同类执行直写接口和仅供其使用的实现须删除。
+产品命令记录、管理通知、来源校验及业务消费事务仍由原 owner 保留，不因清理执行直写接口一并删除。
+
+目录与数据库文件名保持不变：执行库为 `<data_dir>/worker/execution.sqlite`，Memory 索引为 `<data_dir>/memory-index.sqlite`。
+独立执行 schema 内不使用部署角色前缀；以下是本次须完成的表名调整，不表示现有代码已经改名：
+
+| 迁移前实现名 | 目标领域表名 |
+| --- | --- |
+| worker_sessions | sessions |
+| worker_admissions | turn_admissions |
+| worker_events | agent_events |
+| worker_checkpoints | turn_checkpoints |
+| worker_supplements | session_history_supplements |
+
+同步调整执行 Store 查询、外键、索引及其验证，不新增旧名兼容写入路径。
+已有 Worker 执行数据须通过所属 Store 的 schema 迁移保留，不能以删库重建替代表名调整。
+Memory 既有表名保持不变；产品库 worker_projection_cursors / worker_event_projection 表达来源与用途，保留此命名。
+跨数据库同名不表示跨库共享表、连接或事务，也不要求字段对齐。
+
 参见 [Worker 执行 Store](../../talos-rs/crates/orchestration/store/src/execution/mod.rs)、
 [本机 Harness 执行装饰器](../../talos-rs/crates/orchestration/agent/src/local_execution.rs)、
 [Worker 历史与 Memory 进度](../../talos-rs/crates/app/talos-worker/src/execution_history.rs)、
@@ -104,6 +139,8 @@ Worker 将受理身份、输入和接受的版本与准入状态持久关联，�
 Goal/Loop 及管理配置变更由产品服务提交新版本，下次派发携带对应版本。
 Worker 只按已接受版本推进执行。暂停、停止或中断当前执行通过已有控制契约受理，
 产品层分别记录请求状态和执行端已确认状态，不通过产品库写入覆盖 Worker 的活动检查点。
+取消请求使用独立管理 token，对产品 API 公开 cancellationRequested；state、事件游标和观察时间只由 Worker 已提交事实投影更新。拒绝取消只清理对应请求，不回滚或覆盖新的执行状态，终态删除活动投影时一并清理请求。
+本次不扩展 Sync SDK 或协议。Sync 只复制已确认执行状态，不同步临时取消请求或 token；多端通过所属产品 API/Relay 查看实时请求状态。
 
 产品 Timeline 在 Worker 保留的代数内可从已提交事件重建。
 重建只更新派生视图及摄取位置，保留 Server 自己的配置、账本及幂等结算记录。
@@ -122,6 +159,16 @@ Worker 只按已接受版本推进执行。暂停、停止或中断当前执行�
 AgentHarness 通过配置解析 AgentProvider，保留 Provider 原生续跑和私有产物。
 未来 Provider 复用同一 Harness 契约。Goal 绑定一个 Harness 和一个 Session。
 跨 Agent 协作保留 Coordinator 已有职责，跨 Agent Goal 拆分不属于本次实现。
+
+### 等待输入与续跑
+
+产品服务保存展示所需的待处理问题及稳定操作身份，提交用户回复时携带既有 Session、Turn、操作身份和命令身份。
+Worker 在原执行 gate 内校验活动状态、历史代数、待处理操作及重复命令，从本地执行记录和 Provider 私有存储恢复 continuation/checkpoint，再继续同一 Turn。
+产品服务及 SDK 不负责查找、保存或回传 Provider 私有续跑引用或执行检查点；Worker 对外的执行事实、结算和产品投影只包含交付及业务消费需要的领域信息。
+产品侧可复用同一事件 reducer 生成只读历史或展示快照，但不把这些派生快照作为 Worker 的续跑检查点或执行恢复来源。
+不能通过复制 Provider 引用到产品库，再由 Server 传回来满足 Worker 的续跑前置条件。
+产品视图落后时先沿原游标刷新或返回原类型化状态错误，不能以旧副本覆盖执行状态；重试继续使用原命令身份。
+本机内嵌和注册 Worker 复用同一 Worker 命令契约及校验路径，不新增另一套远程续跑实现。
 
 ## 断连与结算
 
@@ -155,6 +202,7 @@ clear/delete 由产品服务接收授权请求，经同一受保护 Worker gate 
 个人远程查看端通过所属宿主的产品 API 经 Relay 补读。Relay 可转发查看端提供的授权位置，不持久保存个人事件游标或重放队列。
 
 终态可能首次经游标读取到达。产品结算按原 Turn、dispatch/occurrence 身份和定义版本匹配用量、Goal 完成与动态 Loop 决策。
+此处产品结算只消费 Worker 已提交的执行结算事实；执行的等待、取消、完成和失败及其持久化均由 Worker 完成，产品服务不能再次驱动执行状态机或补造终态。
 缺少 Goal/Loop 注册这类不可重试的业务结果，不伪装为存储故障。其产品通知与来源回执的结算确认在同一产品事务提交；重复恢复不新增通知，通知写入失败仍保留原回执待重试。
 结算保留原执行模型身份，不读取结算时的新 Session 模型配置来归账。Worker 本地 Memory 反射产生的辅助模型用量随同终态持久化，沿原幂等用量 owner 结算。
 Worker 已持久接受后，即使产品视图事务暂时失败，也不释放原命令或队列身份、不重新执行；返回原受理身份，随后沿既有游标补读完成物化与结算。
@@ -220,6 +268,9 @@ Automation 页面复用 builtinJob/list、builtinJob/control 和 BuiltinJobInfo�
 - 分别在准入前后断开本机观察者、Relay WSS 和 Worker 连接，验证释放或持续执行、游标补齐、重叠去重、一次结算和过期游标拒绝。
 - 验证租约到期、撤销、明确中断、等待输入和宿主关闭；并发管理者切换只能在空闲时准入。
 - 中断产品摄取事务后恢复，确认连续游标与 Timeline 一致；检查产品库和执行库所有权及事务边界。
+- 清空并重建执行派生视图后继续等待输入的 Turn，验证 Worker 使用自身 continuation/checkpoint，产品库和命令不持有 Provider 私有续跑引用；已有产品配置和幂等账本保持不变。
+- 核对两边同一事件的身份、序列、发生时间和 payload 一致，只有产品序号/入库时间及派生字段不同；执行表改名后的查询、外键与索引不保留旧名写入分支。
+- 验证产品服务无法通过旧直接写入接口创建准入、执行进度或终态；断连及旧副本均不能替代 Worker 的执行决定。
 - 丢失准入响应后以相同命令重试，覆盖载荷/版本冲突，确认原输入和 Turn 只准入一次。
 - 在活动 Turn 中变更定义或暂停，确认已接受版本与管理请求状态分离，控制操作须有执行端结果。
 - 延迟 Server 摄取并重建派生视图，确认最后已知进度可展示，不能自动判断失败、重复派发或重复结算；独立配置与账本保持其 owner。

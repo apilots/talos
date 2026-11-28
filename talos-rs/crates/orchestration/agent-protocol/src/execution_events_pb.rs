@@ -55,18 +55,14 @@ pub fn encode_page(value: AgentSessionEventsResult) -> TalosResult<pb::AgentSess
                     .settlement
                     .map(|settlement| pb::AgentExecutionSettlement {
                         state: Some(match settlement {
-                            AgentExecutionSettlement::WaitingForInput {
-                                continuation,
-                                metrics,
-                            } => pb::agent_execution_settlement::State::Waiting(Box::new(
-                                pb::WaitingSettlement {
-                                    event: None,
-                                    continuation: Some(pb::ContinuationRef {
-                                        opaque_id: continuation.opaque_id,
-                                    }),
-                                    metrics: Some(harness_pb::encode_metrics(metrics)),
-                                },
-                            )),
+                            AgentExecutionSettlement::WaitingForInput { metrics } => {
+                                pb::agent_execution_settlement::State::Waiting(Box::new(
+                                    pb::WaitingSettlement {
+                                        event: None,
+                                        metrics: Some(harness_pb::encode_metrics(metrics)),
+                                    },
+                                ))
+                            }
                             AgentExecutionSettlement::Finished {
                                 metrics,
                                 memory_usage,
@@ -115,9 +111,6 @@ pub fn decode_page(value: pb::AgentSessionEventsPage) -> TalosResult<AgentSessio
                     match settlement.state.ok_or_else(invalid)? {
                         pb::agent_execution_settlement::State::Waiting(waiting) => {
                             Ok(AgentExecutionSettlement::WaitingForInput {
-                                continuation: talos_agent_api::AgentContinuationRef {
-                                    opaque_id: waiting.continuation.ok_or_else(invalid)?.opaque_id,
-                                },
                                 metrics: harness_pb::decode_metrics(waiting.metrics)?,
                             })
                         }

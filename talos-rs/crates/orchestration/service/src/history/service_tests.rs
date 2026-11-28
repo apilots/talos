@@ -1,3 +1,4 @@
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use std::sync::Arc;
 
 use talos_agent_api::{
@@ -6,9 +7,7 @@ use talos_agent_api::{
     AgentTurnCompleted, AgentTurnRef,
 };
 use talos_storage::SqliteStorage;
-use talos_store::session::{
-    AgentExecutionStore, CommitTerminalSettlementParams, DatabaseSessionStore,
-};
+use talos_store::session::{AgentExecutionStore, DatabaseSessionStore};
 
 use super::SessionHistoryService;
 use crate::test_support::{
@@ -56,7 +55,6 @@ async fn completed_history_reads_terminal_metrics_beyond_the_first_event_page() 
         }),
     );
     let admission = commit_test_running_turn(store.as_ref(), identity.clone(), user).await;
-    let mut tail = admission.active_turn.last_event_seq;
     let mut sequence = admission.events.last().unwrap().sequence;
     let mut metrics = talos_agent_api::AgentRunMetrics::default();
     // Exercise the UI checkpoint page boundary without a transaction per token.
@@ -71,28 +69,29 @@ async fn completed_history_reads_terminal_metrics_beyond_the_first_event_page() 
             payload: AgentEventPayload::MetricsUpdated(metrics.clone()),
         });
         if batch.len() == 256 || duration == 10_001 {
-            tail = store
-                .commit_progress_events(std::mem::take(&mut batch), tail)
+            store
+                .project_test_events(TestWorkerEvents::new(std::mem::take(&mut batch)))
                 .await
-                .unwrap()
-                .active_turn
-                .last_event_seq;
+                .unwrap();
         }
     }
     let terminal = store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity: identity.clone(),
-                sequence: sequence + 1,
-                occurred_at: 13,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: tail,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity: identity.clone(),
+            sequence: sequence + 1,
+            occurred_at: 13,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     let turns = history
         .read(&identity.session_id, None, Some(1))
@@ -135,11 +134,7 @@ fn completed_message(
     }
 }
 
-async fn commit_completed_turn(
-    store: &dyn AgentExecutionStore,
-    identity: AgentTurnRef,
-    suffix: &str,
-) {
+async fn commit_completed_turn(store: &DatabaseSessionStore, identity: AgentTurnRef, suffix: &str) {
     let user = completed_message(
         &identity,
         &format!("user-{suffix}"),
@@ -173,30 +168,27 @@ async fn commit_completed_turn(
         .expect("assistant lifecycle should contain events")
         .sequence
         + 1;
-    let mut expected_event_seq = admission.active_turn.last_event_seq;
     for event in assistant_events {
-        expected_event_seq = store
-            .commit_progress_event(event, expected_event_seq)
+        store
+            .project_test_events(TestWorkerEvents::new(vec![event]))
             .await
-            .expect("assistant message lifecycle should commit")
-            .active_turn
-            .last_event_seq;
+            .expect("assistant message lifecycle should commit");
     }
-    store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity,
-                sequence: terminal_sequence,
-                occurred_at: 13,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq,
-            completed_turn_metrics: None,
-        })
+    let terminal = store
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity,
+            sequence: terminal_sequence,
+            occurred_at: 13,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
         .expect("terminal event should commit");
+    store
+        .complete_worker_settlement(&terminal.cursor)
+        .await
+        .expect("history fixture settlement should complete");
 }
 
 #[tokio::test]
@@ -285,27 +277,21 @@ async fn history_does_not_load_a_long_running_turn() {
         ),
     )
     .await;
-    let mut tail = admission.active_turn.last_event_seq;
     let mut sequence = admission.events.last().unwrap().sequence;
     for duration in 1..=2050 {
         sequence += 1;
-        tail = store
-            .commit_progress_event(
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence,
-                    occurred_at: 12,
-                    payload: AgentEventPayload::MetricsUpdated(talos_agent_api::AgentRunMetrics {
-                        duration_ms: Some(duration),
-                        ..Default::default()
-                    }),
-                },
-                tail,
-            )
+        store
+            .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+                identity: identity.clone(),
+                sequence,
+                occurred_at: 12,
+                payload: AgentEventPayload::MetricsUpdated(talos_agent_api::AgentRunMetrics {
+                    duration_ms: Some(duration),
+                    ..Default::default()
+                }),
+            }]))
             .await
-            .unwrap()
-            .active_turn
-            .last_event_seq;
+            .unwrap();
     }
     storage.take_event_rows();
     let empty = history
@@ -330,20 +316,23 @@ async fn history_does_not_load_a_long_running_turn() {
     )
     .await;
     let terminal = store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity: identity.clone(),
-                sequence: sequence + 1,
-                occurred_at: 13,
-                payload: AgentEventPayload::TurnFailed(talos_agent_api::AgentTurnFailed {
-                    error: talos_error::ApiError::new(talos_error::ErrorCode::InternalError),
-                    retryable: false,
-                }),
-            },
-            expected_event_seq: tail,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity: identity.clone(),
+            sequence: sequence + 1,
+            occurred_at: 13,
+            payload: AgentEventPayload::TurnFailed(talos_agent_api::AgentTurnFailed {
+                error: talos_error::ApiError::new(talos_error::ErrorCode::InternalError),
+                retryable: false,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     let expected = history
         .read(&identity.session_id, None, Some(10))

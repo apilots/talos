@@ -28,9 +28,9 @@ impl TurnService {
         request: SubmitTurnInputRequest,
     ) -> TalosResult<SubmitTurnInputResponse> {
         let service = self.clone();
-        super::await_admission(
-            async move { service.submit_turn_input_owned(session, request).await },
-        )
+        super::await_admission(self.execution.track_admission()?, async move {
+            service.submit_turn_input_owned(session, request).await
+        })
         .await
     }
 
@@ -272,7 +272,7 @@ impl TurnService {
         if matches!(
             active,
             Some(ref active)
-                if active.identity == *identity && active.state == ActiveTurnState::Running
+                if active.identity == *identity && active.state == ActiveTurnState::Running && !active.cancellation_requested
         ) {
             return Ok(());
         }

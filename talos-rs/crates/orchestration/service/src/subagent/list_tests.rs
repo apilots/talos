@@ -90,13 +90,16 @@ async fn list_rejects_an_agent_tree_beyond_the_response_limit() {
         )
         .await;
         commit_agent_text(
+            services.sessions.as_ref(),
             services.store.as_ref(),
             services.timeline.as_ref(),
-            &child.session_id,
-            &turn_id,
+            services.journal.as_ref(),
+            &talos_agent_api::AgentTurnRef::new(&child.session_id, &turn_id),
             &format!("commentary-{index}"),
-            AgentAssistantTextPhase::Commentary,
-            "x".repeat(2 * 1024),
+            AgentAssistantText {
+                phase: AgentAssistantTextPhase::Commentary,
+                text: "x".repeat(2 * 1024),
+            },
         )
         .await;
     }

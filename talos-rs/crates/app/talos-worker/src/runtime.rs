@@ -271,7 +271,7 @@ impl TalosWorker {
                     provider: provider.clone(),
                     execution: Arc::new(
                         talos_agent::LocalExecutionHarness::new(
-                            create_agent_harness(definition.id, provider),
+                            create_agent_harness(definition.id, provider, execution_store.clone()),
                             execution_store.clone(),
                         )
                         .with_terminal_observer({
@@ -439,6 +439,28 @@ impl TalosWorker {
         drop(config);
         self.plugin_manager.recover_credentials();
         prepared.publish();
+        Ok(())
+    }
+
+    /// Stop only this physical Worker's executions, preserving resources and source reads.
+    /// The owning coordinator performs final Harness teardown after product delivery drains.
+    pub async fn stop_execution(&self, timeout: std::time::Duration) -> TalosResult<()> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        for (_, harness) in &self.harnesses {
+            harness
+                .stop_execution(deadline.saturating_duration_since(tokio::time::Instant::now()))
+                .await?;
+        }
+        if !self
+            .execution_store
+            .interrupted_executions()
+            .await?
+            .is_empty()
+        {
+            return Err(TalosError::internal(
+                "Worker execution facts remain unfinished after stopping.",
+            ));
+        }
         Ok(())
     }
 

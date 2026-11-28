@@ -1,3 +1,4 @@
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use std::sync::Arc;
 
 use talos_agent_api::{
@@ -8,10 +9,7 @@ use talos_agent_api::{
     AgentTurnRef, TimelineEventPayload,
 };
 use talos_storage::SqliteStorage;
-use talos_store::session::{
-    AgentActiveTurnRecord, AgentExecutionStore, CommitTerminalSettlementParams,
-    DatabaseSessionStore, SessionStore,
-};
+use talos_store::session::{AgentActiveTurnRecord, DatabaseSessionStore};
 
 use super::*;
 use crate::test_support::{commit_test_running_turn, run_test_migrations};
@@ -52,40 +50,11 @@ impl Fixture {
             service: TimelineEventService::new(store.clone()),
             store,
             sequence: admitted.events.last().unwrap().sequence,
-            active: admitted.active_turn,
+            active: admitted.active_turn.unwrap(),
         }
     }
 
     async fn bind_metadata_goal(&self) {
-        self.store
-            .insert_session_record(&talos_store::session::SessionRecord {
-                session_kind: talos_types::SessionKind::Standard,
-                id: "session-1".into(),
-                agent_id: "default".into(),
-                execution_node_id: "embedded".into(),
-                tree_identity: talos_store::session::SessionTreeIdentity::Primary,
-                workspace_id: "default".into(),
-                title: "Metadata".into(),
-                user_id: "user".into(),
-                source_type: talos_types::talos::SessionSourceType::System,
-                source_provider: talos_types::talos::SessionSourceProvider::System,
-                channel_id: None,
-                thread_id: None,
-                environment: None,
-                created_at: 1,
-                last_activity: 1,
-                message_count: 0,
-                latest_turn_seq: 0,
-                memory_processed_until_event_seq: 0,
-                usage: Default::default(),
-                conf: Default::default(),
-                project_id: None,
-                worktree_binding: None,
-                current_directory: None,
-                pinned: false,
-            })
-            .await
-            .unwrap();
         self.store
             .automation_store()
             .create_goal(&metadata_goal(), Some(&self.active.identity))
@@ -97,18 +66,15 @@ impl Fixture {
         self.sequence += 1;
         let committed = self
             .store
-            .commit_progress_event(
-                AgentEvent {
-                    identity: self.active.identity.clone(),
-                    sequence: self.sequence,
-                    occurred_at: 11,
-                    payload,
-                },
-                self.active.last_event_seq,
-            )
+            .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+                identity: self.active.identity.clone(),
+                sequence: self.sequence,
+                occurred_at: 11,
+                payload,
+            }]))
             .await
             .unwrap();
-        self.active = committed.active_turn;
+        self.active = committed.active_turn.unwrap();
     }
 
     async fn start_text(&mut self) {
@@ -259,19 +225,22 @@ async fn completion_after_running_turn_capture_is_delivered_after_its_offset() {
         .unwrap();
     let terminal = f
         .store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity: f.active.identity,
-                sequence: f.sequence + 1,
-                occurred_at: 12,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: f.active.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity: f.active.identity,
+            sequence: f.sequence + 1,
+            occurred_at: 12,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     let snapshot = f.service.read_turn_snapshot(captured).await.unwrap();
     assert_eq!(snapshot.last_sequence, f.sequence);
@@ -301,19 +270,22 @@ async fn parallel_history_boundary_covers_the_preceding_completed_turn() {
     let f = Fixture::new().await;
     let terminal = f
         .store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity: f.active.identity.clone(),
-                sequence: f.sequence + 1,
-                occurred_at: 12,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: f.active.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity: f.active.identity.clone(),
+            sequence: f.sequence + 1,
+            occurred_at: 12,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     let next = commit_test_running_turn(
         f.store.as_ref(),
@@ -332,7 +304,10 @@ async fn parallel_history_boundary_covers_the_preceding_completed_turn() {
     let response = f.service.read_active_turn("session-1").await.unwrap();
     assert_eq!(response.last_completed_event_seq, terminal.event_seq);
     let snapshot = response.active_turn.unwrap();
-    assert_eq!(snapshot.last_event_seq, next.active_turn.last_event_seq);
+    assert_eq!(
+        snapshot.last_event_seq,
+        next.active_turn.as_ref().unwrap().last_event_seq
+    );
     assert_eq!(snapshot.active_turn.identity.turn_id, "turn-2");
 }
 
@@ -433,34 +408,35 @@ async fn completed_history_keeps_the_exact_input_binding_after_later_user_steer(
     });
     let admitted = f
         .store
-        .commit_running_input_admission(talos_store::session::CommitRunningInputAdmissionParams {
-            events: crate::test_support::canonical_user_admission(
+        .project_test_events(TestWorkerEvents::new(
+            crate::test_support::canonical_user_admission(
                 f.active.identity.clone(),
                 later,
                 f.sequence + 1,
                 false,
             ),
-            expected_event_seq: f.active.last_event_seq,
-            command: None,
-        })
+        ))
         .await
         .unwrap();
-    f.active = admitted.active_turn;
+    f.active = admitted.active_turn.unwrap();
     f.sequence = admitted.events.last().unwrap().sequence;
     f.store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity: f.active.identity.clone(),
-                sequence: f.sequence + 1,
-                occurred_at: 12,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: f.active.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity: f.active.identity.clone(),
+            sequence: f.sequence + 1,
+            occurred_at: 12,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     let history = crate::SessionHistoryService::new(Arc::new(f.service))
         .read("session-1", None, None)

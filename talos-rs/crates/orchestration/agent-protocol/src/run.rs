@@ -4,31 +4,52 @@ use std::pin::Pin;
 use tokio::sync::{mpsc, oneshot};
 
 use talos_agent_api::{
-    AgentContinuationRef, AgentEvent, AgentMessage, AgentMessageRole, AgentMessageStatus,
-    AgentRunMetrics, AgentTurnRef,
+    AgentEvent, AgentMessage, AgentMessageBlockContent, AgentMessageRole, AgentMessageStatus,
+    AgentRunMetrics, AgentTurnRef, AgentUserContent,
 };
 use talos_error::TalosError;
 
-use crate::{AgentContext, AgentResult, AgentRunCheckpoint};
+use crate::{AgentContext, AgentResult};
 
 type AgentPermitFuture = Pin<Box<dyn Future<Output = AgentResult<()>> + Send + 'static>>;
 
-/// Parameters for starting or continuing one logical Agent Turn.
-///
-/// A continuation carries its Provider reference; the Worker restores the local
-/// checkpoint before invoking the underlying Harness.
+/// Worker-owned execution intent. Provider recovery state never crosses this boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentRunIntent {
+    Start,
+    RespondUserAction,
+}
+
+/// Domain input for one logical Agent Turn.
+/// The Worker resolves waiting state, checkpoints and Provider continuation locally.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentRunParams {
     pub subagent_limit: Option<std::num::NonZeroU32>,
     pub command: Option<AgentCommandIdentity>,
     pub automation_origin: Option<talos_types::AutomationTurnOrigin>,
     pub context: AgentContext,
     pub input: AgentMessage,
-    pub checkpoint: Option<AgentRunCheckpoint>,
-    pub continuation: Option<AgentContinuationRef>,
+    pub intent: AgentRunIntent,
 }
 
 impl AgentRunParams {
+    /// Return the one typed response without consulting any product projection.
+    pub fn user_action_response(&self) -> Option<(&str, &talos_types::UserActionResponse)> {
+        let [block] = self.input.blocks.as_slice() else {
+            return None;
+        };
+        let AgentMessageBlockContent::UserContent(AgentUserContent::UserActionResponse {
+            action_id,
+            response,
+        }) = &block.content
+        else {
+            return None;
+        };
+        Some((action_id, response))
+    }
+
     /// Validate boundary invariants before Harness admission.
     pub fn validate(&self) -> AgentResult<()> {
         if self.input.turn_id != self.context.turn_id {
@@ -45,11 +66,33 @@ impl AgentRunParams {
                 "Agent run input must be one completed User message",
             ));
         }
-        if self.checkpoint.is_some() && self.continuation.is_none() {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                "Agent checkpoint requires a Provider continuation reference",
-            ));
+        match self.intent {
+            AgentRunIntent::Start => {
+                if self.input.blocks.iter().any(|block| {
+                    matches!(
+                        block.content,
+                        AgentMessageBlockContent::UserContent(
+                            AgentUserContent::UserActionResponse { .. }
+                        )
+                    )
+                }) {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::InvalidRequest,
+                        "A UserAction response requires its Worker execution intent",
+                    ));
+                }
+            }
+            AgentRunIntent::RespondUserAction => {
+                if self
+                    .user_action_response()
+                    .is_none_or(|(id, _)| id.is_empty())
+                {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::InvalidRequest,
+                        "Responding to a UserAction requires one identified response",
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -71,7 +114,7 @@ pub struct AgentInterruptParams {
     pub identity: AgentTurnRef,
 }
 
-/// Harness admission facts that Service must persist before causing an effect.
+/// Harness admission facts the Worker commits before releasing their effects.
 pub struct AgentAdmission {
     pub events: Vec<AgentEvent>,
     pub permit: AgentAdmissionPermit,
@@ -123,7 +166,7 @@ impl AgentProgressEventReceiver {
         self.receiver.recv_many(events, limit).await
     }
 
-    /// Wrap the Harness-owned progress channel for delivery to Service.
+    /// Wrap the Harness-owned progress channel for the Worker commit path.
     pub fn new(receiver: mpsc::Receiver<AgentEvent>) -> Self {
         Self { receiver }
     }
@@ -141,14 +184,13 @@ impl std::fmt::Debug for AgentProgressEventReceiver {
 }
 
 /// Unique waiting or terminal delivery of canonical Agent facts and invocation outcome.
-/// Harness produces live results; Service recovery reuses the same shape from
-/// a durable checkpoint without invoking a Provider or fabricating snapshots.
+/// The Worker publishes live and replayed committed results. Product consumers
+/// project these facts without owning checkpoints or invoking a Provider.
 /// Metrics are cumulative for the logical Turn, including earlier invocations.
 #[derive(Debug, Clone)]
 pub enum AgentRunSettlement {
     WaitingForInput {
         event: AgentEvent,
-        continuation: AgentContinuationRef,
         metrics: AgentRunMetrics,
     },
     Finished {
@@ -165,7 +207,7 @@ pub struct AgentRunSettlementReceiver {
 }
 
 impl AgentRunSettlementReceiver {
-    /// Wrap the Harness-owned settlement channel for delivery to Service.
+    /// Wrap the Harness-owned settlement channel for the Worker commit path.
     pub fn new(receiver: oneshot::Receiver<AgentResult<AgentRunSettlement>>) -> Self {
         Self { receiver }
     }

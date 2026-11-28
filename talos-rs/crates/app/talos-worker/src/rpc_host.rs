@@ -187,10 +187,10 @@ impl crate::TalosWorker {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use talos_fs::FileSystem;
-    struct UnusedFiles;
+    pub(crate) struct UnusedFiles;
     impl talos_agent::AttachmentReader for UnusedFiles {
         fn read<'a>(
             &'a self,

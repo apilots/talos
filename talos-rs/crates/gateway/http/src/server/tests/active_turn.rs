@@ -15,6 +15,7 @@ async fn test_get_active_turn_handler_returns_active_state() {
         identity: AgentTurnRef::new("mock-session", "turn-1"),
         initial_message_id: Some("msg-1".to_string()),
         state: ActiveTurnState::Running,
+        cancellation_requested: false,
         last_event_seq: 1,
         current_action_id: None,
         updated_at: 123,
@@ -84,6 +85,7 @@ async fn test_get_active_turn_handler_returns_waiting_state_without_a_second_act
         identity: AgentTurnRef::new("mock-session", "turn-dynamic"),
         initial_message_id: Some("msg-dynamic".to_string()),
         state: ActiveTurnState::WaitingForInput,
+        cancellation_requested: false,
         last_event_seq: 2,
         current_action_id: Some("action-dynamic".to_string()),
         updated_at: 125,
@@ -127,11 +129,12 @@ async fn test_get_active_turn_handler_returns_waiting_state_without_a_second_act
 #[tokio::test]
 async fn test_interrupt_turn_handler_returns_success() {
     let execution_store = test_agent_execution_store().await;
-    seed_running_agent_execution(execution_store.as_ref(), "mock-session", "turn-1").await;
+    let worker_fixture = running_agent_events("mock-session", "turn-1").await;
     let state = test_state_with_event_store_and_agent_execution_store(
         false,
         execution_store.clone(),
         execution_store,
+        Some(worker_fixture),
     )
     .await;
 

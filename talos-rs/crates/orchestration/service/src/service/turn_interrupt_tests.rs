@@ -102,13 +102,12 @@ async fn interrupt_turn_finalizes_orphaned_canonical_turn() {
         1,
     )
     .unwrap();
-    crate::test_support::commit_test_running_turn(store.as_ref(), identity.clone(), message).await;
-
-    seed_worker_fixture(
-        &service,
+    crate::test_worker::seed_running_worker(
+        service.sessions.as_ref(),
         store.as_ref(),
         journal.as_ref(),
-        &identity.session_id,
+        identity.clone(),
+        message,
     )
     .await;
 

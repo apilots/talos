@@ -1,3 +1,4 @@
+use agent_protocol::AgentHarness;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -13,8 +14,9 @@ use super::*;
 
 #[tokio::test]
 async fn input_admission_blocks_delivery_until_permit() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Input);
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
     let identity = AgentTurnRef::new("session-1", "turn-1");
     let settlement = start_execution(&harness, &provider, identity.clone()).await;
 
@@ -47,8 +49,9 @@ async fn input_admission_blocks_delivery_until_permit() {
 
 #[tokio::test]
 async fn rejected_input_keeps_its_cause_after_provider_cleanup() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::RejectInput);
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
     let identity = AgentTurnRef::new("session-1", "turn-1");
     let settlement = start_execution(&harness, &provider, identity.clone()).await;
 
@@ -84,8 +87,9 @@ async fn rejected_input_keeps_its_cause_after_provider_cleanup() {
 
 #[tokio::test]
 async fn interrupt_targets_one_exact_live_turn() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
     let identity = AgentTurnRef::new("session-1", "turn-1");
     let settlement = start_execution(&harness, &provider, identity.clone()).await;
 
@@ -120,8 +124,10 @@ async fn interrupt_targets_one_exact_live_turn() {
 
 #[tokio::test]
 async fn waiting_settlement_returns_usage_and_releases_live_slot() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Waiting);
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider);
+    let core = Harness::new(TEST_AGENT_ID.to_string(), provider, journal.clone());
+    let harness = crate::LocalExecutionHarness::new(Arc::new(core.clone()), journal.clone());
     let identity = AgentTurnRef::new("session-1", "turn-1");
     let execution = harness
         .start(run_params(identity.clone(), "message-1"))
@@ -138,14 +144,16 @@ async fn waiting_settlement_returns_usage_and_releases_live_slot() {
         execution.settlement.recv().await.expect("settle waiting"),
         AgentRunSettlement::WaitingForInput { metrics, .. } if metrics.usage.total_tokens == 3
     ));
-    assert!(!harness.inner.active.contains_key(&identity.session_id));
+    assert!(!core.inner.active.contains_key(&identity.session_id));
 }
 
 #[tokio::test]
 async fn compaction_reuses_run_execution_and_returns_usage_in_metrics() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let harness = Harness::new(
         TEST_AGENT_ID.to_string(),
         FakeProvider::new(FakeMode::Release),
+        journal.clone(),
     );
     let mut execution = harness
         .compact_session(context(AgentTurnRef::new("session-1", "turn-compact-1")))
@@ -180,8 +188,9 @@ async fn compaction_reuses_run_execution_and_returns_usage_in_metrics() {
 
 #[tokio::test]
 async fn session_maintenance_conflicts_with_a_live_turn() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
     let settlement = start_execution(
         &harness,
         &provider,
@@ -212,8 +221,9 @@ async fn session_maintenance_conflicts_with_a_live_turn() {
 
 #[tokio::test]
 async fn failed_session_maintenance_releases_its_reservation() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release).with_clear_failure();
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider);
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider, journal.clone());
 
     harness
         .clear_session(session_params())
@@ -230,9 +240,11 @@ async fn failed_session_maintenance_releases_its_reservation() {
 
 #[tokio::test]
 async fn failed_session_acquisition_retains_unconfirmed_resources() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let harness = Harness::new(
         TEST_AGENT_ID.to_string(),
         FakeProvider::new(FakeMode::UnconfirmedAcquisition),
+        journal.clone(),
     );
     let identity = AgentTurnRef::new("session-1", "turn-cleanup-pending");
     let execution = harness
@@ -267,9 +279,11 @@ async fn failed_session_acquisition_retains_unconfirmed_resources() {
 
 #[tokio::test]
 async fn failed_session_acquisition_releases_confirmed_resources() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let harness = Harness::new(
         TEST_AGENT_ID.to_string(),
         FakeProvider::new(FakeMode::FailAcquisition),
+        journal.clone(),
     );
     let identity = AgentTurnRef::new("session-1", "turn-acquisition-failure");
     let execution = harness
@@ -293,8 +307,10 @@ async fn failed_session_acquisition_releases_confirmed_resources() {
 
 #[tokio::test]
 async fn shutdown_closes_admission_before_provider_shutdown() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Waiting);
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let core = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
+    let harness = crate::LocalExecutionHarness::new(Arc::new(core.clone()), journal.clone());
     let execution = harness
         .start(run_params(
             AgentTurnRef::new("session-1", "turn-1"),
@@ -311,11 +327,23 @@ async fn shutdown_closes_admission_before_provider_shutdown() {
     execution.settlement.recv().await.expect("settle run");
 
     harness
+        .stop_execution(Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert!(!provider.close_called.load(Ordering::Acquire));
+    assert_eq!(provider.shutdown_count.load(Ordering::Acquire), 0);
+    harness
         .shutdown(Duration::from_secs(1))
         .await
         .expect("shutdown Harness");
     assert!(provider.close_called.load(Ordering::Acquire));
     assert!(provider.shutdown_called.load(Ordering::Acquire));
+    assert_eq!(provider.shutdown_count.load(Ordering::Acquire), 1);
+    harness
+        .stop_execution(Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert_eq!(provider.shutdown_count.load(Ordering::Acquire), 1);
     assert!(harness
         .start(run_params(
             AgentTurnRef::new("session-2", "turn-2"),
@@ -327,8 +355,9 @@ async fn shutdown_closes_admission_before_provider_shutdown() {
 
 #[tokio::test]
 async fn shutdown_cancels_in_flight_session_acquisition() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release).with_blocked_session_acquisition();
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
     let execution = harness
         .start(run_params(
             AgentTurnRef::new("session-1", "turn-1"),
@@ -356,8 +385,10 @@ async fn shutdown_cancels_in_flight_session_acquisition() {
 
 #[tokio::test]
 async fn shutdown_retains_cached_session_when_close_fails() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Waiting).with_close_failure();
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let core = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
+    let harness = crate::LocalExecutionHarness::new(Arc::new(core.clone()), journal.clone());
     let execution = harness
         .start(run_params(
             AgentTurnRef::new("session-1", "turn-1"),
@@ -380,7 +411,7 @@ async fn shutdown_retains_cached_session_when_close_fails() {
 
     assert!(provider.close_called.load(Ordering::Acquire));
     assert!(!provider.shutdown_called.load(Ordering::Acquire));
-    assert_eq!(harness.inner.sessions.len(), 1);
+    assert_eq!(core.inner.sessions.len(), 1);
 }
 
 async fn start_execution(

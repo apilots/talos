@@ -21,7 +21,7 @@ use super::Harness;
 use crate::{AgentHarnessRpcAdapter, AgentRunSettlement};
 
 async fn server(
-    harness: Arc<dyn AgentHarness>,
+    harness: Arc<Harness<FakeProvider>>,
 ) -> (
     RemoteAgentClient,
     AgentHarnessRpcAdapter,
@@ -34,7 +34,7 @@ async fn server(
 }
 
 async fn server_with_binder(
-    harness: Arc<dyn AgentHarness>,
+    harness: Arc<Harness<FakeProvider>>,
     binder: Option<crate::AgentInvocationResourceBinder>,
 ) -> (
     RemoteAgentClient,
@@ -45,11 +45,7 @@ async fn server_with_binder(
     tokio::task::JoinHandle<()>,
 ) {
     let home = tempfile::tempdir().unwrap();
-    let journal = Arc::new(
-        talos_store::execution::WorkerExecutionStore::open(&home.path().join("worker.sqlite"))
-            .await
-            .unwrap(),
-    );
+    let journal = harness.inner.execution_store.clone();
     let harness: Arc<dyn AgentHarness> =
         Arc::new(crate::LocalExecutionHarness::new(harness, journal));
     let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()]).unwrap();
@@ -137,8 +133,13 @@ pub(super) async fn commit_received_settlement(
 
 #[tokio::test]
 async fn rpc_delivers_terminal_settlement_after_large_progress_history() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::LargeHistory);
-    let harness: Arc<dyn AgentHarness> = Arc::new(Harness::new(TEST_AGENT_ID.into(), provider));
+    let harness = Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider,
+        journal.clone(),
+    ));
     let (client, _, _, _, stop, server_task) = server(harness).await;
     tokio::time::timeout(Duration::from_secs(20), async {
         let mut run = client
@@ -172,9 +173,13 @@ async fn rpc_delivers_terminal_settlement_after_large_progress_history() {
 
 #[tokio::test]
 async fn direct_and_tls_rpc_use_the_same_paused_harness_execution() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
-    let harness: Arc<dyn AgentHarness> =
-        Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone()));
+    let harness = Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider.clone(),
+        journal.clone(),
+    ));
     let identity = AgentTurnRef::new("session-1", "turn-1");
     let direct = harness
         .start(run_params(identity.clone(), "message-1"))
@@ -223,9 +228,13 @@ async fn direct_and_tls_rpc_use_the_same_paused_harness_execution() {
 
 #[tokio::test]
 async fn rpc_input_commit_and_new_client_interrupt_keep_cleanup_conservative() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Input);
-    let harness: Arc<dyn AgentHarness> =
-        Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone()));
+    let harness = Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider.clone(),
+        journal.clone(),
+    ));
     let (client, _, pem, endpoint, stop, task) = server(harness).await;
     let identity = AgentTurnRef::new("session-1", "turn-input");
     let mut run = client
@@ -277,152 +286,14 @@ async fn rpc_input_commit_and_new_client_interrupt_keep_cleanup_conservative() {
 }
 
 #[tokio::test]
-async fn waiting_rpc_cancellation_and_failed_continuation_keep_the_original_boundary() {
-    let provider = FakeProvider::new(FakeMode::Waiting);
-    let harness: Arc<dyn AgentHarness> = Arc::new(Harness::new(TEST_AGENT_ID.into(), provider));
-    let (client, _, certificate, endpoint, stop, task) = server(harness).await;
-    let peer = uuid::Uuid::new_v4().to_string();
-    let client = client.with_coordinator_id(peer.clone()).unwrap();
-    let identity = AgentTurnRef::new("session-1", "waiting-turn");
-    let run = client
-        .start(run_params(identity.clone(), "question"))
-        .await
-        .unwrap();
-    run.admission.permit.consume().await.unwrap();
-    let AgentRunSettlement::WaitingForInput {
-        continuation,
-        event,
-        metrics,
-    } = run.settlement.recv().await.unwrap()
-    else {
-        panic!("expected waiting settlement");
-    };
-    let before = client
-        .read_session_execution_state(session_params())
-        .await
-        .unwrap()
-        .unwrap();
-    let mut invalid = run_params(identity.clone(), "answer");
-    invalid.continuation = Some(talos_agent_api::AgentContinuationRef {
-        opaque_id: "invalid-reference".into(),
-    });
-    assert!(
-        matches!(client.start(invalid).await, Err(error) if error.is_code(ErrorCode::Conflict))
-    );
-    assert_eq!(
-        client
-            .read_session_execution_state(session_params())
-            .await
-            .unwrap()
-            .unwrap(),
-        before
-    );
-    assert!(client
-        .clear_session(session_params(), Default::default())
-        .await
-        .unwrap_err()
-        .is_code(ErrorCode::ActiveTurnRunning));
-    let mut resume = run_params(identity.clone(), "answer");
-    resume.continuation = Some(continuation);
-    resume.checkpoint = Some(agent_protocol::AgentRunCheckpoint {
-        last_sequence: event.sequence,
-        messages: vec![],
-        metrics,
-    });
-    // Close the actual request stream after admission without a commit frame.
-    let channel = tonic::transport::Endpoint::from_shared(endpoint)
-        .unwrap()
-        .tls_config(
-            tonic::transport::ClientTlsConfig::new()
-                .ca_certificate(tonic::transport::Certificate::from_pem(certificate)),
-        )
-        .unwrap()
-        .connect_lazy();
-    let first = agent_pb::StartRequest {
-        auth: Some(agent_protocol::node_pb::encode_auth(NodeAuth {
-            node_id: "node-1".into(),
-            token: "lease-secret".into(),
-        })),
-        caller: Some(agent_pb::CoordinatorCallContext {
-            coordinator_id: peer,
-            session: Some(agent_protocol::harness_pb::encode_session_context(
-                session_params(),
-            )),
-            turn_id: Some(identity.turn_id.clone()),
-            ..Default::default()
-        }),
-        params: Some(agent_pb::StartParams {
-            body: Some(agent_pb::start_params::Body::Run(Box::new(
-                agent_protocol::harness_pb::encode_run_params(resume).unwrap(),
-            ))),
-        }),
-    };
-    let mut unfinished = agent_pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(channel)
-        .start(tokio_stream::iter([first]))
-        .await
-        .unwrap()
-        .into_inner();
-    assert!(matches!(
-        unfinished.message().await.unwrap().unwrap().result,
-        Some(agent_pb::run_response::Result::Admission(_))
-    ));
-    assert!(matches!(
-        unfinished.message().await.unwrap().unwrap().result,
-        Some(agent_pb::run_response::Result::Failure(_))
-    ));
-    drop(unfinished);
-    tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            match client
-                .interrupt(AgentInterruptParams {
-                    agent_id: TEST_AGENT_ID.into(),
-                    identity: identity.clone(),
-                })
-                .await
-            {
-                Ok(AgentInterruptOutcome::Cancelled) => break,
-                Err(error) if error.is_code(ErrorCode::RunCleanupUnconfirmed) => {
-                    tokio::task::yield_now().await
-                }
-                result => panic!("waiting cleanup changed: {result:?}"),
-            }
-        }
-    })
-    .await
-    .unwrap();
-    let after = client
-        .read_session_execution_state(session_params())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(after.active_turn.is_none());
-    assert!(after.handoff_ready);
-    assert_eq!(
-        after.history_cursor.completed_turn_id.as_deref(),
-        Some(identity.turn_id.as_str())
-    );
-    assert!(client
-        .clear_session(session_params(), Default::default())
-        .await
-        .unwrap_err()
-        .is_code(ErrorCode::EventCursorExpired));
-    assert!(client
-        .interrupt(AgentInterruptParams {
-            agent_id: TEST_AGENT_ID.into(),
-            identity
-        })
-        .await
-        .unwrap_err()
-        .is_code(ErrorCode::Conflict));
-    stop.cancel();
-    task.await.unwrap();
-}
-
-#[tokio::test]
 async fn tls_rpc_management_and_interrupt_preserve_harness_outcomes() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
-    let harness: Arc<dyn AgentHarness> =
-        Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone()));
+    let harness = Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider.clone(),
+        journal.clone(),
+    ));
     let (client, _, _, _, stop, task) = server(harness).await;
     let identity = AgentTurnRef::new("session-1", "turn-management");
     let run = client
@@ -485,9 +356,13 @@ async fn tls_rpc_management_and_interrupt_preserve_harness_outcomes() {
 
 #[tokio::test]
 async fn revoked_lease_stops_a_live_rpc_without_reporting_completion() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
-    let harness: Arc<dyn AgentHarness> =
-        Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone()));
+    let harness = Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider.clone(),
+        journal.clone(),
+    ));
     let (client, adapter, _, _, stop, task) = server(harness).await;
     let identity = AgentTurnRef::new("session-1", "turn-revoked");
     let run = client
@@ -505,9 +380,13 @@ async fn revoked_lease_stops_a_live_rpc_without_reporting_completion() {
 
 #[tokio::test]
 async fn local_host_execution_survives_cloud_lease_revocation_and_reconnect_drain() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
-    let harness: Arc<dyn AgentHarness> =
-        Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone()));
+    let harness = Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider.clone(),
+        journal.clone(),
+    ));
     let (_, adapter, pem, endpoint, stop, task) = server(harness).await;
     let local_auth = NodeAuth {
         node_id: "node-1".into(),
@@ -608,9 +487,13 @@ async fn local_host_execution_survives_cloud_lease_revocation_and_reconnect_drai
 
 #[tokio::test]
 async fn progress_crosses_tls_and_lease_renewal_preserves_the_live_turn() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::ProgressThenRelease);
-    let harness: Arc<dyn AgentHarness> =
-        Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone()));
+    let harness = Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider.clone(),
+        journal.clone(),
+    ));
     let (client, adapter, _, _, stop, task) = server(harness).await;
     let identity = AgentTurnRef::new("session-1", "turn-progress");
     let mut run = client
@@ -653,9 +536,13 @@ async fn progress_crosses_tls_and_lease_renewal_preserves_the_live_turn() {
 
 #[tokio::test]
 async fn rpc_rejects_wrong_lease_and_dropped_admission_has_no_provider_effect() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
-    let harness: Arc<dyn AgentHarness> =
-        Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone()));
+    let harness = Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider.clone(),
+        journal.clone(),
+    ));
     let (client, _, pem, endpoint, stop, task) = server(harness).await;
     let untrusted = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])
         .unwrap()
@@ -808,9 +695,13 @@ async fn rpc_rejects_wrong_lease_and_dropped_admission_has_no_provider_effect() 
 
 #[tokio::test]
 async fn rpc_input_admission_survives_provider_delivery_rejection() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::RejectInput);
-    let harness: Arc<dyn AgentHarness> =
-        Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone()));
+    let harness = Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider.clone(),
+        journal.clone(),
+    ));
     let (client, _, _, _, stop, task) = server(harness).await;
     let identity = AgentTurnRef::new("session-1", "turn-reject-input");
     let run = client
@@ -865,7 +756,11 @@ async fn library_client_with_binder(
             .unwrap(),
     );
     let durable: Arc<dyn AgentHarness> = Arc::new(crate::LocalExecutionHarness::new(
-        Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone())),
+        Arc::new(Harness::new(
+            TEST_AGENT_ID.into(),
+            provider.clone(),
+            journal.clone(),
+        )),
         journal,
     ));
     let adapter = AgentHarnessRpcAdapter::new(
@@ -890,23 +785,6 @@ async fn library_client_with_binder(
         .local_harness(TEST_AGENT_ID.into(), auth, uuid::Uuid::new_v4().to_string())
         .unwrap();
     (home, provider, adapter, client)
-}
-
-fn eight_megabyte_message(identity: &AgentTurnRef) -> talos_agent_api::AgentMessage {
-    use talos_agent_api::{
-        AgentMessageBlock, AgentMessageBlockContent, AgentMessageBlockStatus, AgentUserContent,
-    };
-    let mut message = user_message(identity, "large-history");
-    message.blocks.push(AgentMessageBlock {
-        block_id: "large-text".into(),
-        status: AgentMessageBlockStatus::Completed,
-        content: AgentMessageBlockContent::UserContent(AgentUserContent::Text {
-            text: "x".repeat(8 * 1024 * 1024),
-        }),
-        started_at: 1,
-        completed_at: Some(1),
-    });
-    message
 }
 
 #[tokio::test]
@@ -975,51 +853,6 @@ async fn library_live_input_stays_paused_until_its_permit_is_consumed() {
         execution.settlement.recv().await.unwrap(),
         AgentRunSettlement::Finished { result: Ok(()), .. }
     ));
-    client.shutdown(Duration::from_secs(2)).await.unwrap();
-}
-
-#[tokio::test]
-async fn library_waiting_continuation_and_cancel_keep_the_original_boundary() {
-    let (_home, _provider, _adapter, client) = library_client(FakeMode::Waiting).await;
-    let identity = AgentTurnRef::new("session-1", "local-waiting");
-    let mut execution = client
-        .start(run_params(identity.clone(), "question"))
-        .await
-        .unwrap();
-    execution.admission.permit.consume().await.unwrap();
-    while execution.events.recv().await.is_some() {}
-    let AgentRunSettlement::WaitingForInput {
-        continuation,
-        event,
-        metrics,
-    } = execution.settlement.recv().await.unwrap()
-    else {
-        panic!("expected waiting");
-    };
-    let mut resume = run_params(identity.clone(), "answer");
-    resume.continuation = Some(continuation);
-    resume.checkpoint = Some(agent_protocol::AgentRunCheckpoint {
-        last_sequence: event.sequence,
-        messages: vec![eight_megabyte_message(&identity)],
-        metrics,
-    });
-    let mut resumed = client.start(resume).await.unwrap();
-    resumed.admission.permit.consume().await.unwrap();
-    while resumed.events.recv().await.is_some() {}
-    assert!(matches!(
-        resumed.settlement.recv().await.unwrap(),
-        AgentRunSettlement::WaitingForInput { .. }
-    ));
-    assert_eq!(
-        client
-            .interrupt(AgentInterruptParams {
-                agent_id: TEST_AGENT_ID.into(),
-                identity
-            })
-            .await
-            .unwrap(),
-        AgentInterruptOutcome::Cancelled
-    );
     client.shutdown(Duration::from_secs(2)).await.unwrap();
 }
 

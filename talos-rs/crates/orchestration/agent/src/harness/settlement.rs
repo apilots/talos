@@ -12,6 +12,8 @@ use crate::{
 pub(super) async fn settle_provider_completion(
     pipeline: &AgentEventPipeline,
     completion: SessionTurnResult,
+    execution_store: &talos_store::execution::WorkerExecutionStore,
+    session: &crate::AgentSessionContext,
 ) -> AgentResult<AgentRunSettlement> {
     match completion {
         SessionTurnResult::Completed { stop_reason } => {
@@ -24,9 +26,16 @@ pub(super) async fn settle_provider_completion(
             let event = pipeline
                 .record(AgentEventPayload::WaitingForInput(*pending))
                 .await?;
+            execution_store
+                .record_waiting_continuation(
+                    session,
+                    &event.identity,
+                    event.sequence,
+                    &continuation,
+                )
+                .await?;
             Ok(AgentRunSettlement::WaitingForInput {
                 event,
-                continuation,
                 metrics: pipeline.metrics().await,
             })
         }

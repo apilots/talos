@@ -1,18 +1,21 @@
 use super::*;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents, WorkerProjectionCommit};
 use talos_agent_api::{
     AgentMessage, AgentMessageBlock, AgentMessageBlockContent, AgentMessageBlockStatus,
     AgentMessageRole, AgentMessageStatus, AgentToolCall, AgentToolCallArguments,
 };
-use talos_store::session::AgentEventCommit;
 
 async fn append_tool_call(
     store: &DatabaseSessionStore,
     identity: &AgentTurnRef,
-    mut commit: AgentEventCommit,
+    mut commit: WorkerProjectionCommit,
     name: &str,
-) -> AgentEventCommit {
+) -> WorkerProjectionCommit {
     let message = AgentMessage {
-        message_id: format!("tool-message-{}", commit.active_turn.last_event_seq),
+        message_id: format!(
+            "tool-message-{}",
+            commit.active_turn.as_ref().unwrap().last_event_seq
+        ),
         turn_id: identity.turn_id.clone(),
         role: AgentMessageRole::Agent,
         status: AgentMessageStatus::Completed,
@@ -43,7 +46,7 @@ async fn append_tool_call(
         crate::test_support::canonical_completed_message_events(identity.clone(), message, sequence)
     {
         commit = store
-            .commit_progress_event(event, commit.active_turn.last_event_seq)
+            .project_test_events(TestWorkerEvents::new(vec![event]))
             .await
             .unwrap();
     }
@@ -65,7 +68,7 @@ async fn settle_with_tools(
     service: &TalosService,
     store: &DatabaseSessionStore,
     identity: AgentTurnRef,
-    commit: AgentEventCommit,
+    commit: WorkerProjectionCommit,
     tool_calls: u32,
 ) {
     let event = normal_end(store, identity, commit).await;
@@ -88,7 +91,7 @@ async fn settle_with_tools(
 async fn active_goal_turn(
     service: &TalosService,
     store: &DatabaseSessionStore,
-) -> (AgentTurnRef, AgentEventCommit) {
+) -> (AgentTurnRef, WorkerProjectionCommit) {
     store
         .automation_store()
         .create_goal(&goal("g", "alice", GoalStatus::Active), None)

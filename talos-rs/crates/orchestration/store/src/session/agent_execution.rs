@@ -1,15 +1,10 @@
 use async_trait::async_trait;
-use talos_agent_api::{
-    ActiveTurnState, AgentContinuationRef, AgentEvent, AgentEventPayload, AgentMessageRole,
-    AgentRunMetrics, AgentTurnRef,
-};
+use talos_agent_api::{ActiveTurnState, AgentEventPayload, AgentTurnRef};
 use talos_error::{TalosError, TalosResult};
 pub use talos_types::IdempotentCommand;
 use talos_types::TurnCommandStatus;
 
-mod admission;
 mod cancellation;
-mod continuation;
 pub(crate) mod idempotency;
 pub(crate) mod notice;
 pub(crate) mod record;
@@ -42,41 +37,19 @@ pub struct AgentActiveTurnRecord {
     pub identity: AgentTurnRef,
     pub initial_message_id: Option<String>,
     pub state: ActiveTurnState,
+    /// A product cancellation request is pending independently of observed execution state.
+    pub cancellation_requested: bool,
     pub last_event_seq: i64,
-    /// Waiting action projected from the continuation binding, not stored twice.
+    /// Public action identity derived from the committed waiting event.
     pub current_action_id: Option<String>,
     pub updated_at: i64,
-}
-
-/// Result of one committed canonical event batch.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AgentEventCommit {
-    pub events: Vec<AgentEventRecord>,
-    pub active_turn: AgentActiveTurnRecord,
 }
 
 /// Result of atomically admitting cancellation for one exact active Turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentCancellationAdmission {
     pub active_turn: AgentActiveTurnRecord,
-    pub previous_state: ActiveTurnState,
-}
-
-/// Durable ownership state for one paused Provider continuation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AgentContinuationBindingStatus {
-    Waiting,
-    Claimed { claim_id: String },
-}
-
-/// Private normalized persistence record for one Provider continuation binding.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentContinuationBindingRecord {
-    pub identity: AgentTurnRef,
-    pub action_id: String,
-    pub provider_ref: AgentContinuationRef,
-    pub expected_event_seq: i64,
-    pub status: AgentContinuationBindingStatus,
+    pub request_id: String,
 }
 
 /// Stable identities allocated before one idempotent command reaches the Agent runtime.
@@ -137,39 +110,7 @@ pub enum IdempotencyReservation {
     InProgress,
 }
 
-/// Inputs atomically committed for one fresh Agent Turn.
-pub struct CommitInitialAdmissionParams {
-    pub automation_origin: Option<talos_types::AutomationTurnOrigin>,
-    /// Bound supplied by Turn policy for child admissions.
-    pub subagent_limit: Option<std::num::NonZeroU32>,
-    pub events: Vec<AgentEvent>,
-    pub command: Option<CommandLease>,
-}
-
-/// Inputs atomically committed for one running Turn input command.
-pub struct CommitRunningInputAdmissionParams {
-    pub events: Vec<AgentEvent>,
-    pub expected_event_seq: i64,
-    pub command: Option<CommandLease>,
-}
-
-/// Inputs atomically committed when claiming one waiting continuation.
-pub struct ClaimContinuationParams {
-    pub events: Vec<AgentEvent>,
-    pub action_id: String,
-    pub claim_id: String,
-    pub expected_event_seq: i64,
-    pub command: Option<CommandLease>,
-}
-
-/// Inputs atomically committed when one canonical Agent invocation becomes terminal.
-pub struct CommitTerminalSettlementParams {
-    pub event: AgentEvent,
-    pub expected_event_seq: i64,
-    pub completed_turn_metrics: Option<AgentRunMetrics>,
-}
-
-/// Narrow atomic Store commands for canonical Agent execution facts.
+/// Product projections and management state for committed Worker execution facts.
 #[async_trait]
 pub trait AgentExecutionStore: Send + Sync {
     async fn get_agent_event_by_sequence(
@@ -257,17 +198,6 @@ pub trait AgentExecutionStore: Send + Sync {
         false
     }
 
-    /// Append bounded facts before the canonical terminal event, never a new event.
-    async fn append_history_supplement(
-        &self,
-        _supplement: talos_agent_api::trajectory::SessionHistorySupplement,
-    ) -> TalosResult<()> {
-        Err(TalosError::new(
-            talos_error::ErrorCode::ServiceUnavailable,
-            "Execution history supplementation is unavailable.",
-        ))
-    }
-
     /// Read a terminal Turn's private facts; None means its column is NULL.
     async fn read_terminal_history_supplement(
         &self,
@@ -328,70 +258,17 @@ pub trait AgentExecutionStore: Send + Sync {
     /// Release an uncommitted lease after a pre-admission failure.
     async fn release_command(&self, lease: CommandLease) -> TalosResult<()>;
 
-    /// Atomically append initial admission and create the nonterminal index.
-    async fn commit_initial_admission(
-        &self,
-        params: CommitInitialAdmissionParams,
-    ) -> TalosResult<AgentEventCommit>;
-
-    /// Atomically append a message-free maintenance admission.
-    async fn commit_maintenance_admission(
-        &self,
-        event: AgentEvent,
-    ) -> TalosResult<AgentEventCommit>;
-
-    /// Atomically append one progress event and CAS the active tail.
-    async fn commit_progress_event(
-        &self,
-        event: AgentEvent,
-        expected_event_seq: i64,
-    ) -> TalosResult<AgentEventCommit>;
-
-    /// Atomically append a nonempty contiguous progress batch and CAS the active tail.
-    /// All events retain their original identity and sequence.
-    async fn commit_progress_events(
-        &self,
-        events: Vec<AgentEvent>,
-        expected_event_seq: i64,
-    ) -> TalosResult<AgentEventCommit>;
-
-    /// Atomically append one accepted live-input admission and advance the tail.
-    async fn commit_running_input_admission(
-        &self,
-        params: CommitRunningInputAdmissionParams,
-    ) -> TalosResult<AgentEventCommit>;
-
-    /// Atomically move one exact active Turn to Cancelling.
+    /// Record one cancellation request for an exact observed active Turn.
     async fn begin_cancellation(
         &self,
         identity: &AgentTurnRef,
     ) -> TalosResult<AgentCancellationAdmission>;
 
-    /// Restore the pre-cancellation state when runtime interruption is rejected.
+    /// Clear only this request when runtime interruption is rejected.
     async fn restore_cancellation(
         &self,
         admission: AgentCancellationAdmission,
     ) -> TalosResult<AgentActiveTurnRecord>;
-
-    /// Atomically append waiting settlement and bind Provider continuation state.
-    async fn commit_waiting_settlement(
-        &self,
-        event: AgentEvent,
-        continuation: AgentContinuationRef,
-        expected_event_seq: i64,
-    ) -> TalosResult<AgentEventCommit>;
-
-    /// Atomically claim one waiting continuation and append accepted User input.
-    async fn claim_continuation(
-        &self,
-        params: ClaimContinuationParams,
-    ) -> TalosResult<AgentEventCommit>;
-
-    /// Atomically append the unique terminal fact and remove nonterminal indexes.
-    async fn commit_terminal_settlement(
-        &self,
-        params: CommitTerminalSettlementParams,
-    ) -> TalosResult<AgentEventRecord>;
 
     /// Read the ordered canonical facts for one logical Turn.
     async fn list_agent_turn_events(
@@ -461,131 +338,6 @@ pub trait AgentExecutionStore: Send + Sync {
     ) -> TalosResult<Option<talos_agent_api::TimelineActiveTurn>> {
         Ok(None)
     }
-
-    /// Read the current continuation ownership for one exact logical Turn.
-    async fn get_agent_continuation_binding(
-        &self,
-        identity: &AgentTurnRef,
-    ) -> TalosResult<Option<AgentContinuationBindingRecord>>;
-}
-
-fn validate_initial_admission(events: &[AgentEvent]) -> TalosResult<(AgentTurnRef, String)> {
-    let first = events
-        .first()
-        .ok_or_else(|| execution_conflict("initial admission cannot be empty"))?;
-    if !matches!(first.payload, AgentEventPayload::TurnStarted(_)) {
-        return Err(execution_conflict(
-            "initial admission must begin with TurnStarted",
-        ));
-    }
-    if first.sequence != 1 {
-        return Err(execution_conflict(
-            "initial admission must start at Agent event sequence 1",
-        ));
-    }
-    validate_event_batch(events)?;
-    if events.iter().skip(1).any(|event| {
-        matches!(
-            event.payload,
-            AgentEventPayload::TurnStarted(_)
-                | AgentEventPayload::WaitingForInput(_)
-                | AgentEventPayload::TurnCompleted(_)
-                | AgentEventPayload::TurnFailed(_)
-        )
-    }) {
-        return Err(execution_conflict(
-            "initial admission contains a waiting or terminal lifecycle event",
-        ));
-    }
-    let user_messages = events
-        .iter()
-        .filter_map(|event| match &event.payload {
-            AgentEventPayload::MessageCompleted(message)
-                if message.role == AgentMessageRole::User =>
-            {
-                Some(message.message_id.clone())
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let [message_id] = user_messages.as_slice() else {
-        return Err(execution_conflict(
-            "initial admission requires exactly one completed User message",
-        ));
-    };
-    Ok((first.identity.clone(), message_id.clone()))
-}
-
-fn validate_event_batch(events: &[AgentEvent]) -> TalosResult<()> {
-    let first = events
-        .first()
-        .ok_or_else(|| execution_conflict("Agent event batch cannot be empty"))?;
-    for (offset, event) in events.iter().enumerate() {
-        if event.identity != first.identity
-            || event.sequence != first.sequence.saturating_add(offset as u64)
-        {
-            return Err(execution_conflict(
-                "Agent event batch identity or sequence is inconsistent",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_user_admission(events: &[AgentEvent]) -> TalosResult<(AgentTurnRef, String)> {
-    validate_event_batch(events)?;
-    if events.iter().any(|event| {
-        matches!(
-            event.payload,
-            AgentEventPayload::TurnStarted(_)
-                | AgentEventPayload::WaitingForInput(_)
-                | AgentEventPayload::TurnCompleted(_)
-                | AgentEventPayload::TurnFailed(_)
-        )
-    }) {
-        return Err(execution_conflict(
-            "User admission contains a Turn lifecycle event",
-        ));
-    }
-    let completed_user_messages = events
-        .iter()
-        .filter_map(|event| match &event.payload {
-            AgentEventPayload::MessageCompleted(message)
-                if message.role == AgentMessageRole::User =>
-            {
-                Some(message.message_id.clone())
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let [message_id] = completed_user_messages.as_slice() else {
-        return Err(execution_conflict(
-            "User admission requires exactly one completed User message",
-        ));
-    };
-    Ok((
-        events
-            .first()
-            .expect("validated User admission is non-empty")
-            .identity
-            .clone(),
-        message_id.clone(),
-    ))
-}
-
-fn validate_progress_event(event: &AgentEvent) -> TalosResult<()> {
-    if matches!(
-        event.payload,
-        AgentEventPayload::TurnStarted(_)
-            | AgentEventPayload::WaitingForInput(_)
-            | AgentEventPayload::TurnCompleted(_)
-            | AgentEventPayload::TurnFailed(_)
-    ) {
-        return Err(execution_conflict(
-            "progress commit cannot persist admission, waiting, or terminal events",
-        ));
-    }
-    Ok(())
 }
 
 fn execution_conflict(message: impl Into<String>) -> TalosError {

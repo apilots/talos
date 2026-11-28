@@ -151,13 +151,20 @@ struct Connected {
     server: tokio::task::JoinHandle<()>,
 }
 impl Connected {
-    async fn new(harness: Arc<dyn AgentHarness>) -> Self {
-        Self::connect(vec![(TEST_AGENT_ID.into(), harness)]).await
+    async fn new(harness: Arc<Harness<FakeProvider>>) -> Self {
+        let execution_store = harness.inner.execution_store.clone();
+        Self::connect(vec![(TEST_AGENT_ID.into(), harness)], execution_store).await
     }
-    async fn with_harnesses(harnesses: Vec<(String, Arc<dyn AgentHarness>)>) -> Self {
-        Self::connect(harnesses).await
+    async fn with_harnesses(
+        harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
+        execution_store: Arc<talos_store::execution::WorkerExecutionStore>,
+    ) -> Self {
+        Self::connect(harnesses, execution_store).await
     }
-    async fn connect(harnesses: Vec<(String, Arc<dyn AgentHarness>)>) -> Self {
+    async fn connect(
+        harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
+        execution_store: Arc<talos_store::execution::WorkerExecutionStore>,
+    ) -> Self {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let pem = certificate.cert.pem().into_bytes();
@@ -180,11 +187,6 @@ impl Connected {
                 .unwrap();
         });
         let home = tempfile::tempdir().unwrap();
-        let execution_store = Arc::new(
-            talos_store::execution::WorkerExecutionStore::open(&home.path().join("worker.sqlite"))
-                .await
-                .unwrap(),
-        );
         let harnesses = harnesses
             .into_iter()
             .map(|(id, harness)| {
@@ -279,10 +281,12 @@ impl Connected {
 
 #[tokio::test]
 async fn registered_worker_preserves_admission_input_settlement_and_management() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Input);
     let fixture = Connected::new(Arc::new(Harness::new(
         TEST_AGENT_ID.into(),
         provider.clone(),
+        journal.clone(),
     )))
     .await;
     let identity = talos_agent_api::AgentTurnRef::new("session-1", "outbound-input");
@@ -380,10 +384,12 @@ async fn registered_worker_preserves_admission_input_settlement_and_management()
 
 #[tokio::test]
 async fn outbound_cancel_before_commit_and_disconnect_after_commit_release_execution() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
     let fixture = Connected::new(Arc::new(Harness::new(
         TEST_AGENT_ID.into(),
         provider.clone(),
+        journal.clone(),
     )))
     .await;
     let first = fixture
@@ -432,21 +438,30 @@ async fn outbound_cancel_before_commit_and_disconnect_after_commit_release_execu
 
 #[tokio::test]
 async fn stalled_outbound_consumer_fails_only_its_call_while_other_calls_progress() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::FloodProgress);
     let independent = FakeProvider::new(FakeMode::Release);
-    let fixture = Connected::with_harnesses(vec![
-        (
-            TEST_AGENT_ID.into(),
-            Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone())),
-        ),
-        (
-            "agent-2".into(),
-            Arc::new(DreamHarness(Arc::new(Harness::new(
+    let fixture = Connected::with_harnesses(
+        vec![
+            (
+                TEST_AGENT_ID.into(),
+                Arc::new(Harness::new(
+                    TEST_AGENT_ID.into(),
+                    provider.clone(),
+                    journal.clone(),
+                )),
+            ),
+            (
                 "agent-2".into(),
-                independent.clone(),
-            )))),
-        ),
-    ])
+                Arc::new(DreamHarness(Arc::new(Harness::new(
+                    "agent-2".into(),
+                    independent.clone(),
+                    journal.clone(),
+                )))),
+            ),
+        ],
+        journal.clone(),
+    )
     .await;
     let independent_client = RemoteAgentClient::from_connection(
         fixture.connection.clone(),
@@ -557,8 +572,14 @@ async fn stalled_outbound_consumer_fails_only_its_call_while_other_calls_progres
 
 #[tokio::test]
 async fn registered_worker_backpressures_a_consuming_progress_stream() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::BurstProgress);
-    let fixture = Connected::new(Arc::new(Harness::new(TEST_AGENT_ID.into(), provider))).await;
+    let fixture = Connected::new(Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider,
+        journal.clone(),
+    )))
+    .await;
     let mut run = fixture
         .client
         .start(run_params(

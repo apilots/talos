@@ -68,7 +68,7 @@ async fn admit(store: &WorkerExecutionStore) {
 }
 
 #[tokio::test]
-async fn execution_survives_restart_and_does_not_initialize_product_tables() {
+async fn execution_survives_restart_with_only_execution_domain_tables() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("execution.sqlite");
     let store = WorkerExecutionStore::open(&path).await.unwrap();
@@ -88,14 +88,22 @@ async fn execution_survives_restart_and_does_not_initialize_product_tables() {
         result.active_turn,
         Some(AgentTurnRef::new("session", "turn"))
     );
-    let tables: Vec<String> =
-        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table'")
-            .fetch_all(&reopened.pool)
-            .await
-            .unwrap();
-    assert!(!tables
-        .iter()
-        .any(|name| name == "sessions" || name == "projects"));
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations' ORDER BY name",
+    )
+    .fetch_all(&reopened.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        tables,
+        [
+            "agent_events",
+            "session_history_supplements",
+            "sessions",
+            "turn_admissions",
+            "turn_checkpoints",
+        ]
+    );
 }
 
 #[tokio::test]
@@ -332,16 +340,13 @@ async fn replay_paginates_without_skipping_global_offsets_or_repeating_facts() {
     assert!(offsets.windows(2).all(|pair| pair[0] < pair[1]));
 }
 
-#[tokio::test]
-async fn sealed_capture_keeps_clock_metadata_and_pages_source_payload_without_product_history() {
+fn history_supplement() -> (
+    talos_agent_api::trajectory::SessionHistorySupplement,
+    talos_agent_api::trajectory::TrajectoryPayload,
+) {
     use talos_agent_api::trajectory::{
         ClockRelation, ClockSegment, SessionHistorySupplement, TrajectoryPayload,
     };
-    let directory = tempfile::tempdir().unwrap();
-    let store = WorkerExecutionStore::open(&directory.path().join("worker.sqlite"))
-        .await
-        .unwrap();
-    admit(&store).await;
     let mut supplement = SessionHistorySupplement {
         identity: AgentTurnRef::new("session", "turn"),
         clock_segments: vec![ClockSegment {
@@ -392,6 +397,18 @@ async fn sealed_capture_keeps_clock_metadata_and_pages_source_payload_without_pr
     supplement
         .payloads
         .insert("payload".into(), payload.clone());
+    (supplement, payload)
+}
+
+#[tokio::test]
+async fn sealed_capture_keeps_clock_metadata_and_pages_source_payload_without_product_history() {
+    use talos_agent_api::trajectory::TrajectoryPayload;
+    let directory = tempfile::tempdir().unwrap();
+    let store = WorkerExecutionStore::open(&directory.path().join("worker.sqlite"))
+        .await
+        .unwrap();
+    admit(&store).await;
+    let (mut supplement, payload) = history_supplement();
     store.append_supplement(supplement.clone()).await.unwrap();
     supplement.clock_segments[0].observed_through_offset_ms = 5.0;
     store.append_supplement(supplement).await.unwrap();
@@ -631,3 +648,129 @@ async fn overflowing_message_snapshot_keeps_last_safe_checkpoint_for_terminal_fa
         .active_turn
         .is_none());
 }
+
+#[tokio::test]
+async fn waiting_private_reference_requires_its_exact_committed_fact_and_survives_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("execution.sqlite");
+    let store = WorkerExecutionStore::open(&path).await.unwrap();
+    admit(&store).await;
+    let waiting = event(
+        2,
+        AgentEventPayload::WaitingForInput(talos_agent_api::AgentPendingInput::Message {
+            action_id: "action".into(),
+            prompt: "Continue?".into(),
+        }),
+    );
+    let reference = talos_agent_api::AgentContinuationRef {
+        opaque_id: "private-worker-reference".into(),
+    };
+    let settlement = AgentExecutionSettlement::WaitingForInput {
+        metrics: AgentRunMetrics::default(),
+    };
+    assert!(store
+        .append(
+            &session(),
+            vec![waiting.clone()],
+            &checkpoint(2),
+            Some(settlement.clone())
+        )
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
+    assert_eq!(
+        store.checkpoint(&waiting.identity).await.unwrap(),
+        Some(checkpoint(1))
+    );
+    store
+        .record_waiting_continuation(&session(), &waiting.identity, 2, &reference)
+        .await
+        .unwrap();
+    assert!(store
+        .waiting_continuation(&session(), &waiting.identity, 2)
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
+    let changed = talos_agent_api::AgentContinuationRef {
+        opaque_id: "changed-private-reference".into(),
+    };
+    assert!(store
+        .record_waiting_continuation(&session(), &waiting.identity, 2, &changed)
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
+    let mut wrong_sequence = waiting.clone();
+    wrong_sequence.sequence = 3;
+    assert!(store
+        .append(
+            &session(),
+            vec![wrong_sequence],
+            &checkpoint(3),
+            Some(settlement.clone())
+        )
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
+    store
+        .append(
+            &session(),
+            vec![waiting.clone()],
+            &checkpoint(2),
+            Some(settlement),
+        )
+        .await
+        .unwrap();
+    store.pool.close().await;
+    let store = WorkerExecutionStore::open(&path).await.unwrap();
+    assert_eq!(
+        store
+            .waiting_continuation(&session(), &waiting.identity, 2)
+            .await
+            .unwrap(),
+        reference
+    );
+    assert!(store
+        .waiting_continuation(&session(), &waiting.identity, 3)
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
+    let page = store
+        .read_events(AgentSessionEventsParams {
+            session: session(),
+            after_cursor: None,
+            limit: 10,
+        })
+        .await
+        .unwrap();
+    let public_json = serde_json::to_string(&page).unwrap();
+    assert!(!public_json.contains("private-worker-reference"));
+    assert!(!public_json.contains("continuation"));
+    let terminal = event(
+        3,
+        AgentEventPayload::TurnCompleted(talos_agent_api::AgentTurnCompleted {
+            stop_reason: talos_agent_api::AgentStopReason::EndTurn,
+        }),
+    );
+    store
+        .append(
+            &session(),
+            vec![terminal],
+            &checkpoint(3),
+            Some(AgentExecutionSettlement::Finished {
+                metrics: AgentRunMetrics::default(),
+                memory_usage: vec![],
+            }),
+        )
+        .await
+        .unwrap();
+    let private: (Option<i64>, Option<String>) = sqlx::query_as("SELECT waiting_sequence,provider_continuation_json FROM turn_checkpoints WHERE session_id='session' AND generation=0 AND turn_id='turn'").fetch_one(&store.pool).await.unwrap();
+    assert_eq!(private, (None, None));
+    assert!(store
+        .waiting_continuation(&session(), &waiting.identity, 2)
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
+}
+
+#[path = "migration_tests.rs"]
+mod migration;

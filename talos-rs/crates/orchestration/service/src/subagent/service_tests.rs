@@ -3,8 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::test_support::{
-    canonical_completed_message_events, canonical_user_admission, commit_test_running_turn,
-    run_test_migrations,
+    canonical_completed_message_events, canonical_user_admission, run_test_migrations,
 };
 use crate::SessionMessageQueueService;
 use async_trait::async_trait;
@@ -25,8 +24,7 @@ use talos_storage::{SqliteStorage, Storage};
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
-    AgentExecutionStore, CommitTerminalSettlementParams, DatabaseSessionStore, SessionQuery,
-    SessionRecord, SessionStore,
+    AgentExecutionStore, DatabaseSessionStore, SessionQuery, SessionRecord, SessionStore,
 };
 use talos_types::talos::{SessionSource, SessionSourceProvider, SessionSourceType};
 use talos_types::{
@@ -529,17 +527,12 @@ async fn create_parent_with_conf(
         1,
     )
     .unwrap();
-    commit_test_running_turn(
-        services.store.as_ref() as &dyn AgentExecutionStore,
-        identity,
-        message,
-    )
-    .await;
-    crate::test_worker::seed_product_history(
+    crate::test_worker::seed_running_worker(
         services.sessions.as_ref(),
         services.store.as_ref(),
         services.journal.as_ref(),
-        &parent_ref.session_id,
+        identity,
+        message,
     )
     .await;
     parent_ref
@@ -567,17 +560,12 @@ async fn create_running_child_named(
         1,
     )
     .unwrap();
-    commit_test_running_turn(
-        services.store.as_ref() as &dyn AgentExecutionStore,
-        identity,
-        message,
-    )
-    .await;
-    crate::test_worker::seed_product_history(
+    crate::test_worker::seed_running_worker(
         services.sessions.as_ref(),
         services.store.as_ref(),
         services.journal.as_ref(),
-        &child.id,
+        identity,
+        message,
     )
     .await;
     (
@@ -674,108 +662,86 @@ async fn settle_durable_turn(
     turn_id: &str,
     payload: CanonicalAgentEventPayload,
 ) {
-    settle_canonical_turn(
-        services.store.as_ref(),
-        services.timeline.as_ref(),
-        session_id,
-        turn_id,
-        payload,
-    )
-    .await;
-    crate::test_worker::seed_product_history(
+    let identity = talos_agent_api::AgentTurnRef::new(session_id, turn_id);
+    let checkpoint = services
+        .journal
+        .checkpoint(&identity)
+        .await
+        .unwrap()
+        .unwrap();
+    crate::test_worker::seed_worker_events(
         services.sessions.as_ref(),
         services.store.as_ref(),
         services.journal.as_ref(),
-        session_id,
+        vec![CanonicalAgentEvent {
+            identity,
+            sequence: checkpoint.last_sequence + 1,
+            occurred_at: 2,
+            payload,
+        }],
+        None,
     )
     .await;
 }
 
 async fn settle_canonical_turn(
+    sessions: &crate::session::SessionService,
     store: &DatabaseSessionStore,
     timeline: &TimelineEventService,
+    journal: &talos_store::execution::WorkerExecutionStore,
     session_id: &str,
     turn_id: &str,
     payload: CanonicalAgentEventPayload,
 ) {
     let identity = talos_agent_api::AgentTurnRef::new(session_id, turn_id);
-    let active = store
-        .get_agent_active_turn(session_id)
-        .await
-        .unwrap()
-        .expect("canonical active turn must exist");
-    let events = store.list_agent_turn_events(&identity, 64).await.unwrap();
-    let completed_turn_metrics = matches!(payload, CanonicalAgentEventPayload::TurnCompleted(_))
-        .then(AgentRunMetrics::default);
-    let terminal = store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: CanonicalAgentEvent {
-                identity,
-                sequence: events
-                    .last()
-                    .expect("canonical turn must have admission events")
-                    .sequence
-                    .saturating_add(1),
-                occurred_at: 2,
-                payload,
-            },
-            expected_event_seq: active.last_event_seq,
-            completed_turn_metrics,
-        })
-        .await
-        .unwrap();
-    timeline.publish_committed([terminal]);
+    let checkpoint = journal.checkpoint(&identity).await.unwrap().unwrap();
+    let events = crate::test_worker::seed_worker_events(
+        sessions,
+        store,
+        journal,
+        vec![CanonicalAgentEvent {
+            identity,
+            sequence: checkpoint.last_sequence + 1,
+            occurred_at: 2,
+            payload,
+        }],
+        None,
+    )
+    .await;
+    timeline.publish_committed(events);
 }
 
 async fn commit_agent_text(
+    sessions: &crate::session::SessionService,
     store: &DatabaseSessionStore,
     timeline: &TimelineEventService,
-    session_id: &str,
-    turn_id: &str,
+    journal: &talos_store::execution::WorkerExecutionStore,
+    identity: &talos_agent_api::AgentTurnRef,
     message_id: &str,
-    phase: AgentAssistantTextPhase,
-    text: String,
+    content: AgentAssistantText,
 ) {
-    let identity = talos_agent_api::AgentTurnRef::new(session_id, turn_id);
-    let active = store
-        .get_agent_active_turn(session_id)
-        .await
-        .unwrap()
-        .expect("canonical active Turn must exist");
-    let events = store.list_agent_turn_events(&identity, 64).await.unwrap();
+    let checkpoint = journal.checkpoint(identity).await.unwrap().unwrap();
     let message = AgentMessage {
         message_id: message_id.to_string(),
-        turn_id: turn_id.to_string(),
+        turn_id: identity.turn_id.clone(),
         role: AgentMessageRole::Agent,
         status: AgentMessageStatus::Completed,
         blocks: vec![AgentMessageBlock {
             block_id: format!("{message_id}-block"),
             status: AgentMessageBlockStatus::Completed,
-            content: AgentMessageBlockContent::AssistantText(AgentAssistantText { phase, text }),
+            content: AgentMessageBlockContent::AssistantText(content),
             started_at: 2,
             completed_at: Some(2),
         }],
         created_at: 2,
         completed_at: Some(2),
     };
-    let message_events = canonical_completed_message_events(
-        identity,
-        message,
-        events
-            .last()
-            .expect("canonical Turn must have admission events")
-            .sequence
-            .saturating_add(1),
-    );
-    let mut expected_event_seq = active.last_event_seq;
-    for event in message_events {
-        let commit = store
-            .commit_progress_event(event, expected_event_seq)
-            .await
-            .unwrap();
-        expected_event_seq = commit.active_turn.last_event_seq;
-        timeline.publish_committed(commit.events);
-    }
+    let message_events =
+        canonical_completed_message_events(identity.clone(), message, checkpoint.last_sequence + 1);
+    let events =
+        crate::test_worker::seed_worker_events(sessions, store, journal, message_events, None)
+            .await;
+    timeline.publish_committed(events);
 }
 
 fn target(subagent: &SubagentRef) -> AgentTarget {
@@ -888,8 +854,10 @@ async fn spawn_rejects_inactive_or_child_parent() {
     let services = test_services().await;
     let parent = create_parent(&services).await;
     settle_canonical_turn(
+        services.sessions.as_ref(),
         services.store.as_ref(),
         services.timeline.as_ref(),
+        services.journal.as_ref(),
         &parent.session_id,
         &parent.turn_id,
         CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {

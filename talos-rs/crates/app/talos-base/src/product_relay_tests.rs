@@ -889,6 +889,35 @@ async fn server_routes_personal_product_and_preview_without_copying_its_business
         )
         .await
         .is_err());
+    let retained_file = host
+        .service
+        .files
+        .upload(
+            &actor,
+            FileUploadRequest {
+                filename: "retained-after-revoke.png".into(),
+                scope: FileScope::Personal,
+                tags: vec![],
+                metadata: Default::default(),
+            },
+            Box::pin(futures_util::stream::iter([Ok(
+                axum::body::Bytes::from_static(b"\x89PNG\r\n\x1a\n"),
+            )])),
+        )
+        .await
+        .unwrap()
+        .file;
+    assert_eq!(
+        source
+            .read_file(FileReadRequest {
+                file_id: retained_file.file_id.clone()
+            })
+            .await
+            .unwrap()
+            .file
+            .file_id,
+        retained_file.file_id
+    );
     let lease = leases_tx.borrow().as_ref().unwrap().auth.clone();
     let principal = server
         .node_service
@@ -904,12 +933,31 @@ async fn server_routes_personal_product_and_preview_without_copying_its_business
         .unregister(&principal)
         .await
         .unwrap();
-    assert!(source
+    let revoked = source
         .read_file(FileReadRequest {
-            file_id: "unreachable-after-revoke".into()
+            file_id: retained_file.file_id.clone(),
         })
         .await
-        .is_err());
+        .unwrap_err();
+    assert_eq!(
+        revoked.error_code(),
+        talos_error::ErrorCode::ResourceNotFound
+    );
+    assert_eq!(
+        host.service
+            .files
+            .read_content(
+                &actor,
+                FileReadRequest {
+                    file_id: retained_file.file_id,
+                }
+            )
+            .await
+            .unwrap()
+            .bytes
+            .as_ref(),
+        b"\x89PNG\r\n\x1a\n"
+    );
     leases_tx.send(None).unwrap();
     client.abort();
     shutdown.cancel();

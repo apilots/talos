@@ -49,14 +49,19 @@ pub(super) async fn shutdown_signal() {
 
 impl TalosApplicationRuntime {
     pub async fn shutdown(&self) -> TalosResult<()> {
+        let automation_result = self.automation.shutdown().await;
+        self.service.begin_execution_drain();
+        let execution_result = self
+            .worker
+            .stop_execution(BACKGROUND_TASK_DRAIN_TIMEOUT)
+            .await;
+        // Cursor recovery still needs the registered Harness until delivery finishes.
+        let delivery_result =
+            drain_product_delivery(&self.service, BACKGROUND_TASK_DRAIN_TIMEOUT).await;
         let registration_result = match self.worker_registration.lock().await.take() {
             Some(registration) => registration.shutdown().await,
             None => Ok(()),
         };
-        let automation_result = self.automation.shutdown().await;
-        // Cursor recovery still needs the registered Harness until delivery finishes.
-        let delivery_result =
-            drain_product_delivery(&self.service, BACKGROUND_TASK_DRAIN_TIMEOUT).await;
         let background_result = self.worker.shutdown_background_tasks().await;
         let drain_result = self
             .coordinator
@@ -70,6 +75,7 @@ impl TalosApplicationRuntime {
                 Err(error)
             }
         };
+        let result = combine(result, execution_result);
         let result = combine(result, delivery_result);
         let result = combine(result, background_result);
         let result = combine(result, registration_result);
@@ -174,6 +180,7 @@ pub(super) fn combine(
 
 #[cfg(feature = "server")]
 pub(super) async fn shutdown_server(
+    worker: &talos_worker::TalosWorker,
     coordinator: &Arc<CoordinatorImpl>,
     automation: &Automation,
     service: &talos_service::TalosService,
@@ -193,6 +200,11 @@ pub(super) async fn shutdown_server(
         "draining background tasks before shutdown"
     );
     let result = automation.shutdown().await;
+    service.begin_execution_drain();
+    let result = combine(
+        result,
+        worker.stop_execution(BACKGROUND_TASK_DRAIN_TIMEOUT).await,
+    );
     let result = combine(
         result,
         drain_product_delivery(service, BACKGROUND_TASK_DRAIN_TIMEOUT).await,

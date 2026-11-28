@@ -79,7 +79,10 @@ pub struct TimelineActiveTurn {
     pub automation_input: Option<talos_types::AutomationInputOrigin>,
     pub identity: AgentTurnRef,
     pub initial_message_id: Option<String>,
+    /// Observed execution state, derived only from committed Worker facts.
     pub state: crate::ActiveTurnState,
+    /// Product management has requested cancellation; this is not an execution fact.
+    pub cancellation_requested: bool,
     pub last_event_id: String,
     #[ts(type = "number")]
     pub updated_at: i64,

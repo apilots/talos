@@ -1,7 +1,7 @@
 //! Product-owned projections of admission provenance and waiting state.
 use super::{conflict, encode};
 use crate::session::AgentEventRecord;
-use agent_protocol::{AgentCommittedEvent, AgentExecutionSettlement};
+use agent_protocol::AgentCommittedEvent;
 use talos_agent_api::{AgentEventPayload, AgentMessageRole};
 use talos_error::TalosResult;
 use talos_storage::StorageTransaction;
@@ -63,20 +63,6 @@ pub(super) async fn project(
             )
             .await?;
         }
-    }
-    match (&event.payload, &fact.settlement) {
-        (
-            AgentEventPayload::WaitingForInput(input),
-            Some(AgentExecutionSettlement::WaitingForInput { continuation, .. }),
-        ) => {
-            tx.execute("INSERT INTO agent_continuation_bindings(session_id,turn_id,action_id,provider_ref_json,expected_event_seq,status,claim_id) VALUES (?,?,?,?,?,'waiting',NULL) ON CONFLICT(session_id,turn_id) DO UPDATE SET action_id=excluded.action_id,provider_ref_json=excluded.provider_ref_json,expected_event_seq=excluded.expected_event_seq,status='waiting',claim_id=NULL", &[&event.identity.session_id,&event.identity.turn_id,input.action_id(),&encode(continuation)?,&record.event_seq.to_string()]).await?;
-        }
-        (AgentEventPayload::MessageCompleted(message), _)
-            if message.role == AgentMessageRole::User =>
-        {
-            tx.execute("UPDATE agent_continuation_bindings SET status='claimed',claim_id=? WHERE session_id=? AND turn_id=? AND status='waiting'", &[&message.message_id,&event.identity.session_id,&event.identity.turn_id]).await?;
-        }
-        _ => {}
     }
     Ok(())
 }

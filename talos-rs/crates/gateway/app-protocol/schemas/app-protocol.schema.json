@@ -17,6 +17,10 @@
           "default": null,
           "description": "Exact admitted automation Input; later User Steer messages remain ordinary."
         },
+        "cancellationRequested": {
+          "description": "Product management has requested cancellation; this is not an execution fact.",
+          "type": "boolean"
+        },
         "identity": {
           "$ref": "#/definitions/AgentTurnRef"
         },
@@ -64,7 +68,12 @@
           ]
         },
         "state": {
-          "$ref": "#/definitions/ActiveTurnState"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ActiveTurnState"
+            }
+          ],
+          "description": "Observed execution state, derived only from committed Worker facts."
         },
         "updatedAt": {
           "format": "int64",
@@ -72,6 +81,7 @@
         }
       },
       "required": [
+        "cancellationRequested",
         "identity",
         "lastEventId",
         "lastEventSeq",
@@ -15494,6 +15504,10 @@
           "default": null,
           "description": "Exact admitted automation Input; later User Steer messages remain ordinary."
         },
+        "cancellationRequested": {
+          "description": "Product management has requested cancellation; this is not an execution fact.",
+          "type": "boolean"
+        },
         "identity": {
           "$ref": "#/definitions/AgentTurnRef"
         },
@@ -15507,7 +15521,12 @@
           "type": "string"
         },
         "state": {
-          "$ref": "#/definitions/ActiveTurnState"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ActiveTurnState"
+            }
+          ],
+          "description": "Observed execution state, derived only from committed Worker facts."
         },
         "updatedAt": {
           "format": "int64",
@@ -15515,6 +15534,7 @@
         }
       },
       "required": [
+        "cancellationRequested",
         "identity",
         "lastEventId",
         "state",

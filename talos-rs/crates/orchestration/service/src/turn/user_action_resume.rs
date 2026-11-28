@@ -4,7 +4,7 @@ use talos_agent_api::{
     AgentMessageRole, AgentPendingInput, AgentUserContent,
 };
 use talos_store::session::{AgentActiveTurnRecord, AgentEventRecord};
-use talos_types::{QuestionAnswer, UserActionParams};
+use talos_types::UserActionParams;
 
 impl TurnService {
     pub(crate) async fn submit_user_action(
@@ -44,6 +44,7 @@ impl TurnService {
             .filter(|active| {
                 active.identity == identity
                     && active.state == ActiveTurnState::WaitingForInput
+                    && !active.cancellation_requested
                     && active.current_action_id.as_deref() == Some(action_id)
             })
             .ok_or_else(|| {
@@ -117,7 +118,7 @@ impl TurnService {
         dispatch: bool,
     ) -> TalosResult<()> {
         let service = self.clone();
-        super::await_admission(async move {
+        super::await_admission(self.execution.track_admission()?, async move {
             service
                 .recover_active_turn_owned(session, active, dispatch)
                 .await
@@ -223,11 +224,9 @@ impl TurnService {
         }
         let active = self.canonical_active_turn(&identity.session_id).await?;
         match active.filter(|active| active.identity == *identity) {
+            Some(active) if active.cancellation_requested => Ok(UserActionState::ExecutionUnknown),
             Some(active) if active.state == ActiveTurnState::Running => {
                 Ok(UserActionState::Resuming)
-            }
-            Some(active) if active.state == ActiveTurnState::Cancelling => {
-                Ok(UserActionState::ExecutionUnknown)
             }
             Some(_) => Ok(UserActionState::ResponseAccepted),
             None => Err(TalosError::internal(
@@ -275,46 +274,5 @@ fn validate_user_action_response(
     params: &UserActionParams,
     response: &UserActionResponse,
 ) -> TalosResult<()> {
-    match (params, response) {
-        (UserActionParams::DynamicToolResult(_), UserActionResponse::DynamicToolResult(_)) => {
-            Ok(())
-        }
-        (UserActionParams::Question(params), UserActionResponse::Question(answer)) => {
-            match answer {
-                QuestionAnswer::SelectedOption { option_id } => {
-                    if !params.options.iter().any(|option| option.id == *option_id) {
-                        return Err(TalosError::new(
-                            talos_error::ErrorCode::InvalidRequest,
-                            format!("question option `{option_id}` does not exist"),
-                        ));
-                    }
-                }
-                QuestionAnswer::FreeForm { text } => {
-                    if text.trim().is_empty() || text.len() > 4096 {
-                        return Err(TalosError::new(
-                            talos_error::ErrorCode::InvalidRequest,
-                            "question free-form answer must contain 1 to 4096 bytes",
-                        ));
-                    }
-                }
-            }
-            Ok(())
-        }
-        (
-            UserActionParams::SandboxApproval(params),
-            UserActionResponse::SandboxApproval(decision),
-        ) => {
-            if !params.available_decisions.contains(decision) {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    format!("sandbox approval decision `{decision:?}` is not available"),
-                ));
-            }
-            Ok(())
-        }
-        _ => Err(TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            "user action response variant does not match its parameters",
-        )),
-    }
+    params.validate_response(response)
 }

@@ -1,5 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
+import { AppProtocol } from "@talos/sdk-browser";
 import type { TalosWebClient } from "./client";
 import { desktopProductOwner, withManagementTimeout } from "./desktop-product-owner";
 import { managedWorkerKey, sessionDetailKey } from "./product-queries";
@@ -54,7 +55,33 @@ describe("Computer product ownership",()=>{
   await f.owner.resolve({sessionId:"session",nodeId:"explicit"});
   expect(f.cloud.forComputer).toHaveBeenLastCalledWith("explicit");
  });
- it("bounds management requests without swallowing their errors",async()=>{
-  await expect(withManagementTimeout(()=>Promise.reject(new Error("failed")))).rejects.toThrow("failed");
+ it("preserves the original management request failure",async()=>{
+  const failure=new Error("failed");
+  await expect(withManagementTimeout(()=>Promise.reject(failure))).rejects.toBe(failure);
+ });
+ it("waits for the management deadline and then aborts the pending request",async()=>{
+  vi.useFakeTimers();
+  try {
+   let requestSignal:AbortSignal|undefined;
+   const settled=vi.fn();
+   const pending=withManagementTimeout(signal=>{
+    requestSignal=signal;
+    return new Promise<never>(()=>{});
+   },100);
+   void pending.then(settled,settled);
+   const rejected=expect(pending).rejects.toMatchObject({code:AppProtocol.ErrorCode.Timeout});
+   await vi.advanceTimersByTimeAsync(99);
+   expect(settled).not.toHaveBeenCalled();
+   expect(requestSignal?.aborted).toBe(false);
+   await vi.advanceTimersByTimeAsync(1);
+   await rejected;
+   expect(requestSignal?.aborted).toBe(true);
+   const reason:unknown=requestSignal?.reason;
+   expect(reason).toMatchObject({code:AppProtocol.ErrorCode.Timeout});
+   expect(settled).toHaveBeenCalledOnce();
+   expect(vi.getTimerCount()).toBe(0);
+  } finally {
+   vi.useRealTimers();
+  }
  });
 });

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use talos_agent_api::{AgentContinuationRef, AgentEvent, AgentRunMetrics, AgentTurnRef};
+use talos_agent_api::{AgentEvent, AgentRunMetrics, AgentTurnRef};
 
 use crate::AgentSessionContext;
 
@@ -19,7 +19,6 @@ pub struct AgentSessionEventCursor {
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum AgentExecutionSettlement {
     WaitingForInput {
-        continuation: AgentContinuationRef,
         metrics: AgentRunMetrics,
     },
     Finished {

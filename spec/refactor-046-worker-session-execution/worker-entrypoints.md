@@ -19,6 +19,7 @@
 | --- | --- | --- |
 | talos-agent 中 RPC 适配器及其执行逻辑 | 共享受保护执行边界，持有 Session gate、SessionOwner、准入和终态生命周期 | 延续 lib 与网络适配器共用的执行状态；把仅限编码的逻辑留在适配层。 |
 | talos-worker | 组合 Harness、Provider、环境、资源及执行持久化 | 承接执行历史、上下文、压缩和 Memory 形成；组合相同实例的本机与网络句柄。 |
+| 产品侧旧执行写入与续跑绑定 | 执行准入、状态迁移、Provider continuation/checkpoint 和执行结算统一归 Worker | 产品服务只提交领域命令并摄取已提交事实；删除已被替代的执行直写接口，移除从产品库读取 Provider 引用再传回 Worker 的依赖。 |
 | runtime.rs 引用的 ConfigService、MemoryService、PluginManagerService 等节点服务 | M4 节点能力与类型化端口 | 按 config/memory/plugin 等既有能力 owner 迁移或暴露窄端口，Worker 不通过整套产品 Session 服务获取节点能力。 |
 | 产品 Service/Store | Session/Project、Timeline、Goal/Loop、Memory 管理、Automation 和计费 | 将依赖具体 Server 宿主的逻辑改为现有类型化端口，供本机与 Server 复用。 |
 | Store 中 resource_revisions 与事务捕获 | 独立于可选 Sync 的常驻变更/tombstone 捕获 | 保留原范围、身份、前后差异与代数；移除 bindings 为空或 feature 未装配时跳过记录的分支。 |
@@ -277,6 +278,7 @@ Server 提供授权入口和选路，模型凭证沿实际节点的配置/凭证
 - 使用同一 Session gate、reservation、两阶段准入、AgentAdmissionPermit 和 SessionOwner 表。适用时使用既有 OS Session 锁处理跨进程共享目录。
 - reload、clear 和 deletion 使用原有独占 gate 和所有权规则。Workspace 从受信配置解析，资源句柄在消费准入前完成绑定，guard 持有到结算和清理结束。
 - 本机资源直接调用所属对象，网络资源携带已验证的 invocation scope；复用相同执行状态提交、事件顺序、中断和一次终态提交。
+- Server 与本机产品服务只发起命令并消费执行副本；续跑引用、检查点、状态迁移和执行结算留在同一 Worker 边界，产品用量归账及后续调度分别消费这些事实。同进程装配不授予产品服务直接写执行事实的能力。
 - 保留 RPC 适配器已有 preflight Status 与操作 Failure 的错误边界。原始 AgentHarness 默认实现不得绕过保护。
 - 已准入调用的重连与补读复用已有 invocation 和稳定事件身份，禁止因重建传输流重复准入。
 - 同一 Turn 的新 continuation 与旧命令重放必须区分：只有执行 owner 按代数和完整命令确认已有准入，才允许纯重放；不能用 start 探测重放。纯查询不创建 Provider、Browser 或资源生命周期，也不新增网络协议或索引。WorkerHarness 沿原上下文标准化转发到既有本地 journal；新 continuation 查无原命令后重新经过原准入、Session 锁、资源绑定及租约监督，载荷冲突直接报错。
@@ -287,6 +289,10 @@ Server 提供授权入口和选路，模型凭证沿实际节点的配置/凭证
 本机访问和远程发布指向同一实例。保留 PR 209 的 listener 独立监督与 PR 208 的主动注册基础。
 
 宿主分别监督控制面、Worker、媒体、注册/传输、可选 Relay 和 Sync 任务，关闭时停止新准入并按已有策略 drain 或取消。
+关闭顺序复用同一生命周期实现：停止产品调度与新准入；仅对宿主拥有的本机 Harness 调用 stop_execution，完成活跃执行与本地日志提交；保持来源注册和读取授权，排空本机产品交付，完成业务结算或保留其已有待消费持久状态；最后由原 Coordinator 唯一执行 Provider、会话和资源的正式关闭。独立 Worker 的原关闭入口也先等待执行日志完成，不能在日志记录器之前关闭 Provider。stop_execution 是同进程宿主端口，不新增 RPC 方法或关闭管理器。
+
+管理端退出时，独立远端 Worker 已准入的 Turn 继续执行。产品层只在观察等待边界结束远端观察，不发送 interrupt、不伪造终态，保留最后已提交游标、原命令身份和待消费回执。已开始的准入、输入提交及产品原子事务完成既有交接后才退出；关闭期间完成的回执仍记账，但不能再派发下一条队列或 Goal/Loop Turn。
+
 保留前台 TUI 与常驻 Desktop 的原宿主规则。常驻管理者负责后续计划，关闭云端查看客户端不停止 Server 调度。
 交付断开、撤销、租约到期与宿主终止按[执行子 Spec](execution-ownership.md#断连与结算)分别处理。
 
@@ -321,12 +327,14 @@ Server 提供授权入口和选路，模型凭证沿实际节点的配置/凭证
 - 在同一 Worker 同时启用 lib/WSS/gRPC，通过一个入口修改配置、读取历史/Memory，再从其他入口观察同一已提交状态；并发同 Session 验证同一准入、锁和结算。
 - 对两个 Worker 分别修改配置、历史/检查点和 Memory 进度，验证服务实例及数据隔离；重连不重建，重启从各自存储恢复，凭证/节点资源不串用。
 - 验证独立 Worker 通过窄端口复用配置/持久化实现，未装配完整云产品管理服务且执行历史不回查 Server；Server 产品配置、任务和结算保持原 owner。
+- 验证 lib/WSS/gRPC 入口的等待输入和续跑均从 Worker 本地状态恢复，产品 API 不要求 Provider 私有引用；产品视图重建不改变 Worker 执行权威，旧执行直写接口已清除。
 - 从同账号 Web 与现有 SDK 操作授权个人和云目标，覆盖能力缺失、账号隔离、离线目标、过时缓存及原产品错误语义。
 - 验证 Desktop/TUI、内嵌 AppServer/Server 从正常产品入口直调 lib，完全无私有执行/资源 listener。
 - 验证 Native WSS 和 Docker/Talo gRPC Connect、显式配置、注册就绪、重连、撤销及无 Worker 执行 listener。
 - 在 Sync 关闭时远程操作个人宿主，确认产品写入归属和无 Relay 内容落盘；从无本地副本客户端操作云产品。
 - 并发本机/Relay 调用及网络调用，验证同一 Session 锁、一次准入、SessionHeld、资源 guard、一次结算和空闲管理者切换。
 - 覆盖断连前后、等待输入、游标首次交付终态、中断、租约过期及关闭，验证结果、错误与流顺序一致。
+- 在本机 Turn 正在运行及准入交接尚未完成时关闭宿主，验证关闭会等待本地执行日志与产品交接，Provider 只正式关闭一次；管理端关闭远端静默长 Turn 的观察后，验证执行继续、无 interrupt、原游标与待消费回执保留。
 - 覆盖大文件和媒体并发时的有界缓冲、背压与交互可用性，验证仍需的文件/媒体权限。
 - 检查旧 handler、路由、缓存与重复实现已删除，Sync 副本不能产生额外调度者；Sync 协议和密钥改造不属于验收。
 

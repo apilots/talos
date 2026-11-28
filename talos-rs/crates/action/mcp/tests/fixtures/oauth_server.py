@@ -72,6 +72,9 @@ class OAuthPeer(Peer):
 
 server = ThreadingHTTPServer(('127.0.0.1', 0), OAuthPeer)
 origin = 'http://127.0.0.1:' + str(server.server_port)
-(root / 'port').write_text(str(server.server_port))
+# Readers treat file existence as readiness, so publish the complete port atomically.
+port = root / 'port.tmp'
+port.write_text(str(server.server_port))
+port.replace(root / 'port')
 (root / 'expected').write_text('unauthorized')
 server.serve_forever()

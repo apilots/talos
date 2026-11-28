@@ -91,8 +91,7 @@ async fn production_harness_replays_only_committed_commands_without_starting_wor
             created_at: 1,
             completed_at: Some(1),
         },
-        checkpoint: None,
-        continuation: None,
+        intent: agent_protocol::AgentRunIntent::Start,
     };
     let store = worker.execution_store();
     store

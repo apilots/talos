@@ -232,10 +232,12 @@ fn client_resources(client: AgentSessionDataClient) -> TalosWorkerResources {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use talos_agent::SessionHistoryReader;
+    use crate::execution_history::tests::{admit_turn, scope};
+    use crate::rpc_host::tests::UnusedFiles;
+    use talos_agent::{SessionHistoryReadParams, SessionHistoryWindow};
 
     #[tokio::test]
-    async fn invocation_history_keeps_each_authenticated_source_identity_on_one_store() {
+    async fn bound_sources_resolve_their_identity_and_share_evolving_worker_history() {
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(
             talos_store::execution::WorkerExecutionStore::open(
@@ -244,20 +246,151 @@ mod tests {
             .await
             .unwrap(),
         );
-        let history = Arc::new(crate::execution_history::WorkerExecutionHistory(store));
-        let embedded = InvocationHistory {
-            history: history.clone(),
-            node_id: "embedded".into(),
+        let context = scope();
+        admit_turn(&store, &context, 0, 16, true).await;
+        let bindings = ResourceBindings::new(Arc::new(
+            crate::execution_history::WorkerExecutionHistory(store.clone()),
+        ));
+        *bindings.local.write().unwrap() = Some(Arc::new(|_| {
+            Box::pin(async {
+                Ok(TalosWorkerResources {
+                    attachment_reader: Arc::new(UnusedFiles),
+                    tool_image_store: Arc::new(UnusedFiles),
+                    agent_control: None,
+                    automation_control: None,
+                })
+            })
+        }));
+        let resolve = bindings.resolver(Arc::new(talos_tools::ToolRegistry::default()));
+        let read = SessionHistoryReadParams {
+            session_id: context.session_id.clone(),
+            window: SessionHistoryWindow::Latest,
+            limit: 10,
         };
-        let registered = InvocationHistory {
-            history,
-            node_id: "registered-worker".into(),
-        };
-        assert_eq!(embedded.source_node_id().as_deref(), Some("embedded"));
+        let embedded_guard = bindings
+            .bind(
+                &NodeAuth {
+                    node_id: "embedded".into(),
+                    token: "embedded-boundary".into(),
+                },
+                &context,
+                None,
+            )
+            .await
+            .unwrap();
+        let embedded = resolve(&context).unwrap().unwrap();
         assert_eq!(
-            registered.source_node_id().as_deref(),
+            embedded.session_history_reader.source_node_id().as_deref(),
+            Some("embedded")
+        );
+        let initial = embedded
+            .session_history_reader
+            .read(read.clone())
+            .await
+            .unwrap();
+        assert_eq!(initial.len(), 1);
+        assert_eq!(
+            initial[0].identity,
+            talos_agent_api::AgentTurnRef::new(&context.session_id, "turn-0")
+        );
+        assert_eq!(initial[0].completed_event_seq, 2);
+        let talos_agent_api::AgentRunResult::Completed(output) = &initial[0].result else {
+            panic!("expected the seeded completed Turn")
+        };
+        assert_eq!(
+            output
+                .messages
+                .iter()
+                .map(|message| message.message_id.as_str())
+                .collect::<Vec<_>>(),
+            ["message-0", "tool-message-0"]
+        );
+        assert_eq!(
+            output.messages,
+            store
+                .checkpoint(&initial[0].identity)
+                .await
+                .unwrap()
+                .unwrap()
+                .messages
+        );
+        embedded
+            .memory_progress_store
+            .advance_processed_until_event_seq(&context.session_id, 0, 2)
+            .await
+            .unwrap();
+        drop(embedded_guard);
+        assert!(resolve(&context).unwrap().is_none());
+
+        let registered_guard = bindings
+            .bind(
+                &NodeAuth {
+                    node_id: "registered-worker".into(),
+                    token: "registered-boundary".into(),
+                },
+                &context,
+                None,
+            )
+            .await
+            .unwrap();
+        let registered = resolve(&context).unwrap().unwrap();
+        assert_eq!(
+            registered
+                .session_history_reader
+                .source_node_id()
+                .as_deref(),
             Some("registered-worker")
         );
-        assert!(Arc::ptr_eq(&embedded.history, &registered.history));
+        assert_eq!(
+            registered
+                .session_history_reader
+                .read(read.clone())
+                .await
+                .unwrap(),
+            initial
+        );
+        assert_eq!(
+            registered
+                .memory_progress_store
+                .processed_until_event_seq(&context.session_id)
+                .await
+                .unwrap(),
+            2
+        );
+        admit_turn(&store, &context, 1, 24, true).await;
+        let evolved = registered
+            .session_history_reader
+            .read(read.clone())
+            .await
+            .unwrap();
+        assert_eq!(evolved.len(), 2);
+        assert_eq!(
+            evolved[1].identity,
+            talos_agent_api::AgentTurnRef::new(&context.session_id, "turn-1")
+        );
+        assert_eq!(evolved[1].completed_event_seq, 4);
+        registered
+            .memory_progress_store
+            .advance_processed_until_event_seq(&context.session_id, 2, 4)
+            .await
+            .unwrap();
+        assert_eq!(
+            embedded.session_history_reader.read(read).await.unwrap(),
+            evolved
+        );
+        assert_eq!(
+            embedded
+                .memory_progress_store
+                .processed_until_event_seq(&context.session_id)
+                .await
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            embedded.session_history_reader.source_node_id().as_deref(),
+            Some("embedded")
+        );
+        drop(registered_guard);
+        assert!(resolve(&context).unwrap().is_none());
     }
 }

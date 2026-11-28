@@ -466,7 +466,15 @@ async fn read_run(
     let mut accepted_tx = Some(accepted_tx);
     let mut settlement_tx = Some(settlement_tx);
     loop {
-        let frame = match inbound.message().await {
+        let received = tokio::select! {
+            biased;
+            _ = async {
+                progress_tx.closed().await;
+                if let Some(sender) = settlement_tx.as_mut() { sender.closed().await; }
+            }, if accepted_tx.is_none() => return,
+            frame = inbound.message() => frame,
+        };
+        let frame = match received {
             Ok(Some(value)) => value,
             Ok(None) => {
                 let error = transport_closed();

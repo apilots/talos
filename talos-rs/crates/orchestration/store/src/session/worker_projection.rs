@@ -23,6 +23,7 @@ pub struct WorkerProjectionParams {
     pub page: AgentSessionEventsResult,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct WorkerProjectionCommit {
     pub events: Vec<AgentEventRecord>,
     pub active_turn: Option<AgentActiveTurnRecord>,
@@ -86,12 +87,9 @@ pub(super) async fn project(
     let (generation, current) = projection_state(tx.as_mut(), &params).await?;
     let mut output = Vec::new();
     for fact in &params.page.events {
-        let fingerprint = format!("{:x}", Sha256::digest(encode(fact)?.as_bytes()));
-        let previous = tx.query("SELECT event_fingerprint FROM worker_event_projection WHERE session_id=? AND history_generation=? AND worker_offset=?", &[&params.session_id, &generation.to_string(), &fact.cursor.offset.to_string()]).await?;
+        let previous = tx.query("SELECT product_event_seq,event_fingerprint,settlement_json,command_json,execution_model_json,execution_purpose FROM worker_event_projection WHERE session_id=? AND history_generation=? AND worker_offset=?", &[&params.session_id, &generation.to_string(), &fact.cursor.offset.to_string()]).await?;
         if let Some(row) = previous.first() {
-            if row.get_string("event_fingerprint").as_deref() != Some(&fingerprint) {
-                return Err(conflict("An already committed Worker event changed"));
-            }
+            validate_replayed_fact(tx.as_mut(), row, fact).await?;
             continue;
         }
         if fact.cursor.offset <= current {
@@ -99,6 +97,7 @@ pub(super) async fn project(
                 "Worker source mapping has a gap before the product cursor",
             ));
         }
+        let fingerprint = format!("{:x}", Sha256::digest(encode(fact)?.as_bytes()));
         let event = project_event(tx.as_mut(), fact).await?;
         metadata::project(tx.as_mut(), fact, &event).await?;
         let settlement = fact.settlement.as_ref().map(encode).transpose()?;
@@ -120,6 +119,73 @@ pub(super) async fn project(
             offset,
         },
     })
+}
+
+/// Waiting receipts compare public facts after private references leave the wire.
+/// Other source envelopes retain their original immutable fingerprint, including
+/// provenance that a product may later augment independently.
+async fn validate_replayed_fact(
+    tx: &mut dyn StorageTransaction,
+    mapping: &talos_storage::Row,
+    fact: &AgentCommittedEvent,
+) -> TalosResult<()> {
+    if !matches!(fact.event.payload, AgentEventPayload::WaitingForInput(_)) {
+        let fingerprint = format!("{:x}", Sha256::digest(encode(fact)?.as_bytes()));
+        return if mapping.get_string("event_fingerprint").as_deref() == Some(&fingerprint) {
+            Ok(())
+        } else {
+            Err(conflict("An already committed Worker event changed"))
+        };
+    }
+    if fact.command.is_some()
+        || fact.automation_input.is_some()
+        || fact.history_supplement.is_some()
+    {
+        return Err(conflict(
+            "Waiting Worker facts cannot carry Input or terminal metadata",
+        ));
+    }
+    let product_seq = mapping.get_i64("product_event_seq").ok_or_else(corrupt)?;
+    let records = tx.query("SELECT event_seq,session_id,turn_id,sequence,occurred_at,persisted_at,payload_json FROM agent_events WHERE event_seq=?", &[&product_seq.to_string()]).await?;
+    let record = records
+        .first()
+        .ok_or_else(corrupt)
+        .and_then(parse_event_record)?;
+    let saved = AgentCommittedEvent {
+        cursor: fact.cursor.clone(),
+        event: talos_agent_api::AgentEvent {
+            identity: record.identity,
+            sequence: record.sequence,
+            occurred_at: record.occurred_at,
+            payload: record.payload,
+        },
+        settlement: mapping
+            .get_string("settlement_json")
+            .map(|value| decode::<Option<AgentExecutionSettlement>>(&value))
+            .transpose()?
+            .flatten(),
+        command: mapping
+            .get_string("command_json")
+            .map(|value| decode::<Option<agent_protocol::AgentCommandIdentity>>(&value))
+            .transpose()?
+            .flatten(),
+        execution_model: mapping
+            .get_string("execution_model_json")
+            .map(|value| decode::<Option<talos_types::ModelRef>>(&value))
+            .transpose()?
+            .flatten(),
+        execution_purpose: decode(
+            &mapping
+                .get_string("execution_purpose")
+                .ok_or_else(corrupt)?,
+        )?,
+        history_supplement: None,
+        automation_input: None,
+    };
+    if saved != *fact {
+        return Err(conflict("An already committed Worker event changed"));
+    }
+    Ok(())
 }
 
 async fn projection_state(
@@ -219,20 +285,26 @@ async fn project_event(
         ) = (&event.payload, &fact.settlement)
         {
             if fact.execution_purpose == agent_protocol::AgentExecutionPurpose::Compaction {
-                update_compacted_session(tx, &event.identity.session_id, metrics.clone()).await?;
+                update_compacted_session(
+                    tx,
+                    &event.identity.session_id,
+                    metrics.clone(),
+                    event.occurred_at,
+                )
+                .await?;
             } else if active
                 .as_ref()
                 .is_some_and(|turn| turn.initial_message_id.is_some())
             {
-                update_completed_turn_session(tx, &event.identity.session_id, metrics.clone())
-                    .await?;
+                update_completed_turn_session(
+                    tx,
+                    &event.identity.session_id,
+                    metrics.clone(),
+                    event.occurred_at,
+                )
+                .await?;
             }
         }
-        tx.execute(
-            "DELETE FROM agent_continuation_bindings WHERE session_id=? AND turn_id=?",
-            &[&event.identity.session_id, &event.identity.turn_id],
-        )
-        .await?;
         tx.execute(
             "DELETE FROM agent_active_turns WHERE session_id=? AND turn_id=?",
             &[&event.identity.session_id, &event.identity.turn_id],

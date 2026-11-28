@@ -23,10 +23,8 @@ use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
 use talos_store::profile::{MockProfileStore, ProfileUsageUpdate};
 use talos_store::project::StorageProjectStore;
-use talos_store::session::{
-    AgentExecutionStore, CommitInitialAdmissionParams, CommitTerminalSettlementParams,
-    DatabaseSessionStore, SessionRecord,
-};
+use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionRecord};
+
 use talos_types::talos::{SessionSourceProvider, SessionSourceType};
 
 use talos_types::{
@@ -165,6 +163,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             .await
             .expect("session store"),
     );
+    let mut source_events = BTreeMap::new();
     for (session_id, user_id, last_activity) in [("s1", "u1", 2), ("s2", "u2", 1)] {
         let mut record = session_record(session_id, user_id, last_activity);
         if session_id == "s2" {
@@ -174,14 +173,15 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             .insert_session_record(&record)
             .await
             .expect("insert session");
-        commit_completed_history_turn(
-            sessions.as_ref(),
-            session_id,
-            &format!("turn-{session_id}"),
-            &format!("message-{session_id}"),
-            &format!("remember {user_id}"),
-        )
-        .await;
+        source_events.insert(
+            session_id.to_string(),
+            completed_history_events(
+                session_id,
+                &format!("turn-{session_id}"),
+                &format!("message-{session_id}"),
+                &format!("remember {user_id}"),
+            ),
+        );
     }
     let provider: Arc<dyn LlmProvider> = Arc::new(TestProvider {
         responses: Mutex::new(VecDeque::from([
@@ -289,6 +289,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             session_id,
             user,
             &format!("turn-{session_id}"),
+            source_events.remove(session_id).unwrap(),
         )
         .await;
     }
@@ -412,15 +413,21 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
 
     let u1_workspace = workspace.path().join("u1");
     let memory_path = u1_workspace.join("MEMORY.md");
-    commit_completed_history_turn(
+    seed_worker_turn(
+        &worker,
         sessions.as_ref(),
+        &config,
         "s1",
+        "u1",
         "turn-s1-2",
-        "message-s1-2",
-        "remember failure invariant",
+        completed_history_events(
+            "s1",
+            "turn-s1-2",
+            "message-s1-2",
+            "remember failure invariant",
+        ),
     )
     .await;
-    seed_worker_turn(&worker, sessions.as_ref(), &config, "s1", "u1", "turn-s1-2").await;
     let memory_before_failure = worker
         .execution_store()
         .memory_progress("s1")
@@ -452,13 +459,12 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     );
 }
 
-async fn commit_completed_history_turn(
-    store: &dyn AgentExecutionStore,
+fn completed_history_events(
     session_id: &str,
     turn_id: &str,
     message_id: &str,
     text: &str,
-) {
+) -> Vec<AgentEvent> {
     let occurred_at = 1_784_251_800;
     let identity = AgentTurnRef::new(session_id, turn_id);
     let completed_block = AgentMessageBlock {
@@ -486,69 +492,55 @@ async fn commit_completed_history_turn(
     let mut started_block = completed_block.clone();
     started_block.status = AgentMessageBlockStatus::Running;
     started_block.completed_at = None;
-    let admission = store
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: vec![
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 1,
-                    occurred_at,
-                    payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
-                },
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 2,
-                    occurred_at,
-                    payload: AgentEventPayload::MessageStarted(AgentMessageStarted {
-                        message: started_message,
-                    }),
-                },
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 3,
-                    occurred_at,
-                    payload: AgentEventPayload::MessageBlockStarted(AgentMessageBlockStarted {
-                        message_id: message_id.to_string(),
-                        block: started_block,
-                    }),
-                },
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 4,
-                    occurred_at: occurred_at + 1,
-                    payload: AgentEventPayload::MessageBlockCompleted(AgentMessageBlockCompleted {
-                        message_id: message_id.to_string(),
-                        block: completed_block,
-                    }),
-                },
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 5,
-                    occurred_at: occurred_at + 1,
-                    payload: AgentEventPayload::MessageCompleted(completed_message),
-                },
-            ],
-            command: None,
-        })
-        .await
-        .expect("canonical Turn admission should commit");
-    store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity,
-                sequence: 6,
-                occurred_at: occurred_at + 2,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: admission.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
-        .await
-        .expect("canonical Turn settlement should commit");
+    let mut events = vec![
+        AgentEvent {
+            identity: identity.clone(),
+            sequence: 1,
+            occurred_at,
+            payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+        },
+        AgentEvent {
+            identity: identity.clone(),
+            sequence: 2,
+            occurred_at,
+            payload: AgentEventPayload::MessageStarted(AgentMessageStarted {
+                message: started_message,
+            }),
+        },
+        AgentEvent {
+            identity: identity.clone(),
+            sequence: 3,
+            occurred_at,
+            payload: AgentEventPayload::MessageBlockStarted(AgentMessageBlockStarted {
+                message_id: message_id.to_string(),
+                block: started_block,
+            }),
+        },
+        AgentEvent {
+            identity: identity.clone(),
+            sequence: 4,
+            occurred_at: occurred_at + 1,
+            payload: AgentEventPayload::MessageBlockCompleted(AgentMessageBlockCompleted {
+                message_id: message_id.to_string(),
+                block: completed_block,
+            }),
+        },
+        AgentEvent {
+            identity: identity.clone(),
+            sequence: 5,
+            occurred_at: occurred_at + 1,
+            payload: AgentEventPayload::MessageCompleted(completed_message),
+        },
+    ];
+    events.push(AgentEvent {
+        identity,
+        sequence: events.last().unwrap().sequence + 1,
+        occurred_at: occurred_at + 2,
+        payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: AgentStopReason::EndTurn,
+        }),
+    });
+    events
 }
 
 fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> SessionRecord {
@@ -594,25 +586,14 @@ fn candidate_response(title: &str) -> String {
 
 async fn seed_worker_turn(
     worker: &talos_worker::TalosWorker,
-    source: &dyn AgentExecutionStore,
+    product: &DatabaseSessionStore,
     config: &TalosConfig,
     session_id: &str,
     user_id: &str,
     turn_id: &str,
+    events: Vec<AgentEvent>,
 ) {
     let identity = AgentTurnRef::new(session_id, turn_id);
-    let events = source
-        .list_agent_turn_events(&identity, 100)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|event| AgentEvent {
-            identity: event.identity,
-            sequence: event.sequence,
-            occurred_at: event.occurred_at,
-            payload: event.payload,
-        })
-        .collect::<Vec<_>>();
     let input = events
         .iter()
         .find_map(|event| match &event.payload {
@@ -660,6 +641,23 @@ async fn seed_worker_turn(
                 metrics: Default::default(),
             }),
         )
+        .await
+        .unwrap();
+    let page = journal
+        .read_events(agent_protocol::AgentSessionEventsParams {
+            session: context,
+            after_cursor: None,
+            limit: agent_protocol::MAX_EXECUTION_PAGE_EVENTS,
+        })
+        .await
+        .unwrap();
+    product
+        .project_worker_events(talos_store::session::WorkerProjectionParams {
+            execution_node_id: "embedded".into(),
+            session_id: session_id.into(),
+            after_cursor: None,
+            page,
+        })
         .await
         .unwrap();
 }

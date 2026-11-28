@@ -45,7 +45,7 @@ pub use port::{AgentFuture, AgentHarness, DreamMemoryModelCall};
 pub use run::{
     AgentAdmission, AgentAdmissionPermit, AgentAdmissionUnconfirmed, AgentCommandIdentity,
     AgentInputParams, AgentInterruptParams, AgentProgressEventReceiver, AgentRunExecution,
-    AgentRunParams, AgentRunSettlement, AgentRunSettlementReceiver,
+    AgentRunIntent, AgentRunParams, AgentRunSettlement, AgentRunSettlementReceiver,
 };
 
 pub use environment::{WorkerEnvironment, WorkerEnvironmentContext, WorkerWorktreeRequest};

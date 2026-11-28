@@ -174,4 +174,4 @@ pub(crate) async fn recover_interrupted(store: &WorkerExecutionStore) -> AgentRe
 
 #[cfg(test)]
 #[path = "execution_history_tests.rs"]
-mod tests;
+pub(crate) mod tests;

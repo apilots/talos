@@ -1,5 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use talos_error::{TalosError, TalosResult};
 use ts_rs::TS;
 
 /// Product permission mode selected for a Session.
@@ -196,4 +197,52 @@ pub enum SandboxApprovalDecision {
     AllowOnce,
     Deny,
     Cancel,
+}
+
+impl UserActionParams {
+    /// Validate a typed response against the exact pending action.
+    pub fn validate_response(&self, response: &UserActionResponse) -> TalosResult<()> {
+        match (self, response) {
+            (UserActionParams::DynamicToolResult(_), UserActionResponse::DynamicToolResult(_)) => {
+                Ok(())
+            }
+            (UserActionParams::Question(params), UserActionResponse::Question(answer)) => {
+                match answer {
+                    QuestionAnswer::SelectedOption { option_id } => {
+                        if !params.options.iter().any(|option| option.id == *option_id) {
+                            return Err(TalosError::new(
+                                talos_error::ErrorCode::InvalidRequest,
+                                format!("question option `{option_id}` does not exist"),
+                            ));
+                        }
+                    }
+                    QuestionAnswer::FreeForm { text } => {
+                        if text.trim().is_empty() || text.len() > 4096 {
+                            return Err(TalosError::new(
+                                talos_error::ErrorCode::InvalidRequest,
+                                "question free-form answer must contain 1 to 4096 bytes",
+                            ));
+                        }
+                    }
+                }
+                Ok(())
+            }
+            (
+                UserActionParams::SandboxApproval(params),
+                UserActionResponse::SandboxApproval(decision),
+            ) => {
+                if !params.available_decisions.contains(decision) {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!("sandbox approval decision `{decision:?}` is not available"),
+                    ));
+                }
+                Ok(())
+            }
+            _ => Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "user action response variant does not match its parameters",
+            )),
+        }
+    }
 }

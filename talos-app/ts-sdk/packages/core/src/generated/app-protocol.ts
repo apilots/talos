@@ -3,6 +3,9 @@
 import type { AutomationMode, LoopSchedule, GoalStatus, GoalPauseReason, LoopStatus, LoopStopReason, SessionGoal, SessionLoop, AutomationTurnOrigin, AutomationInputOrigin, SessionAutomationSnapshot, SessionAutomationReadRequest, AutomationListEntry, AutomationListScope, AutomationListRequest, AutomationListResponse, AutomationChangedNotification, AutomationAction, GoalAction, LoopAction, LoopWakeDecision, AutomationRequest, AutomationEffect, AutomationControlResult, AutomationObjectRef, AutomationCommandDescriptor, AutomationCommandCatalogRequest, AutomationCommandCatalogResponse, AutomationCommand, AutomationCommandResolveRequest, AutomationCommandResolveResponse, BuiltinJobId, BuiltinJobAction, BuiltinJobOutcome, BuiltinJobInfo, BuiltinJobListRequest, BuiltinJobListResponse, BuiltinJobControlRequest } from "./automation";
 export type { AutomationMode, LoopSchedule, GoalStatus, GoalPauseReason, LoopStatus, LoopStopReason, SessionGoal, SessionLoop, AutomationTurnOrigin, AutomationInputOrigin, SessionAutomationSnapshot, SessionAutomationReadRequest, AutomationListEntry, AutomationListScope, AutomationListRequest, AutomationListResponse, AutomationChangedNotification, AutomationAction, GoalAction, LoopAction, LoopWakeDecision, AutomationRequest, AutomationEffect, AutomationControlResult, AutomationObjectRef, AutomationCommandDescriptor, AutomationCommandCatalogRequest, AutomationCommandCatalogResponse, AutomationCommand, AutomationCommandResolveRequest, AutomationCommandResolveResponse, BuiltinJobId, BuiltinJobAction, BuiltinJobOutcome, BuiltinJobInfo, BuiltinJobListRequest, BuiltinJobListResponse, BuiltinJobControlRequest };
 
+import type { BrowserAction, BrowserTabAction, BrowserHostRequest, BrowserHostOperation, BrowserHostResponse, BrowserHostElement, BrowserHostPage, BrowserHostTab, BrowserHostCancel, BrowserHostUpload, BrowserHostFile, BrowserDownloadReceipt } from "./browser";
+export type { BrowserAction, BrowserTabAction, BrowserHostRequest, BrowserHostOperation, BrowserHostResponse, BrowserHostElement, BrowserHostPage, BrowserHostTab, BrowserHostCancel, BrowserHostUpload, BrowserHostFile, BrowserDownloadReceipt };
+
 import type { DesktopMediaFrame, DesktopStreamOpen, DesktopStreamSend, DesktopStreamClose, DesktopWorkerIdentityResponse, DesktopWorkerEnrollParams, DesktopViewGrant, DesktopOpenRequest } from "./desktop";
 export type { DesktopMediaFrame, DesktopStreamOpen, DesktopStreamSend, DesktopStreamClose, DesktopWorkerIdentityResponse, DesktopWorkerEnrollParams, DesktopViewGrant, DesktopOpenRequest };
 
@@ -11,30 +14,6 @@ export type ProtocolVersion = { major: number, minor: number, };
 export const PROTOCOL_VERSION = {"major":0,"minor":5} as const;
 
 export type RequestId = string | number;
-
-export type BrowserAction = { "kind": "state" } | { "kind": "navigate", url: string, } | { "kind": "click", element: string, } | { "kind": "fill", element: string, text: string, } | { "kind": "key", key: string, } | { "kind": "scroll", deltaX: number, deltaY: number, } | { "kind": "tab", action: BrowserTabAction, tabId: string | null, url: string | null, } | { "kind": "screenshot" } | { "kind": "download" } | { "kind": "upload", element: string, fileId: string, };
-
-export type BrowserTabAction = "open" | "close" | "focus";
-
-export type BrowserHostRequest = { generation: string, epoch: number, userId: string, target: BrowserTargetKind, operation: BrowserHostOperation, };
-
-export type BrowserHostOperation = { "kind": "probe" } | { "kind": "execute", action: BrowserAction, targetId: string | null, element: BrowserHostElement | null, upload: BrowserHostUpload | null, } | { "kind": "acknowledgeDownloads", files: Array<BrowserDownloadReceipt>, } | { "kind": "connect" } | { "kind": "disconnect" } | { "kind": "show" } | { "kind": "releaseInputs" } | { "kind": "shutdown" };
-
-export type BrowserHostResponse = { "kind": "readiness", connected: boolean, } | { "kind": "done" } | { "kind": "observation", page: BrowserHostPage, loaderId: string | null, elements: Array<BrowserHostElement>, screenshot: string | null, downloads: Array<BrowserHostFile>, };
-
-export type BrowserHostElement = { backendNodeId: number, tag: string, attributes: { [key in string]?: string }, targetId: string, loaderId: string, };
-
-export type BrowserHostPage = { targetId: string, url: string, title: string, tabs: Array<BrowserHostTab>, text: string | null, };
-
-export type BrowserHostTab = { tabId: string, title: string, url: string, };
-
-export type BrowserHostCancel = { requestId: string, };
-
-export type BrowserHostUpload = { filename: string, dataBase64: string, };
-
-export type BrowserHostFile = { filename: string, dataBase64: string, };
-
-export type BrowserDownloadReceipt = { filename: string, sha256: string, };
 
 export type AppServerErrorCode = -32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002;
 export const AppServerErrorCode = {
@@ -298,13 +277,29 @@ export type TimelineActiveTurn = {
 /**
  * Exact admitted automation Input; later User Steer messages remain ordinary.
  */
-automationInput: AutomationInputOrigin | null, identity: AgentTurnRef, initialMessageId: string | null, state: ActiveTurnState, lastEventId: string, updatedAt: number, };
+automationInput: AutomationInputOrigin | null, identity: AgentTurnRef, initialMessageId: string | null,
+/**
+ * Observed execution state, derived only from committed Worker facts.
+ */
+state: ActiveTurnState,
+/**
+ * Product management has requested cancellation; this is not an execution fact.
+ */
+cancellationRequested: boolean, lastEventId: string, updatedAt: number, };
 
 export type ActiveTurnSnapshot = { lastSequence: number, lastEventSeq: number, messages: Array<AgentMessage>, metrics: AgentRunMetrics, pendingInput: AgentPendingInput | null, notices: Array<TimelineEvent>,
 /**
  * Exact admitted automation Input; later User Steer messages remain ordinary.
  */
-automationInput: AutomationInputOrigin | null, identity: AgentTurnRef, initialMessageId: string | null, state: ActiveTurnState, lastEventId: string, updatedAt: number, };
+automationInput: AutomationInputOrigin | null, identity: AgentTurnRef, initialMessageId: string | null,
+/**
+ * Observed execution state, derived only from committed Worker facts.
+ */
+state: ActiveTurnState,
+/**
+ * Product management has requested cancellation; this is not an execution fact.
+ */
+cancellationRequested: boolean, lastEventId: string, updatedAt: number, };
 
 export type ActiveTurnState = "running" | "waitingForInput" | "cancelling";
 

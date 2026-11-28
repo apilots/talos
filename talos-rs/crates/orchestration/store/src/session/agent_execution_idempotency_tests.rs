@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 
 fn reservation(
     request_hash: &str,
@@ -49,11 +50,9 @@ async fn turn_admission_atomically_completes_its_idempotency_record() {
     );
 
     let commit = store
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: admission(),
+        .project_test_events(TestWorkerEvents {
             command: Some(lease),
+            ..TestWorkerEvents::new(admission())
         })
         .await
         .unwrap();
@@ -108,11 +107,9 @@ async fn expired_completed_record_releases_its_key_for_a_new_command() {
             .unwrap(),
     );
     store
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: admission(),
+        .project_test_events(TestWorkerEvents {
             command: Some(lease),
+            ..TestWorkerEvents::new(admission())
         })
         .await
         .unwrap();
@@ -225,7 +222,7 @@ async fn expired_reservation_repairs_an_existing_canonical_admission() {
         .await
         .unwrap();
     let commit = store
-        .commit_initial_admission(initial_admission(admission()))
+        .project_test_events(initial_admission(admission()))
         .await
         .unwrap();
 

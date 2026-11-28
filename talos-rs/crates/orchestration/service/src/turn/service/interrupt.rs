@@ -46,7 +46,7 @@ impl TurnService {
             ),
         };
 
-        let cancellation = if active.state == ActiveTurnState::Cancelling {
+        let cancellation = if active.cancellation_requested {
             None
         } else {
             match self

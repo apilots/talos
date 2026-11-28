@@ -1,5 +1,8 @@
+#[path = "../../store/src/test_support.rs"]
+mod worker_facts;
 use std::path::Path;
 use std::time::Duration;
+pub(crate) use worker_facts::{ProjectTestWorkerEvents, TestWorkerEvents, WorkerProjectionCommit};
 
 use async_trait::async_trait;
 use sqlx::SqlitePool;
@@ -14,7 +17,7 @@ use talos_agent_api::{
 };
 use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_error::TalosResult;
-use talos_store::session::{AgentEventCommit, AgentExecutionStore, CommitInitialAdmissionParams};
+use talos_store::session::SessionStore;
 
 pub(crate) async fn run_test_migrations(pool: &SqlitePool) {
     let migration_dir =
@@ -112,17 +115,25 @@ pub(crate) fn canonical_completed_message_events(
 }
 
 pub(crate) async fn commit_test_running_turn(
-    store: &dyn AgentExecutionStore,
+    store: &talos_store::session::DatabaseSessionStore,
     identity: talos_agent_api::AgentTurnRef,
     message: AgentMessage,
-) -> AgentEventCommit {
+) -> WorkerProjectionCommit {
+    if store
+        .get_session_record(&identity.session_id)
+        .await
+        .unwrap()
+        .is_none()
+    {
+        store
+            .insert_session_record(&worker_facts::test_session_record(&identity.session_id))
+            .await
+            .unwrap();
+    }
     store
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: canonical_user_admission(identity, message, 1, true),
-            command: None,
-        })
+        .project_test_events(TestWorkerEvents::new(canonical_user_admission(
+            identity, message, 1, true,
+        )))
         .await
         .expect("canonical test Turn admission should commit")
 }

@@ -7,6 +7,7 @@ fn running_turn_store() -> Arc<RecordingAgentExecutionStore> {
         identity: AgentTurnRef::new("mock-session", "turn-1"),
         initial_message_id: Some("msg-1".to_string()),
         state: ActiveTurnState::Running,
+        cancellation_requested: false,
         last_event_seq: 1,
         current_action_id: None,
         updated_at: 1,
@@ -37,6 +38,7 @@ async fn message_queue_handlers_return_shared_queue_and_typed_full_error() {
             auth_disabled: false,
             lifecycle: Arc::new(ServerLifecycle::new()),
             config_store: None,
+            worker_fixture: None,
         },
         store,
     )

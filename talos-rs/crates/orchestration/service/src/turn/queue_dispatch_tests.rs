@@ -102,9 +102,13 @@ async fn profile_write_failure_is_reported_once_without_stopping_queued_turns() 
 
 #[tokio::test]
 async fn profile_discard_failure_preserves_the_error_and_dispatches_queued_work() {
+    let logs = tempfile::tempdir().unwrap();
+    let log_path = logs.path().join("profile-discard.log");
+    let dispatch = log_dispatch(&log_path);
+    let _subscriber = tracing::dispatcher::set_default(&dispatch);
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     let execution = Arc::new(RecordingAgentExecution::default());
-    let (service, _, store, queue) = test_service_with_storage(
+    let (service, timeline, store, queue) = test_service_with_storage(
         execution.clone(),
         Arc::new(RecordingAgentCoordinator::default()),
         storage.clone(),
@@ -114,8 +118,13 @@ async fn profile_discard_failure_preserves_the_error_and_dispatches_queued_work(
     let identity = AgentTurnRef::new("s1", "failed-turn");
     let input = completed_agent_user_input("failed-turn", "message-1", test_user_input("first"), 1)
         .unwrap();
-    commit_test_running_turn(store.as_ref(), identity, input).await;
-    seed_worker_fixture(&service, store.as_ref(), execution.as_ref()).await;
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        execution.as_ref(),
+        canonical_user_admission(identity.clone(), input, 1, true),
+    )
+    .await;
     fail_worker_fixture(execution.as_ref(), talos_error::ErrorCode::InternalError).await;
     DatabaseProfileStore::new(&storage)
         .record_turn_usage(talos_store::profile::TurnUsageUpdate {
@@ -138,6 +147,19 @@ async fn profile_discard_failure_preserves_the_error_and_dispatches_queued_work(
         .unwrap();
     sqlx::query("CREATE TRIGGER reject_profile_discard BEFORE DELETE ON profile_turn_usage BEGIN SELECT RAISE(FAIL, 'profile-discard-sentinel'); END")
         .execute(storage.pool()).await.unwrap();
+    let journal = execution.worker_store.lock().unwrap().clone().unwrap();
+    let scope = journal.session_scope("s1").await.unwrap().unwrap();
+    let original_settlement = journal.settlement(&identity).await.unwrap().unwrap();
+    let original_cursor = journal
+        .read_events(agent_protocol::AgentSessionEventsParams {
+            session: scope,
+            after_cursor: None,
+            limit: 256,
+        })
+        .await
+        .unwrap()
+        .next_cursor;
+    *execution.hold_running_turn.lock().unwrap() = true;
     queue.add("s1", test_user_input("next")).unwrap();
     let active = store.get_agent_active_turn("s1").await.unwrap().unwrap();
     service
@@ -145,11 +167,120 @@ async fn profile_discard_failure_preserves_the_error_and_dispatches_queued_work(
         .await
         .unwrap();
     wait_for_stream_requests(execution.as_ref(), 1).await;
+    let usage_count = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM profile_turn_usage WHERE session_id='s1' AND turn_id='failed-turn'")
+            .fetch_one(storage.pool()).await.unwrap()
+    };
+    assert_eq!(usage_count().await, 1);
+    let receipt = store
+        .pending_worker_settlements("s1")
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|receipt| receipt.event.identity == identity)
+        .expect("failed product effect must retain its receipt");
+    assert_eq!(receipt.cursor, original_cursor);
+    let discard_notices = |events: Vec<talos_agent_api::TimelineEvent>| {
+        events
+            .into_iter()
+            .filter(|event| event.event.identity() == &identity)
+            .filter(|event| {
+                matches!(
+                    event.event,
+                    talos_agent_api::TimelineEventPayload::SystemNotice(_)
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let notices = discard_notices(timeline.list_events_after("s1", None, 100).await.unwrap());
+    let [notice] = notices.as_slice() else {
+        panic!("one controlled discard failure must publish one notice");
+    };
+    assert!(
+        matches!(&notice.event, talos_agent_api::TimelineEventPayload::SystemNotice(data)
+        if data.notice.level == talos_types::TalosTimelineNoticeLevel::Warning
+        && matches!(&data.notice.content, talos_agent_api::SystemNoticeContent::Error(error) if error.code == talos_error::ErrorCode::InternalError))
+    );
+    let safe = serde_json::to_string(notice).unwrap();
+    for private in [
+        "profile-discard-sentinel",
+        "DELETE",
+        "profile_turn_usage",
+        "backtrace_status",
+    ] {
+        assert!(
+            !safe.contains(private),
+            "notice leaked private diagnostics: {safe}"
+        );
+    }
+    let content = std::fs::read_to_string(&log_path).unwrap();
+    assert!(
+        content.contains("profile-discard-sentinel")
+            && content.contains("discard_turn_usage")
+            && content.contains("backtrace_status=Captured"),
+        "{content}"
+    );
+    let reports = content
+        .lines()
+        .filter(|line| {
+            line.contains("application failure") && line.contains("profile-discard-sentinel")
+        })
+        .count();
+    assert_eq!(reports, 1, "{content}");
+    let next = execution.stream_requests.lock().unwrap()[0].clone();
+    assert_ne!(next.context.identity(), identity);
+    assert!(matches!(&next.input.blocks[0].content,
+        talos_agent_api::AgentMessageBlockContent::UserContent(talos_agent_api::AgentUserContent::Text { text }) if text == "next"));
+
+    sqlx::query("DROP TRIGGER reject_profile_discard")
+        .execute(storage.pool())
+        .await
+        .unwrap();
+    service
+        .recover_worker_settlements("s1", false)
+        .await
+        .unwrap();
+    assert_eq!(usage_count().await, 0);
+    assert!(store
+        .pending_worker_settlements("s1")
+        .await
+        .unwrap()
+        .iter()
+        .all(|receipt| receipt.cursor != original_cursor));
+    assert_eq!(execution.stream_requests.lock().unwrap().len(), 1);
+    service
+        .recover_worker_settlements("s1", false)
+        .await
+        .unwrap();
+    assert_eq!(execution.stream_requests.lock().unwrap().len(), 1);
+    assert_eq!(
+        discard_notices(timeline.list_events_after("s1", None, 100).await.unwrap()),
+        notices
+    );
+    assert_eq!(
+        journal.settlement(&identity).await.unwrap().unwrap(),
+        original_settlement
+    );
+    let retried_log = std::fs::read_to_string(&log_path).unwrap();
+    assert_eq!(
+        retried_log
+            .lines()
+            .filter(|line| line.contains("application failure")
+                && line.contains("profile-discard-sentinel"))
+            .count(),
+        reports
+    );
+
+    complete_held_turn(&service, execution.as_ref()).await;
 }
 
 #[tokio::test]
 async fn committed_failure_recovery_releases_execution_and_dispatches_the_queue() {
-    for rejected_stage in ["panic", "permit"] {
+    enum StartFailure {
+        Panic,
+        Permit,
+    }
+    for rejected_stage in [StartFailure::Panic, StartFailure::Permit] {
         let logs = tempfile::tempdir().unwrap();
         let log_path = logs.path().join("recovery.log");
         let dispatch = log_dispatch(&log_path);
@@ -157,42 +288,17 @@ async fn committed_failure_recovery_releases_execution_and_dispatches_the_queue(
         let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
         let execution = Arc::new(RecordingAgentExecution::default());
         let coordinator = Arc::new(RecordingAgentCoordinator::default());
-        if rejected_stage == "turnCompleted" {
-            *coordinator.interrupt_error.lock().unwrap() = Some(TalosError::new(
-                talos_error::ErrorCode::RunCleanupUnconfirmed,
-                "The remote Client no longer owns a live invocation",
-            ));
-        }
         let (service, _, store, queue) =
             test_service_with_storage(execution.clone(), coordinator, storage.clone()).await;
         create_test_session_record(store.clone()).await;
-        if rejected_stage == "metricsUpdated" {
-            *execution.progress_event.lock().unwrap() = Some(
-                CanonicalAgentEventPayload::MetricsUpdated(AgentRunMetrics::default()),
-            );
-        }
-        if rejected_stage == "panic" {
-            execution.panic_start_permit.store(true, Ordering::SeqCst);
-        } else if rejected_stage == "permit" {
-            *execution.start_permit_error.lock().unwrap() = Some(talos_error::TalosError::new(
-                talos_error::ErrorCode::InternalError,
-                "injected start permit rejection",
-            ));
-        } else {
-            sqlx::query(&format!(
-                r#"
-        CREATE TRIGGER reject_first_completion BEFORE INSERT ON agent_events
-        WHEN json_extract(NEW.payload_json, '$.type') = '{rejected_stage}'
-          AND NOT EXISTS (
-            SELECT 1 FROM agent_events WHERE session_id = NEW.session_id
-              AND json_extract(payload_json, '$.type') = 'turnFailed'
-          )
-        BEGIN SELECT RAISE(FAIL, 'injected terminal persistence failure'); END
-    "#
-            ))
-            .execute(storage.pool())
-            .await
-            .unwrap();
+        match rejected_stage {
+            StartFailure::Panic => execution.panic_start_permit.store(true, Ordering::SeqCst),
+            StartFailure::Permit => {
+                *execution.start_permit_error.lock().unwrap() = Some(TalosError::new(
+                    talos_error::ErrorCode::InternalError,
+                    "injected start permit rejection",
+                ));
+            }
         }
         queue.add("s1", test_user_input("first")).unwrap();
         queue.add("s1", test_user_input("next")).unwrap();
@@ -407,8 +513,13 @@ async fn automation_settlement_warning_preserves_usage_cleanup_and_queued_work()
         1,
     )
     .unwrap();
-    commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
-    seed_worker_fixture(&service, store.as_ref(), execution.as_ref()).await;
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        execution.as_ref(),
+        canonical_user_admission(identity.clone(), input, 1, true),
+    )
+    .await;
     fail_worker_fixture(execution.as_ref(), talos_error::ErrorCode::InternalError).await;
     DatabaseProfileStore::new(&storage)
         .record_turn_usage(talos_store::profile::TurnUsageUpdate {
@@ -620,9 +731,7 @@ async fn product_transaction_failure_retains_original_worker_receipt_until_curso
 #[tokio::test]
 async fn lost_commit_confirmation_retains_queue_identity_until_worker_replay() {
     let execution = Arc::new(RecordingAgentExecution::default());
-    execution
-        .lose_start_confirmation
-        .store(true, Ordering::SeqCst);
+    *execution.admission_fault.lock().unwrap() = crate::test_worker::AdmissionFault::AfterCommit;
     let (service, _, store, queue) = test_service(execution.clone()).await;
     create_test_session_record(store.clone()).await;
     let first = queue
@@ -680,9 +789,7 @@ async fn lost_commit_confirmation_retains_queue_identity_until_worker_replay() {
 async fn unknown_commit_not_received_retries_original_queue_identity_after_lease_expiry() {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     let execution = Arc::new(RecordingAgentExecution::default());
-    execution
-        .lose_commit_before_worker
-        .store(true, Ordering::SeqCst);
+    *execution.admission_fault.lock().unwrap() = crate::test_worker::AdmissionFault::BeforeCommit;
     let (service, _, store, queue) = test_service_with_storage(
         execution.clone(),
         Arc::new(RecordingAgentCoordinator::default()),
@@ -731,15 +838,13 @@ async fn unknown_commit_not_received_retries_original_queue_identity_after_lease
 async fn expired_unknown_command_replays_worker_admission_before_rebuilding_input() {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     let execution = Arc::new(RecordingAgentExecution::default());
-    execution
-        .lose_start_confirmation
-        .store(true, Ordering::SeqCst);
     let (service, _, store, _) = test_service_with_storage(
         execution.clone(),
         Arc::new(RecordingAgentCoordinator::default()),
         storage.clone(),
     )
     .await;
+    *execution.admission_fault.lock().unwrap() = crate::test_worker::AdmissionFault::AfterCommit;
     create_test_session_record(store.clone()).await;
     let request = StartTurnRequest {
         node_id: None,

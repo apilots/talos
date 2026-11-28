@@ -101,14 +101,9 @@ impl AgentExecutionDriver {
                     payload: fact.event.payload,
                 };
                 return Ok(match fact.settlement {
-                    AgentExecutionSettlement::WaitingForInput {
-                        continuation,
-                        metrics,
-                    } => agent_protocol::AgentRunSettlement::WaitingForInput {
-                        event,
-                        continuation,
-                        metrics,
-                    },
+                    AgentExecutionSettlement::WaitingForInput { metrics } => {
+                        agent_protocol::AgentRunSettlement::WaitingForInput { event, metrics }
+                    }
                     AgentExecutionSettlement::Finished { metrics, .. } => {
                         let result = match &event.payload {
                             AgentEventPayload::TurnFailed(failed) => {

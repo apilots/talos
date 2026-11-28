@@ -97,6 +97,12 @@ pub struct TalosService {
 }
 
 impl TalosService {
+    /// Stop product admission and detach independent remote observations without
+    /// cancelling their Worker execution. Local delivery remains joined by drain.
+    pub fn begin_execution_drain(&self) {
+        self.turns.begin_execution_drain();
+    }
+
     /// The host stops product admissions and scheduling first, keeping the source
     /// Harness and model resources available until product delivery finishes.
     pub async fn drain_execution_delivery(&self) {

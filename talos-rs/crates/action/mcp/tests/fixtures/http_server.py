@@ -50,5 +50,8 @@ class Peer(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     server = ThreadingHTTPServer(('127.0.0.1', 0), Peer)
-    (root / 'port').write_text(str(server.server_port))
+    # Readers treat file existence as readiness, so publish the complete port atomically.
+    port = root / 'port.tmp'
+    port.write_text(str(server.server_port))
+    port.replace(root / 'port')
     server.serve_forever()

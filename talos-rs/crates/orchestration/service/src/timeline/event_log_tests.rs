@@ -1,3 +1,4 @@
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use std::sync::Arc;
 
 use talos_agent_api::{AgentMessage, AgentMessageRole, AgentMessageStatus, AgentTurnRef};
@@ -66,7 +67,7 @@ async fn product_notices_share_replay_without_advancing_agent_state() {
         .unwrap();
     assert_eq!(
         store.get_agent_active_turn("session-1").await.unwrap(),
-        Some(commit.active_turn.clone())
+        commit.active_turn.clone()
     );
     let progress = AgentEvent {
         identity: identity.clone(),
@@ -75,7 +76,7 @@ async fn product_notices_share_replay_without_advancing_agent_state() {
         payload: AgentEventPayload::MetricsUpdated(AgentRunMetrics::default()),
     };
     let committed = store
-        .commit_progress_event(progress.clone(), commit.active_turn.last_event_seq)
+        .project_test_events(TestWorkerEvents::new(vec![progress.clone()]))
         .await
         .unwrap();
     let after = service
@@ -95,7 +96,10 @@ async fn product_notices_share_replay_without_advancing_agent_state() {
     );
     assert_eq!(
         service
-            .turn_checkpoint(&identity, committed.active_turn.last_event_seq)
+            .turn_checkpoint(
+                &identity,
+                committed.active_turn.as_ref().unwrap().last_event_seq
+            )
             .await
             .unwrap()
             .last_sequence,
@@ -103,7 +107,10 @@ async fn product_notices_share_replay_without_advancing_agent_state() {
     );
     assert_eq!(
         service
-            .turn_notices(&[identity], committed.active_turn.last_event_seq)
+            .turn_notices(
+                &[identity],
+                committed.active_turn.as_ref().unwrap().last_event_seq
+            )
             .await
             .unwrap(),
         vec![notice]

@@ -1,5 +1,5 @@
 use agent_pb as pb;
-use talos_agent_api::{AgentContinuationRef, AgentInterruptOutcome};
+use talos_agent_api::AgentInterruptOutcome;
 use talos_config::Config;
 use talos_error::TalosResult;
 
@@ -12,7 +12,7 @@ use super::invalid;
 use super::message::{decode_message, encode_message};
 use crate::error_pb;
 use crate::{
-    AgentInputParams, AgentInterruptParams, AgentRunCheckpoint, AgentRunParams, AgentRunSettlement,
+    AgentInputParams, AgentInterruptParams, AgentRunIntent, AgentRunParams, AgentRunSettlement,
 };
 
 pub fn encode_run_params(value: AgentRunParams) -> TalosResult<pb::RunParams> {
@@ -25,10 +25,10 @@ pub fn encode_run_params(value: AgentRunParams) -> TalosResult<pb::RunParams> {
             .map(crate::automation_pb::encode_origin),
         context: Some(encode_context(value.context)?),
         input: Some(encode_message(value.input)?),
-        checkpoint: value.checkpoint.map(encode_checkpoint).transpose()?,
-        continuation: value.continuation.map(|value| pb::ContinuationRef {
-            opaque_id: value.opaque_id,
-        }),
+        intent: match value.intent {
+            AgentRunIntent::Start => pb::AgentRunIntent::Start,
+            AgentRunIntent::RespondUserAction => pb::AgentRunIntent::RespondUserAction,
+        } as i32,
     })
 }
 
@@ -45,10 +45,11 @@ pub fn decode_run_params(value: pb::RunParams, config: &Config) -> TalosResult<A
             .transpose()?,
         context: decode_context(value.context, config)?,
         input: decode_message(value.input.ok_or_else(invalid)?)?,
-        checkpoint: value.checkpoint.map(decode_checkpoint).transpose()?,
-        continuation: value.continuation.map(|value| AgentContinuationRef {
-            opaque_id: value.opaque_id,
-        }),
+        intent: match pb::AgentRunIntent::try_from(value.intent).map_err(|_| invalid())? {
+            pb::AgentRunIntent::Start => AgentRunIntent::Start,
+            pb::AgentRunIntent::RespondUserAction => AgentRunIntent::RespondUserAction,
+            pb::AgentRunIntent::Unspecified => return Err(invalid()),
+        },
     };
     value.validate()?;
     Ok(value)
@@ -112,17 +113,12 @@ pub fn decode_admission_events(
 pub fn encode_settlement(value: AgentRunSettlement) -> TalosResult<pb::Settlement> {
     Ok(pb::Settlement {
         result: Some(match value {
-            AgentRunSettlement::WaitingForInput {
-                event,
-                continuation,
-                metrics,
-            } => pb::settlement::Result::Waiting(pb::WaitingSettlement {
-                event: Some(encode_event(event)?),
-                continuation: Some(pb::ContinuationRef {
-                    opaque_id: continuation.opaque_id,
-                }),
-                metrics: Some(encode_metrics(metrics)),
-            }),
+            AgentRunSettlement::WaitingForInput { event, metrics } => {
+                pb::settlement::Result::Waiting(pb::WaitingSettlement {
+                    event: Some(encode_event(event)?),
+                    metrics: Some(encode_metrics(metrics)),
+                })
+            }
             AgentRunSettlement::Finished {
                 event,
                 metrics,
@@ -145,9 +141,6 @@ pub fn decode_settlement(value: pb::Settlement) -> TalosResult<AgentRunSettlemen
     match value.result.ok_or_else(invalid)? {
         pb::settlement::Result::Waiting(value) => Ok(AgentRunSettlement::WaitingForInput {
             event: decode_event(value.event.ok_or_else(invalid)?)?,
-            continuation: AgentContinuationRef {
-                opaque_id: value.continuation.ok_or_else(invalid)?.opaque_id,
-            },
             metrics: decode_metrics(value.metrics)?,
         }),
         pb::settlement::Result::Finished(value) => {
@@ -190,30 +183,6 @@ pub fn decode_interrupt_outcome(value: pb::InterruptResult) -> TalosResult<Agent
             Ok(AgentInterruptOutcome::CleanupUnconfirmed { task_count })
         }
     }
-}
-
-fn encode_checkpoint(value: AgentRunCheckpoint) -> TalosResult<pb::Checkpoint> {
-    Ok(pb::Checkpoint {
-        last_sequence: value.last_sequence,
-        messages: value
-            .messages
-            .into_iter()
-            .map(encode_message)
-            .collect::<TalosResult<_>>()?,
-        metrics: Some(encode_metrics(value.metrics)),
-    })
-}
-
-fn decode_checkpoint(value: pb::Checkpoint) -> TalosResult<AgentRunCheckpoint> {
-    Ok(AgentRunCheckpoint {
-        last_sequence: value.last_sequence,
-        messages: value
-            .messages
-            .into_iter()
-            .map(decode_message)
-            .collect::<TalosResult<_>>()?,
-        metrics: decode_metrics(value.metrics)?,
-    })
 }
 
 pub fn encode_command(value: crate::AgentCommandIdentity) -> pb::AgentCommandIdentity {

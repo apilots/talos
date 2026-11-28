@@ -29,6 +29,8 @@ tokio = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+agent-protocol = { workspace = true }
+talos-store = { workspace = true }
 tempfile = "3.8"
 
 [lints]

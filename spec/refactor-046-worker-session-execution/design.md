@@ -47,6 +47,7 @@ Sync 独立服务、协议、Loro 合并、加密、密钥管理及数据迁移�
 | B6 | Desktop/TUI 在本机完整管理和触发任务；Server 管理产品的任务由 Server 触发、Worker 执行，并支持已有托管休眠唤醒。 |
 | B7 | 已准入且授权仍有效的 Turn 在交付连接断开后继续执行；重连后按游标获取增量。切换管理者必须等待 Session 空闲。 |
 | B8 | 原有历史留在已有副本的电脑上本地只读。新执行统一进入新架构，并删除旧执行兼容路径及仅服务于它的代码。 |
+| B9 | 全部执行面由 Worker 接管。Server 只负责管理、调度和执行副本消费，不管理 Provider 续跑状态、检查点或执行状态迁移，不自行生成执行结果。 |
 
 ## 产品架构
 
@@ -210,7 +211,7 @@ Worker 是执行事实的唯一写入者。Server 管理产品中的 Timeline �
 | --- | --- | --- |
 | Session/Project 配置，Goal/Loop 定义、预算、计划和暂停状态 | 对应产品服务；云产品为 Server，本机产品为所属宿主 | 派发携带本次所需输入、版本和稳定命令身份，Worker 提交其已接受版本。 |
 | 已准入输入、消息、工具事件、执行状态和终态 | Worker | 产品服务只将已提交事件物化为 Timeline 和执行结果视图。 |
-| 检查点、上下文摘要、Provider 续跑状态、Memory 形成进度和生成结果 | Worker / Provider | 产品服务物化管理展示所需结果，Memory 管理配置仍由产品服务持有。 |
+| 检查点、上下文摘要、Provider 续跑状态、Memory 形成进度和生成结果 | Worker / Provider | 产品服务只物化管理展示所需结果；不保存或回传 Provider 私有续跑引用、检查点来驱动执行。Memory 管理配置仍由产品服务持有。 |
 | 用量结算、下一次调度时间、产品管理状态 | 对应产品业务服务 | 幂等消费原 Turn/occurrence 和版本对应的已提交事实。 |
 
 ![执行事实与产品视图一致性时序](assets/execution-consistency.svg)
@@ -224,10 +225,27 @@ Worker 是执行事实的唯一写入者。Server 管理产品中的 Timeline �
 | C5 | 准入响应丢失时使用原命令身份核对和重试，Worker 返回原受理结果或当前状态，避免重复执行。 |
 | C6 | 配置和 Goal/Loop 变更按版本提交并由 Worker 明确接受。更新不覆写活动 Turn 的检查点；影响当前执行须走原有控制/中断命令及其结果。 |
 | C7 | clear/delete 按授权操作、Session gate、历史代数及 tombstone 协同执行。晚到旧代事件不得恢复已删除内容。 |
-| C8 | Worker 启动、续跑、压缩和 Memory 形成只读取自身执行状态，不向 Server 获取历史 Session；Server 重建的是执行派生视图，不覆盖其独立配置或业务账本。 |
+| C8 | Worker 启动、续跑、压缩和 Memory 形成只读取自身执行状态，不向 Server 获取历史 Session、检查点或 Provider 续跑引用；Server 重建的是执行派生视图，不覆盖其独立配置或业务账本。 |
 
 补读和重建限于 Worker 已保留的历史及权限。数据已清理或游标过代时返回现有类型化错误，
 按明确的生命周期处理，不以空历史继续执行。此契约不增加逐事件 ACK、投递 outbox 或跨库事务协调器。
+
+### 执行权威与管理副本
+
+```text
+Server / 所属产品管理者                    Worker / Harness
+权限、路由、任务触发 ──类型化命令─────────> 准入、Session 锁、执行状态迁移
+产品历史与状态副本 <──已提交事件及游标───── 检查点、续跑、执行结算与持久化
+用量归账、后续调度                         本地历史与上下文
+```
+
+执行结算表示 Turn 等待输入或结束及其执行结果，只由 Worker 提交；产品结算表示消费这些事实后的用量归账、管理通知和调度进度，由所属产品服务幂等处理。
+Server 的活跃状态只是查询投影，不构成第二套执行状态机；最终准入、继续、取消和结束均由 Worker 校验并提交。
+Server 仍是账号、注册、任务定义等管理数据的 owner，因此“执行副本”不表示其全部产品数据都是副本。
+
+两侧共用同一 typed AgentEvent，允许执行库与产品库采用不同表结构。产品层展开事件字段、增加产品序号及入库时间，并派生查询视图；不得重新解释或改写原执行事实。
+Worker 表采用领域名称，独立数据库间允许同名，不要求 schema 相同；布局及命名见[执行子 Spec](execution-ownership.md#执行事实与产品投影的结构)。
+以上副本契约仅适用于所属产品管理者；个人 Desktop/TUI 的管理副本在本机，Server Relay 不因此取得其业务数据存储权。
 
 ## 架构决策
 
@@ -243,6 +261,7 @@ Worker 是执行事实的唯一写入者。Server 管理产品中的 Timeline �
 | A8 | 执行事实单写在 Worker，Server 产品 Timeline 为可补读的最终一致物化视图；产品配置、管理与结算仍由各自业务 owner 持有。 |
 | A9 | 抽取独立 talos-control-plane lib 归拢节点与托管管理，产品业务调度、Worker 执行和 Relay 转发各有其 owner。 |
 | A10 | 共享产品运行时、Worker 运行时、Server 控制面和控制面客户端明确分层。AppServer/TUI 复用产品持久化和业务调度，接入客户端与 Server 管理实现分开。 |
+| A11 | Worker 独占全部执行面；上层产品服务只提交命令、消费事实并管理自己的业务数据。内嵌 Worker 也保持此边界，不能因同进程部署把执行职责放回产品 Service。 |
 
 ## 技术决策
 
@@ -265,6 +284,8 @@ Worker 是执行事实的唯一写入者。Server 管理产品中的 Timeline �
 | T15 | 复用 TalosApplicationRuntime 和现有产品服务，复用 AgentNodeClient/AgentNodeRunner/RegisteredWorker 等客户端类型；从 ApplicationSyncHost/WorkerEnrollment 迁出宿主身份与接入职责，客户端不依赖控制面服务实现。 |
 | T16 | 内嵌/独立 Worker 共享服务、类型化接口及 Store 实现；每 Worker 自持实例、命名空间和数据，同 Worker 多入口共享状态/锁。已本地保存的节点能力及 Provider 私有产物沿用原后端，仅解除执行事实与进度的产品/远端依赖。 |
 | T17 | ConfigService 按字段与能力拆分窄端口：Llm/WebSearch 归节点，SessionMessageSendPolicy 归所属产品。复用原类型与配置 Store，产品策略不写入远端 Worker，也不引入平行配置系统。 |
+| T18 | 产品服务提交针对既有 Session/Turn/待处理操作的用户回复或控制命令；Worker 从本地查找并校验 Provider continuation 和检查点。Provider 私有续跑引用不作为产品持久化或回传的执行必需输入。 |
+| T19 | 产品执行视图仅从 Worker 已提交事实物化。删除已被替代的产品侧直接准入、执行进度和终态写入接口及其无用实现，保留产品自有命令、通知和幂等业务消费能力。 |
 
 ## 落地顺序与完成条件
 

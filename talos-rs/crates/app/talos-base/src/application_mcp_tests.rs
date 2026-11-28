@@ -19,7 +19,28 @@ pub(super) async fn available(runtime: &crate::TalosApplicationRuntime, server: 
         }
     })
     .await
-    .unwrap();
+    .unwrap_or_else(|_| {
+        let listed = runtime
+            .worker
+            .plugin_manager()
+            .list_mcp_servers(McpServerListRequest::default())
+            .unwrap();
+        let states = listed
+            .data
+            .iter()
+            .map(|server| {
+                let status = match &server.status {
+                    McpServerStatus::NotStarted => "notStarted".to_string(),
+                    McpServerStatus::Starting => "starting".to_string(),
+                    McpServerStatus::Ready => "ready".to_string(),
+                    McpServerStatus::Failed { error } => format!("failed({:?})", error.code),
+                    McpServerStatus::Exited { error } => format!("exited({:?})", error.code),
+                };
+                (server.name.as_str(), status)
+            })
+            .collect::<Vec<_>>();
+        panic!("MCP tool unavailable after 8s: server={server}, states={states:?}");
+    });
 }
 
 pub(super) fn save(config: &Config) {

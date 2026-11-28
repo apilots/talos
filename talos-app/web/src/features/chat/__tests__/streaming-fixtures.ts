@@ -489,6 +489,7 @@ export function activeTurn(overrides: Partial<ActiveTurnSnapshot> = {}): ActiveT
     identity: { sessionId: "sess-1", turnId: "turn-1" },
     initialMessageId: "msg-1",
     state: "running",
+    cancellationRequested: false,
     lastEventId: "ev_0",
     lastEventSeq: 0,
     lastSequence: 0,

@@ -9,7 +9,7 @@ use talos_agent_api::{
     AgentTurnRef, AgentTurnStarted, AgentUserContent,
 };
 
-async fn admit_turn(
+pub(crate) async fn admit_turn(
     store: &WorkerExecutionStore,
     scope: &AgentSessionContext,
     index: usize,
@@ -111,7 +111,7 @@ async fn admit_turn(
             .unwrap();
     }
 }
-fn scope() -> AgentSessionContext {
+pub(crate) fn scope() -> AgentSessionContext {
     AgentSessionContext {
         agent_id: "agent-1".into(),
         session_id: "session-1".into(),

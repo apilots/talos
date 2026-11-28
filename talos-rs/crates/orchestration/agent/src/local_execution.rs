@@ -1,6 +1,6 @@
-//! Optional durable AgentHarness decorator assembled by a Worker host.
+//! Worker-owned durable AgentHarness decorator assembled once by its host.
 //! The host exclusively opens and owns its WorkerExecutionStore namespace; the
-//! underlying Provider SPI and Harness core do not depend on product Session Stores.
+//! Harness core shares that store; neither it nor Provider SPI depends on product Stores.
 //! Every ingress must share this decorator and its original Harness instance.
 
 use crate::{AgentEventReducer, AgentHarness};
@@ -50,6 +50,87 @@ pub struct LocalExecutionHarness {
     store: Arc<WorkerExecutionStore>,
     active: Arc<Mutex<HashMap<(String, String), Running>>>,
     terminal_observer: Option<Arc<LocalTerminalObserver>>,
+    admission_gate: Arc<tokio::sync::RwLock<bool>>,
+    recording_tasks: tokio_util::task::TaskTracker,
+}
+
+pub(crate) struct WaitingRunState {
+    pub checkpoint: AgentRunCheckpoint,
+    pub continuation: talos_agent_api::AgentContinuationRef,
+}
+
+/// Restore only the exact locally waiting Turn, never caller-supplied Provider state.
+pub(crate) async fn waiting_run_state(
+    store: &WorkerExecutionStore,
+    params: &AgentRunParams,
+) -> TalosResult<Option<WaitingRunState>> {
+    match params.intent {
+        AgentRunIntent::Start => return Ok(None),
+        AgentRunIntent::RespondUserAction => {}
+    }
+    let identity = params.context.identity();
+    let state = store.execution_state(&params.context.session).await?;
+    if !state.is_some_and(|state| state.active_turn.as_ref() == Some(&identity)) {
+        return Err(TalosError::new(
+            ErrorCode::Conflict,
+            "Worker continuation is unavailable for this Turn.",
+        ));
+    }
+    let (event, settlement) = store.settlement(&identity).await?.ok_or_else(|| {
+        TalosError::new(ErrorCode::Conflict, "Worker continuation is unavailable.")
+    })?;
+    let (
+        AgentEventPayload::WaitingForInput(pending),
+        AgentExecutionSettlement::WaitingForInput { .. },
+    ) = (event.payload, settlement)
+    else {
+        return Err(TalosError::new(
+            ErrorCode::Conflict,
+            "Worker Turn is not waiting for a User action.",
+        ));
+    };
+    let continuation = store
+        .waiting_continuation(&params.context.session, &identity, event.sequence)
+        .await?;
+    let (action_id, response) = params.user_action_response().ok_or_else(|| {
+        TalosError::new(
+            ErrorCode::InvalidRequest,
+            "A waiting Turn requires one User action response.",
+        )
+    })?;
+    if action_id != pending.action_id() {
+        return Err(TalosError::new(
+            ErrorCode::Conflict,
+            "User action response does not match the waiting Worker Turn.",
+        ));
+    }
+    match pending {
+        talos_agent_api::AgentPendingInput::UserAction { action } => {
+            action.params.validate_response(response)?
+        }
+        talos_agent_api::AgentPendingInput::Message { .. } => {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Worker waiting input does not define a typed User action.",
+            ))
+        }
+    }
+    let checkpoint = store.checkpoint(&identity).await?.ok_or_else(|| {
+        TalosError::new(
+            ErrorCode::Conflict,
+            "Worker waiting checkpoint is unavailable.",
+        )
+    })?;
+    if checkpoint.last_sequence != event.sequence {
+        return Err(TalosError::new(
+            ErrorCode::Conflict,
+            "Worker waiting checkpoint does not match its settlement.",
+        ));
+    }
+    Ok(Some(WaitingRunState {
+        checkpoint,
+        continuation,
+    }))
 }
 
 impl LocalExecutionHarness {
@@ -59,6 +140,8 @@ impl LocalExecutionHarness {
             store,
             active: Default::default(),
             terminal_observer: None,
+            admission_gate: Arc::new(tokio::sync::RwLock::new(true)),
+            recording_tasks: tokio_util::task::TaskTracker::new(),
         }
     }
 
@@ -100,6 +183,14 @@ impl LocalExecutionHarness {
             admission: AgentAdmission {
                 events,
                 permit: AgentAdmissionPermit::new(async move {
+                    let gate = recorder.admission_gate.clone();
+                    let accepting = gate.read().await;
+                    if !*accepting {
+                        return Err(TalosError::new(
+                            ErrorCode::Cancelled,
+                            "Worker execution is stopping.",
+                        ));
+                    }
                     recorder
                         .store
                         .admit(&session, &command, original_events, &reducer.checkpoint())
@@ -137,7 +228,8 @@ impl LocalExecutionHarness {
                         let _ = settled_tx.send(result);
                         return Ok(());
                     }
-                    tokio::spawn(async move {
+                    let tasks = recorder.recording_tasks.clone();
+                    tasks.spawn(async move {
                         let context = match command {
                             AgentExecutionCommand::Run { params } => Some(params.context),
                             _ => None,
@@ -163,6 +255,7 @@ impl LocalExecutionHarness {
                             talos_logging::report_error(&error);
                         }
                     });
+                    drop(accepting);
                     Ok(())
                 }),
             },
@@ -245,14 +338,12 @@ impl LocalExecutionHarness {
                     }
                     if let Some(settlement) = committed.settlement {
                         let outcome = match settlement {
-                            AgentExecutionSettlement::WaitingForInput {
-                                continuation,
-                                metrics,
-                            } => AgentRunSettlement::WaitingForInput {
-                                event: committed.event,
-                                continuation,
-                                metrics,
-                            },
+                            AgentExecutionSettlement::WaitingForInput { metrics } => {
+                                AgentRunSettlement::WaitingForInput {
+                                    event: committed.event,
+                                    metrics,
+                                }
+                            }
                             AgentExecutionSettlement::Finished { metrics, .. } => {
                                 let result = match &committed.event.payload {
                                     AgentEventPayload::TurnFailed(failed) => {
@@ -377,26 +468,9 @@ impl AgentHarness for LocalExecutionHarness {
                 .await?
                 .map(|state| state.history_cursor)
                 .or_else(|| Some(Default::default()));
-            if params.continuation.is_some() {
-                let identity = params.context.identity();
-                let stored = self.store.settlement(&identity).await?.ok_or_else(|| {
-                    TalosError::new(ErrorCode::Conflict, "Worker continuation is unavailable.")
-                })?;
-                match stored.1 {
-                    AgentExecutionSettlement::WaitingForInput { continuation, .. }
-                        if Some(&continuation) == params.continuation.as_ref() =>
-                    {
-                        params.checkpoint = self.store.checkpoint(&identity).await?
-                    }
-                    _ => {
-                        return Err(TalosError::new(
-                            ErrorCode::Conflict,
-                            "Worker continuation no longer matches this Turn.",
-                        ))
-                    }
-                }
-            }
-            let checkpoint = params.checkpoint.clone();
+            let checkpoint = waiting_run_state(&self.store, &params)
+                .await?
+                .map(|state| state.checkpoint);
             let execution = self.inner.start(params).await?;
             self.record(session, command, execution, checkpoint)
         })
@@ -623,7 +697,33 @@ impl AgentHarness for LocalExecutionHarness {
     ) -> AgentFuture<'_, AgentResult<()>> {
         self.inner.close_session(session, expected)
     }
+    fn stop_execution(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + timeout;
+            *self.admission_gate.write().await = false;
+            self.inner
+                .stop_execution(deadline.saturating_duration_since(tokio::time::Instant::now()))
+                .await?;
+            self.recording_tasks.close();
+            tokio::time::timeout_at(deadline, self.recording_tasks.wait())
+                .await
+                .map_err(|source| {
+                    TalosError::from_source(
+                        ErrorCode::Timeout,
+                        "Worker execution facts did not finish committing.",
+                        source,
+                    )
+                })
+        })
+    }
+
     fn shutdown(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
-        self.inner.shutdown(timeout)
+        Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + timeout;
+            self.stop_execution(timeout).await?;
+            self.inner
+                .shutdown(deadline.saturating_duration_since(tokio::time::Instant::now()))
+                .await
+        })
     }
 }

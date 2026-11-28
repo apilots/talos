@@ -125,13 +125,53 @@ pub(crate) struct AgentExecutionDriver {
     inner_model: Option<Arc<crate::InnerModelClient>>,
     active: Arc<Mutex<HashMap<String, LiveExecution>>>,
     delivery_tasks: tokio_util::task::TaskTracker,
+    remote_observation_stop: tokio_util::sync::CancellationToken,
     message_queue: Option<SessionMessageQueueService>,
 }
 
 impl AgentExecutionDriver {
-    pub(crate) async fn drain_delivery(&self) {
+    pub(crate) fn begin_delivery_drain(&self) {
+        self.remote_observation_stop.cancel();
         self.delivery_tasks.close();
+    }
+
+    pub(super) fn delivery_is_stopping(&self) -> bool {
+        self.remote_observation_stop.is_cancelled()
+    }
+
+    fn ensure_accepting(&self) -> TalosResult<()> {
+        if self.delivery_is_stopping() {
+            return Err(TalosError::new(
+                ErrorCode::ServiceUnavailable,
+                "Product execution delivery is stopping.",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn track_admission(
+        &self,
+    ) -> TalosResult<tokio_util::task::task_tracker::TaskTrackerToken> {
+        self.ensure_accepting()?;
+        let admission = self.delivery_tasks.token();
+        self.ensure_accepting()?;
+        Ok(admission)
+    }
+
+    pub(crate) async fn drain_delivery(&self) {
+        self.begin_delivery_drain();
         self.delivery_tasks.wait().await;
+    }
+
+    pub(super) fn observation_stop(
+        &self,
+        execution_node_id: &str,
+    ) -> tokio_util::sync::CancellationToken {
+        if execution_node_id == "embedded" {
+            tokio_util::sync::CancellationToken::new()
+        } else {
+            self.remote_observation_stop.clone()
+        }
     }
 
     pub(crate) fn spawn_delivery(
@@ -165,6 +205,7 @@ impl AgentExecutionDriver {
             inner_model: None,
             active: Arc::new(Mutex::new(HashMap::new())),
             delivery_tasks: tokio_util::task::TaskTracker::new(),
+            remote_observation_stop: tokio_util::sync::CancellationToken::new(),
             message_queue: None,
         }
     }
@@ -234,10 +275,10 @@ impl AgentExecutionDriver {
         params.subagent_limit = subagent_limit;
         params.command = command.as_ref().map(command_identity);
         params.automation_origin = automation_origin.clone();
-        if params.checkpoint.is_some() || params.continuation.is_some() {
+        if params.intent != agent_protocol::AgentRunIntent::Start {
             self.remove_live_execution(&identity);
             return Err(TalosError::internal(
-                "fresh Agent execution cannot include continuation state",
+                "fresh Agent execution requires a start intent",
             ));
         }
         let scope = params.context.session.clone();
@@ -401,6 +442,7 @@ impl AgentExecutionDriver {
         command: Option<CommandLease>,
         queued_input: Option<QueuedRunningInput>,
     ) -> TalosResult<()> {
+        self.ensure_accepting()?;
         let identity = params.identity.clone();
         let active = self
             .active
@@ -455,25 +497,12 @@ impl AgentExecutionDriver {
         command: Option<CommandLease>,
     ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
         let identity = context.identity();
-        let (action_id, _response) = user_action_response(&input).ok_or_else(|| {
+        user_action_response(&input).ok_or_else(|| {
             TalosError::new(
                 ErrorCode::InvalidRequest,
                 "waiting Agent continuation requires one UserAction response",
             )
         })?;
-        let binding = self
-            .execution_store
-            .get_agent_continuation_binding(&identity)
-            .await?
-            .ok_or_else(|| {
-                TalosError::new(ErrorCode::Conflict, "Agent continuation binding is missing")
-            })?;
-        if action_id != binding.action_id {
-            return Err(TalosError::new(
-                ErrorCode::Conflict,
-                "UserAction response does not match the durable continuation",
-            ));
-        }
         self.begin_admission(identity.clone()).await?;
         let execution = match self
             .coordinator
@@ -483,8 +512,7 @@ impl AgentExecutionDriver {
                 automation_origin: None,
                 context: context.clone(),
                 input,
-                checkpoint: None,
-                continuation: Some(binding.provider_ref),
+                intent: agent_protocol::AgentRunIntent::RespondUserAction,
             })
             .await
         {
@@ -526,6 +554,7 @@ impl AgentExecutionDriver {
     }
 
     async fn begin_admission(&self, identity: AgentTurnRef) -> TalosResult<()> {
+        self.ensure_accepting()?;
         let previous = self
             .active
             .lock()

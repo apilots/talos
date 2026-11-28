@@ -157,7 +157,7 @@ impl TurnService {
         reservation: MessageQueueReservation,
     ) -> TalosResult<StartTurnResponse> {
         let service = self.clone();
-        super::await_admission(async move {
+        super::await_admission(self.execution.track_admission()?, async move {
             service
                 .submit_queue_reservation_owned(session, reservation)
                 .await
@@ -308,7 +308,7 @@ impl TurnService {
         if !matches!(
             active_turn,
             Some(ref active)
-                if active.identity.turn_id == turn_id && active.state == ActiveTurnState::Running
+                if active.identity.turn_id == turn_id && active.state == ActiveTurnState::Running && !active.cancellation_requested
         ) {
             self.message_queue.release(reservation)?;
             return Err(TalosError::new(

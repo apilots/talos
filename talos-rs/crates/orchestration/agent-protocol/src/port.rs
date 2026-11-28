@@ -158,6 +158,18 @@ pub trait AgentHarness: Send + Sync {
         memory_unavailable()
     }
 
+    /// Local Worker-host phase: stop admission and settle active execution while
+    /// retaining Provider resources and authorized committed-fact reads.
+    /// Remote clients do not own this phase and expose no transport operation for it.
+    fn stop_execution(&self, _timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(async {
+            Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Local Worker execution stopping is unavailable.",
+            ))
+        })
+    }
+
     /// Stop admission and release all Harness/Provider process resources.
     fn shutdown(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>>;
 }

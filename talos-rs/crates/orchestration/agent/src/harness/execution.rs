@@ -21,6 +21,16 @@ use crate::{
     AgentSession, SessionTurnInputReceiver, SessionTurnParams,
 };
 
+struct AdmittedInvocation {
+    params: AgentRunParams,
+    continuation: Option<talos_agent_api::AgentContinuationRef>,
+    control: Arc<ActiveRunControl>,
+    pipeline: AgentEventPipeline,
+    provider_sink: AgentEventSink,
+    start_rx: oneshot::Receiver<()>,
+    settlement_tx: oneshot::Sender<AgentResult<AgentRunSettlement>>,
+}
+
 impl<P> Harness<P>
 where
     P: AgentProvider,
@@ -29,16 +39,23 @@ where
     pub async fn start(&self, params: AgentRunParams) -> AgentResult<AgentRunExecution> {
         params.validate()?;
         self.validate_agent_id(&params.context.session.agent_id)?;
-        if params.continuation.is_some() {
+        if params.intent == agent_protocol::AgentRunIntent::RespondUserAction {
             self.validate_continuation_input_capabilities(&params.input)?;
         } else {
             self.validate_fresh_input_capabilities(&params.input)?;
         }
+        let restored =
+            crate::local_execution::waiting_run_state(&self.inner.execution_store, &params).await?;
+        let (checkpoint, continuation) = match restored {
+            Some(state) => (Some(state.checkpoint), Some(state.continuation)),
+            None => (None, None),
+        };
         let identity = params.context.identity();
         let control = Arc::new(ActiveRunControl::new(identity.clone()));
         self.reserve(&identity, control.clone())?;
 
-        let pipeline_result = match params.checkpoint.clone() {
+        let fresh = checkpoint.is_none();
+        let pipeline_result = match checkpoint {
             Some(checkpoint) => AgentEventPipeline::resumed(identity.clone(), checkpoint),
             None => Ok(AgentEventPipeline::fresh(identity.clone())),
         };
@@ -50,7 +67,7 @@ where
             }
         };
         let mut admission_events = Vec::new();
-        if params.checkpoint.is_none() {
+        if fresh {
             match pipeline
                 .record(AgentEventPayload::TurnStarted(AgentTurnStarted {}))
                 .await
@@ -83,14 +100,15 @@ where
         let harness = self.clone();
         let task = tokio::spawn(async move {
             harness
-                .drive_invocation(
+                .drive_invocation(AdmittedInvocation {
                     params,
+                    continuation,
                     control,
                     pipeline,
                     provider_sink,
                     start_rx,
                     settlement_tx,
-                )
+                })
                 .await;
         });
         drop(task);
@@ -158,15 +176,16 @@ where
         Ok(interrupt_outcome(&settlement))
     }
 
-    async fn drive_invocation(
-        self,
-        params: AgentRunParams,
-        control: Arc<ActiveRunControl>,
-        pipeline: AgentEventPipeline,
-        provider_sink: AgentEventSink,
-        start_rx: oneshot::Receiver<()>,
-        settlement_tx: oneshot::Sender<AgentResult<AgentRunSettlement>>,
-    ) {
+    async fn drive_invocation(self, invocation: AdmittedInvocation) {
+        let AdmittedInvocation {
+            params,
+            continuation,
+            control,
+            pipeline,
+            provider_sink,
+            start_rx,
+            settlement_tx,
+        } = invocation;
         let identity = params.context.identity();
         tokio::select! {
             biased;
@@ -208,7 +227,7 @@ where
         }
 
         let session_context = params.context.session.clone();
-        let session = match self.session(session_context, &control).await {
+        let session = match self.session(session_context.clone(), &control).await {
             Ok(session) => session.session,
             Err(error) => {
                 let result = if error.is_code(talos_error::ErrorCode::RunCleanupUnconfirmed) {
@@ -224,7 +243,7 @@ where
         let turn = SessionTurnParams {
             context: params.context,
             initial_input: params.input,
-            continuation: params.continuation,
+            continuation,
             input: input_receiver,
             events: provider_sink,
             control: AgentOperationControl::from_run_control(&control),
@@ -315,7 +334,15 @@ where
         } else {
             match provider_result {
                 Ok(Ok(completion)) => match self.validate_turn_result_capabilities(&completion) {
-                    Ok(()) => settle_provider_completion(&pipeline, completion).await,
+                    Ok(()) => {
+                        settle_provider_completion(
+                            &pipeline,
+                            completion,
+                            &self.inner.execution_store,
+                            &session_context,
+                        )
+                        .await
+                    }
                     Err(error) => settle_failure(&pipeline, error).await,
                 },
                 Ok(Err(error)) => settle_failure(&pipeline, error).await,

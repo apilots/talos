@@ -417,11 +417,12 @@ async fn test_compact_session_handler_returns_session_payload() {
 #[tokio::test]
 async fn test_compact_session_handler_maps_active_turn_to_conflict() {
     let execution_store = test_agent_execution_store().await;
-    seed_running_agent_execution(execution_store.as_ref(), "mock-session", "turn-running").await;
+    let worker_fixture = running_agent_events("mock-session", "turn-running").await;
     let state = test_state_with_event_store_and_agent_execution_store(
         false,
         execution_store.clone(),
         execution_store,
+        Some(worker_fixture),
     )
     .await;
 
@@ -973,6 +974,7 @@ async fn project_list_http_and_rpc_filter_retained_projects_by_actor_and_compute
             auth_disabled: false,
             lifecycle: Arc::new(ServerLifecycle::new()),
             config_store: None,
+            worker_fixture: None,
         },
         store,
         Arc::new(projects),

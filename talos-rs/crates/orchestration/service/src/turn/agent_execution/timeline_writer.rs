@@ -13,19 +13,26 @@ impl AgentExecutionDriver {
         mut inputs: mpsc::Receiver<RunningInputCommit>,
         settlement: AgentRunSettlementReceiver,
         _tail: (i64, u64),
-    ) -> TalosResult<AgentRunSettlement> {
+        observation_stop: tokio_util::sync::CancellationToken,
+    ) -> TalosResult<Option<AgentRunSettlement>> {
         if let Err(error) = self.project_worker(&active.session).await {
-            return self.recover_failed_execution(&active, 0, &error).await;
+            return self
+                .recover_failed_execution(&active, 0, &error)
+                .await
+                .map(Some);
         }
         let mut batch = Vec::with_capacity(64);
         let mut inputs_open = true;
         let mut deliveries = tokio::task::JoinSet::new();
+        let mut detached = false;
         loop {
             tokio::select! {
+                biased;
+                _ = observation_stop.cancelled() => { detached = true; break; }
                 count = events.recv_many(&mut batch, 64) => {
                     batch.clear();
                     if count == 0 { break; }
-                    if let Err(error) = self.project_worker(&active.session).await { return self.recover_failed_execution(&active, 0, &error).await; }
+                    if let Err(error) = self.project_worker(&active.session).await { return self.recover_failed_execution(&active, 0, &error).await.map(Some); }
                 }
                 input = inputs.recv(), if inputs_open => match input {
                     Some(mut input) => {
@@ -57,12 +64,25 @@ impl AgentExecutionDriver {
                 TalosError::internal_with_source("Product input projection task failed.", error)
             })??;
         }
-        let settlement = match settlement.recv().await {
+        if detached {
+            return Ok(None);
+        }
+        let received = tokio::select! {
+            biased;
+            _ = observation_stop.cancelled() => return Ok(None),
+            received = settlement.recv() => received,
+        };
+        let settlement = match received {
             Ok(settlement) => settlement,
-            Err(error) => return self.recover_failed_execution(&active, 0, &error).await,
+            Err(error) => {
+                return self
+                    .recover_failed_execution(&active, 0, &error)
+                    .await
+                    .map(Some)
+            }
         };
         self.project_worker(&active.session).await?;
-        Ok(settlement)
+        Ok(Some(settlement))
     }
 
     /// The same writer finalizes title delivery after live or recovered settlement.

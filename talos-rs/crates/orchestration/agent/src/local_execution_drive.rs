@@ -200,14 +200,9 @@ impl LocalExecutionHarness {
         }
         let result = settlement.recv().await?;
         let (event, persisted) = match &result {
-            AgentRunSettlement::WaitingForInput {
-                event,
-                continuation,
-                metrics,
-            } => (
+            AgentRunSettlement::WaitingForInput { event, metrics } => (
                 event.clone(),
                 AgentExecutionSettlement::WaitingForInput {
-                    continuation: continuation.clone(),
                     metrics: metrics.clone(),
                 },
             ),

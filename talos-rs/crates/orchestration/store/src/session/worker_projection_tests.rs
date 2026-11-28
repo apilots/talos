@@ -6,7 +6,7 @@ use talos_agent_api::{
     AgentEvent, AgentMessage, AgentMessageRole, AgentMessageStatus, AgentRunMetrics,
     AgentStopReason, AgentTurnCompleted, AgentTurnRef, AgentTurnStarted,
 };
-use talos_storage::SqliteStorage;
+use talos_storage::{SqliteStorage, Storage};
 use talos_types::talos::{SessionSourceProvider, SessionSourceType};
 use talos_types::{SessionConf, SessionUsage};
 
@@ -466,3 +466,297 @@ mod worker_title_tests;
 
 #[path = "worker_projection_read_tests.rs"]
 mod read_tests;
+
+#[tokio::test]
+async fn private_reference_upgrade_preserves_receipts_and_accepts_canonical_overlap() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Arc::new(
+        SqliteStorage::new_with_max_connections(dir.path().join("legacy.db").to_str().unwrap(), 1)
+            .await
+            .unwrap(),
+    );
+    let migrations = sqlx::migrate::Migrator::new(test_migrations_dir())
+        .await
+        .unwrap();
+    let prior = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            migrations
+                .iter()
+                .filter(|entry| entry.version < 202611280007)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    prior.run(db.pool()).await.unwrap();
+    let s = DatabaseSessionStore::new(db.clone()).await.unwrap();
+    s.insert_session_record(&session_record()).await.unwrap();
+    let mut events = admission();
+    let mut waiting = fact(
+        14,
+        3,
+        AgentEventPayload::WaitingForInput(talos_agent_api::AgentPendingInput::Message {
+            action_id: "action-1".into(),
+            prompt: "Continue?".into(),
+        }),
+    );
+    waiting.settlement = Some(AgentExecutionSettlement::WaitingForInput {
+        metrics: AgentRunMetrics::default(),
+    });
+    events.push(waiting);
+    let command = agent_protocol::AgentCommandIdentity {
+        command: talos_types::IdempotentCommand::TurnSubmission,
+        idempotency_key: "stable".into(),
+        request_id: "request-1".into(),
+    };
+    let model = talos_types::ModelRef {
+        provider: "provider".into(),
+        id: "model".into(),
+    };
+    events[1].command = Some(command.clone());
+    events[1].execution_model = Some(model.clone());
+    let mut tx = db.begin_transaction().await.unwrap();
+    let records = crate::session::agent_execution::record::append_events(
+        tx.as_mut(),
+        events.iter().map(|fact| fact.event.clone()).collect(),
+    )
+    .await
+    .unwrap();
+    for (fact, record) in events.iter().zip(records) {
+        let legacy = fact
+            .settlement
+            .as_ref()
+            .map(|settlement| {
+                let mut json = serde_json::to_value(settlement).unwrap();
+                json["continuation"] = serde_json::json!({"opaqueId":"legacy-provider-secret"});
+                json.to_string()
+            })
+            .unwrap_or_else(|| "null".into());
+        let mut legacy_envelope = serde_json::to_value(fact).unwrap();
+        legacy_envelope["settlement"] = serde_json::from_str(&legacy).unwrap();
+        let fingerprint = if fact.settlement.is_some() {
+            format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_string(&legacy_envelope).unwrap().as_bytes())
+            )
+        } else {
+            format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_string(fact).unwrap().as_bytes())
+            )
+        };
+        tx.execute("INSERT INTO worker_event_projection(session_id,history_generation,worker_offset,product_event_seq,event_fingerprint,settlement_json,command_json,execution_model_json,execution_purpose) VALUES ('session-1',0,?,?,?,?,?,?,?)", &[&fact.cursor.offset.to_string(), &record.event_seq.to_string(), &fingerprint, &legacy, &serde_json::to_string(&fact.command).unwrap(), &serde_json::to_string(&fact.execution_model).unwrap(), &serde_json::to_string(&fact.execution_purpose).unwrap()]).await.unwrap();
+    }
+    tx.execute(
+        "INSERT INTO worker_projection_cursors VALUES ('session-1','embedded',0,14)",
+        &[],
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    run_migrations(db.pool(), &test_migrations_dir())
+        .await
+        .unwrap();
+    let commit = s
+        .project_worker_events(params(events.clone()))
+        .await
+        .unwrap();
+    assert!(commit.events.is_empty());
+    assert_eq!(commit.cursor, events.last().unwrap().cursor);
+    let pending = s.pending_worker_settlements("session-1").await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].settlement, events[2].settlement.clone().unwrap());
+    assert_eq!(pending[0].command, Some(command));
+    assert_eq!(pending[0].execution_model, Some(model));
+    let receipt: String = sqlx::query_scalar(
+        "SELECT settlement_json FROM worker_event_projection WHERE worker_offset=14",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(!receipt.contains("continuation"));
+    assert!(!receipt.contains("legacy-provider-secret"));
+    let binding_tables: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name='agent_continuation_bindings'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(binding_tables, 0);
+    s.complete_worker_settlement(&pending[0].cursor)
+        .await
+        .unwrap();
+    assert!(s.delete_session_record("session-1").await.unwrap());
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM visible_agent_events WHERE session_id='session-1'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(remaining, 0);
+}
+
+#[tokio::test]
+async fn overlap_rejects_changed_business_metadata_and_optional_provenance() {
+    use talos_agent_api::trajectory::SessionHistorySupplement;
+    let (s, _dir) = store().await;
+    let mut events = admission();
+    events[1].command = Some(agent_protocol::AgentCommandIdentity {
+        command: talos_types::IdempotentCommand::TurnSubmission,
+        idempotency_key: "stable".into(),
+        request_id: "request-1".into(),
+    });
+    events[1].execution_model = Some(talos_types::ModelRef {
+        provider: "provider".into(),
+        id: "model".into(),
+    });
+    events[1].automation_input = Some(talos_types::AutomationInputOrigin {
+        message_id: "message-1".into(),
+        origin: talos_types::AutomationTurnOrigin::Goal {
+            goal_id: "goal-1".into(),
+            objective_revision: 1,
+        },
+    });
+    let mut terminal = fact(
+        14,
+        3,
+        AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: AgentStopReason::EndTurn,
+        }),
+    );
+    terminal.history_supplement = Some(SessionHistorySupplement {
+        identity: terminal.event.identity.clone(),
+        clock_segments: vec![],
+        requests: vec![],
+        tools: vec![],
+        payloads: Default::default(),
+    });
+    events.push(terminal);
+    s.project_worker_events(params(events.clone()))
+        .await
+        .unwrap();
+    assert!(s
+        .project_worker_events(params(events.clone()))
+        .await
+        .unwrap()
+        .events
+        .is_empty());
+    for variant in 0..10 {
+        let mut changed = events.clone();
+        match variant {
+            0 => changed[1].command.as_mut().unwrap().request_id = "changed".into(),
+            1 => changed[1].execution_model.as_mut().unwrap().id = "changed".into(),
+            2 => changed[2].execution_purpose = agent_protocol::AgentExecutionPurpose::Compaction,
+            3 => changed[2].history_supplement = None,
+            4 => changed[1].automation_input = None,
+            5 => changed[0].automation_input = events[1].automation_input.clone(),
+            6 => changed[1].automation_input.as_mut().unwrap().message_id = "changed".into(),
+            7 => changed[0].event.identity.turn_id = "changed".into(),
+            8 => changed[2].event.occurred_at += 1,
+            9 => {
+                let Some(AgentExecutionSettlement::Finished {
+                    metrics,
+                    memory_usage,
+                }) = &mut changed[2].settlement
+                else {
+                    unreachable!()
+                };
+                metrics.usage.total_tokens = 99;
+                memory_usage.push(agent_protocol::AgentMemoryModelUsage {
+                    request_id: "memory".into(),
+                    model_ref: talos_types::ModelRef {
+                        provider: "provider".into(),
+                        id: "memory".into(),
+                    },
+                    usage: talos_types::TokenUsage::default(),
+                    completed_at: 10,
+                    timezone: "UTC".into(),
+                });
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            s.project_worker_events(params(changed))
+                .await
+                .unwrap_err()
+                .is_code(ErrorCode::Conflict),
+            "variant {variant}"
+        );
+    }
+    assert_eq!(
+        s.worker_event_cursor("session-1").await.unwrap(),
+        Some(events[2].cursor.clone())
+    );
+    assert_eq!(
+        s.list_agent_turn_events(&events[0].event.identity, 10)
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+    assert!(s
+        .project_worker_events(params(events))
+        .await
+        .unwrap()
+        .events
+        .is_empty());
+}
+
+#[tokio::test]
+async fn product_goal_binding_does_not_change_the_original_worker_provenance() {
+    use crate::automation::goal_loop::DatabaseAutomationStore;
+    use talos_types::{AutomationTurnOrigin, GoalStatus, SessionGoal};
+    let (s, _dir) = store().await;
+    let events = admission();
+    s.project_worker_events(params(events.clone()))
+        .await
+        .unwrap();
+    let goal = SessionGoal {
+        id: "goal-1".into(),
+        session_id: "session-1".into(),
+        objective: "Finish".into(),
+        objective_revision: 1,
+        status: GoalStatus::Active,
+        pause_reason: None,
+        reason: None,
+        token_budget: None,
+        tokens_used: 0,
+        latest_turn_id: None,
+        completion_evidence: None,
+        created_at: 10,
+        updated_at: 10,
+    };
+    let automation = DatabaseAutomationStore::new(s.storage.clone());
+    automation
+        .create_goal(&goal, Some(&events[0].event.identity))
+        .await
+        .unwrap();
+    let origin = AutomationTurnOrigin::Goal {
+        goal_id: goal.id.clone(),
+        objective_revision: goal.objective_revision,
+    };
+    assert_eq!(
+        automation.origin(&events[0].event.identity).await.unwrap(),
+        Some(origin.clone())
+    );
+    assert!(s
+        .project_worker_events(params(events.clone()))
+        .await
+        .unwrap()
+        .events
+        .is_empty());
+    let mut changed = events.clone();
+    changed[1].automation_input = Some(talos_types::AutomationInputOrigin {
+        message_id: "message-1".into(),
+        origin,
+    });
+    assert!(s
+        .project_worker_events(params(changed))
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
+    assert_eq!(
+        s.worker_event_cursor("session-1").await.unwrap(),
+        Some(events[1].cursor.clone())
+    );
+}

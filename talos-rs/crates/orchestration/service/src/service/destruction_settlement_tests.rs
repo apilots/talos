@@ -97,8 +97,7 @@ impl Fixture {
                 subagent_limit: None,
                 command: None,
                 automation_origin: None,
-                checkpoint: None,
-                continuation: None,
+                intent: agent_protocol::AgentRunIntent::Start,
             }),
         };
         let mut reducer = talos_agent::AgentEventReducer::new(identity.clone());

@@ -110,7 +110,7 @@ pub(crate) async fn cut_from_row(
     let command_tail = super::command_tail(tx, session_id, generation).await?;
     let active = tx
         .query(
-            "SELECT * FROM agent_active_turns WHERE session_id = ?",
+            "SELECT active.*, event.payload_json AS active_payload_json FROM agent_active_turns active LEFT JOIN visible_agent_events event ON event.event_seq=active.last_event_seq WHERE active.session_id = ?",
             &[session_id],
         )
         .await?

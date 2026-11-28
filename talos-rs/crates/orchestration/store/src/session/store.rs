@@ -671,12 +671,6 @@ impl SessionStore for DatabaseSessionStore {
 
         transaction
             .execute(
-                "DELETE FROM agent_continuation_bindings WHERE session_id = ?",
-                &[session_id],
-            )
-            .await?;
-        transaction
-            .execute(
                 "DELETE FROM agent_command_idempotency WHERE session_id = ?",
                 &[session_id],
             )

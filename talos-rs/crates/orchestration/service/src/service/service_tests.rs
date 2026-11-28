@@ -47,6 +47,7 @@ pub(super) enum TestAgentExecutionMode {
     },
     StartTimeout,
     StartFailed,
+    StartActiveTurn,
     WorkerStateBlocked,
     WorkerStateUnavailable,
     WorkerStateActive,
@@ -436,6 +437,12 @@ impl AgentCoordinator for TestExecutionCoordinator {
             TestAgentExecutionMode::StartFailed => {
                 return Err(TalosError::internal("injected Agent start failure"));
             }
+            TestAgentExecutionMode::StartActiveTurn => {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::ActiveTurnRunning,
+                    "Worker admission is held by an active Turn.",
+                ));
+            }
             TestAgentExecutionMode::Accepted
             | TestAgentExecutionMode::LostAcceptedConfirmation
             | TestAgentExecutionMode::WorkerStateBlocked
@@ -694,9 +701,13 @@ async fn test_application_with_worker_storage(
         Some(environment) => crate::test_support::with_worker_environment(coordinator, environment),
         None => crate::test_support::with_environment(coordinator, config.clone()),
     };
-    let (durable, journal) = crate::test_worker::durable_with_store_and_confirmation(
+    let (durable, journal) = crate::test_worker::durable_with_store_and_fault(
         coordinator.clone(),
-        lose_confirmation,
+        Arc::new(Mutex::new(if lose_confirmation {
+            crate::test_worker::AdmissionFault::AfterCommit
+        } else {
+            crate::test_worker::AdmissionFault::None
+        })),
     )
     .await;
     let coordinator = if fault_injected_worker {
@@ -1134,13 +1145,15 @@ async fn seed_worker_fixture(
     service: &TalosService,
     product: &DatabaseSessionStore,
     journal: &talos_store::execution::WorkerExecutionStore,
-    session_id: &str,
+    events: Vec<talos_agent_api::AgentEvent>,
+    continuation: Option<talos_agent_api::AgentContinuationRef>,
 ) {
-    crate::test_worker::seed_product_history(
+    crate::test_worker::seed_worker_events(
         service.sessions.as_ref(),
         product,
         journal,
-        session_id,
+        events,
+        continuation,
     )
     .await;
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::commit_test_running_turn;
 use talos_agent_api::{ActiveTurnState, AgentTurnRef};
 
 #[tokio::test]
@@ -6,8 +7,13 @@ async fn waiting_continuation_survives_manager_restart_without_reissuing_input()
     let execution = Arc::new(RecordingAgentExecution::default());
     let (service, _, store, _) = test_service(execution.clone()).await;
     create_test_session_record(store.clone()).await;
-    insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
-    seed_worker_fixture(&service, store.as_ref(), execution.as_ref()).await;
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        execution.as_ref(),
+        pending_dynamic_action_events(Some("tool-original")),
+    )
+    .await;
     let active = store.get_agent_active_turn("s1").await.unwrap().unwrap();
     service
         .recover_active_turn(test_session(), active)
@@ -72,10 +78,11 @@ async fn product_history_without_worker_facts_cannot_manufacture_a_terminal() {
     .unwrap();
     let admitted = commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
     let failure = service
-        .recover_active_turn(test_session(), admitted.active_turn)
+        .recover_active_turn(test_session(), admitted.active_turn.unwrap())
         .await
         .unwrap_err();
-    assert!(failure.is_code(talos_error::ErrorCode::ServiceUnavailable));
+    // The Worker rejects a product cursor that has no matching execution facts.
+    assert_eq!(failure.error_code(), talos_error::ErrorCode::InvalidCursor);
     assert!(store
         .get_latest_agent_terminal_event("s1")
         .await

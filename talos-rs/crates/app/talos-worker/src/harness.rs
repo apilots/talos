@@ -133,6 +133,10 @@ impl AgentHarness for WorkerHarness {
         self.execution
             .close_session(context, expected_history_cursor)
     }
+    fn stop_execution(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
+        self.execution.stop_execution(timeout)
+    }
+
     fn shutdown(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
         self.execution.shutdown(timeout)
     }

@@ -328,8 +328,10 @@ pub fn exit_with_error(context: &str, error: TalosError) -> ! {
     std::process::exit(1);
 }
 
-/// Drains product delivery before subscriptions close; runtime owns execution teardown.
+/// Stops local execution and drains product delivery before subscriptions close.
+/// The runtime alone owns final Coordinator and Provider teardown.
 struct ProductDeliveryDrain {
+    worker: talos_worker::TalosWorker,
     service: Arc<TalosService>,
     automation: Automation,
 }
@@ -338,6 +340,9 @@ struct ProductDeliveryDrain {
 impl BackgroundTaskDrain for ProductDeliveryDrain {
     async fn drain(&self, timeout: Duration) -> TalosResult<()> {
         let result = self.automation.shutdown().await;
+        self.service.begin_execution_drain();
+        let result =
+            application_automation::combine(result, self.worker.stop_execution(timeout).await);
         application_automation::combine(
             result,
             application_automation::drain_product_delivery(&self.service, timeout).await,
@@ -397,6 +402,7 @@ async fn run_json_rpc_stdio_after_startup(
     let app = Arc::new(
         talos_app_server::TalosApplicationAdapter::new(service.clone(), replay_limit)
             .with_drain_provider(Box::new(ProductDeliveryDrain {
+                worker: runtime.worker.clone(),
                 service: service.clone(),
                 automation: runtime.automation.clone(),
             }))

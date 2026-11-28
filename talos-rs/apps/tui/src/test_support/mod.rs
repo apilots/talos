@@ -716,6 +716,7 @@ impl GatewayClient for MockGatewayClient {
             automation_input,
             identity: AgentTurnRef::new(session_id, turn_id),
             state: ActiveTurnState::Running,
+            cancellation_requested: false,
             last_event_id: "ev_0".to_string(),
             updated_at: 0,
         }))

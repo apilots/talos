@@ -1,7 +1,10 @@
 //! Test composition reuses the production Worker journal instead of a product-side writer.
 use agent_protocol::*;
 use async_trait::async_trait;
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_error::TalosResult;
 use talos_store::session::{AgentExecutionStore, SessionStore};
@@ -47,11 +50,20 @@ impl AgentHarness for CoordinatorHarness {
         Box::pin(self.0.shutdown(timeout))
     }
 }
+/// Select one fault for the next paused start; consuming it restores healthy delivery.
+#[derive(Default)]
+pub(crate) enum AdmissionFault {
+    #[default]
+    None,
+    BeforeCommit,
+    AfterCommit,
+}
+
 struct DurableCoordinator {
     delegate: Arc<dyn AgentCoordinator>,
     harness: Arc<dyn AgentHarness>,
     _directory: tempfile::TempDir,
-    lose_next_ack: std::sync::atomic::AtomicBool,
+    admission_fault: Arc<Mutex<AdmissionFault>>,
 }
 #[async_trait]
 impl AgentCoordinator for DurableCoordinator {
@@ -95,23 +107,34 @@ impl AgentCoordinator for DurableCoordinator {
     }
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         let mut execution = self.harness.start(params).await?;
-        if self
-            .lose_next_ack
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
-        {
-            let permit = std::mem::replace(
-                &mut execution.admission.permit,
-                AgentAdmissionPermit::new(async { Ok(()) }),
-            );
-            execution.admission.permit = AgentAdmissionPermit::new(async move {
-                permit.consume().await?;
-                Err(AgentAdmissionUnconfirmed::wrap(
-                    talos_error::TalosError::new(
-                        talos_error::ErrorCode::ServiceUnavailable,
-                        "Worker admission confirmation disconnected.",
-                    ),
-                ))
-            });
+        let fault = std::mem::take(&mut *self.admission_fault.lock().unwrap());
+        match fault {
+            AdmissionFault::None => {}
+            AdmissionFault::BeforeCommit => {
+                execution.admission.permit = AgentAdmissionPermit::new(async {
+                    Err(AgentAdmissionUnconfirmed::wrap(
+                        talos_error::TalosError::new(
+                            talos_error::ErrorCode::ServiceUnavailable,
+                            "Commit delivery disconnected.",
+                        ),
+                    ))
+                });
+            }
+            AdmissionFault::AfterCommit => {
+                let permit = std::mem::replace(
+                    &mut execution.admission.permit,
+                    AgentAdmissionPermit::new(async { Ok(()) }),
+                );
+                execution.admission.permit = AgentAdmissionPermit::new(async move {
+                    permit.consume().await?;
+                    Err(AgentAdmissionUnconfirmed::wrap(
+                        talos_error::TalosError::new(
+                            talos_error::ErrorCode::ServiceUnavailable,
+                            "Worker admission confirmation disconnected.",
+                        ),
+                    ))
+                });
+            }
         }
         Ok(execution)
     }
@@ -158,12 +181,12 @@ pub(crate) async fn durable_with_store(
     Arc<dyn AgentCoordinator>,
     Arc<talos_store::execution::WorkerExecutionStore>,
 ) {
-    durable_with_store_and_confirmation(coordinator, false).await
+    durable_with_store_and_fault(coordinator, Arc::default()).await
 }
 
-pub(crate) async fn durable_with_store_and_confirmation(
+pub(crate) async fn durable_with_store_and_fault(
     coordinator: Arc<dyn AgentCoordinator>,
-    lose_confirmation: bool,
+    admission_fault: Arc<Mutex<AdmissionFault>>,
 ) -> (
     Arc<dyn AgentCoordinator>,
     Arc<talos_store::execution::WorkerExecutionStore>,
@@ -182,48 +205,35 @@ pub(crate) async fn durable_with_store_and_confirmation(
                 store.clone(),
             )),
             _directory: directory,
-            lose_next_ack: std::sync::atomic::AtomicBool::new(lose_confirmation),
+            admission_fault,
         }),
         store,
     )
 }
 
-pub(crate) async fn seed_product_history(
+/// Write an explicit fixture source into the Worker before projecting its committed page.
+pub(crate) async fn seed_worker_events(
     sessions: &crate::session::SessionService,
     product: &talos_store::session::DatabaseSessionStore,
     journal: &talos_store::execution::WorkerExecutionStore,
-    session_id: &str,
-) {
+    events: Vec<talos_agent_api::AgentEvent>,
+    continuation: Option<talos_agent_api::AgentContinuationRef>,
+) -> Vec<talos_store::session::AgentEventRecord> {
+    let identity = events
+        .first()
+        .expect("Worker fixture events")
+        .identity
+        .clone();
     let session = product
-        .get_session_record(session_id)
+        .get_session_record(&identity.session_id)
         .await
         .unwrap()
         .unwrap();
-    let events = product
-        .list_agent_events_after(&session.id, None, 1000)
-        .await
-        .unwrap();
-    if events.is_empty() {
-        return;
-    }
-    let identity = events[0].identity.clone();
-    let existing = journal.checkpoint(&identity).await.unwrap();
     let context = sessions
         .build_agent_context(&session, identity.clone())
         .await
         .unwrap();
-    let input = events
-        .iter()
-        .find_map(|event| match &event.payload {
-            talos_agent_api::AgentEventPayload::MessageCompleted(message)
-                if message.role == talos_agent_api::AgentMessageRole::User =>
-            {
-                Some(message.clone())
-            }
-            _ => None,
-        })
-        .unwrap();
-    let split=events.iter().position(|event|matches!(&event.payload,talos_agent_api::AgentEventPayload::MessageCompleted(message) if message.message_id==input.message_id)).unwrap()+1;
+    let existing = journal.checkpoint(&identity).await.unwrap();
     let last_sequence = existing.as_ref().map(|checkpoint| checkpoint.last_sequence);
     let mut reducer = match existing {
         Some(checkpoint) => {
@@ -231,17 +241,20 @@ pub(crate) async fn seed_product_history(
         }
         None => talos_agent::AgentEventReducer::new(identity.clone()),
     };
-
-    if last_sequence.is_none() {
-        let admission = events[..split]
+    let split = if last_sequence.is_none() {
+        let (index, input) = events
             .iter()
-            .map(|event| talos_agent_api::AgentEvent {
-                identity: event.identity.clone(),
-                sequence: event.sequence,
-                occurred_at: event.occurred_at,
-                payload: event.payload.clone(),
+            .enumerate()
+            .find_map(|(index, event)| match &event.payload {
+                talos_agent_api::AgentEventPayload::MessageCompleted(message)
+                    if message.role == talos_agent_api::AgentMessageRole::User =>
+                {
+                    Some((index + 1, message.clone()))
+                }
+                _ => None,
             })
-            .collect::<Vec<_>>();
+            .expect("Worker fixture admission input");
+        let admission = events[..index].to_vec();
         for event in &admission {
             reducer.apply(event.clone()).unwrap();
         }
@@ -255,8 +268,7 @@ pub(crate) async fn seed_product_history(
                         input,
                         command: None,
                         automation_origin: None,
-                        checkpoint: None,
-                        continuation: None,
+                        intent: agent_protocol::AgentRunIntent::Start,
                     }),
                 },
                 admission,
@@ -264,39 +276,36 @@ pub(crate) async fn seed_product_history(
             )
             .await
             .unwrap();
-    }
-    let continuation = product
-        .get_agent_continuation_binding(&identity)
-        .await
-        .unwrap()
-        .map(|binding| binding.provider_ref)
-        .unwrap_or(talos_agent_api::AgentContinuationRef {
-            opaque_id: "continuation-1".into(),
-        });
-    let progress = last_sequence.map_or(split, |last| {
-        events
-            .iter()
-            .position(|event| event.sequence > last)
-            .unwrap_or(events.len())
-    });
-    for event in &events[progress..] {
-        let event = talos_agent_api::AgentEvent {
-            identity: event.identity.clone(),
-            sequence: event.sequence,
-            occurred_at: event.occurred_at,
-            payload: event.payload.clone(),
-        };
+        index
+    } else {
+        0
+    };
+    for event in events
+        .into_iter()
+        .skip(split)
+        .filter(|event| last_sequence.is_none_or(|last| event.sequence > last))
+    {
         reducer.apply(event.clone()).unwrap();
         let settlement = match &event.payload {
             talos_agent_api::AgentEventPayload::WaitingForInput(_) => {
+                journal
+                    .record_waiting_continuation(
+                        &context.session,
+                        &identity,
+                        event.sequence,
+                        continuation
+                            .as_ref()
+                            .expect("Worker fixture waiting continuation"),
+                    )
+                    .await
+                    .unwrap();
                 Some(agent_protocol::AgentExecutionSettlement::WaitingForInput {
-                    continuation: continuation.clone(),
                     metrics: reducer.checkpoint().metrics.clone(),
                 })
             }
             payload if payload.is_terminal() => {
                 Some(agent_protocol::AgentExecutionSettlement::Finished {
-                    memory_usage: Vec::new(),
+                    memory_usage: vec![],
                     metrics: reducer.checkpoint().metrics.clone(),
                 })
             }
@@ -312,4 +321,52 @@ pub(crate) async fn seed_product_history(
             .await
             .unwrap();
     }
+    let mut projected = Vec::new();
+    let mut after = product
+        .worker_event_cursor(&identity.session_id)
+        .await
+        .unwrap();
+    loop {
+        let page = journal
+            .read_events(AgentSessionEventsParams {
+                session: context.session.clone(),
+                after_cursor: after.clone(),
+                limit: agent_protocol::MAX_EXECUTION_PAGE_EVENTS,
+            })
+            .await
+            .unwrap();
+        let more = page.has_more;
+        let commit = product
+            .project_worker_events(talos_store::session::WorkerProjectionParams {
+                execution_node_id: session.execution_node_id.clone(),
+                session_id: identity.session_id.clone(),
+                after_cursor: after,
+                page,
+            })
+            .await
+            .unwrap();
+        projected.extend(commit.events);
+        after = Some(commit.cursor);
+        if !more {
+            break;
+        }
+    }
+    projected
+}
+
+pub(crate) async fn seed_running_worker(
+    sessions: &crate::session::SessionService,
+    product: &talos_store::session::DatabaseSessionStore,
+    journal: &talos_store::execution::WorkerExecutionStore,
+    identity: talos_agent_api::AgentTurnRef,
+    message: talos_agent_api::AgentMessage,
+) {
+    seed_worker_events(
+        sessions,
+        product,
+        journal,
+        crate::test_support::canonical_user_admission(identity, message, 1, true),
+        None,
+    )
+    .await;
 }

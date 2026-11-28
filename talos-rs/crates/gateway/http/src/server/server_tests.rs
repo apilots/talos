@@ -250,6 +250,7 @@ async fn test_state_with_lifecycle(
         auth_disabled,
         lifecycle,
         config_store: None,
+        worker_fixture: None,
     })
     .await
 }
@@ -260,6 +261,7 @@ struct TestStateConfig {
     auth_disabled: bool,
     lifecycle: Arc<ServerLifecycle>,
     config_store: Option<Arc<dyn ConfigStore>>,
+    worker_fixture: Option<WorkerFixture>,
 }
 
 async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
@@ -287,7 +289,7 @@ async fn build_test_state_with_agent_execution_store(
 }
 
 async fn build_test_state_with_stores(
-    config: TestStateConfig,
+    mut config: TestStateConfig,
     agent_execution_store: Arc<dyn AgentExecutionStore>,
     project_store: Arc<dyn talos_store::project::ProjectStore>,
     product_store: Option<Arc<dyn talos_store::session::SessionStore>>,
@@ -347,14 +349,17 @@ async fn build_test_state_with_stores(
         .await
         .unwrap(),
     );
-    seed_worker_fixture(
-        &worker_store,
-        agent_execution_store.as_ref(),
-        &config.base_config,
-    )
-    .await;
+    if let Some(fixture) = config.worker_fixture.take() {
+        seed_worker_fixture(
+            &worker_store,
+            agent_execution_store.as_ref(),
+            &config.base_config,
+            fixture,
+        )
+        .await;
+    }
     let harness = Arc::new(talos_agent::LocalExecutionHarness::new(
-        Arc::new(HttpFixtureHarness),
+        Arc::new(HttpFixtureHarness(worker_store.clone())),
         worker_store,
     ));
     let coordinator = Arc::new(TestAgentCoordinator {
@@ -392,6 +397,7 @@ async fn test_state_with_event_store_and_agent_execution_store(
     auth_disabled: bool,
     event_store: Arc<dyn AgentExecutionStore>,
     agent_execution_store: Arc<talos_store::session::DatabaseSessionStore>,
+    worker_fixture: Option<WorkerFixture>,
 ) -> Arc<HttpApiState> {
     build_test_state_with_stores(
         TestStateConfig {
@@ -400,6 +406,7 @@ async fn test_state_with_event_store_and_agent_execution_store(
             auth_disabled,
             lifecycle: Arc::new(ServerLifecycle::new()),
             config_store: None,
+            worker_fixture,
         },
         agent_execution_store.clone(),
         Arc::new(MockProjectStore::new()),
@@ -423,6 +430,7 @@ async fn test_state_with_config(
         auth_disabled,
         lifecycle: Arc::new(ServerLifecycle::new()),
         config_store: None,
+        worker_fixture: None,
     })
     .await
 }
@@ -485,7 +493,7 @@ impl TestAgentCoordinator {
             plugins,
             configuration,
             harness: Arc::new(talos_agent::LocalExecutionHarness::new(
-                Arc::new(HttpFixtureHarness),
+                Arc::new(HttpFixtureHarness(store.clone())),
                 store,
             )),
             _execution_directory: directory,
@@ -599,6 +607,7 @@ async fn test_state_with_gateway_event_store_config_and_lifecycle(
         auth_disabled,
         lifecycle,
         config_store: Some(config_store),
+        worker_fixture: None,
     })
     .await
 }
@@ -700,13 +709,13 @@ mod automation;
 #[path = "tests/product_routing.rs"]
 mod product_routing_tests;
 
-struct HttpFixtureHarness;
+struct HttpFixtureHarness(Arc<talos_store::execution::WorkerExecutionStore>);
 impl talos_agent::AgentHarness for HttpFixtureHarness {
     fn start(
         &self,
         params: AgentRunParams,
     ) -> talos_agent::AgentFuture<'_, TalosResult<AgentRunExecution>> {
-        Box::pin(mock_agent_execution(params))
+        Box::pin(mock_agent_execution(params, self.0.clone()))
     }
     fn submit_input(
         &self,
@@ -793,23 +802,10 @@ async fn seed_worker_fixture(
     worker: &talos_store::execution::WorkerExecutionStore,
     product: &dyn AgentExecutionStore,
     config: &talos_types::TalosConfig,
+    fixture: WorkerFixture,
 ) {
-    let Some(active) = product.get_agent_active_turn("mock-session").await.unwrap() else {
-        return;
-    };
-    let records = product
-        .list_agent_turn_events(&active.identity, 1000)
-        .await
-        .unwrap();
-    let events: Vec<CanonicalAgentEvent> = records
-        .into_iter()
-        .map(|record| CanonicalAgentEvent {
-            identity: record.identity,
-            sequence: record.sequence,
-            occurred_at: record.occurred_at,
-            payload: record.payload,
-        })
-        .collect();
+    let events = fixture.events;
+    let identity = events.first().unwrap().identity.clone();
     let Some((admission_end, input)) =
         events
             .iter()
@@ -834,7 +830,7 @@ async fn seed_worker_fixture(
         tree_identity: talos_types::SessionTreeIdentity::Primary,
         history_cursor: None,
         session: session.clone(),
-        turn_id: active.identity.turn_id.clone(),
+        turn_id: identity.turn_id.clone(),
         project_id: None,
         working_directory: None,
         environment: None,
@@ -852,11 +848,10 @@ async fn seed_worker_fixture(
             automation_origin: None,
             context,
             input,
-            checkpoint: None,
-            continuation: None,
+            intent: agent_protocol::AgentRunIntent::Start,
         }),
     };
-    let mut reducer = talos_agent::AgentEventReducer::new(active.identity.clone());
+    let mut reducer = talos_agent::AgentEventReducer::new(identity.clone());
     for event in &events[..=admission_end] {
         reducer.apply(event.clone()).unwrap();
     }
@@ -873,17 +868,25 @@ async fn seed_worker_fixture(
         for event in &events[admission_end + 1..] {
             reducer.apply(event.clone()).unwrap();
         }
-        let binding = product
-            .get_agent_continuation_binding(&active.identity)
-            .await
-            .unwrap();
-        let settlement =
-            binding.map(
-                |binding| agent_protocol::AgentExecutionSettlement::WaitingForInput {
-                    continuation: binding.provider_ref,
-                    metrics: reducer.checkpoint().metrics.clone(),
-                },
-            );
+        let settlement = if let Some(continuation) = fixture.continuation {
+            worker
+                .record_waiting_continuation(
+                    &session,
+                    &identity,
+                    events
+                        .last()
+                        .expect("Worker fixture waiting event")
+                        .sequence,
+                    &continuation,
+                )
+                .await
+                .unwrap();
+            Some(agent_protocol::AgentExecutionSettlement::WaitingForInput {
+                metrics: reducer.checkpoint().metrics.clone(),
+            })
+        } else {
+            None
+        };
         worker
             .append(
                 &session,
@@ -894,4 +897,21 @@ async fn seed_worker_fixture(
             .await
             .unwrap();
     }
+    let page = worker
+        .read_events(agent_protocol::AgentSessionEventsParams {
+            session,
+            after_cursor: None,
+            limit: agent_protocol::MAX_EXECUTION_PAGE_EVENTS,
+        })
+        .await
+        .unwrap();
+    product
+        .project_worker_events(talos_store::session::WorkerProjectionParams {
+            execution_node_id: "embedded".into(),
+            session_id: identity.session_id,
+            after_cursor: None,
+            page,
+        })
+        .await
+        .unwrap();
 }

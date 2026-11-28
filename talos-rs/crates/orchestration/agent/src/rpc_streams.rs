@@ -432,7 +432,7 @@ impl AgentHarnessRpcAdapter {
         if let Some(execution) = self.replay_active(auth, &params, coordinator).await? {
             return Ok(execution);
         }
-        let admission = if params.continuation.is_some() {
+        let admission = if params.intent == agent_protocol::AgentRunIntent::RespondUserAction {
             super::session_gate::RunAdmission::Continuation
         } else {
             super::session_gate::RunAdmission::NewTurn
@@ -469,7 +469,7 @@ impl AgentHarnessRpcAdapter {
             &self.config.read().expect("Worker config lock poisoned"),
         )
         .map_err(status_from_error)?;
-        let admission = if params.continuation.is_some() {
+        let admission = if params.intent == agent_protocol::AgentRunIntent::RespondUserAction {
             super::session_gate::RunAdmission::Continuation
         } else {
             super::session_gate::RunAdmission::NewTurn

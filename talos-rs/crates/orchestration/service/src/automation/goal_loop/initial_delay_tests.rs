@@ -1,5 +1,6 @@
 //! First automatic admission uses existing definition timestamps and cancellation.
 use super::*;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 
 pub(super) async fn create(
     service: &TalosService,
@@ -94,12 +95,15 @@ async fn initial_loop_due_scan_admits_once_then_uses_original_minute_cadence() {
         }),
     };
     store
-        .commit_terminal_settlement(talos_store::session::CommitTerminalSettlementParams {
-            event: terminal.clone(),
-            expected_event_seq: active.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![terminal.clone()]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     let session = store.get_session_record("alice").await.unwrap().unwrap();
     service

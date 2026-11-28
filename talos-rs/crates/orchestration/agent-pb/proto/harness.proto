@@ -55,7 +55,7 @@ message SessionRequest { NodeAuth auth = 1; SessionContext params = 2; Coordinat
 message ShutdownParams { string agent_id = 1; uint64 timeout_ms = 2; }
 message ShutdownRequest { NodeAuth auth = 1; ShutdownParams params = 2; }
 message EmptyResponse { oneof result { Empty completed = 1; Failure failure = 2; } }
-message WaitingSettlement { AgentEvent event = 1; ContinuationRef continuation = 2; RunMetrics metrics = 3; }
+message WaitingSettlement { reserved 2; reserved "continuation"; AgentEvent event = 1; RunMetrics metrics = 3; }
 message FinishedSettlement {
   reserved 2; // Turn messages already travel in canonical progress.
   reserved "messages";
