@@ -44,7 +44,7 @@ pub(super) async fn read_source(
     };
     let embedded_project = matches!(resource, SyncResourceKey::Project { .. })
         && row.get_string("execution_node_id").as_deref() == Some("embedded");
-    let mut fields = super::source::SourceFields::from(row);
+    let mut fields = crate::capture::source::SourceFields::from(row);
     if embedded_project {
         if !TalosSync::captures_embedded_resource(tx, &adapter.binding, ResourceKind::Project, id)
             .await?
@@ -256,7 +256,7 @@ pub(super) async fn delete(
             )
             .await?;
         if !owned.is_empty() {
-            super::source::retire_history(tx, session_id, /*deleted*/ true).await?;
+            crate::capture::source::retire_history(tx, session_id, /*deleted*/ true).await?;
         }
     }
     let (table, key, owner) = match resource {

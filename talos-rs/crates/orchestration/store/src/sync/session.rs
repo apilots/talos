@@ -153,7 +153,7 @@ pub(super) async fn apply(
         .and_then(|r| r.get_i64("generation"))
         .is_some_and(|g| (g as u64) < generation)
     {
-        super::source::retire_history(tx, session_id, /*deleted*/ false).await?;
+        crate::capture::source::retire_history(tx, session_id, /*deleted*/ false).await?;
         tx.execute(
             "DELETE FROM agent_command_idempotency WHERE session_id = ?",
             &[session_id],

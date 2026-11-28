@@ -2,19 +2,17 @@
 //! Imports use these Store-owned projections without invoking Services, Agents,
 //! accounting, filesystem mutation, continuation claims or capture again.
 
-mod bindings;
 pub(crate) mod capture;
 mod catalog;
 mod collect;
-pub use bindings::StoreSyncBindings;
 mod file;
 mod import_stage;
 pub(crate) mod metadata;
 mod reclaim;
 pub(crate) mod session;
-pub(crate) mod source;
 mod timeline;
 
+use crate::capture::source;
 use std::sync::{Arc, RwLock, Weak};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{Storage, StorageTransaction};

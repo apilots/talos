@@ -6,6 +6,9 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Channel, ClientTlsConfig};
 
+#[path = "worker_environment_rpc_tests.rs"]
+mod environment;
+
 struct Ingress {
     client: pb::agent_node_control_client::AgentNodeControlClient<Channel>,
     endpoint: String,

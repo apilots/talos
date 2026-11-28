@@ -92,7 +92,7 @@ pub struct TalosService {
     message_queue: SessionMessageQueueService,
     subagents: SubagentService,
     pub files: Arc<FileService>,
-    execution_gate: Arc<crate::turn::NodeAdmissionGates>,
+    execution_gate: Arc<agent_protocol::NodeAdmissionGates>,
     native_jobs: Arc<std::sync::OnceLock<Arc<crate::automation::native_jobs::NativeJobService>>>,
 }
 

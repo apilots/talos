@@ -748,7 +748,7 @@ async fn test_service_with_storage(
             profile_store,
             message_queue.clone(),
             config,
-            Arc::new(crate::turn::NodeAdmissionGates::default()),
+            Arc::new(agent_protocol::NodeAdmissionGates::default()),
         ),
         event_service,
         store,

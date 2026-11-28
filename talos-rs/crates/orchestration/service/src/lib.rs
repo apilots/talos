@@ -14,8 +14,6 @@ mod fs;
 mod history;
 #[cfg(feature = "product")]
 mod inner_model;
-#[cfg(feature = "product")]
-mod keyed_gates;
 mod memory;
 #[cfg(feature = "product")]
 mod message_queue;

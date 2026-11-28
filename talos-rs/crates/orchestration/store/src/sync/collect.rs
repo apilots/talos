@@ -1,6 +1,7 @@
 //! Project committed Store revisions into the existing outbox.
 use std::{sync::Arc, time::Duration};
 
+use crate::capture::source::{SessionRevision, SourceCut, SourceFields};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{Row, StorageTransaction};
 use talos_sync::{
@@ -8,11 +9,7 @@ use talos_sync::{
     TalosSync,
 };
 
-use super::{
-    capture, catalog, codec, metadata, reclaim, session,
-    source::{SessionRevision, SourceCut},
-    timeline, StoreSyncAdapter,
-};
+use super::{capture, catalog, codec, metadata, reclaim, session, timeline, StoreSyncAdapter};
 
 // Page by resource so an unreplayable revision only holds its own resource.
 const RESOURCES_PER_PASS: usize = 32;
@@ -400,6 +397,6 @@ impl StoreSyncAdapter {
 fn source_fields(cut: &SourceCut) -> TalosResult<Row> {
     cut.fields
         .as_ref()
-        .map(super::source::SourceFields::row)
+        .map(SourceFields::row)
         .ok_or_else(|| TalosError::internal("Session revision is missing its metadata baseline."))
 }

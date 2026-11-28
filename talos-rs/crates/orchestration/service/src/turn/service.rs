@@ -1,3 +1,4 @@
+use agent_protocol::NodeAdmissionGates;
 use std::{sync::Arc, time::Duration};
 
 use talos_agent::{AgentInputParams, AgentRunParams, AgentRunSettlement};
@@ -53,7 +54,7 @@ pub(crate) struct TurnService {
     profile_store: Arc<dyn ProfileStore>,
     message_queue: SessionMessageQueueService,
     base_config: TalosConfig,
-    execution_gate: Arc<super::NodeAdmissionGates>,
+    execution_gate: Arc<NodeAdmissionGates>,
     nodes: Option<crate::ProductNodeAccess>,
     wake_dispatches:
         Arc<std::sync::Mutex<std::collections::HashSet<(String, managed_wake::WakeCandidate)>>>,
@@ -78,7 +79,7 @@ impl TurnService {
         profile_store: Arc<dyn ProfileStore>,
         message_queue: SessionMessageQueueService,
         base_config: TalosConfig,
-        execution_gate: Arc<super::NodeAdmissionGates>,
+        execution_gate: Arc<NodeAdmissionGates>,
     ) -> Self {
         Self {
             execution: execution.with_message_queue(message_queue.clone()),

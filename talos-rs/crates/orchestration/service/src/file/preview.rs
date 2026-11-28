@@ -182,6 +182,6 @@ async fn convert_office(
     Ok(bytes.into())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "product"))]
 #[path = "preview_tests.rs"]
 mod tests;

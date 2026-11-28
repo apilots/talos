@@ -413,7 +413,7 @@ async fn test_services_with_config(config: TalosConfig) -> TestServices {
         profile_store,
         SessionMessageQueueService::new(10).expect("queue service should initialize"),
         config,
-        Arc::new(crate::turn::NodeAdmissionGates::default()),
+        Arc::new(agent_protocol::NodeAdmissionGates::default()),
     ));
     let subagents = SubagentService::new(sessions.clone(), turns, event_service.clone());
     TestServices {
