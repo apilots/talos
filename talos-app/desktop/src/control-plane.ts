@@ -40,6 +40,7 @@ export function controlPlaneFetch(runtime: DesktopAppServerController): typeof f
       target.search = url.search;
       const headers = new Headers();
       for (const name of ["accept", "authorization", "content-type", "idempotency-key", "last-event-id", "range",
+        "x-talos-computer", "x-talos-source-peer", "x-talos-file-transfer",
         "origin", "access-control-request-headers", "access-control-request-method"]) {
         const value = request.headers.get(name);
         if (value !== null) headers.set(name, value);

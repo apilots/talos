@@ -49,7 +49,7 @@ impl ServiceGateway {
             access_token, user, ..
         } = &response
         {
-            self.service.resume_account_sync_after_login(
+            self.service.resume_account_host_after_login(
                 &Actor::regular(&user.user_id)
                     .with_role(user.role)
                     .with_user_type(user.r#type)
@@ -105,7 +105,7 @@ impl ServiceGateway {
             .account
             .current_user_with_request(actor, request)
             .await?;
-        self.service.resume_account_sync(actor);
+        self.service.resume_account_host(actor);
         Ok(UserCurrentResponse { user })
     }
 }

@@ -1,10 +1,10 @@
 //! Metrics uses the original account verifier without changing synchronization state.
-use super::application_sync::ApplicationSyncHost;
+use super::application_host::ApplicationHost;
 use talos_error::{TalosError, TalosResult};
 use talos_service::Actor;
 use talos_types::SyncMetricsResponse;
 
-impl ApplicationSyncHost {
+impl ApplicationHost {
     pub(crate) async fn read_metrics(&self, actor: &Actor) -> TalosResult<SyncMetricsResponse> {
         let verified = self.verified_actor(actor).await?;
         let config = self.config.reload()?;

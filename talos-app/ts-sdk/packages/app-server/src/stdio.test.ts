@@ -7,7 +7,7 @@ import { AppServerProtocolError, JsonRpcStdioTransport, StdioAppServerClient, fi
 it("shares concurrent initialization and does not send initialize twice", async () => {
   const client = new StdioAppServerClient({});
   const response = { protocol_version: AppProtocol.PROTOCOL_VERSION,
-    server_info: { name: "fixture", version: "test", auth_enabled: false, cloud_auth_url: null } };
+    server_info: { name: "fixture", version: "test", auth_enabled: false, cloud_auth_url: null, capabilities: { sync: true, relay: true } } };
   const request = vi.spyOn(client.transport, "request").mockResolvedValue(response);
   vi.spyOn(client.transport, "notify").mockImplementation(() => undefined);
   expect(await Promise.all([client.connect(), client.connect(), client.connect()])).toEqual([response, response, response]);

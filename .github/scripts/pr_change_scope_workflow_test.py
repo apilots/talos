@@ -146,7 +146,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(any(call.args[:2] in [('just', 'clippy'), ('just', 'test')]
                              for call in commands.call_args_list))
 
-    def test_build_union_is_compiled_once_and_archived(self):
+    def test_product_binaries_are_built_separately_and_archived(self):
         task = plan(['.github/release-toolchain.env'])['build']
         for b in task['binaries']:
             path = self.root / 'talos-rs/target/debug' / BINARIES[b][1]
@@ -155,9 +155,10 @@ class WorkflowTests(unittest.TestCase):
             path.chmod(0o755)
         task['tests'] = {}  # This regression isolates executable distribution.
         ci_run.execute(task, self.root / 'cache')
-        self.assertEqual(len(self.calls), 1)
-        args = self.calls[0][0]
-        self.assertEqual(args[:3], ('just', 'build', '--locked'))
+        self.assertEqual([args for args, _ in self.calls], [
+            ('just', 'build', '--locked', '-p', BINARIES[binary][0], '--bin', BINARIES[binary][1])
+            for binary in task['binaries']
+        ])
         for binary in task['binaries']:
             path = self.root / 'cache' / f'binary-{binary}.tar.gz'
             with tarfile.open(path) as archive:

@@ -5,13 +5,15 @@ async fn directory_reads_remain_local_while_control_plane_observations_are_block
     let mut fixture = Fixture::start().await;
     fixture.block_directory.store(true, Ordering::SeqCst);
     let actor = actor();
+    #[cfg(feature = "sync")]
+    #[cfg(feature = "sync")]
     fixture
         .runtime
         .sync
         .set_enabled(&actor.user_id, false)
         .await
         .unwrap();
-    let host = fixture.runtime.sync_host.clone();
+    let host = fixture.runtime.host.clone();
     let refresh_actor = actor.clone();
     let refresh =
         tokio::spawn(async move { host.refresh_computer_directory(&refresh_actor).await });
@@ -56,7 +58,7 @@ async fn directory_reads_remain_local_while_control_plane_observations_are_block
             .await
             .unwrap()
             .connection,
-        talos_sync::SyncConnectionState::Disabled
+        talos_types::SyncConnectionState::Disabled
     );
     let other = talos_service::Actor::regular("another-account").with_access_token("credential");
     assert!(fixture
@@ -70,7 +72,7 @@ async fn directory_reads_remain_local_while_control_plane_observations_are_block
     fixture.fail_directory.store(true, Ordering::SeqCst);
     assert!(fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .is_err());
@@ -89,6 +91,8 @@ async fn directory_reads_remain_local_while_control_plane_observations_are_block
 async fn confirmed_rename_survives_an_older_inflight_directory_pull_with_sync_disabled() {
     let mut fixture = Fixture::start().await;
     let actor = actor();
+    #[cfg(feature = "sync")]
+    #[cfg(feature = "sync")]
     fixture
         .runtime
         .sync
@@ -97,16 +101,22 @@ async fn confirmed_rename_survives_an_older_inflight_directory_pull_with_sync_di
         .unwrap();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
     fixture.block_directory.store(true, Ordering::SeqCst);
-    let host = fixture.runtime.sync_host.clone();
+    let host = fixture.runtime.host.clone();
     let refresh_actor = actor.clone();
     let refresh =
         tokio::spawn(async move { host.refresh_computer_directory(&refresh_actor).await });
-    assert_eq!(fixture.entered.recv().await.unwrap(), "directory");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), fixture.entered.recv())
+            .await
+            .expect("fixture observation must be bounded")
+            .unwrap(),
+        "directory"
+    );
     let renamed = fixture
         .runtime
         .service
@@ -158,7 +168,7 @@ async fn confirmed_rename_survives_an_older_inflight_directory_pull_with_sync_di
             .await
             .unwrap()
             .connection,
-        talos_sync::SyncConnectionState::Disabled
+        talos_types::SyncConnectionState::Disabled
     );
     fixture.finish().await;
 }
@@ -166,6 +176,8 @@ async fn confirmed_rename_survives_an_older_inflight_directory_pull_with_sync_di
 async fn only_complete_owner_validated_pages_replace_the_cached_directory() {
     let fixture = Fixture::start().await;
     let actor = actor();
+    #[cfg(feature = "sync")]
+    #[cfg(feature = "sync")]
     fixture
         .runtime
         .sync
@@ -174,7 +186,7 @@ async fn only_complete_owner_validated_pages_replace_the_cached_directory() {
         .unwrap();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
@@ -183,7 +195,7 @@ async fn only_complete_owner_validated_pages_replace_the_cached_directory() {
     fixture.directory.write().unwrap().push(foreign);
     assert!(fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap_err()
@@ -202,7 +214,7 @@ async fn only_complete_owner_validated_pages_replace_the_cached_directory() {
         .retain(|node| node.node_id != "fast" && node.node_id != "foreign-page");
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
@@ -218,15 +230,14 @@ async fn only_complete_owner_validated_pages_replace_the_cached_directory() {
 }
 
 #[tokio::test]
-async fn refreshed_directory_removes_stale_rows_before_sql_pagination_and_repairs_legacy_sync_markers(
-) {
+async fn server_directory_pagination_ignores_legacy_local_rows_and_sync_markers() {
     let fixture = Fixture::start().await;
     let actor = actor();
     for n in 0..35 {
         fixture
             .runtime
-            .sync_host
-            .sync_stores
+            .host
+            .stores
             .nodes
             .create(talos_store::node::CreateNodeParams {
                 node_id: format!("000-stale-{n:02}"),
@@ -243,15 +254,15 @@ async fn refreshed_directory_removes_stale_rows_before_sql_pagination_and_repair
     }
     fixture
         .runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .nodes
         .reconcile_deleted_registration("fast", "account")
         .await
         .unwrap();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
@@ -277,6 +288,8 @@ async fn refreshed_directory_removes_stale_rows_before_sql_pagination_and_repair
 async fn create_and_delete_confirmations_update_cache_during_directory_outage_and_old_pull() {
     let mut fixture = Fixture::start().await;
     let actor = actor();
+    #[cfg(feature = "sync")]
+    #[cfg(feature = "sync")]
     fixture
         .runtime
         .sync
@@ -285,7 +298,7 @@ async fn create_and_delete_confirmations_update_cache_during_directory_outage_an
         .unwrap();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
@@ -317,11 +330,17 @@ async fn create_and_delete_confirmations_update_cache_during_directory_outage_an
         .any(|node| node.node_id == "created"));
     fixture.fail_directory.store(false, Ordering::SeqCst);
     fixture.block_directory.store(true, Ordering::SeqCst);
-    let host = fixture.runtime.sync_host.clone();
+    let host = fixture.runtime.host.clone();
     let refresh_actor = actor.clone();
     let refresh =
         tokio::spawn(async move { host.refresh_computer_directory(&refresh_actor).await });
-    assert_eq!(fixture.entered.recv().await.unwrap(), "directory");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), fixture.entered.recv())
+            .await
+            .expect("fixture observation must be bounded")
+            .unwrap(),
+        "directory"
+    );
     fixture
         .runtime
         .service
@@ -339,7 +358,7 @@ async fn create_and_delete_confirmations_update_cache_during_directory_outage_an
     fixture.fail_directory.store(true, Ordering::SeqCst);
     assert!(fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .is_err());
@@ -373,14 +392,21 @@ async fn delayed_connection_cannot_overwrite_a_confirmed_directory_mutation() {
     let actor = actor();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
-    let host = fixture.runtime.sync_host.clone();
+    let host = fixture.runtime.host.clone();
     let identity = fixture.identity.clone();
+    fixture.block_read.store(true, Ordering::SeqCst);
     let slow = tokio::spawn(async move { host.connect_computer(&identity, "slow").await });
-    assert_eq!(fixture.entered.recv().await.unwrap(), "slow");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), fixture.entered.recv())
+            .await
+            .expect("fixture observation must be bounded")
+            .unwrap(),
+        "slow"
+    );
     fixture
         .runtime
         .service
@@ -422,14 +448,21 @@ async fn rejects_late_connection(removal: Removal) {
     let actor = actor();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
-    let host = fixture.runtime.sync_host.clone();
+    let host = fixture.runtime.host.clone();
     let identity = fixture.identity.clone();
+    fixture.block_read.store(true, Ordering::SeqCst);
     let slow = tokio::spawn(async move { host.connect_computer(&identity, "slow").await });
-    assert_eq!(fixture.entered.recv().await.unwrap(), "slow");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), fixture.entered.recv())
+            .await
+            .expect("fixture observation must be bounded")
+            .unwrap(),
+        "slow"
+    );
     match removal {
         Removal::ConfirmedDelete => {
             fixture
@@ -453,7 +486,7 @@ async fn rejects_late_connection(removal: Removal) {
                 .retain(|node| node.node_id != "slow");
             fixture
                 .runtime
-                .sync_host
+                .host
                 .refresh_computer_directory(&actor)
                 .await
                 .unwrap();
@@ -495,6 +528,8 @@ enum RenameResolution {
 async fn rejects_late_rename(resolution: RenameResolution) {
     let mut fixture = Fixture::start().await;
     let actor = actor();
+    #[cfg(feature = "sync")]
+    #[cfg(feature = "sync")]
     fixture
         .runtime
         .sync
@@ -503,7 +538,7 @@ async fn rejects_late_rename(resolution: RenameResolution) {
         .unwrap();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
@@ -521,7 +556,13 @@ async fn rejects_late_rename(resolution: RenameResolution) {
             )
             .await
     });
-    assert_eq!(fixture.entered.recv().await.unwrap(), "rename");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), fixture.entered.recv())
+            .await
+            .expect("fixture observation must be bounded")
+            .unwrap(),
+        "rename"
+    );
     let removed = matches!(
         resolution,
         RenameResolution::Deleted | RenameResolution::MissingFromDirectory
@@ -549,7 +590,7 @@ async fn rejects_late_rename(resolution: RenameResolution) {
                 .retain(|node| node.node_id != "fast");
             fixture
                 .runtime
-                .sync_host
+                .host
                 .refresh_computer_directory(&actor)
                 .await
                 .unwrap();
@@ -580,7 +621,7 @@ async fn rejects_late_rename(resolution: RenameResolution) {
                 .display_name = "Latest name".into();
             fixture
                 .runtime
-                .sync_host
+                .host
                 .refresh_computer_directory(&actor)
                 .await
                 .unwrap();
@@ -603,12 +644,19 @@ async fn rejects_late_rename(resolution: RenameResolution) {
         .unwrap();
     let cached = fixture
         .runtime
-        .sync_host
-        .sync_stores
+        .host
+        .computer_directory
+        .read(&actor.user_id, "fast")
+        .ok();
+    assert!(fixture
+        .runtime
+        .host
+        .stores
         .nodes
         .get("fast")
         .await
-        .unwrap();
+        .unwrap()
+        .is_none());
     if removed {
         assert!(page.data.iter().all(|node| node.node_id != "fast"));
         assert!(cached.is_none());
@@ -644,12 +692,12 @@ async fn delayed_rename_returns_the_newer_directory_name() {
 }
 
 #[tokio::test]
-async fn cached_computers_remain_readable_after_an_outage_and_restart() {
+async fn directory_cache_is_ephemeral_and_does_not_publish_stale_rows_after_restart() {
     let mut fixture = Fixture::start().await;
     let actor = actor();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
@@ -665,14 +713,14 @@ async fn cached_computers_remain_readable_after_an_outage_and_restart() {
     assert!((&mut fixture.auth).await.unwrap_err().is_cancelled());
     assert!(fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .is_err());
     fixture.restart().await;
     assert!(fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .is_err());
@@ -686,36 +734,12 @@ async fn cached_computers_remain_readable_after_an_outage_and_restart() {
     .await
     .expect("cached reads must not wait for the stopped Server or Auth")
     .unwrap();
-    assert_eq!(
-        before
-            .data
-            .iter()
-            .map(|node| (&node.node_id, &node.display_name))
-            .collect::<Vec<_>>(),
-        after
-            .data
-            .iter()
-            .map(|node| (&node.node_id, &node.display_name))
-            .collect::<Vec<_>>()
+    assert_eq!(before.data.len(), 3);
+    assert!(
+        after.data.is_empty(),
+        "remote directory observations are not persisted across restart"
     );
-    assert_eq!(after.total, 3);
-    for node in &after.data {
-        assert_eq!(node.health, talos_types::NodeHealth::Unknown);
-        assert!(!node.available);
-        let detail = fixture
-            .runtime
-            .service
-            .nodes
-            .read_computer(
-                &actor,
-                talos_types::GetNodeRequest {
-                    node_id: node.node_id.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(detail, *node);
-    }
+    assert_eq!(after.total, 0);
     let other = talos_service::Actor::regular("other-account").with_access_token("credential");
     assert!(fixture
         .runtime
@@ -734,16 +758,22 @@ async fn delayed_rename_cannot_resurrect_a_removal_from_an_earlier_started_pull(
     let actor = actor();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
     fixture.block_directory.store(true, Ordering::SeqCst);
-    let host = fixture.runtime.sync_host.clone();
+    let host = fixture.runtime.host.clone();
     let refresh_actor = actor.clone();
     let refresh =
         tokio::spawn(async move { host.refresh_computer_directory(&refresh_actor).await });
-    assert_eq!(fixture.entered.recv().await.unwrap(), "directory");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), fixture.entered.recv())
+            .await
+            .expect("fixture observation must be bounded")
+            .unwrap(),
+        "directory"
+    );
     fixture.block_response.store(true, Ordering::SeqCst);
     let nodes = fixture.runtime.service.nodes.clone();
     let rename_actor = actor.clone();
@@ -758,7 +788,13 @@ async fn delayed_rename_cannot_resurrect_a_removal_from_an_earlier_started_pull(
             )
             .await
     });
-    assert_eq!(fixture.entered.recv().await.unwrap(), "rename");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), fixture.entered.recv())
+            .await
+            .expect("fixture observation must be bounded")
+            .unwrap(),
+        "rename"
+    );
     // The first page was captured before rename. The final page observes deletion.
     fixture
         .directory
@@ -775,8 +811,8 @@ async fn delayed_rename_cannot_resurrect_a_removal_from_an_earlier_started_pull(
         .is_code(talos_error::ErrorCode::ResourceExpired));
     assert!(fixture
         .runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .nodes
         .get("slow")
         .await
@@ -795,7 +831,7 @@ async fn accepts_mutation_committed_after_a_directory_snapshot(mutation: Pending
     let actor = actor();
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
@@ -832,10 +868,16 @@ async fn accepts_mutation_committed_after_a_directory_snapshot(mutation: Pending
             }
         }
     });
-    assert_eq!(fixture.entered.recv().await.unwrap(), "before-commit");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), fixture.entered.recv())
+            .await
+            .expect("fixture observation must be bounded")
+            .unwrap(),
+        "before-commit"
+    );
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
@@ -886,7 +928,7 @@ async fn managed_worker_from_control_plane_directory_never_enters_personal_compu
     }
     fixture
         .runtime
-        .sync_host
+        .host
         .refresh_computer_directory(&actor)
         .await
         .unwrap();
@@ -904,5 +946,72 @@ async fn managed_worker_from_control_plane_directory_never_enters_personal_compu
         .data
         .iter()
         .all(|node| node.managed_worker_phase.is_none()));
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn directory_refresh_retires_own_deleted_registration_without_ui_polling() {
+    let fixture = Fixture::start().await;
+    let actor = actor();
+    let store = talos_config::YamlConfigStore::new(fixture.runtime.config.source_path());
+    store
+        .save_node_identity(
+            &talos_config::AgentNodeRunnerConfig {
+                transport: Some(talos_config::AgentNodeTransport::Outbound),
+                node_id: "slow".into(),
+                control_plane_endpoint: fixture.runtime.config.cloud.agent_base_url.clone(),
+                credential_file: fixture
+                    .runtime
+                    .config
+                    .talos_paths()
+                    .conf_dir
+                    .join("node.credential"),
+                trusted_ca_file: fixture.runtime.config.cloud.agent_trusted_ca_file.clone(),
+            },
+            "controlled-worker-credential",
+        )
+        .unwrap();
+    *fixture.runtime.host.local_owner.write().unwrap() = Some(actor.user_id.clone());
+    #[cfg(feature = "sync")]
+    fixture
+        .runtime
+        .sync
+        .set_enabled(&actor.user_id, false)
+        .await
+        .unwrap();
+    fixture
+        .runtime
+        .host
+        .refresh_computer_directory(&actor)
+        .await
+        .unwrap();
+    assert_eq!(store.removed_registration_owner().unwrap(), None);
+    fixture
+        .directory
+        .write()
+        .unwrap()
+        .retain(|node| node.node_id != "slow");
+    fixture
+        .runtime
+        .host
+        .refresh_computer_directory(&actor)
+        .await
+        .unwrap();
+    assert_eq!(
+        store.removed_registration_owner().unwrap().as_deref(),
+        Some(actor.user_id.as_str())
+    );
+    assert!(fixture
+        .runtime
+        .host
+        .stores
+        .sessions
+        .local_registration_retired(&actor.user_id, "slow")
+        .await
+        .unwrap());
+    assert_eq!(
+        fixture.runtime.host.local_computer_id().await.unwrap(),
+        "embedded"
+    );
     fixture.finish().await;
 }

@@ -14,7 +14,7 @@ use talos_agent::{
 use talos_agent_api::{
     AgentAssistantText, AgentAssistantTextPhase, AgentEventPayload, AgentMessage,
     AgentMessageBlock, AgentMessageBlockContent, AgentMessageBlockStatus, AgentMessageRole,
-    AgentMessageStatus, AgentTurnRef, AgentUserContent, SessionHistoryTurn,
+    AgentMessageStatus, AgentTurnRef, AgentUserContent,
 };
 use talos_agent_kernel::{
     EventAuthor, ExecutionBranch, KernelMemoryProgressStore, KernelSessionArtifactStore,
@@ -94,7 +94,7 @@ impl SessionHistoryReader for EmptyHistory {
     fn read(
         &self,
         _params: SessionHistoryReadParams,
-    ) -> AgentFuture<'_, AgentResult<Vec<SessionHistoryTurn>>> {
+    ) -> AgentFuture<'_, AgentResult<Vec<talos_agent::SessionHistoryReadTurn>>> {
         Box::pin(async { Ok(Vec::new()) })
     }
 }
@@ -264,14 +264,23 @@ async fn kernel_provider_keeps_streaming_while_live_input_waits_for_a_safe_bound
     let temp_dir = tempfile::tempdir().unwrap();
     let provider = provider(temp_dir.path());
     let identity = AgentTurnRef::new("session-1", "turn-1");
-    let harness = create_agent_harness("agent-1".to_string(), provider);
+    let journal = Arc::new(
+        talos_store::execution::WorkerExecutionStore::open(
+            &temp_dir.path().join("execution.sqlite"),
+        )
+        .await
+        .unwrap(),
+    );
+    let harness = create_agent_harness("agent-1".to_string(), provider, journal);
     let context = context(identity, temp_dir.path());
     let execution = harness
         .start(AgentRunParams {
+            subagent_limit: None,
+            command: None,
+            automation_origin: None,
             context,
             input: user_message(),
-            checkpoint: None,
-            continuation: None,
+            intent: talos_agent::AgentRunIntent::Start,
         })
         .await
         .unwrap();
@@ -294,6 +303,7 @@ async fn kernel_provider_keeps_streaming_while_live_input_waits_for_a_safe_bound
     });
     let admission = harness
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: "agent-1".to_string(),
             identity: AgentTurnRef::new("session-1", "turn-1"),
             input: live_user_message(),
@@ -394,6 +404,13 @@ async fn kernel_provider_clear_session_deletes_only_private_artifacts() {
     let harness = create_agent_harness(
         "agent-1".to_string(),
         provider_with_store(temp_dir.path(), artifact_store.clone()),
+        Arc::new(
+            talos_store::execution::WorkerExecutionStore::open(
+                &temp_dir.path().join("execution.sqlite"),
+            )
+            .await
+            .unwrap(),
+        ),
     );
     harness
         .clear_session(
@@ -506,6 +523,7 @@ fn rich_input() -> Vec<AgentUserContentKind> {
 
 fn context(identity: AgentTurnRef, workspace_root: &Path) -> AgentContext {
     AgentContext {
+        tree_identity: talos_types::SessionTreeIdentity::Primary,
         history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),

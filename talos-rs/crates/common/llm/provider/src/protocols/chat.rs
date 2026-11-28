@@ -1,8 +1,8 @@
 use crate::{
     ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, ModelBlockCompleted,
     ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent,
-    ModelOutputPhase, ModelToolCallStart, ReasoningContinuation, ReasoningEffort, ReasoningOutput,
-    Role, SseLineDecoder, ToolChoice, Usage,
+    ModelOutputPhase, ModelToolCallStart, ReasoningContinuation, ReasoningOutput, Role,
+    SseLineDecoder, ToolChoice, Usage,
 };
 use futures_util::StreamExt;
 use serde::de::DeserializeOwned;
@@ -21,6 +21,7 @@ mod types;
 mod tests;
 
 pub use content::{content_text, tool_calls};
+pub use reasoning::reasoning_effort;
 use reasoning::{reasoning_fields, response_reasoning};
 pub use tool_definitions::tools;
 pub use types::*;
@@ -104,16 +105,6 @@ pub fn request(
             None
         },
     })
-}
-
-pub fn reasoning_effort(effort: ReasoningEffort) -> String {
-    match effort {
-        ReasoningEffort::Light => "low",
-        ReasoningEffort::Medium => "medium",
-        ReasoningEffort::High => "high",
-        ReasoningEffort::XHigh => "xhigh",
-    }
-    .to_string()
 }
 
 pub fn messages(

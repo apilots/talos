@@ -2,13 +2,8 @@
 
 mod management;
 mod node;
-mod peer_files;
 mod remote;
-mod resource_dispatch;
 mod resources;
-pub use resource_dispatch::{
-    AgentResourceRequests, AgentResourceResponses, AgentResourceRpcHandler,
-};
 mod runner;
 mod tls;
 
@@ -19,8 +14,6 @@ pub use runner::{AgentNodeLeaseObserver, AgentNodeLeaseUpdate, AgentNodeRunner};
 pub use tls::AgentTlsTrust;
 
 mod connection;
-mod coordinator_connection;
-pub use coordinator_connection::serve_coordinator_connection;
 mod connection_writer;
 mod harness_transport;
 mod response_window;
@@ -51,6 +44,5 @@ fn decode_rpc_status(status: tonic::Status) -> talos_error::TalosError {
 
 mod environment;
 pub use environment::AgentEnvironmentClient;
-mod coordinator_commands;
 mod desktop;
 pub use desktop::DesktopReservation;

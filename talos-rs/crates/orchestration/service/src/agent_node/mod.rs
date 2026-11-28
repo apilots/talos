@@ -1,30 +1,11 @@
-mod service;
-mod types;
-
+//! Product access uses local capabilities or the existing Server authority.
+mod computer_management;
+mod product_access;
 pub use agent_protocol::{
     CreateNodeRequest, GetNodeRequest, ListNodesRequest, RotateCredentialRequest, UpdateNodeRequest,
 };
-pub(crate) use service::ManagedDispatch;
-pub use service::{AgentNodeRevocationHook, AgentNodeService};
-/// The existing transport owner atomically verifies Worker idleness and revokes remote admission.
-pub type AgentNodeDeletionHook = std::sync::Arc<
-    dyn Fn(
-            agent_protocol::RegistrationAdmission,
-        ) -> agent_protocol::AgentFuture<'static, talos_error::TalosResult<()>>
-        + Send
-        + Sync,
->;
-pub use types::NodePrincipal;
-
-#[cfg(test)]
-#[path = "agent_node_tests.rs"]
-mod tests;
-
-#[cfg(test)]
-mod computers_tests;
-
-mod remote_management;
-pub use remote_management::ComputerManagement;
-
-#[cfg(test)]
-mod deletion_tests;
+pub use computer_management::ComputerManagement;
+pub use product_access::ProductNodeAccess;
+pub(crate) use product_access::{ManagedConversationBinding, ManagedDispatch};
+#[cfg(feature = "control-plane")]
+pub use talos_control_plane::{AgentNodeRevocationHook, AgentNodeService, NodePrincipal};

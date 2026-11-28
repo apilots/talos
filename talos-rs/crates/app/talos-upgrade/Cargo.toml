@@ -7,6 +7,10 @@ license.workspace = true
 description = "Talos startup upgrade coordinator"
 repository.workspace = true
 
+[features]
+default = []
+sync = ["dep:talos-sync"]
+
 [dependencies]
 talos-agent = { workspace = true }
 talos-agent-api = { workspace = true }
@@ -24,7 +28,7 @@ talos-fs = { workspace = true }
 talos-memory = { workspace = true }
 talos-store = { workspace = true }
 talos-storage = { workspace = true }
-talos-sync = { workspace = true }
+talos-sync = { workspace = true, optional = true }
 talos-types = { workspace = true }
 tracing = { workspace = true }
 

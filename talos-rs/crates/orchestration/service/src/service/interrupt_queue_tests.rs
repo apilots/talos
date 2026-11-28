@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn interrupt_requires_the_current_turn_and_pauses_until_explicit_queue_start() {
     let cancelled_turn_ids = Arc::new(Mutex::new(Vec::new()));
-    let (service, store) = test_application_with_coordinator(
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::Accepted,
         }),
@@ -32,7 +32,14 @@ async fn interrupt_requires_the_current_turn_and_pauses_until_explicit_queue_sta
         1,
     )
     .expect("canonical User message should be valid");
-    crate::test_support::commit_test_running_turn(store.as_ref(), identity.clone(), message).await;
+    crate::test_worker::seed_running_worker(
+        service.sessions.as_ref(),
+        store.as_ref(),
+        journal.as_ref(),
+        identity.clone(),
+        message,
+    )
+    .await;
 
     let stale_error = service
         .interrupt_turn(
@@ -99,7 +106,7 @@ async fn interrupt_requires_the_current_turn_and_pauses_until_explicit_queue_sta
 
 #[tokio::test]
 async fn interrupt_restores_active_turn_when_harness_rejects_interruption() {
-    let (service, store) = test_application_with_coordinator(
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::StartFailed,
         }),
@@ -120,11 +127,16 @@ async fn interrupt_restores_active_turn_when_harness_rejects_interruption() {
         )
         .await
         .expect("session should be created");
-    commit_running_turn(
+    seed_worker_fixture(
+        &service,
         store.as_ref(),
-        "session-interrupt-rejected",
-        "turn-existing",
-        "msg-existing",
+        journal.as_ref(),
+        running_turn_events(
+            "session-interrupt-rejected",
+            "turn-existing",
+            "msg-existing",
+        ),
+        None,
     )
     .await;
 
@@ -154,7 +166,7 @@ async fn interrupt_restores_active_turn_when_harness_rejects_interruption() {
 
 #[tokio::test]
 async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
-    let (service, store) = test_application_with_coordinator(
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::StartFailed,
         }),
@@ -175,11 +187,16 @@ async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
         )
         .await
         .unwrap();
-    commit_running_turn(
+    seed_worker_fixture(
+        &service,
         store.as_ref(),
-        "session-cleanup-unconfirmed",
-        "turn-existing",
-        "msg-existing",
+        journal.as_ref(),
+        running_turn_events(
+            "session-cleanup-unconfirmed",
+            "turn-existing",
+            "msg-existing",
+        ),
+        None,
     )
     .await;
 
@@ -202,7 +219,7 @@ async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
     );
     let identity = talos_types::AgentTurnRef::new("session-cleanup-unconfirmed", "turn-existing");
     let before = store.list_agent_turn_events(&identity, 32).await.unwrap();
-    let recovery_error = service
+    let recovered = service
         .recover_timeline(
             &actor,
             talos_types::RecoverTimelineRequest {
@@ -212,8 +229,10 @@ async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
             },
         )
         .await
-        .unwrap_err();
-    assert!(recovery_error.is_code(talos_error::ErrorCode::RunCleanupUnconfirmed));
+        .unwrap();
+    let active = recovered.active_turn.unwrap();
+    assert_eq!(active.state, talos_agent_api::ActiveTurnState::Running);
+    assert!(active.cancellation_requested);
     let subscription = service
         .open_timeline_subscription(
             &actor,
@@ -227,21 +246,42 @@ async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
             },
         )
         .await;
-    assert!(
-        matches!(subscription, Err(error) if error.is_code(talos_error::ErrorCode::RunCleanupUnconfirmed))
+    assert!(subscription.is_ok());
+    let retry = service
+        .interrupt_turn(
+            &actor,
+            talos_agent_api::InterruptTurnRequest {
+                identity: identity.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        retry.outcome,
+        AgentInterruptOutcome::CleanupUnconfirmed { task_count: 1 }
     );
+    assert!(service
+        .start_turn(
+            &actor,
+            request_source(),
+            start_turn_request(&identity.session_id, "blocked"),
+            None
+        )
+        .await
+        .err()
+        .unwrap()
+        .is_code(talos_error::ErrorCode::ActiveTurnRunning));
     assert_eq!(
         store.list_agent_turn_events(&identity, 32).await.unwrap(),
         before
     );
-    assert_eq!(
+    assert!(
         store
             .get_agent_active_turn("session-cleanup-unconfirmed")
             .await
             .unwrap()
             .unwrap()
-            .state,
-        talos_agent_api::ActiveTurnState::Cancelling
+            .cancellation_requested
     );
 }
 
@@ -252,7 +292,7 @@ async fn interrupting_a_waiting_action_commits_one_canonical_terminal_fact() {
     };
 
     let cancelled_turn_ids = Arc::new(Mutex::new(Vec::new()));
-    let (service, store) = test_application_with_coordinator(
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::StartFailed,
         }),
@@ -274,96 +314,79 @@ async fn interrupting_a_waiting_action_commits_one_canonical_terminal_fact() {
         .await
         .unwrap();
     let identity = talos_agent_api::AgentTurnRef::new("session-waiting-cancel", "turn-waiting");
-    let mut admission = commit_running_turn(
+    let mut events = running_turn_events(&identity.session_id, &identity.turn_id, "msg-waiting");
+    events.push(talos_agent_api::AgentEvent {
+        identity: identity.clone(),
+        sequence: events.last().unwrap().sequence.saturating_add(1),
+        occurred_at: 2,
+        payload: talos_agent_api::AgentEventPayload::MessageStarted(
+            talos_agent_api::AgentMessageStarted {
+                message: talos_agent_api::AgentMessage {
+                    message_id: "agent-waiting".to_string(),
+                    turn_id: identity.turn_id.clone(),
+                    role: talos_agent_api::AgentMessageRole::Agent,
+                    status: talos_agent_api::AgentMessageStatus::InProgress,
+                    blocks: Vec::new(),
+                    created_at: 2,
+                    completed_at: None,
+                },
+            },
+        ),
+    });
+    events.push(talos_agent_api::AgentEvent {
+        identity: identity.clone(),
+        sequence: events.last().unwrap().sequence.saturating_add(1),
+        occurred_at: 3,
+        payload: talos_agent_api::AgentEventPayload::MessageBlockStarted(
+            talos_agent_api::AgentMessageBlockStarted {
+                message_id: "agent-waiting".to_string(),
+                block: talos_agent_api::AgentMessageBlock {
+                    block_id: "tool-1".to_string(),
+                    status: talos_agent_api::AgentMessageBlockStatus::Running,
+                    content: talos_agent_api::AgentMessageBlockContent::ToolCall(
+                        talos_agent_api::AgentToolCall {
+                            call_id: "call-1".to_string(),
+                            name: "AskUser".to_string(),
+                            arguments: talos_agent_api::AgentToolCallArguments::Streaming {
+                                json_fragment: "{}".to_string(),
+                            },
+                            progress: Vec::new(),
+                        },
+                    ),
+                    started_at: 3,
+                    completed_at: None,
+                },
+            },
+        ),
+    });
+    events.push(talos_agent_api::AgentEvent {
+        identity: identity.clone(),
+        sequence: events.last().unwrap().sequence.saturating_add(1),
+        occurred_at: 2,
+        payload: talos_agent_api::AgentEventPayload::WaitingForInput(
+            talos_agent_api::AgentPendingInput::UserAction {
+                action: PendingUserAction {
+                    action_id: "action-1".to_string(),
+                    call_id: "call-1".to_string(),
+                    item_id: Some("tool-1".to_string()),
+                    state: UserActionState::Pending,
+                    params: UserActionParams::DynamicToolResult(DynamicToolResultParams {
+                        tool_name: "AskUser".to_string(),
+                    }),
+                },
+            },
+        ),
+    });
+    seed_worker_fixture(
+        &service,
         store.as_ref(),
-        &identity.session_id,
-        &identity.turn_id,
-        "msg-waiting",
+        journal.as_ref(),
+        events,
+        Some(talos_agent_api::AgentContinuationRef {
+            opaque_id: "continuation-waiting".into(),
+        }),
     )
     .await;
-    admission = store
-        .commit_progress_event(
-            talos_agent_api::AgentEvent {
-                identity: identity.clone(),
-                sequence: admission.events.last().unwrap().sequence.saturating_add(1),
-                occurred_at: 2,
-                payload: talos_agent_api::AgentEventPayload::MessageStarted(
-                    talos_agent_api::AgentMessageStarted {
-                        message: talos_agent_api::AgentMessage {
-                            message_id: "agent-waiting".to_string(),
-                            turn_id: identity.turn_id.clone(),
-                            role: talos_agent_api::AgentMessageRole::Agent,
-                            status: talos_agent_api::AgentMessageStatus::InProgress,
-                            blocks: Vec::new(),
-                            created_at: 2,
-                            completed_at: None,
-                        },
-                    },
-                ),
-            },
-            admission.active_turn.last_event_seq,
-        )
-        .await
-        .unwrap();
-    admission = store
-        .commit_progress_event(
-            talos_agent_api::AgentEvent {
-                identity: identity.clone(),
-                sequence: admission.events.last().unwrap().sequence.saturating_add(1),
-                occurred_at: 3,
-                payload: talos_agent_api::AgentEventPayload::MessageBlockStarted(
-                    talos_agent_api::AgentMessageBlockStarted {
-                        message_id: "agent-waiting".to_string(),
-                        block: talos_agent_api::AgentMessageBlock {
-                            block_id: "tool-1".to_string(),
-                            status: talos_agent_api::AgentMessageBlockStatus::Running,
-                            content: talos_agent_api::AgentMessageBlockContent::ToolCall(
-                                talos_agent_api::AgentToolCall {
-                                    call_id: "call-1".to_string(),
-                                    name: "AskUser".to_string(),
-                                    arguments: talos_agent_api::AgentToolCallArguments::Streaming {
-                                        json_fragment: "{}".to_string(),
-                                    },
-                                    progress: Vec::new(),
-                                },
-                            ),
-                            started_at: 3,
-                            completed_at: None,
-                        },
-                    },
-                ),
-            },
-            admission.active_turn.last_event_seq,
-        )
-        .await
-        .unwrap();
-    store
-        .commit_waiting_settlement(
-            talos_agent_api::AgentEvent {
-                identity: identity.clone(),
-                sequence: admission.events.last().unwrap().sequence.saturating_add(1),
-                occurred_at: 2,
-                payload: talos_agent_api::AgentEventPayload::WaitingForInput(
-                    talos_agent_api::AgentPendingInput::UserAction {
-                        action: PendingUserAction {
-                            action_id: "action-1".to_string(),
-                            call_id: "call-1".to_string(),
-                            item_id: Some("tool-1".to_string()),
-                            state: UserActionState::Pending,
-                            params: UserActionParams::DynamicToolResult(DynamicToolResultParams {
-                                tool_name: "AskUser".to_string(),
-                            }),
-                        },
-                    },
-                ),
-            },
-            talos_agent_api::AgentContinuationRef {
-                opaque_id: "continuation-waiting".to_string(),
-            },
-            admission.active_turn.last_event_seq,
-        )
-        .await
-        .unwrap();
 
     service
         .interrupt_turn(
@@ -375,10 +398,8 @@ async fn interrupting_a_waiting_action_commits_one_canonical_terminal_fact() {
         .await
         .unwrap();
 
-    assert_eq!(
-        *cancelled_turn_ids.lock().unwrap(),
-        vec!["turn-waiting".to_string()]
-    );
+    // The persisted waiting settlement proves there is no live Provider to cancel.
+    assert!(cancelled_turn_ids.lock().unwrap().is_empty());
     assert!(store
         .get_agent_active_turn("session-waiting-cancel")
         .await
@@ -392,12 +413,11 @@ async fn interrupting_a_waiting_action_commits_one_canonical_terminal_fact() {
     ));
 }
 
-async fn commit_running_turn(
-    store: &DatabaseSessionStore,
+fn running_turn_events(
     session_id: &str,
     turn_id: &str,
     message_id: &str,
-) -> talos_store::session::AgentEventCommit {
+) -> Vec<talos_agent_api::AgentEvent> {
     let identity = talos_agent_api::AgentTurnRef::new(session_id, turn_id);
     let message = crate::turn::completed_agent_user_input(
         turn_id,
@@ -406,5 +426,5 @@ async fn commit_running_turn(
         1,
     )
     .unwrap();
-    crate::test_support::commit_test_running_turn(store, identity, message).await
+    crate::test_support::canonical_user_admission(identity, message, 1, true)
 }

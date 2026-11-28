@@ -38,38 +38,32 @@ async fn interrupt_waiting_child_clears_its_durable_continuation() {
     let parent = create_parent(&services).await;
     let (child, turn_id) = create_running_child(&services, parent.clone()).await;
     let identity = AgentTurnRef::new(&child.session_id, &turn_id);
-    let active = services
-        .store
-        .get_agent_active_turn(&child.session_id)
+    let checkpoint = services
+        .journal
+        .checkpoint(&identity)
         .await
         .unwrap()
         .unwrap();
-    let events = services
-        .store
-        .list_agent_turn_events(&identity, 64)
-        .await
-        .unwrap();
-    services
-        .store
-        .commit_waiting_settlement(
-            CanonicalAgentEvent {
-                identity: identity.clone(),
-                sequence: events.last().expect("child admission events").sequence + 1,
-                occurred_at: 2,
-                payload: CanonicalAgentEventPayload::WaitingForInput(
-                    talos_agent_api::AgentPendingInput::Message {
-                        action_id: "action-child".to_string(),
-                        prompt: "Continue?".to_string(),
-                    },
-                ),
-            },
-            talos_agent_api::AgentContinuationRef {
-                opaque_id: "child-continuation".to_string(),
-            },
-            active.last_event_seq,
-        )
-        .await
-        .unwrap();
+    crate::test_worker::seed_worker_events(
+        services.sessions.as_ref(),
+        services.store.as_ref(),
+        services.journal.as_ref(),
+        vec![CanonicalAgentEvent {
+            identity: identity.clone(),
+            sequence: checkpoint.last_sequence + 1,
+            occurred_at: 2,
+            payload: CanonicalAgentEventPayload::WaitingForInput(
+                talos_agent_api::AgentPendingInput::Message {
+                    action_id: "action-child".into(),
+                    prompt: "Continue?".into(),
+                },
+            ),
+        }],
+        Some(talos_agent_api::AgentContinuationRef {
+            opaque_id: "child-continuation".into(),
+        }),
+    )
+    .await;
     let result = services
         .subagents
         .interrupt(InterruptSubagentRequest {
@@ -81,7 +75,7 @@ async fn interrupt_waiting_child_clears_its_durable_continuation() {
     assert_eq!(result.outcome, SubagentOutcome::Interrupted { turn_id });
     assert!(services
         .store
-        .get_agent_continuation_binding(&identity)
+        .get_agent_active_turn(&identity.session_id)
         .await
         .unwrap()
         .is_none());
@@ -109,15 +103,14 @@ async fn interrupt_retries_until_child_cleanup_is_confirmed() {
         .await
         .unwrap_err();
     assert!(error.is_code(talos_error::ErrorCode::RunCleanupUnconfirmed));
-    assert_eq!(
+    assert!(
         services
             .store
             .get_agent_active_turn(&child.session_id)
             .await
             .unwrap()
             .unwrap()
-            .state,
-        talos_agent_api::ActiveTurnState::Cancelling
+            .cancellation_requested
     );
     let spawn = || {
         services.subagents.spawn(SpawnSubagentRequest {

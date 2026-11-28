@@ -151,8 +151,7 @@ impl ProtocolProvider {
                     request,
                     stream,
                     chat::ChatCompletionRequestOptions {
-                        reasoning_effort: send_effort
-                            .then(|| wire_effort(effort, LlmProtocol::Chat)),
+                        reasoning_effort: send_effort.then(|| wire_effort(effort)),
                         reasoning_continuation: replay,
                         ..Default::default()
                     },
@@ -169,7 +168,7 @@ impl ProtocolProvider {
                     stream.then_some(true),
                     responses::ResponsesRequestOptions {
                         reasoning: send_effort.then(|| responses::ResponsesReasoning {
-                            effort: wire_effort(effort, LlmProtocol::Responses),
+                            effort: wire_effort(effort),
                             summary: None,
                         }),
                         include: (send_effort && effort.is_some())
@@ -201,7 +200,7 @@ impl ProtocolProvider {
                             None
                         } else {
                             effort.map(|effort| messages::MessagesOutputConfig {
-                                effort: wire_effort(Some(effort), LlmProtocol::Messages),
+                                effort: wire_effort(Some(effort)),
                             })
                         },
                     },
@@ -249,14 +248,14 @@ impl ProtocolProvider {
     }
 }
 
-fn wire_effort(effort: Option<ReasoningEffort>, protocol: LlmProtocol) -> String {
+fn wire_effort(effort: Option<ReasoningEffort>) -> String {
     match effort {
         None => "none",
         Some(ReasoningEffort::Light) => "low",
         Some(ReasoningEffort::Medium) => "medium",
         Some(ReasoningEffort::High) => "high",
-        Some(ReasoningEffort::XHigh) if protocol == LlmProtocol::Messages => "max",
         Some(ReasoningEffort::XHigh) => "xhigh",
+        Some(ReasoningEffort::Max) => "max",
     }
     .to_owned()
 }

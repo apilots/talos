@@ -1,70 +1,84 @@
-//! Projection of the existing Dream formation model callback's consumed fields.
+//! Typed projection of Worker-owned Dream execution and product consumption positions.
 
+use crate::{dream::*, error_pb, execution_events_pb, harness_pb};
 use agent_pb as pb;
-use talos_error::{TalosError, TalosResult};
-use talos_llm_provider::{ChatMessage, ChatResponse, ReasoningOutput, Role, Usage};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 
-pub fn encode_prompt(messages: Vec<ChatMessage>) -> TalosResult<pb::DreamMemoryModelPrompt> {
-    if messages.len() != 2
-        || messages[0].role != Role::System
-        || messages[1].role != Role::User
-        || messages.iter().any(|message| {
-            message.attachments.is_some()
-                || !message.image_file_ids.is_empty()
-                || message.name.is_some()
-                || message.tool_call_id.is_some()
-                || message.tool_calls.is_some()
-                || message.reasoning_continuation.is_some()
-                || message.cache_control.is_some()
-        })
-    {
-        return Err(TalosError::internal("Dream Memory model prompt is invalid"));
+fn invalid() -> TalosError {
+    TalosError::new(
+        ErrorCode::InvalidRequest,
+        "Dream Memory execution data is invalid.",
+    )
+}
+fn encode_cursor(value: DreamMemoryCursor) -> pb::DreamMemoryCursor {
+    pb::DreamMemoryCursor {
+        generation: value.generation,
+        offset: value.offset,
     }
-    let mut messages = messages.into_iter();
-    Ok(pb::DreamMemoryModelPrompt {
-        system: messages.next().expect("checked").content,
-        user: messages.next().expect("checked").content,
+}
+fn decode_cursor(value: pb::DreamMemoryCursor) -> TalosResult<DreamMemoryCursor> {
+    if value.offset < 0 {
+        return Err(invalid());
+    }
+    Ok(DreamMemoryCursor {
+        generation: value.generation,
+        offset: value.offset,
     })
 }
-
-pub fn decode_prompt(prompt: pb::DreamMemoryModelPrompt) -> Vec<ChatMessage> {
-    vec![
-        ChatMessage::system(prompt.system),
-        ChatMessage::user(prompt.user),
-    ]
+pub fn encode_params(value: DreamMemoryParams) -> pb::DreamMemoryParams {
+    pb::DreamMemoryParams {
+        context: Some(harness_pb::encode_session_context(value.session)),
+        after_cursor: value.after_cursor.map(encode_cursor),
+    }
 }
-
-pub fn encode_reply(response: ChatResponse) -> pb::DreamMemoryModelReply {
-    pb::DreamMemoryModelReply {
-        content: response.content,
-        usage: Some(pb::TokenUsage {
-            input_tokens: response.usage.prompt_tokens,
-            output_tokens: response.usage.completion_tokens,
-            total_tokens: response.usage.total_tokens,
-            cache_creation_input_tokens: response.usage.cache_creation_input_tokens,
-            cache_read_input_tokens: response.usage.cache_read_input_tokens,
-            reasoning_tokens: response.usage.reasoning_tokens,
+pub fn decode_params(
+    value: Option<pb::DreamMemoryParams>,
+    config: &talos_config::Config,
+) -> TalosResult<DreamMemoryParams> {
+    let value = value.ok_or_else(invalid)?;
+    Ok(DreamMemoryParams {
+        session: harness_pb::decode_session_context(value.context, config)?,
+        after_cursor: value.after_cursor.map(decode_cursor).transpose()?,
+    })
+}
+pub fn encode_result(value: DreamMemoryResult) -> pb::DreamMemoryResult {
+    pb::DreamMemoryResult {
+        formation: value.formation.map(|formation| pb::DreamMemoryFormation {
+            covers_until_seq: formation.covers_until_seq,
+            model_usage: Some(execution_events_pb::encode_memory_usage(
+                formation.model_usage,
+            )),
+            failure: formation
+                .failure
+                .map(|error| error_pb::encode_failure(&TalosError::from(error))),
         }),
+        next_cursor: Some(encode_cursor(value.next_cursor)),
+        processed_until_seq: value.processed_until_seq,
     }
 }
-
-pub fn decode_reply(response: pb::DreamMemoryModelReply) -> TalosResult<ChatResponse> {
-    let usage = response
-        .usage
-        .ok_or_else(|| TalosError::internal("Dream Memory model usage is missing"))?;
-    Ok(ChatResponse {
-        content: response.content,
-        reasoning: ReasoningOutput::default(),
-        model: String::new(),
-        finish_reason: None,
-        tool_calls: None,
-        usage: Usage {
-            prompt_tokens: usage.input_tokens,
-            completion_tokens: usage.output_tokens,
-            total_tokens: usage.total_tokens,
-            cache_creation_input_tokens: usage.cache_creation_input_tokens,
-            cache_read_input_tokens: usage.cache_read_input_tokens,
-            reasoning_tokens: usage.reasoning_tokens,
-        },
+pub fn decode_result(value: pb::DreamMemoryResult) -> TalosResult<DreamMemoryResult> {
+    Ok(DreamMemoryResult {
+        formation: value
+            .formation
+            .map(|formation| -> TalosResult<DreamMemoryFormation> {
+                Ok(DreamMemoryFormation {
+                    covers_until_seq: formation.covers_until_seq,
+                    model_usage: execution_events_pb::decode_memory_usage(
+                        formation.model_usage.ok_or_else(invalid)?,
+                    )?,
+                    failure: formation
+                        .failure
+                        .map(error_pb::decode_failure)
+                        .transpose()?
+                        .map(|error| error.to_api_error()),
+                })
+            })
+            .transpose()?,
+        next_cursor: decode_cursor(value.next_cursor.ok_or_else(invalid)?)?,
+        processed_until_seq: value.processed_until_seq,
     })
 }
+
+#[cfg(test)]
+#[path = "dream_pb_tests.rs"]
+mod tests;

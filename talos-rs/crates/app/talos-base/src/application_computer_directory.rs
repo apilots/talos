@@ -1,5 +1,5 @@
 //! Account-owned Server directory cache, independent of document synchronization.
-use super::application_sync::ApplicationSyncHost;
+use super::application_host::ApplicationHost;
 use std::{
     collections::{HashMap, HashSet},
     sync::{RwLock, Weak},
@@ -38,6 +38,67 @@ impl Default for ComputerDirectory {
     }
 }
 impl ComputerDirectory {
+    pub(crate) fn list(
+        &self,
+        account: &str,
+        request: talos_types::ComputerListRequest,
+    ) -> TalosResult<talos_types::ComputerListResponse> {
+        let mut data = self
+            .accounts
+            .read()
+            .expect("Computer directory cache lock")
+            .get(account)
+            .map(|directory| {
+                directory
+                    .nodes
+                    .values()
+                    .filter_map(|entry| entry.info.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let query = request.query.as_deref().unwrap_or("").trim().to_lowercase();
+        data.retain(|node| node.display_name.to_lowercase().contains(&query));
+        data.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+        let total = data.len() as u64;
+        if let Some(cursor) = &request.cursor {
+            data.retain(|node| node.node_id > *cursor);
+        }
+        let limit = request.limit.unwrap_or(50).clamp(1, 200) as usize;
+        let has_more = data.len() > limit;
+        data.truncate(limit);
+        for info in &mut data {
+            self.apply(account, info)?;
+        }
+        let next_cursor = has_more.then(|| {
+            data.last()
+                .expect("positive directory page limit")
+                .node_id
+                .clone()
+        });
+        Ok(talos_types::ComputerListResponse {
+            data,
+            total,
+            next_cursor,
+        })
+    }
+    pub(crate) fn read(&self, account: &str, id: &str) -> TalosResult<NodeInfo> {
+        let mut info = self
+            .accounts
+            .read()
+            .expect("Computer directory cache lock")
+            .get(account)
+            .and_then(|directory| directory.nodes.get(id))
+            .and_then(|entry| entry.info.clone())
+            .ok_or_else(|| {
+                TalosError::new(
+                    ErrorCode::ResourceNotFound,
+                    "Computer is absent from the account directory.",
+                )
+            })?;
+        self.apply(account, &mut info)?;
+        Ok(info)
+    }
+
     pub(crate) async fn clear_account(&self, account: &str) {
         let _publish = self.publish.lock().await;
         self.accounts
@@ -116,7 +177,7 @@ impl ComputerDirectory {
     }
 }
 struct AccountLifetime {
-    host: Weak<ApplicationSyncHost>,
+    host: Weak<ApplicationHost>,
     account: String,
 }
 impl Drop for AccountLifetime {
@@ -132,7 +193,7 @@ impl Drop for AccountLifetime {
 }
 
 pub(crate) async fn maintain(
-    host: Weak<ApplicationSyncHost>,
+    host: Weak<ApplicationHost>,
     mut actors: tokio::sync::watch::Receiver<Actor>,
 ) {
     let _lifetime = AccountLifetime {
@@ -151,7 +212,7 @@ pub(crate) async fn maintain(
                 return Ok(());
             };
             if host.account_connections_allowed(&actor.user_id)
-                && host.config.agent_node.control_plane.is_none()
+                && host.product_owner == talos_types::NodeProductOwner::Computer
             {
                 host.refresh_computer_directory(&actor).await?;
             }
@@ -170,36 +231,12 @@ pub(crate) async fn maintain(
     }
 }
 
-impl ApplicationSyncHost {
-    /// Publish an authenticated Server result without replacing newer directory facts.
-    pub(crate) async fn cache_server_computer(
-        &self,
-        account: &str,
-        info: &NodeInfo,
-        started: Instant,
-    ) -> TalosResult<NodeInfo> {
-        if info.managed_worker_phase.is_some() {
-            return Ok(info.clone());
-        }
-        let _publish = self.computer_directory.publish.lock().await;
-        if !self.account_connections_allowed(account) {
-            return Err(TalosError::new(
-                ErrorCode::Unauthenticated,
-                "The Computer account is no longer active.",
-            ));
-        }
-        if let Some(current) =
-            self.computer_directory
-                .observation_after(account, &info.node_id, started)?
-        {
-            return Ok(current);
-        }
-        self.publish_computer(account, info).await
-    }
-
+impl ApplicationHost {
     /// Caller holds the directory publication lock through persistence and observation.
     async fn publish_computer(&self, account: &str, info: &NodeInfo) -> TalosResult<NodeInfo> {
-        self.sync_stores.nodes.confirm_remote_computer(info).await?;
+        if self.local_computer_id().await? == info.node_id {
+            self.stores.nodes.confirm_remote_computer(info).await?;
+        }
         self.computer_directory.record(account, info.clone());
         Ok(info.clone())
     }
@@ -294,7 +331,7 @@ impl ApplicationSyncHost {
 
     /// Caller holds the directory publication lock.
     async fn publish_computer_deletion(&self, account: &str, id: &str) -> TalosResult<()> {
-        self.sync_stores
+        self.stores
             .nodes
             .remove_cached_computer(account, id)
             .await?;
@@ -316,6 +353,7 @@ impl ApplicationSyncHost {
     }
     pub(crate) async fn refresh_computer_directory(&self, actor: &Actor) -> TalosResult<()> {
         let verified = self.verified_actor(actor).await?;
+        let local = self.local_computer(actor).await?;
         let client = self.gateway_client().await?;
         let started = Instant::now();
         let mut cursor = None;
@@ -412,14 +450,17 @@ impl ApplicationSyncHost {
                 }
             }
         }
-        let visible: Vec<_> = merged
-            .values()
-            .filter_map(|value| value.info.clone())
-            .collect();
-        self.sync_stores
-            .nodes
-            .replace_remote_computers(&actor.user_id, &visible)
-            .await?;
+        let removed_local = local.filter(|id| {
+            id != "embedded" && merged.get(id).is_none_or(|value| value.info.is_none())
+        });
+        // Remote directory entries remain in the account cache. Persist only this
+        // host's confirmed identity instead of copying other Computers locally.
+        if let Some(local) = merged
+            .get(&self.local_computer_id().await?)
+            .and_then(|entry| entry.info.as_ref())
+        {
+            self.stores.nodes.confirm_remote_computer(local).await?;
+        }
         self.computer_directory
             .accounts
             .write()
@@ -433,6 +474,11 @@ impl ApplicationSyncHost {
                     nodes: merged,
                 },
             );
+        // Retirement can restart account Sync; never hold the directory publication lock.
+        drop(_publish);
+        if let Some(id) = removed_local {
+            self.observe_registration_removal(&verified, &id).await?;
+        }
 
         Ok(())
     }

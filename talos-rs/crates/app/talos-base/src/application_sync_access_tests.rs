@@ -1,5 +1,6 @@
-//! Cold remote deletion must establish execution access only during bounded preflight.
+//! A replicated display view never grants authority to delete remote execution.
 use super::*;
+use talos_coordinator::AgentCoordinator;
 
 pub(super) async fn verify_unconnected_remote_deletion(
     a: &TalosApplicationRuntime,
@@ -59,27 +60,33 @@ pub(super) async fn verify_unconnected_remote_deletion(
         .iter()
         .any(|entry| entry.session.id == "cold-remote-delete"));
     assert!(
-        !a.sync_host
-            .sync_stores
-            .connections
-            .lock()
+        a.coordinator
+            .worker_environment(computer, &actor.user_id)
             .await
-            .contains_key(computer),
-        "metadata and History must not open remote execution access"
+            .is_err(),
+        "Sync display facts must not publish a remote execution runtime"
     );
-    assert!(tokio::time::timeout(
+    let error = tokio::time::timeout(
         Duration::from_secs(3),
-        a.service.delete_session(actor, "cold-remote-delete")
+        a.service.delete_session(actor, "cold-remote-delete"),
     )
     .await
-    .expect("cold remote deletion must remain bounded")
-    .unwrap());
-    wait_for("cold deletion returned to source", async || {
-        b.session_store
-            .get_session_record("cold-remote-delete")
-            .await
-            .unwrap()
-            .is_none()
-    })
-    .await;
+    .expect("unsupported remote deletion must remain bounded")
+    .unwrap_err();
+    assert!(matches!(
+        error.error_code(),
+        talos_error::ErrorCode::ServiceUnavailable | talos_error::ErrorCode::InvalidRequest
+    ));
+    assert!(a
+        .session_store
+        .get_session_record("cold-remote-delete")
+        .await
+        .unwrap()
+        .is_some());
+    assert!(b
+        .session_store
+        .get_session_record("cold-remote-delete")
+        .await
+        .unwrap()
+        .is_some());
 }

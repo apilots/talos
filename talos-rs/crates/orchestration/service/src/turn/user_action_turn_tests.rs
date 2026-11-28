@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use talos_agent_api::{AgentTurnRef, SubmitTurnInput, SubmitTurnInputRequest};
 
 #[tokio::test]
@@ -7,7 +8,13 @@ async fn waiting_input_replays_the_committed_response_without_claiming_twice() {
     let (service, _event_service, store, _message_queue) =
         test_service(agent_execution.clone()).await;
     create_test_session_record(store.clone()).await;
-    insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        agent_execution.as_ref(),
+        pending_dynamic_action_events(Some("tool-original")),
+    )
+    .await;
     let request = SubmitTurnInputRequest {
         identity: AgentTurnRef::new("s1", "turn-original"),
         input: SubmitTurnInput::UserActionResponse {
@@ -34,12 +41,31 @@ async fn waiting_input_replays_the_committed_response_without_claiming_twice() {
 }
 
 #[tokio::test]
-async fn dynamic_tool_response_resumes_the_original_canonical_turn() {
+async fn dynamic_tool_response_resumes_without_product_continuation_state() {
     let agent_execution = Arc::new(RecordingAgentExecution::default());
-    let (service, _event_service, store, _message_queue) =
-        test_service(agent_execution.clone()).await;
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    let (service, _event_service, store, _message_queue) = test_service_with_storage(
+        agent_execution.clone(),
+        Arc::new(RecordingAgentCoordinator::default()),
+        storage.clone(),
+    )
+    .await;
     create_test_session_record(store.clone()).await;
-    insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        agent_execution.as_ref(),
+        pending_dynamic_action_events(Some("tool-original")),
+    )
+    .await;
+    // An execution-side waiting fact is sufficient; no product Provider state is required.
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'agent_continuation_bindings'")
+            .fetch_one(storage.pool())
+            .await
+            .unwrap(),
+        0
+    );
 
     service
         .submit_user_action(
@@ -66,14 +92,12 @@ async fn dynamic_tool_response_resumes_the_original_canonical_turn() {
         (
             request.context.turn_id,
             request.input.message_id,
-            request.checkpoint.is_some(),
-            request.continuation.is_some(),
+            request.intent,
         ),
         (
             "turn-original".to_string(),
             "msg_action_action-1".to_string(),
-            true,
-            true,
+            agent_protocol::AgentRunIntent::RespondUserAction,
         )
     );
     let events = store
@@ -97,9 +121,15 @@ async fn sandbox_cancel_is_one_canonical_response_and_one_terminal_fact() {
     *agent_execution.turn_errors_remaining.lock().unwrap() = 1;
     let coordinator = Arc::new(RecordingAgentCoordinator::default());
     let (service, _event_service, store, _message_queue) =
-        test_service_with_coordinator(agent_execution, coordinator.clone()).await;
+        test_service_with_coordinator(agent_execution.clone(), coordinator.clone()).await;
     create_test_session_record(store.clone()).await;
-    insert_pending_sandbox_approval(store.as_ref()).await;
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        agent_execution.as_ref(),
+        pending_sandbox_approval_events(),
+    )
+    .await;
     let response = UserActionResponse::SandboxApproval(SandboxApprovalDecision::Cancel);
 
     let accepted = service
@@ -155,6 +185,7 @@ async fn stale_user_action_response_cannot_reopen_a_terminal_turn() {
     let agent_execution = Arc::new(RecordingAgentExecution::default());
     let (service, _event_service, store, _message_queue) =
         test_service(agent_execution.clone()).await;
+    create_test_session_record(store.clone()).await;
     insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
     settle_pending_turn(store.as_ref()).await;
 
@@ -178,30 +209,33 @@ async fn stale_user_action_response_cannot_reopen_a_terminal_turn() {
 
 async fn settle_pending_turn(store: &DatabaseSessionStore) {
     let identity = AgentTurnRef::new("s1", "turn-original");
-    let active = store
+    let _active = store
         .get_agent_active_turn("s1")
         .await
         .unwrap()
         .expect("waiting canonical Turn should exist");
     let events = store.list_agent_turn_events(&identity, 64).await.unwrap();
     store
-        .commit_terminal_settlement(talos_store::session::CommitTerminalSettlementParams {
-            event: CanonicalAgentEvent {
-                identity,
-                sequence: events.last().unwrap().sequence.saturating_add(1),
-                occurred_at: 10,
-                payload: CanonicalAgentEventPayload::TurnFailed(AgentTurnFailed {
-                    error: talos_error::ApiError {
-                        code: talos_error::ErrorCode::Cancelled,
-                        message: "settled before response".to_string(),
-                        localization: None,
-                    },
-                    retryable: false,
-                }),
-            },
-            expected_event_seq: active.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![CanonicalAgentEvent {
+            identity,
+            sequence: events.last().unwrap().sequence.saturating_add(1),
+            occurred_at: 10,
+            payload: CanonicalAgentEventPayload::TurnFailed(AgentTurnFailed {
+                error: talos_error::ApiError {
+                    code: talos_error::ErrorCode::Cancelled,
+                    message: "settled before response".to_string(),
+                    localization: None,
+                },
+                retryable: false,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .expect("terminal canonical fact should commit");
 }

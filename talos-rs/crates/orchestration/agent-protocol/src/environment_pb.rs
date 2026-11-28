@@ -264,6 +264,27 @@ pub fn encode_preview_read(
                 path: path(value)?,
                 expires_at,
             }),
+            Request::OpenFile {
+                metadata,
+                expires_at,
+                max_bytes,
+            } => Operation::OpenFile(pb::PreviewOpenFileParams {
+                metadata: Some(encode_preview_metadata(metadata)),
+                expires_at,
+                max_bytes,
+            }),
+            Request::Write {
+                handle,
+                offset,
+                data,
+            } => Operation::Write(pb::PreviewWriteParams {
+                handle,
+                offset,
+                data: data.to_vec(),
+            }),
+            Request::PrepareDocument { handle, max_bytes } => {
+                Operation::PrepareDocument(pb::PreviewPrepareDocumentParams { handle, max_bytes })
+            }
             Request::Read {
                 handle,
                 path: value,
@@ -289,6 +310,20 @@ pub fn decode_preview_read(
             root: v.root.into(),
             path: v.path.into(),
             expires_at: v.expires_at,
+        },
+        Operation::OpenFile(v) => Request::OpenFile {
+            metadata: decode_preview_metadata(v.metadata)?,
+            expires_at: v.expires_at,
+            max_bytes: v.max_bytes,
+        },
+        Operation::Write(v) => Request::Write {
+            handle: v.handle,
+            offset: v.offset,
+            data: v.data.into(),
+        },
+        Operation::PrepareDocument(v) => Request::PrepareDocument {
+            handle: v.handle,
+            max_bytes: v.max_bytes,
         },
         Operation::Read(v) => Request::Read {
             handle: v.handle,
@@ -337,6 +372,8 @@ pub fn encode_preview_content(
                 offset: v.offset,
                 data: v.data.to_vec(),
             }),
+            Response::Written => Result::Written(pb::Empty {}),
+            Response::Document(document) => Result::Document(encode_preview_document(document)),
             Response::Closed => Result::Closed(pb::Empty {}),
         }),
     })
@@ -357,6 +394,8 @@ pub fn decode_preview_content(
             offset: v.offset,
             data: v.data.into(),
         }),
+        Result::Written(_) => Response::Written,
+        Result::Document(document) => Response::Document(decode_preview_document(document)?),
         Result::Closed(_) => Response::Closed,
     })
 }
@@ -408,3 +447,42 @@ pub fn decode_worktree_binding(
         git_common_directory: value.git_common_directory.into(),
     })
 }
+
+fn encode_preview_document(document: FilePreviewDocument) -> pb::PreviewDocument {
+    use pb::preview_document::Result;
+    use pb::PreviewDocumentUnavailable as Unavailable;
+    pb::PreviewDocument {
+        result: Some(match document {
+            FilePreviewDocument::Pdf { resource_path } => Result::Pdf(resource_path),
+            FilePreviewDocument::Unavailable { reason } => Result::Unavailable(match reason {
+                FilePreviewDocumentUnavailable::ConverterUnavailable => {
+                    Unavailable::ConverterUnavailable
+                }
+                FilePreviewDocumentUnavailable::ConversionFailed => Unavailable::ConversionFailed,
+                FilePreviewDocumentUnavailable::TooLarge => Unavailable::TooLarge,
+            }
+                as i32),
+        }),
+    }
+}
+fn decode_preview_document(document: pb::PreviewDocument) -> TalosResult<FilePreviewDocument> {
+    use pb::preview_document::Result;
+    use pb::PreviewDocumentUnavailable as Unavailable;
+    Ok(match document.result.ok_or_else(invalid)? {
+        Result::Pdf(resource_path) => FilePreviewDocument::Pdf { resource_path },
+        Result::Unavailable(reason) => FilePreviewDocument::Unavailable {
+            reason: match Unavailable::try_from(reason).map_err(|_| invalid())? {
+                Unavailable::ConverterUnavailable => {
+                    FilePreviewDocumentUnavailable::ConverterUnavailable
+                }
+                Unavailable::ConversionFailed => FilePreviewDocumentUnavailable::ConversionFailed,
+                Unavailable::TooLarge => FilePreviewDocumentUnavailable::TooLarge,
+                Unavailable::Unspecified => return Err(invalid()),
+            },
+        },
+    })
+}
+
+#[cfg(test)]
+#[path = "environment_pb_tests.rs"]
+mod tests;

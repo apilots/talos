@@ -40,12 +40,14 @@ use talos_types::talos::{
 #[derive(Clone)]
 pub(super) enum TestAgentExecutionMode {
     Accepted,
+    LostAcceptedConfirmation,
     AdmissionBlocked {
         reached: Arc<tokio::sync::Notify>,
         release: Arc<tokio::sync::Notify>,
     },
     StartTimeout,
     StartFailed,
+    StartActiveTurn,
     WorkerStateBlocked,
     WorkerStateUnavailable,
     WorkerStateActive,
@@ -63,12 +65,19 @@ mod turn_interrupt_tests;
 
 #[path = "admission_recovery_tests.rs"]
 mod admission_recovery_tests;
+#[path = "session_title_tests.rs"]
+mod session_title_tests;
+
 #[path = "compaction_tests.rs"]
 mod compaction_tests;
 #[path = "interrupt_queue_tests.rs"]
 mod interrupt_queue_tests;
 #[path = "maintenance_tests.rs"]
 mod maintenance_tests;
+#[path = "ownership_boundary_tests.rs"]
+mod ownership_boundary_tests;
+#[path = "view_rebuild_tests.rs"]
+mod view_rebuild_tests;
 
 pub(super) struct TestAgentExecution {
     pub(super) mode: TestAgentExecutionMode,
@@ -272,10 +281,10 @@ impl AgentCoordinator for TestAgentCoordinator {
                     block_id: completed_block.block_id.clone(),
                     delta: AgentMessageBlockDeltaContent::ContextCompaction(
                         AgentContextCompactionDelta {
-                            stage: Some(ContextCompactionStage::Summarizing),
-                            outcome: None,
-                            metrics: None,
-                            message: Some("Summarizing context".to_string()),
+                            stage: Some(ContextCompactionStage::Completed),
+                            outcome: Some(ContextCompactionOutcome::Applied),
+                            metrics: Some(Default::default()),
+                            message: Some("Context compacted".to_string()),
                         },
                     ),
                 }),
@@ -433,7 +442,14 @@ impl AgentCoordinator for TestExecutionCoordinator {
             TestAgentExecutionMode::StartFailed => {
                 return Err(TalosError::internal("injected Agent start failure"));
             }
+            TestAgentExecutionMode::StartActiveTurn => {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::ActiveTurnRunning,
+                    "Worker admission is held by an active Turn.",
+                ));
+            }
             TestAgentExecutionMode::Accepted
+            | TestAgentExecutionMode::LostAcceptedConfirmation
             | TestAgentExecutionMode::WorkerStateBlocked
             | TestAgentExecutionMode::WorkerStateUnavailable
             | TestAgentExecutionMode::WorkerStateActive
@@ -443,20 +459,8 @@ impl AgentCoordinator for TestExecutionCoordinator {
             }
         };
         let identity = params.context.identity();
-        let admission = vec![
-            CanonicalAgentEvent {
-                identity: identity.clone(),
-                sequence: 1,
-                occurred_at: 1,
-                payload: CanonicalAgentEventPayload::TurnStarted(AgentTurnStarted {}),
-            },
-            CanonicalAgentEvent {
-                identity,
-                sequence: 2,
-                occurred_at: params.input.completed_at.unwrap_or(params.input.created_at),
-                payload: CanonicalAgentEventPayload::MessageCompleted(params.input),
-            },
-        ];
+        let admission =
+            crate::test_support::canonical_user_admission(identity, params.input, 1, true);
         let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(1);
         let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
         Ok(AgentRunExecution {
@@ -499,6 +503,21 @@ impl AgentCoordinator for TestExecutionCoordinator {
 
     async fn compact_session(&self, params: AgentContext) -> TalosResult<AgentRunExecution> {
         self.delegate.compact_session(params).await
+    }
+
+    async fn retire_session(
+        &self,
+        params: AgentSessionContext,
+        expected: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        if matches!(
+            self.execution.mode,
+            TestAgentExecutionMode::WorkerClearBlocked
+        ) {
+            std::future::pending().await
+        } else {
+            self.delegate.retire_session(params, expected).await
+        }
     }
 
     async fn clear_session(
@@ -611,6 +630,44 @@ async fn test_application_with_storage(
     environment: Option<Arc<dyn agent_protocol::WorkerEnvironment>>,
     storage: Arc<SqliteStorage>,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
+    let (service, store, _) = test_application_with_worker_storage(
+        agent_execution,
+        coordinator,
+        config,
+        environment,
+        storage,
+        None,
+    )
+    .await;
+    (service, store)
+}
+
+async fn test_application_with_worker(
+    agent_execution: Arc<TestAgentExecution>,
+    coordinator: Arc<dyn AgentCoordinator>,
+    config: TalosConfig,
+) -> (
+    TalosService,
+    Arc<DatabaseSessionStore>,
+    Arc<talos_store::execution::WorkerExecutionStore>,
+) {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    test_application_with_worker_storage(agent_execution, coordinator, config, None, storage, None)
+        .await
+}
+
+async fn test_application_with_worker_storage(
+    agent_execution: Arc<TestAgentExecution>,
+    coordinator: Arc<dyn AgentCoordinator>,
+    config: TalosConfig,
+    environment: Option<Arc<dyn agent_protocol::WorkerEnvironment>>,
+    storage: Arc<SqliteStorage>,
+    delivery_fault: Option<Arc<Mutex<crate::test_worker::AdmissionFault>>>,
+) -> (
+    TalosService,
+    Arc<DatabaseSessionStore>,
+    Arc<talos_store::execution::WorkerExecutionStore>,
+) {
     run_test_migrations(storage.pool()).await;
     let profile_store: Arc<dyn ProfileStore> = Arc::new(DatabaseProfileStore::new(&storage));
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
@@ -633,6 +690,17 @@ async fn test_application_with_storage(
     let auth = Arc::new(TestAuthService);
     let auth_service: Arc<dyn AuthService> = auth.clone();
     let user_service: Arc<dyn UserService> = auth;
+    let lose_confirmation = matches!(
+        agent_execution.mode,
+        TestAgentExecutionMode::LostAcceptedConfirmation
+    );
+    let fault_injected_worker = matches!(
+        agent_execution.mode,
+        TestAgentExecutionMode::WorkerStateBlocked
+            | TestAgentExecutionMode::WorkerStateUnavailable
+            | TestAgentExecutionMode::WorkerStateActive
+            | TestAgentExecutionMode::WorkerClearBlocked
+    );
     let coordinator: Arc<dyn AgentCoordinator> = Arc::new(TestExecutionCoordinator {
         execution: agent_execution,
         delegate: coordinator,
@@ -640,6 +708,22 @@ async fn test_application_with_storage(
     let coordinator = match environment {
         Some(environment) => crate::test_support::with_worker_environment(coordinator, environment),
         None => crate::test_support::with_environment(coordinator, config.clone()),
+    };
+    let (durable, journal) = crate::test_worker::durable_with_store_and_fault(
+        coordinator.clone(),
+        delivery_fault.unwrap_or_else(|| {
+            Arc::new(Mutex::new(if lose_confirmation {
+                crate::test_worker::AdmissionFault::AfterCommit
+            } else {
+                crate::test_worker::AdmissionFault::None
+            }))
+        }),
+    )
+    .await;
+    let coordinator = if fault_injected_worker {
+        coordinator
+    } else {
+        durable
     };
     let service = TalosService::new(
         coordinator,
@@ -654,7 +738,7 @@ async fn test_application_with_storage(
         auth_service,
         user_service,
     );
-    (service, store)
+    (service, store, journal)
 }
 
 fn request_source() -> SessionSource {
@@ -1050,6 +1134,9 @@ async fn assert_session_creation_rolled_back(
 #[path = "session_deletion_tests.rs"]
 mod session_deletion_tests;
 
+#[path = "destruction_settlement_tests.rs"]
+mod destruction_settlement_tests;
+
 #[path = "file_preview_tests.rs"]
 mod file_preview_tests;
 #[path = "plugin_preparation_tests.rs"]
@@ -1060,3 +1147,23 @@ mod trajectory_tests;
 
 #[path = "../automation/goal_loop/facade_tests.rs"]
 mod automation_runtime_tests;
+
+#[path = "mcp_callback_tests.rs"]
+mod mcp_callback_tests;
+
+async fn seed_worker_fixture(
+    service: &TalosService,
+    product: &DatabaseSessionStore,
+    journal: &talos_store::execution::WorkerExecutionStore,
+    events: Vec<talos_agent_api::AgentEvent>,
+    continuation: Option<talos_agent_api::AgentContinuationRef>,
+) {
+    crate::test_worker::seed_worker_events(
+        service.sessions.as_ref(),
+        product,
+        journal,
+        events,
+        continuation,
+    )
+    .await;
+}

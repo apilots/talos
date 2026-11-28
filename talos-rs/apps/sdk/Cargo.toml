@@ -7,6 +7,10 @@ license.workspace = true
 description = "Talos SDK library for connecting to App Server and gateway APIs"
 
 [dependencies]
+reqwest.workspace = true
+futures-util.workspace = true
+uuid.workspace = true
+talos-logging.workspace = true
 async-trait = { workspace = true }
 base64 = { workspace = true }
 bytes = { workspace = true }
@@ -20,6 +24,7 @@ talos-auth = { workspace = true }
 talos-error = { path = "../../crates/infra/error" }
 
 [dev-dependencies]
+axum = "0.7"
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

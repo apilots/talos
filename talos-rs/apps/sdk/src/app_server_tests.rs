@@ -451,6 +451,8 @@ fn test_app_server_client(use_cloud_session_cache: bool) -> AppServerClient {
     let (_events_tx, events) = mpsc::channel(1);
     let (_notifications_tx, notifications) = mpsc::channel(1);
     AppServerClient {
+        product_http: None,
+        computer_id: None,
         ownership: AppServerOwnership::BorrowedProcess,
         child: None,
         stdin: None,
@@ -538,4 +540,303 @@ async fn automation_changes_are_scoped_and_close_lagged_subscription() {
         .await;
     }
     assert!(senders.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn product_http_preserves_typed_request_and_authenticated_computer_scope() {
+    use axum::{routing::post, Json, Router};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let router = Router::new().route(
+        "/v1/app/request",
+        post(
+            |headers: axum::http::HeaderMap,
+             Json(params): Json<talos_app_protocol::requests::ClientRequestParams>| async move {
+                assert_eq!(headers["authorization"], "Bearer private-token");
+                assert_eq!(headers["x-talos-computer"], "computer-a");
+                assert!(matches!(
+                    params,
+                    talos_app_protocol::requests::ClientRequestParams::ModelList(_)
+                ));
+                Json(serde_json::json!({"status":"success","data":{"source":"cloud-product"}}))
+            },
+        ),
+    );
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut client = AppServerClient::connect_product_http(
+        &endpoint,
+        "private-token".into(),
+        "computer-a".into(),
+        None,
+    )
+    .unwrap();
+    let value = client
+        .request_value("model/list", ModelListRequest { node_id: None })
+        .await
+        .unwrap();
+    assert_eq!(value["source"], "cloud-product");
+    task.abort();
+}
+
+#[tokio::test]
+async fn product_http_streams_timeline_without_importing_remote_session_state() {
+    use axum::{routing::get, Router};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let expected = timeline_event("event-remote", 1);
+    let body = format!(
+        "event: timeline/agent\ndata: {}\n\nevent: subscription/terminated\ndata: {{}}\n\n",
+        serde_json::to_string(&expected).unwrap()
+    );
+    let router = Router::new().route(
+        "/v1/sessions/session-1/events",
+        get(move |headers: axum::http::HeaderMap| {
+            let body = body.clone();
+            async move {
+                assert_eq!(headers["x-talos-computer"], "computer-a");
+                ([("content-type", "text/event-stream")], body)
+            }
+        }),
+    );
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut client =
+        AppServerClient::connect_product_http(&endpoint, "token".into(), "computer-a".into(), None)
+            .unwrap();
+    let mut stream = client
+        .open_timeline_stream(SubscribeTimelineRequest {
+            session_id: "session-1".into(),
+            turn_id: None,
+            since_event_id: None,
+            replay_limit: Some(10),
+            close_when_idle: Some(false),
+            close_on_terminal: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(stream.stream.recv().await.unwrap(), expected);
+    client.shutdown().await.unwrap();
+    task.abort();
+}
+
+#[tokio::test]
+async fn desktop_grant_uses_central_media_api_with_the_selected_computer() {
+    use axum::{routing::post, Json, Router};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let router = Router::new().route(
+        "/v1/desktop/open",
+        post(
+            |headers: axum::http::HeaderMap,
+             Json(params): Json<talos_types::DesktopOpenRequest>| async move {
+                assert_eq!(headers["authorization"], "Bearer private-token");
+                assert_eq!(params.node_id, "personal-computer");
+                Json(serde_json::json!({"status":"success","data":{"ticket":"media-grant"}}))
+            },
+        ),
+    );
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut client = AppServerClient::connect_product_http(
+        &endpoint,
+        "private-token".into(),
+        "personal-computer".into(),
+        None,
+    )
+    .unwrap();
+    let response = client
+        .request_value(
+            "desktop/open",
+            talos_types::DesktopOpenRequest {
+                node_id: "embedded".into(),
+                target_id: "managed".into(),
+                viewer_id: "viewer".into(),
+                generation: "generation".into(),
+                input_mode: talos_types::BrowserInputMode::ReadOnly,
+                controller_id: None,
+                input_epoch: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(response["ticket"], "media-grant");
+    task.abort();
+}
+
+struct BootstrapGate {
+    ready: std::sync::atomic::AtomicBool,
+    attempts: std::sync::atomic::AtomicUsize,
+    bootstraps: std::sync::atomic::AtomicUsize,
+    source_peer: bool,
+    reject_bootstrap: bool,
+    reject_retry: bool,
+}
+
+async fn fresh_product_server(
+    source_peer: bool,
+    reject_bootstrap: bool,
+    reject_retry: bool,
+) -> (String, Arc<BootstrapGate>, tokio::task::JoinHandle<()>) {
+    use axum::{response::IntoResponse, Json, Router};
+    use std::sync::atomic::Ordering;
+    let gate = Arc::new(BootstrapGate {
+        ready: false.into(),
+        attempts: 0.into(),
+        bootstraps: 0.into(),
+        source_peer,
+        reject_bootstrap,
+        reject_retry,
+    });
+    let state = gate.clone();
+    let router = Router::new().fallback(move |method: axum::http::Method, uri: axum::http::Uri,
+        headers: axum::http::HeaderMap, body: Bytes| {
+        let state = state.clone();
+        async move {
+            assert_eq!(headers["authorization"], "Bearer private-token");
+            let denied = || (axum::http::StatusCode::UNAUTHORIZED, Json(talos_types::ApiResponse::<Value>::error(
+                talos_error::ApiError::new(talos_error::ErrorCode::Unauthenticated)))).into_response();
+            if uri.path() == "/v1/user" {
+                assert_eq!(method, axum::http::Method::GET);
+                assert!(!headers.contains_key("x-talos-computer"));
+                assert!(!headers.contains_key("x-talos-source-peer"));
+                state.bootstraps.fetch_add(1, Ordering::SeqCst);
+                if state.reject_bootstrap { return denied(); }
+                state.ready.store(true, Ordering::SeqCst);
+                return Json(talos_types::ApiResponse::success(talos_types::UserCurrentResponse {
+                    user: talos_auth::UserDto { user_id: "account".into(), username: "account".into(), email: None,
+                        role: Default::default(), r#type: Default::default(), disabled: false, created_at: 0, updated_at: 0 },
+                })).into_response();
+            }
+            state.attempts.fetch_add(1, Ordering::SeqCst);
+            if state.source_peer {
+                assert_eq!(headers["x-talos-source-peer"], "source-a");
+                assert!(!headers.contains_key("x-talos-computer"));
+            } else {
+                assert_eq!(headers["x-talos-computer"], "computer-a");
+            }
+            if !state.ready.load(Ordering::SeqCst) || state.reject_retry { return denied(); }
+            match uri.path() {
+                "/v1/app/request" => {
+                    let params: talos_app_protocol::requests::ClientRequestParams = serde_json::from_slice(&body).unwrap();
+                    assert!(matches!(params, talos_app_protocol::requests::ClientRequestParams::ModelList(ref request) if request.node_id.as_deref() == Some("computer-a")));
+                    Json(serde_json::json!({"status":"success","data":{"source":"fresh-server"}})).into_response()
+                }
+                "/v1/sessions/session-1/events" => {
+                    assert!(uri.query().unwrap().contains("limit=10"));
+                    let event = timeline_event("fresh-server-event", 1);
+                    ([("content-type", "text/event-stream")], format!("event: timeline/agent\ndata: {}\n\nevent: subscription/terminated\ndata: {{}}\n\n",serde_json::to_string(&event).unwrap())).into_response()
+                }
+                "/v1/files/file-a/content" => {
+                    assert_eq!(uri.query(), Some("offset=2&limit=3"));
+                    Json(talos_types::ApiResponse::success(talos_types::FileContentResponse {
+                        file: talos_types::FileInfo {file_id: "file-a".into(), scope: talos_types::FileScope::Personal,
+                            original_filename: "a.txt".into(), mime_type: "text/plain".into(), size_bytes: 8,
+                            tags: vec![], metadata: Default::default(), created_at: 0, updated_at: 0},
+                        data_base64: "Y2Rl".into(),
+                    })).into_response()
+                }
+                _ => panic!("unexpected product API {}", uri.path()),
+            }
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    (endpoint, gate, task)
+}
+
+#[tokio::test]
+async fn fresh_product_request_bootstraps_central_account_then_replays_the_same_scope() {
+    let (endpoint, gate, task) = fresh_product_server(false, false, false).await;
+    let mut client = AppServerClient::connect_product_http(
+        &endpoint,
+        "private-token".into(),
+        "computer-a".into(),
+        None,
+    )
+    .unwrap();
+    let data = client
+        .request_value("model/list", ModelListRequest { node_id: None })
+        .await
+        .unwrap();
+    assert_eq!(data["source"], "fresh-server");
+    assert_eq!(gate.bootstraps.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(gate.attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    task.abort();
+}
+
+#[tokio::test]
+async fn fresh_timeline_bootstraps_without_losing_subscription_scope_or_events() {
+    let (endpoint, gate, task) = fresh_product_server(false, false, false).await;
+    let mut client = AppServerClient::connect_product_http(
+        &endpoint,
+        "private-token".into(),
+        "computer-a".into(),
+        None,
+    )
+    .unwrap();
+    let mut stream = client
+        .open_timeline_stream(SubscribeTimelineRequest {
+            session_id: "session-1".into(),
+            turn_id: None,
+            since_event_id: None,
+            replay_limit: Some(10),
+            close_when_idle: Some(false),
+            close_on_terminal: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        stream.stream.recv().await.unwrap(),
+        timeline_event("fresh-server-event", 1)
+    );
+    assert_eq!(gate.bootstraps.load(std::sync::atomic::Ordering::SeqCst), 1);
+    client.shutdown().await.unwrap();
+    task.abort();
+}
+
+#[tokio::test]
+async fn fresh_source_range_bootstraps_without_changing_peer_or_byte_range() {
+    let (endpoint, gate, task) = fresh_product_server(true, false, false).await;
+    let client = AppServerClient::connect_source_product_http(
+        &endpoint,
+        "private-token".into(),
+        "source-a".into(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        client
+            .read_product_file_range("file-a", 2..5)
+            .await
+            .unwrap()
+            .data,
+        Bytes::from_static(b"cde")
+    );
+    assert_eq!(gate.bootstraps.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(gate.attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    task.abort();
+}
+
+#[tokio::test]
+async fn account_bootstrap_failure_or_second_unauthorized_response_never_loops() {
+    for reject_bootstrap in [false, true] {
+        let (endpoint, gate, task) = fresh_product_server(false, reject_bootstrap, true).await;
+        let mut client = AppServerClient::connect_product_http(
+            &endpoint,
+            "private-token".into(),
+            "computer-a".into(),
+            None,
+        )
+        .unwrap();
+        assert!(client
+            .request_value("model/list", ModelListRequest { node_id: None })
+            .await
+            .unwrap_err()
+            .is_code(talos_error::ErrorCode::Unauthenticated));
+        assert_eq!(gate.bootstraps.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            gate.attempts.load(std::sync::atomic::Ordering::SeqCst),
+            if reject_bootstrap { 1 } else { 2 }
+        );
+        task.abort();
+    }
 }

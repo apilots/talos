@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
 
-use crate::test_support::run_test_migrations;
 use base64::Engine;
 use bytes::Bytes;
 use futures_util::stream;
@@ -24,6 +23,7 @@ use crate::Actor;
 use super::{FileByteStream, FileService};
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+#[cfg(feature = "sync")]
 #[path = "peer_tests.rs"]
 mod peer_tests;
 const CSV: &[u8] = b"name,severity\nfire,high\nsmoke,medium\n";
@@ -91,7 +91,11 @@ struct TestFiles {
 impl TestFiles {
     async fn new(configure: impl FnOnce(&mut FileStorageConfig)) -> Self {
         let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
-        run_test_migrations(storage.pool()).await;
+        let migrations = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../conf/migrations/sqlite");
+        talos_store::migration::run_migrations(storage.pool(), &migrations)
+            .await
+            .unwrap();
         let store = Arc::new(DatabaseFileStore::new(&storage));
         let project_store = Arc::new(StorageProjectStore::new(storage.clone()).await.unwrap());
         let root = tempfile::tempdir().unwrap();

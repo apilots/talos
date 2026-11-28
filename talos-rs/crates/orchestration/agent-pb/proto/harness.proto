@@ -6,17 +6,20 @@ import "memory.proto";
 
 // Ordinary per-method gRPC. Each node serves its existing local Harness instances.
 service AgentHarnessRpc {
+  rpc ReadSessionEvents(ReadSessionEventsRequest) returns (ReadSessionEventsResponse);
+  rpc ReadExecutionPayload(ReadExecutionPayloadRequest) returns (ReadExecutionPayloadResponse);
   rpc SetRegistrationAdmission(SetRegistrationAdmissionRequest) returns (EmptyResponse);
   rpc ReadSessionExecutionState(ReadSessionExecutionStateRequest) returns (SessionExecutionStateResponse);
-  rpc CommitSessionExecutionState(CommitSessionExecutionStateRequest) returns (EmptyResponse);
   rpc Start(stream StartRequest) returns (stream RunResponse);
   rpc SubmitInput(stream SubmitInputRequest) returns (stream InputResponse);
   rpc Interrupt(InterruptRequest) returns (InterruptResponse);
   rpc CompactSession(stream CompactSessionRequest) returns (stream RunResponse);
   rpc ClearSession(SessionRequest) returns (EmptyResponse);
+  rpc RetireSession(SessionRequest) returns (EmptyResponse);
   rpc CloseSession(SessionRequest) returns (EmptyResponse);
   rpc ReadWorkspaceMemory(SessionRequest) returns (WorkspaceMemoryResponse);
   rpc UpdateWorkspaceMemory(UpdateWorkspaceMemoryRequest) returns (WorkspaceMemoryResponse);
+  rpc GenerateSessionTitle(GenerateSessionTitleRequest) returns (GenerateSessionTitleResponse);
   rpc FormDreamMemory(stream FormDreamMemoryRequest) returns (stream FormDreamMemoryResponse);
   rpc Shutdown(ShutdownRequest) returns (EmptyResponse);
 }
@@ -53,7 +56,7 @@ message SessionRequest { NodeAuth auth = 1; SessionContext params = 2; Coordinat
 message ShutdownParams { string agent_id = 1; uint64 timeout_ms = 2; }
 message ShutdownRequest { NodeAuth auth = 1; ShutdownParams params = 2; }
 message EmptyResponse { oneof result { Empty completed = 1; Failure failure = 2; } }
-message WaitingSettlement { AgentEvent event = 1; ContinuationRef continuation = 2; RunMetrics metrics = 3; }
+message WaitingSettlement { reserved 2; reserved "continuation"; AgentEvent event = 1; RunMetrics metrics = 3; }
 message FinishedSettlement {
   reserved 2; // Turn messages already travel in canonical progress.
   reserved "messages";
@@ -64,22 +67,24 @@ message Settlement {
   oneof result { WaitingSettlement waiting = 1; FinishedSettlement finished = 2; }
 }
 
-// Invocation-scoped model callback, not a generic LLM transport. These fields
-// project exactly the text/usage consumed by the existing formation algorithm.
-// Model selection and accounting run on the control plane; policy/files on node.
-message DreamMemoryModelPrompt { string system = 1; string user = 2; }
-message DreamMemoryModelReply { string content = 1; TokenUsage usage = 2; }
+// Dream runs entirely on the target Worker; the product consumes retained execution facts.
+message DreamMemoryCursor { uint64 generation = 1; int64 offset = 2; }
+message DreamMemoryParams { SessionContext context = 1; DreamMemoryCursor after_cursor = 2; }
 message FormDreamMemoryRequest {
   NodeAuth auth = 1;
-  CoordinatorCallContext caller = 5;
-  oneof body { SessionContext context = 2; DreamMemoryModelReply model_reply = 3; Failure model_failure = 4; }
+  DreamMemoryParams params = 2;
+  CoordinatorCallContext caller = 3;
 }
-message DreamMemoryFormation { optional uint64 covers_until_seq = 1; }
+message DreamMemoryFormation {
+  optional uint64 covers_until_seq = 1;
+  AgentMemoryModelUsage model_usage = 2;
+  Failure failure = 3;
+}
+message DreamMemoryResult { DreamMemoryFormation formation = 1; DreamMemoryCursor next_cursor = 2; uint64 processed_until_seq = 3; }
 message FormDreamMemoryResponse {
-  oneof result { DreamMemoryModelPrompt model_prompt = 1; DreamMemoryFormation formed = 2; Failure failure = 3; }
+  oneof result { DreamMemoryResult formed = 1; Failure failure = 2; }
 }
 
-enum SessionStateVisibility { SESSION_STATE_VISIBILITY_UNSPECIFIED = 0; LOCAL = 1; SHARED = 2; }
 message SessionExecutionState {
   SessionHistoryCursor history_cursor = 1;
   optional TurnRef active_turn = 2;
@@ -88,8 +93,6 @@ message SessionExecutionState {
 }
 message ReadSessionExecutionStateRequest { NodeAuth auth = 1; SessionContext params = 2; CoordinatorCallContext caller = 3; }
 message SessionExecutionStateResponse { oneof result { SessionExecutionState state = 1; Failure failure = 2; } }
-message CommitSessionExecutionStateParams { SessionContext session = 1; TurnRef identity = 2; SessionHistoryCursor history_cursor = 3; SessionStateVisibility visibility = 4; }
-message CommitSessionExecutionStateRequest { NodeAuth auth = 1; CommitSessionExecutionStateParams params = 2; CoordinatorCallContext caller = 3; }
 
 // The control plane excludes renewal while preparing an owned registration deletion.
 message SetRegistrationAdmissionRequest {
@@ -99,4 +102,35 @@ message SetRegistrationAdmissionRequest {
     bool reject_controller = 3;
     int64 idle_before_unix_seconds = 4;
   }
+}
+
+message AgentSessionEventCursor { string session_id = 1; uint64 generation = 2; int64 offset = 3; }
+message AgentExecutionSettlement { oneof state { WaitingSettlement waiting = 1; AgentFinishedSettlement finished = 2; } }
+// history_supplement reuses the strict SessionHistorySupplement capture encoding.
+// Only sealed terminal metadata is included; payload bodies use bounded reads.
+enum AgentExecutionPurpose { AGENT_EXECUTION_PURPOSE_UNSPECIFIED = 0; AGENT_EXECUTION_PURPOSE_TURN = 1; AGENT_EXECUTION_PURPOSE_COMPACTION = 2; }
+message AgentCommittedEvent {
+  AgentExecutionPurpose execution_purpose = 8; AgentSessionEventCursor cursor = 1; AgentEvent event = 2; AgentExecutionSettlement settlement = 3; AutomationInputOrigin automation_input = 4; AgentCommandIdentity command = 5; ModelSelection execution_model = 6; bytes history_supplement = 7; }
+message AgentSessionEventsPage { repeated AgentCommittedEvent events = 1; AgentSessionEventCursor next_cursor = 2; bool has_more = 3; optional TurnRef active_turn = 4; }
+message ReadSessionEventsRequest { NodeAuth auth = 1; SessionContext params = 2; CoordinatorCallContext caller = 3; AgentSessionEventCursor after_cursor = 4; uint32 limit = 5; }
+message ReadSessionEventsResponse { oneof result { AgentSessionEventsPage page = 1; Failure failure = 2; } }
+
+message AgentMemoryModelUsage { string request_id = 1; ModelSelection model_ref = 2; TokenUsage usage = 3; int64 completed_at = 4; string timezone = 5; }
+message AgentFinishedSettlement { RunMetrics metrics = 1; repeated AgentMemoryModelUsage memory_usage = 2; }
+
+message ReadExecutionPayloadParams {SessionContext session=1;TurnRef identity=2;string payload_id=3;uint64 offset=4;uint32 limit=5;}
+message ReadExecutionPayloadRequest {NodeAuth auth=1;CoordinatorCallContext caller=2;ReadExecutionPayloadParams params=3;}
+message ExecutionPayloadChunk {string data=1;optional uint64 next_offset=2;}
+message ReadExecutionPayloadResponse {oneof result {ExecutionPayloadChunk chunk=1;Failure failure=2;}}
+
+// The target Worker owns input history, model selection and retained execution facts.
+enum AgentSessionTitleMode { AGENT_SESSION_TITLE_MODE_UNSPECIFIED = 0; AGENT_SESSION_TITLE_MODE_GENERATE = 1; AGENT_SESSION_TITLE_MODE_READ_RETAINED = 2; }
+message AgentSessionTitleParams { SessionContext session = 1; TurnRef identity = 2; AgentSessionTitleMode mode = 3; }
+message GenerateSessionTitleRequest { NodeAuth auth = 1; CoordinatorCallContext caller = 2; AgentSessionTitleParams params = 3; }
+message AgentSessionTitleResult {
+  oneof outcome { string title = 1; Failure failure = 2; }
+  AgentMemoryModelUsage model_usage = 3;
+}
+message GenerateSessionTitleResponse {
+  oneof result { AgentSessionTitleResult generated = 1; Empty no_input = 2; Failure failure = 3; }
 }

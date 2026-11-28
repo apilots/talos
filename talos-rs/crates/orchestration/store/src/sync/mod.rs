@@ -2,19 +2,17 @@
 //! Imports use these Store-owned projections without invoking Services, Agents,
 //! accounting, filesystem mutation, continuation claims or capture again.
 
-mod bindings;
 pub(crate) mod capture;
 mod catalog;
 mod collect;
-pub use bindings::StoreSyncBindings;
 mod file;
 mod import_stage;
-mod metadata;
+pub(crate) mod metadata;
 mod reclaim;
 pub(crate) mod session;
-pub(crate) mod source;
 mod timeline;
 
+use crate::capture::source;
 use std::sync::{Arc, RwLock, Weak};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{Storage, StorageTransaction};
@@ -31,7 +29,8 @@ pub type SessionInfoProjection =
 
 /// The one product bridge for an installed, authenticated account binding.
 /// The caller owns account verification and network lifecycle. It must install
-/// this bridge on the original Stores before enabling product mutations.
+/// this bridge on the original Stores when replication is enabled. Store facts
+/// are captured transactionally even before this bridge is installed.
 pub struct StoreSyncAdapter {
     storage: Arc<dyn Storage>,
     pub(crate) sync: Arc<TalosSync>,
@@ -136,6 +135,10 @@ impl StoreSyncAdapter {
             ));
         }
         if let SyncResourceKey::Session { session_id } = &batch.resource {
+            if !tx.query("SELECT 1 FROM sessions WHERE session_key=? AND execution_architecture='legacy_read_only'", &[session_id]).await?.is_empty() {
+                return Err(TalosError::new(talos_error::ErrorCode::Conflict,
+                    "Legacy Session history cannot be modified by synchronization."));
+            }
             let executing = tx
                 .query(
                     "SELECT 1 FROM agent_active_turns WHERE session_id=?",

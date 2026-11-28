@@ -5,6 +5,12 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = ["product", "control-plane"]
+product = ["dep:talos-coordinator"]
+control-plane = ["product", "dep:talos-control-plane", "dep:talos-worker-runtime"]
+sync = ["product", "dep:talos-sync", "talos-store/sync"]
+
 [dependencies]
 talos-browser.workspace = true
 http = "1"
@@ -26,27 +32,25 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-getrandom = { workspace = true }
-subtle = { workspace = true }
 agent-protocol = { workspace = true }
 agent-client = { workspace = true }
 talos-auth = { workspace = true }
 talos-agent-api = { workspace = true }
 talos-agent = { workspace = true }
 talos-config = { workspace = true }
-talos-coordinator = { path = "../coordinator" }
+talos-coordinator = { path = "../coordinator", optional = true }
+talos-control-plane = { workspace = true, optional = true }
 talos-error = { workspace = true }
 talos-fs = { workspace = true }
-talos-llm-provider = { workspace = true }
 talos-knowledge-format = { workspace = true }
 talos-memory = { workspace = true }
 talos-mcp = { workspace = true }
 talos-plugin = { workspace = true }
 talos-skills = { workspace = true }
 talos-store = { workspace = true }
-talos-sync = { workspace = true }
+talos-sync = { workspace = true, optional = true }
 talos-types = { workspace = true }
-talos-worker-runtime = { workspace = true }
+talos-worker-runtime = { workspace = true, optional = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

@@ -3,15 +3,12 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use talos_agent_api::{
-    AgentContinuationRef, AgentEvent, AgentEventPayload, AgentTurnRef, TimelineEventPayload,
-    TimelineSystemNotice,
+    AgentEvent, AgentEventPayload, AgentTurnRef, TimelineEventPayload, TimelineSystemNotice,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_store::session::{
-    AgentActiveTurnRecord, AgentCancellationAdmission, AgentContinuationBindingRecord,
-    AgentEventCommit, AgentEventRecord, AgentExecutionStore, ClaimContinuationParams, CommandLease,
-    CommandReservation, CommitInitialAdmissionParams, CommitRunningInputAdmissionParams,
-    CommitTerminalSettlementParams, IdempotencyReservation, TimelineEventRecord,
+    AgentActiveTurnRecord, AgentCancellationAdmission, AgentEventRecord, AgentExecutionStore,
+    CommandLease, CommandReservation, IdempotencyReservation, TimelineEventRecord,
 };
 
 #[derive(Default)]
@@ -102,43 +99,6 @@ impl AgentExecutionStore for RecordingAgentExecutionStore {
         Err(out_of_scope())
     }
 
-    async fn commit_initial_admission(
-        &self,
-        _params: CommitInitialAdmissionParams,
-    ) -> TalosResult<AgentEventCommit> {
-        Err(out_of_scope())
-    }
-
-    async fn commit_maintenance_admission(
-        &self,
-        _event: AgentEvent,
-    ) -> TalosResult<AgentEventCommit> {
-        Err(out_of_scope())
-    }
-
-    async fn commit_progress_event(
-        &self,
-        _event: AgentEvent,
-        _expected_event_seq: i64,
-    ) -> TalosResult<AgentEventCommit> {
-        Err(out_of_scope())
-    }
-
-    async fn commit_progress_events(
-        &self,
-        _events: Vec<AgentEvent>,
-        _expected_event_seq: i64,
-    ) -> TalosResult<AgentEventCommit> {
-        Err(out_of_scope())
-    }
-
-    async fn commit_running_input_admission(
-        &self,
-        _params: CommitRunningInputAdmissionParams,
-    ) -> TalosResult<AgentEventCommit> {
-        Err(out_of_scope())
-    }
-
     async fn begin_cancellation(
         &self,
         _identity: &AgentTurnRef,
@@ -150,29 +110,6 @@ impl AgentExecutionStore for RecordingAgentExecutionStore {
         &self,
         _admission: AgentCancellationAdmission,
     ) -> TalosResult<AgentActiveTurnRecord> {
-        Err(out_of_scope())
-    }
-
-    async fn commit_waiting_settlement(
-        &self,
-        _event: AgentEvent,
-        _continuation: AgentContinuationRef,
-        _expected_event_seq: i64,
-    ) -> TalosResult<AgentEventCommit> {
-        Err(out_of_scope())
-    }
-
-    async fn claim_continuation(
-        &self,
-        _params: ClaimContinuationParams,
-    ) -> TalosResult<AgentEventCommit> {
-        Err(out_of_scope())
-    }
-
-    async fn commit_terminal_settlement(
-        &self,
-        _params: CommitTerminalSettlementParams,
-    ) -> TalosResult<AgentEventRecord> {
         Err(out_of_scope())
     }
 
@@ -325,13 +262,6 @@ impl AgentExecutionStore for RecordingAgentExecutionStore {
             .expect("active Turn fixture lock")
             .get(session_id)
             .cloned())
-    }
-
-    async fn get_agent_continuation_binding(
-        &self,
-        _identity: &AgentTurnRef,
-    ) -> TalosResult<Option<AgentContinuationBindingRecord>> {
-        Ok(None)
     }
 }
 

@@ -26,7 +26,7 @@ it("lists real Session facts with links and no independent create entry", async 
   const mocks = setup();
   expect(await screen.findByText("Check CI")).toBeInTheDocument();
   expect(mocks.list).toHaveBeenCalledWith({ sessionId: null, scope: "unfinished", cursor: null, limit: 30 });
-  expect(screen.getByRole("link", { name: /Open chat/ })).toHaveAttribute("href", "/sessions/s1");
+  expect(screen.getByRole("link", { name: /Open chat/ })).toHaveAttribute("href", "/sessions/s1?computerId=computer-A");
   expect(screen.queryByRole("button", { name: /new|create/i })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Stop Loop" }));
   await waitFor(() => expect(mocks.execute).toHaveBeenCalledWith({ sessionId: "s1", action: { target: "loop", action: { type: "stop", loopId: "loop-1" } } }));

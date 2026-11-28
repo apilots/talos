@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 1010" role="img" aria-labelledby="title desc" lang="zh-CN">
+<title id="title">四个边界与产品组装</title>
+<desc id="desc">AppServer/TUI 装配共享产品运行时、内嵌 Worker 和可选接入/Sync。Server 装配共享产品运行时、Server 控制面、可选 Relay/Sync 和 Worker 绑定。独立 Worker 只装配 Worker 运行时及控制面客户端。单向箭头表示调用或宿主绑定关系，控制面客户端通过现有协议访问 Server 管理实现。同一 Worker 各入口共享原服务、状态和锁，不同 Worker 自持实例和数据。</desc>
+<style>
+text { font-family:'PingFang SC','Microsoft YaHei',sans-serif; fill:#f0f4f8; font-size:21px; }
+.title { font-size:37px; font-weight:650; }
+.head { font-size:25px; font-weight:600; }
+.sub { font-size:18px; fill:#a8b8c9; }
+.small { font-size:16px; fill:#a8b8c9; }
+.edge { fill:none; stroke:#8fc2ff; stroke-width:2; marker-end:url(#arrow); }
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8fc2ff"/></marker></defs>
+<rect width="100%" height="100%" fill="#10161d"/>
+<text x="40" y="60" class="title">四个边界 · 复用现有运行时 · 按产品组装</text>
+<text x="40" y="103" class="sub">七模块是能力划分；运行时与接入边界说明谁启动、谁持久化、谁连接 Server</text>
+<rect x="40" y="145" width="500" height="120" rx="17" fill="#203b36"/>
+<text x="65" y="183" class="head">AppServer / TUI / Desktop</text>
+<text x="65" y="219" class="sub">产品运行时 + 内嵌 Worker</text>
+<text x="65" y="248" class="sub">可选远程接入 / Sync</text>
+<rect x="590" y="145" width="500" height="120" rx="17" fill="#243c56"/>
+<text x="615" y="183" class="head">TalosServer</text>
+<text x="615" y="219" class="sub">产品运行时 + 控制面 + Worker 绑定</text>
+<text x="615" y="248" class="sub">可选 Relay / Sync</text>
+<rect x="1140" y="145" width="500" height="120" rx="17" fill="#192735"/>
+<text x="1165" y="183" class="head">Native / Docker / Talo Worker</text>
+<text x="1165" y="219" class="sub">Worker 运行时 + 控制面客户端</text>
+<text x="1165" y="248" class="sub">复用同一执行入口与宿主环境适配</text>
+<text x="40" y="318" class="small">单向箭头为调用方 → 被调用能力（宿主绑定另标）；注册客户端不装配 Server 管理实现。</text>
+<rect x="40" y="345" width="370" height="280" rx="17" fill="#203b36"/>
+<text x="65" y="385" class="head">共享产品运行时</text>
+<text x="65" y="421" class="sub">talos-service / talos-store</text>
+<text x="65" y="451" class="sub">talos-coordinator · talos-base 装配</text>
+<text x="65" y="485" class="sub">TalosService · TimelineEventService</text>
+<text x="65" y="519" class="sub">CoordinatorImpl</text>
+<text x="65" y="553" class="sub">DatabaseSessionStore</text>
+<text x="65" y="595" class="small">M1 / M2 · 产品库 / 物化 / 业务调度</text>
+<rect x="450" y="345" width="370" height="280" rx="17" fill="#192735"/>
+<text x="475" y="385" class="head">Worker 运行时</text>
+<text x="475" y="421" class="sub">talos-worker / talos-agent</text>
+<text x="475" y="451" class="sub">agent-protocol · TalosWorker</text>
+<text x="475" y="485" class="sub">AgentHarnessRpcAdapter</text>
+<text x="475" y="519" class="sub">SessionOwner · ConfigService</text>
+<text x="475" y="553" class="sub">历史 / 检查点 / Memory / 节点环境</text>
+<text x="475" y="595" class="small">M3 / M4 · 每个 Worker 自持服务及数据</text>
+<rect x="860" y="345" width="370" height="280" rx="17" fill="#192735"/>
+<text x="885" y="385" class="head">控制面客户端 / 接入</text>
+<text x="885" y="421" class="sub">agent-client / 现有 SDK / 宿主接入</text>
+<text x="885" y="451" class="sub">AgentNodeRunner · AgentNodeClient</text>
+<text x="885" y="485" class="sub">RegisteredWorker（talos-worker）</text>
+<text x="885" y="519" class="sub">自身身份 / 凭证 · 注册 / 重连</text>
+<text x="885" y="553" class="sub">绑定已有 Worker，接入不重建服务</text>
+<text x="885" y="595" class="small">M1 客户端与 Worker 宿主适配</text>
+<rect x="1270" y="345" width="370" height="280" rx="17" fill="#243c56"/>
+<text x="1295" y="385" class="head">Server 控制面</text>
+<text x="1295" y="421" class="sub">talos-control-plane lib（已抽取）</text>
+<text x="1295" y="451" class="sub">AgentNodeService / ManagedWorkers</text>
+<text x="1295" y="485" class="sub">权威目录 · 凭证 / 租约 · 发布</text>
+<text x="1295" y="519" class="sub">节点路由 · Talo 生命周期</text>
+<text x="1295" y="553" class="sub">复用已有 auth / 节点 Store / 驱动</text>
+<text x="1295" y="595" class="small">M5 · 网络监听 / 编解码在适配层</text>
+<path d="M413 535H440" class="edge"/>
+<path d="M1233 535H1260" class="edge"/>
+<path d="M1045 630V675H635V635" class="edge"/>
+<text x="708" y="663" class="sub">宿主接线绑定已有 Worker</text>
+<path d="M225 630V730H1455V635" class="edge"/>
+<text x="525" y="718" class="sub">Server 侧产品服务：通过控制面端口解析节点 / 请求唤醒</text>
+<rect x="40" y="770" width="1600" height="100" rx="13" fill="#192735"/>
+<text x="65" y="802" class="sub">共享实现与类型化持久化接口；每个 Worker 自持配置、历史 / 检查点、Memory 进度与适用节点资源 / 凭证。</text>
+<text x="65" y="833" class="sub">同一 Worker 的 lib / WSS / gRPC 复用同一实例、Store、状态和锁；Server 产品配置 / 任务 / 结算保持原 owner。</text>
+<text x="65" y="858" class="small">talos-base 监督组装与生命周期；纯管理 CLI 只装 M1 + M2，不创建 Worker、调度、注册或 Sync。</text>
+<rect x="40" y="900" width="1600" height="70" rx="13" fill="#203b36"/>
+<text x="65" y="930" class="sub">Relay / Sync 独立可选；常驻变更 / tombstone 捕获不依赖 Sync，未装配期间的修改与删除后续仍可同步。</text>
+<text x="65" y="956" class="small">保持原同步协议；图示为调用与接入关系，编译依赖通过稳定契约核对。停止接入或 Sync 不销毁本机产品状态。</text>
+</svg>

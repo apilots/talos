@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 1110" role="img" aria-labelledby="title description" lang="zh-CN">
+<title id="title">执行事实与产品视图一致性时序</title>
+<desc id="description">Server 发送输入和配置版本，Worker 将准入输入提交自己的执行库，从本地历史执行，提交事件后交付 Server。Server 原子物化 Timeline 和连续游标。断线时授权有效的 Turn 继续，Server 重连按最后游标补读并幂等结算。本机产品服务使用同一契约。</desc>
+<style>
+text { font-family:'PingFang SC','Microsoft YaHei',sans-serif; fill:#f0f4f8; font-size:21px; }
+.title { font-size:36px; font-weight:650; }
+.sub { font-size:19px; fill:#a8b8c9; }
+.head { font-size:24px; font-weight:600; }
+.small { font-size:18px; fill:#a8b8c9; }
+.arrow { fill:none; stroke:#8fc2ff; stroke-width:2; marker-end:url(#arrow); }
+.fact { fill:none; stroke:#74dbbd; stroke-width:2; marker-end:url(#fact); }
+.lane { stroke:#344355; stroke-width:1; stroke-dasharray:6 6; }
+</style>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8fc2ff"/></marker>
+<marker id="fact" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#74dbbd"/></marker>
+</defs>
+<rect width="1680" height="1110" fill="#10161d"/>
+<text x="45" y="60" class="title">执行事实单写 · 产品视图最终一致</text>
+<text x="45" y="100" class="sub">Worker 本地读取历史 · Server 按游标物化和补读 · 本机产品服务遵循相同契约</text>
+<rect x="80" y="145" width="320" height="80" rx="14" fill="#243c56"/>
+<rect x="500" y="145" width="320" height="80" rx="14" fill="#203b36"/>
+<rect x="900" y="145" width="320" height="80" rx="14" fill="#203b36"/>
+<rect x="1300" y="145" width="320" height="80" rx="14" fill="#243c56"/>
+<text x="240" y="177" class="head" text-anchor="middle">TalosServer</text>
+<text x="240" y="207" class="small" text-anchor="middle">配置 · 命令 · 调度</text>
+<text x="660" y="177" class="head" text-anchor="middle">Worker</text>
+<text x="660" y="207" class="small" text-anchor="middle">唯一执行事实写入者</text>
+<text x="1060" y="177" class="head" text-anchor="middle">Worker 执行库</text>
+<text x="1060" y="207" class="small" text-anchor="middle">输入 · 历史 · 检查点 · 终态</text>
+<text x="1460" y="177" class="head" text-anchor="middle">Server 产品视图</text>
+<text x="1460" y="207" class="small" text-anchor="middle">Timeline · 进度 · 摄取游标</text>
+<line x1="240" y1="225" x2="240" y2="985" class="lane"/>
+<line x1="660" y1="225" x2="660" y2="985" class="lane"/>
+<line x1="1060" y1="225" x2="1060" y2="985" class="lane"/>
+<line x1="1460" y1="225" x2="1460" y2="985" class="lane"/>
+<text x="450" y="265" text-anchor="middle">输入 / 绑定 / 配置版本 / 命令 ID</text>
+<line x1="240" y1="280" x2="660" y2="280" class="arrow"/>
+<text x="860" y="335" text-anchor="middle">持久提交准入输入及接受版本</text>
+<line x1="660" y1="350" x2="1060" y2="350" class="fact"/>
+<text x="860" y="405" text-anchor="middle">本地历史 → 上下文预算 → 执行</text>
+<line x1="660" y1="420" x2="1060" y2="420" class="fact"/>
+<text x="860" y="475" text-anchor="middle">提交事件与终态</text>
+<line x1="660" y1="490" x2="1060" y2="490" class="fact"/>
+<text x="450" y="545" text-anchor="middle">已提交事件及游标</text>
+<line x1="660" y1="560" x2="240" y2="560" class="fact"/>
+<text x="850" y="615" text-anchor="middle">同事务写入产品 Timeline 与连续游标</text>
+<line x1="240" y1="630" x2="1460" y2="630" class="arrow"/>
+<rect x="100" y="675" width="1480" height="82" rx="12" fill="#2b2924"/>
+<text x="840" y="708" text-anchor="middle">连接断开 · 授权有效的同一 Turn 继续运行与提交</text>
+<text x="840" y="740" text-anchor="middle" class="small">Server 展示最后已确认进度 / 补读中，按原命令身份核对受理结果</text>
+<text x="450" y="795" text-anchor="middle">从最后提交的 afterCursor 补读</text>
+<line x1="240" y1="810" x2="660" y2="810" class="arrow"/>
+<text x="450" y="870" text-anchor="middle">返回缺失的已提交事件</text>
+<line x1="660" y1="885" x2="240" y2="885" class="fact"/>
+<text x="850" y="945" text-anchor="middle">重叠去重 · 缺口补齐 · 幂等结算 · 原子推进连续游标</text>
+<line x1="240" y1="960" x2="1460" y2="960" class="arrow"/>
+<line x1="45" y1="1002" x2="1635" y2="1002" stroke="#344355"/>
+<text x="45" y="1042" class="small">每类事实唯一写入者 · 配置按版本受理 · clear/delete 通过 gate、代数与 tombstone 协同</text>
+<text x="45" y="1078" class="small">视图可在保留历史内重建；独立配置与账本保持原 owner。Worker 运行不依赖 Server 历史查询。</text>
+</svg>

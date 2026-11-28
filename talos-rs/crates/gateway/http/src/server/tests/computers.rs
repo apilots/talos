@@ -234,7 +234,7 @@ async fn held_http_deletion_isolates_other_computer_reads_and_lifecycle() {
     use tokio::sync::Notify;
 
     let state = test_state(false).await;
-    let nodes = state.app.nodes.clone();
+    let nodes = state.app.nodes.server().unwrap().clone();
     let app = super::super::computers::routes()
         .with_state(state.clone())
         .layer(axum::middleware::from_fn_with_state(state, auth_middleware));
@@ -263,6 +263,7 @@ async fn held_http_deletion_isolates_other_computer_reads_and_lifecycle() {
                 .register(
                     &principal,
                     RegisterParams {
+                        product_owner: talos_types::NodeProductOwner::Server,
                         system_info: None,
                         deployments: vec![agent_protocol::Deployment {
                             agent_id: "default".into(),

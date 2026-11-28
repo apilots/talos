@@ -10,12 +10,7 @@ use talos_types::{
     ProjectUnavailableReason,
 };
 
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(super) struct MetadataSource {
-    fields: super::source::SourceFields,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    tags: Vec<String>,
-}
+pub(crate) use crate::capture::MetadataSource;
 
 pub(super) async fn read_source(
     adapter: &StoreSyncAdapter,
@@ -49,7 +44,7 @@ pub(super) async fn read_source(
     };
     let embedded_project = matches!(resource, SyncResourceKey::Project { .. })
         && row.get_string("execution_node_id").as_deref() == Some("embedded");
-    let mut fields = super::source::SourceFields::from(row);
+    let mut fields = crate::capture::source::SourceFields::from(row);
     if embedded_project {
         if !TalosSync::captures_embedded_resource(tx, &adapter.binding, ResourceKind::Project, id)
             .await?
@@ -118,7 +113,7 @@ impl MetadataSource {
                 updated_at: number(&row, "updated_at")?,
             }),
             SyncResourceKey::Project { .. } => SyncResourceSnapshot::Project(ProjectInfo {
-                node_id: text(&row, "execution_node_id")?,
+                node_id: adapter.computer(&text(&row, "execution_node_id")?),
                 project_id: id.into(),
                 name: text(&row, "name")?,
                 directory: text(&row, "directory")?.into(),
@@ -165,6 +160,7 @@ pub(super) async fn project_session(
         None => (adapter.session_projection)(&record)?,
     };
     info.session_kind = record.session_kind;
+    info.pinned = record.pinned;
     info.title = record.title.clone();
     info.last_activity = record.last_activity;
     info.message_count = record.message_count;
@@ -260,7 +256,7 @@ pub(super) async fn delete(
             )
             .await?;
         if !owned.is_empty() {
-            super::source::retire_history(tx, session_id, /*deleted*/ true).await?;
+            crate::capture::source::retire_history(tx, session_id, /*deleted*/ true).await?;
         }
     }
     let (table, key, owner) = match resource {
@@ -288,14 +284,14 @@ pub(super) fn text(row: &talos_storage::Row, key: &str) -> TalosResult<String> {
         .ok_or_else(|| TalosError::internal("Missing persisted synchronization field."))
 }
 
-pub(super) async fn session_row(
+pub(crate) async fn session_row(
     adapter: &StoreSyncAdapter,
     tx: &mut dyn StorageTransaction,
     session_id: &str,
 ) -> TalosResult<Option<talos_storage::Row>> {
     let rows = tx
         .query(
-            "SELECT * FROM sessions WHERE session_key = ? AND user_id IN (?, ?)",
+            "SELECT * FROM sessions WHERE session_key = ? AND user_id IN (?, ?) AND execution_architecture <> 'legacy_read_only'",
             &[
                 session_id,
                 &adapter.binding.source_user_id,

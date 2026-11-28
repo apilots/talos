@@ -183,13 +183,7 @@ async fn upgraded_hub_and_local_replica_continue_from_the_original_cut() {
     let b: Value =
         serde_json::from_slice(&std::fs::read(fixture.join("survivor-b.json")).unwrap()).unwrap();
     let a_version: talos_sync::SyncVersion = serde_json::from_value(a["version"].clone()).unwrap();
-    let mut tx = old_b
-        .sync_host
-        .sync_stores
-        .storage
-        .begin_transaction()
-        .await
-        .unwrap();
+    let mut tx = old_b.host.stores.storage.begin_transaction().await.unwrap();
     tx.execute(
         "UPDATE sync_documents SET acknowledged_vector=unhex(?) WHERE resource_id=?",
         &[&legacy::hex(&a_version.version_vector), SESSION],
@@ -210,8 +204,8 @@ async fn upgraded_hub_and_local_replica_continue_from_the_original_cut() {
         .unwrap()
         .unwrap();
     let full = survivor
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .storage
         .query(
             "SELECT length(snapshot_blob) AS bytes FROM sync_documents WHERE resource_id=?",

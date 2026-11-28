@@ -93,14 +93,23 @@ impl OllamaProvider {
         request: ChatRequest,
         stream: bool,
     ) -> TalosResult<chat_protocol::ChatCompletionRequest> {
-        let reasoning_effort = request.reasoning_effort.map(|effort| {
-            match effort {
-                ReasoningEffort::Light => "low",
-                ReasoningEffort::Medium => "medium",
-                ReasoningEffort::High | ReasoningEffort::XHigh => "high",
-            }
-            .to_string()
-        });
+        let reasoning_effort = request
+            .reasoning_effort
+            .map(|effort| {
+                Ok(match effort {
+                    ReasoningEffort::Light => "low",
+                    ReasoningEffort::Medium => "medium",
+                    ReasoningEffort::High | ReasoningEffort::XHigh => "high",
+                    ReasoningEffort::Max => {
+                        return Err(TalosError::new(
+                            talos_error::ErrorCode::InvalidRequest,
+                            "Maximum reasoning effort is not supported by this Ollama connection.",
+                        ));
+                    }
+                }
+                .to_string())
+            })
+            .transpose()?;
         chat_protocol::request(
             request,
             stream,

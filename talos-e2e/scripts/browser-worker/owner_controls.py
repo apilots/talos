@@ -237,7 +237,7 @@ class Desktop:
         assert result['status'] == 'authenticated' and result['user']['role'] == role
         self.token = result['access_token']
 
-    def has_computer(self, computer):
+    def has_local_computer_record(self, computer):
         with sqlite3.connect(f'file:{self.home / "data/talos.db"}?mode=ro', uri=True) as db:
             return db.execute('SELECT 1 FROM agent_nodes WHERE node_id=?', (computer,)).fetchone() is not None
 
@@ -315,11 +315,11 @@ def main():
         binding = controls(computer,
             lambda: admin.call('builtinJob/list', {'computerId': computer}),
             lambda request: admin.call('builtinJob/control', request))
-        assert admin.has_computer(computer), 'Server directory cache lost the registered Computer'
+        assert not admin.has_local_computer_record(computer), 'Remote Computer was copied into the local product database'
         read = {'nodeId': computer, 'operation': {'kind': 'read'}}
         snapshot = admin.call('browser/operate', read)
         assert snapshot['display']['kind'] == 'dockerDesktop'
-        assert admin.has_computer(computer), 'Computer connection changed the Server directory cache'
+        assert not admin.has_local_computer_record(computer), 'Connecting to a remote Computer copied its registry locally'
         viewer = DesktopViewer(admin, admin.call('desktop/open', open_request(computer, snapshot)))
         try:
             viewer.frame(REPORT / 'desktop-embedded-desktop.png')
@@ -334,9 +334,11 @@ def main():
                    ('desktop/open', '/v1/desktop/open', open_request(computer, snapshot))]
         for method, path, request in blocked:
             codes = {'permissionDenied', 'resourceNotFound'} if method == 'desktop/open' else {'permissionDenied'}
-            denied(qa.exchange(method, request), codes)
+            # Scoped Desktop requests hide foreign Computers before Job dispatch.
+            ipc_codes = codes if method == 'desktop/open' else {'resourceNotFound'}
+            denied(qa.exchange(method, request), ipc_codes)
             status, response = http_response(web + path, request, QA_TOKEN)
-            assert status in (403, 404)
+            assert status in ({403, 404} if method == 'desktop/open' else {403})
             denied(response, codes)
         denied(qa.exchange('browser/operate', read), {'permissionDenied', 'resourceNotFound'})
         status, response = http_response(web + '/v1/builtin-job/control',

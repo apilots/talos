@@ -487,6 +487,7 @@ impl<C: SdkRequestSource> GatewayClient for C {
                     ..SessionConf::default()
                 }),
                 current_directory: None,
+                pinned: None,
             },
         )
         .await
@@ -508,6 +509,7 @@ impl<C: SdkRequestSource> GatewayClient for C {
                     ..SessionConf::default()
                 }),
                 current_directory: None,
+                pinned: None,
             },
         )
         .await

@@ -1,13 +1,8 @@
-use talos_agent::{
-    AgentProgressEventReceiver, AgentRunFailure, AgentRunSettlement, AgentRunSettlementReceiver,
-};
-use talos_agent_api::{AgentEventPayload, AgentInterruptOutcome};
-use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_store::session::{CommitRunningInputAdmissionParams, CommitTerminalSettlementParams};
-use tokio::sync::mpsc;
-use tokio::task::JoinSet;
-
+//! Live delivery only wakes the single cursor-based product projection path.
 use super::{ActiveTimelineStream, AgentExecutionDriver, ExecutionPurpose, RunningInputCommit};
+use talos_agent::{AgentProgressEventReceiver, AgentRunSettlement, AgentRunSettlementReceiver};
+use talos_error::{ErrorCode, TalosError, TalosResult};
+use tokio::sync::mpsc;
 
 impl AgentExecutionDriver {
     pub(super) async fn drive(
@@ -16,327 +11,108 @@ impl AgentExecutionDriver {
         mut events: AgentProgressEventReceiver,
         mut inputs: mpsc::Receiver<RunningInputCommit>,
         settlement: AgentRunSettlementReceiver,
-        tail: (i64, u64),
-        purpose: ExecutionPurpose,
-    ) -> TalosResult<AgentRunSettlement> {
-        let (mut last_event_seq, mut last_sequence) = tail;
-        let mut pending_input: Option<RunningInputCommit> = None;
-        let mut input_open = true;
-        let mut deliveries = JoinSet::new();
-        let mut progress_batch = Vec::with_capacity(64);
-        loop {
-            if let Some(mut input) = pending_input.take() {
-                let expected_sequence = input
-                    .events
-                    .first()
-                    .map(|event| event.sequence.saturating_sub(1));
-                match expected_sequence {
-                    Some(expected_sequence) if expected_sequence == last_sequence => {
-                        let result = match self
-                            .execution_store
-                            .commit_running_input_admission(CommitRunningInputAdmissionParams {
-                                events: input.events,
-                                expected_event_seq: last_event_seq,
-                                command: input.command,
-                            })
-                            .await
-                        {
-                            Ok(commit) => {
-                                last_event_seq = commit.active_turn.last_event_seq;
-                                last_sequence = commit
-                                    .events
-                                    .last()
-                                    .expect("committed input admission contains canonical events")
-                                    .sequence;
-                                let queue_result = match input.queued_input.take() {
-                                    Some(queued_input) => queued_input.commit(),
-                                    None => Ok(()),
-                                };
-                                self.event_service.publish_committed(commit.events);
-                                if let Err(error) = queue_result {
-                                    self.report_warning(
-                                        &active.identity,
-                                        error.context(
-                                            "remove an already persisted queued Agent input",
-                                        ),
-                                    )
-                                    .await;
-                                }
-                                deliveries.spawn(input.permit.consume());
-                                Ok(())
-                            }
-                            Err(error) => Err(error),
-                        };
-                        let _ = input.result_tx.send(result);
-                        continue;
-                    }
-                    Some(expected_sequence) if expected_sequence > last_sequence => {
-                        pending_input = Some(input);
-                    }
-                    _ => {
-                        let _ = input.result_tx.send(Err(TalosError::new(
-                            ErrorCode::Conflict,
-                            "Agent input admission no longer follows the active Turn tail",
-                        )));
-                        continue;
-                    }
-                }
-            }
-
-            tokio::select! {
-                count = events.recv_many(&mut progress_batch, 64) => {
-                    if count == 0 {
-                        break;
-                    }
-                    let sequence = progress_batch.last().expect("nonempty progress batch").sequence;
-                    match self
-                        .execution_store
-                        .commit_progress_events(std::mem::take(&mut progress_batch), last_event_seq)
-                        .await
-                    {
-                        Ok(commit) => {
-                            last_event_seq = commit.active_turn.last_event_seq;
-                            last_sequence = sequence;
-                            self.event_service.publish_committed(commit.events);
-                        }
-                        Err(commit_error) => {
-                            return self.recover_failed_execution(
-                                &active,
-                                last_event_seq,
-                                &commit_error,
-                            )
-                            .await;
-                        }
-                    }
-                }
-                input = inputs.recv(), if input_open && pending_input.is_none() => {
-                    match input {
-                        Some(input) => pending_input = Some(input),
-                        None => input_open = false,
-                    }
-                }
-                delivery = deliveries.join_next(), if !deliveries.is_empty() => {
-                    if let Some(error) = delivery_error(&active, delivery) {
-                        return self.recover_failed_execution(&active, last_event_seq, &error).await;
-                    }
-                }
-            }
-        }
-        if let Some(input) = pending_input {
-            let _ = input.result_tx.send(Err(TalosError::new(
-                ErrorCode::Conflict,
-                "Agent Turn ended before input admission reached its durable position",
-            )));
-        }
-        while let Some(delivery) = deliveries.join_next().await {
-            if let Some(error) = delivery_error(&active, Some(delivery)) {
-                return self
-                    .recover_failed_execution(&active, last_event_seq, &error)
-                    .await;
-            }
-        }
-
-        let settlement = match settlement.recv().await {
-            Ok(settlement) => settlement,
-            Err(settlement_error) => {
-                return self
-                    .recover_failed_execution(&active, last_event_seq, &settlement_error)
-                    .await;
-            }
-        };
-        let expected_event_seq = last_event_seq;
-        let result = match &settlement {
-            AgentRunSettlement::WaitingForInput {
-                event,
-                continuation,
-                ..
-            } => {
-                if purpose.is_compaction() {
-                    let error = TalosError::new(
-                        ErrorCode::ContextCompactionFailed,
-                        "Agent compaction cannot wait for User input",
-                    );
-                    return self
-                        .settle_failed_execution(
-                            &active,
-                            expected_event_seq,
-                            &error,
-                            AgentInterruptOutcome::Completed,
-                        )
-                        .await;
-                }
-                self.execution_store
-                    .commit_waiting_settlement(
-                        event.clone(),
-                        continuation.clone(),
-                        expected_event_seq,
-                    )
-                    .await
-                    .map(|commit| commit.events)
-            }
-            AgentRunSettlement::Finished { event, metrics, .. } => {
-                if !purpose.is_compaction()
-                    && matches!(event.payload, AgentEventPayload::TurnCompleted(_))
-                    && (self.memory_reflection.is_some() || self.inner_model.is_some())
-                {
-                    match self
-                        .event_service
-                        .turn_checkpoint(&event.identity, expected_event_seq)
-                        .await
-                    {
-                        Ok(checkpoint) => {
-                            if let Some(reflection) = &self.memory_reflection {
-                                if let Err(error) =
-                                    reflection.reflect(event, &checkpoint.messages).await
-                                {
-                                    self.report_warning(
-                                        &event.identity,
-                                        error.context("reflect User Workspace Memory"),
-                                    )
-                                    .await;
-                                }
-                            }
-                            if let Some(inner_model) = &self.inner_model {
-                                if let Err(error) = self
-                                    .sessions
-                                    .generate_title(inner_model, event, &checkpoint.messages)
-                                    .await
-                                {
-                                    self.report_warning(
-                                        &event.identity,
-                                        error.context("generate Session title"),
-                                    )
-                                    .await;
-                                }
-                            }
-                        }
-                        Err(error) => {
-                            self.report_warning(
-                                &event.identity,
-                                error.context(
-                                    "read committed Agent messages for completion effects",
-                                ),
-                            )
-                            .await
-                        }
-                    }
-                }
-                self.execution_store
-                    .commit_terminal_settlement(CommitTerminalSettlementParams {
-                        completed_turn_metrics: (!purpose.is_compaction()
-                            && matches!(event.payload, AgentEventPayload::TurnCompleted(_)))
-                        .then_some(metrics.clone()),
-                        event: event.clone(),
-                        expected_event_seq,
-                    })
-                    .await
-                    .map(|record| vec![record])
-            }
-        };
-        match result {
-            Ok(records) => {
-                let terminal = records.last().is_some_and(|record| {
-                    matches!(
-                        record.payload,
-                        AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_)
-                    )
-                });
-                self.event_service.publish_committed(records);
-                if terminal {
-                    let _ = active.terminal_commit_tx.send(true);
-                }
-                Ok(settlement)
-            }
-            Err(commit_error) => {
-                if let AgentRunSettlement::Finished {
-                    result: Err(error), ..
-                } = &settlement
-                {
-                    talos_logging::report_error(error);
-                }
-                // A canonical settlement is emitted only after Harness cleanup is
-                // confirmed. Preserve that fact even if persistence fails; an RPC
-                // client need not retain another completed-Turn ledger.
-                self.settle_failed_execution(
-                    &active,
-                    expected_event_seq,
-                    &commit_error,
-                    AgentInterruptOutcome::Completed,
-                )
+        _tail: (i64, u64),
+        observation_stop: tokio_util::sync::CancellationToken,
+    ) -> TalosResult<Option<AgentRunSettlement>> {
+        if let Err(error) = self.project_worker(&active.session).await {
+            return self
+                .recover_failed_execution(&active, 0, &error)
                 .await
+                .map(Some);
+        }
+        let mut batch = Vec::with_capacity(64);
+        let mut inputs_open = true;
+        let mut deliveries = tokio::task::JoinSet::new();
+        let mut detached = false;
+        loop {
+            tokio::select! {
+                biased;
+                _ = observation_stop.cancelled() => { detached = true; break; }
+                count = events.recv_many(&mut batch, 64) => {
+                    batch.clear();
+                    if count == 0 { break; }
+                    if let Err(error) = self.project_worker(&active.session).await { return self.recover_failed_execution(&active, 0, &error).await.map(Some); }
+                }
+                input = inputs.recv(), if inputs_open => match input {
+                    Some(mut input) => {
+                        let driver = self.clone();
+                        let session = active.session.clone();
+                        let identity = active.identity.clone();
+                        deliveries.spawn(async move {
+                            let result = async {
+                                input.permit.consume().await?;
+                                if let Err(error)=driver.project_worker(&session).await {driver.report_warning(&identity,error).await;}
+                                if let Some(queued) = input.queued_input.take() {
+                                    if let Err(error) = queued.commit() { driver.report_warning(&identity, error.context("remove a committed queued input")).await; }
+                                }
+                                Ok(())
+                            }.await;
+                            let _ = input.result_tx.send(result.clone());
+                            if result.as_ref().err().is_some_and(agent_protocol::AgentAdmissionUnconfirmed::contains) {Ok(())} else {result}
+                        });
+                    }
+                    None => inputs_open = false,
+                },
+                result = deliveries.join_next(), if !deliveries.is_empty() => {
+                    if let Some(result) = result { result.map_err(|error| TalosError::internal_with_source("Product input projection task failed.", error))??; }
+                }
             }
         }
+        while let Some(result) = deliveries.join_next().await {
+            result.map_err(|error| {
+                TalosError::internal_with_source("Product input projection task failed.", error)
+            })??;
+        }
+        if detached {
+            return Ok(None);
+        }
+        let received = tokio::select! {
+            biased;
+            _ = observation_stop.cancelled() => return Ok(None),
+            received = settlement.recv() => received,
+        };
+        let settlement = match received {
+            Ok(settlement) => settlement,
+            Err(error) => {
+                return self
+                    .recover_failed_execution(&active, 0, &error)
+                    .await
+                    .map(Some)
+            }
+        };
+        self.project_worker(&active.session).await?;
+        Ok(Some(settlement))
     }
 
+    /// The same writer acknowledges live or recovered settlement delivery.
+    pub(super) async fn finish_product_delivery(
+        &self,
+        active: &ActiveTimelineStream,
+        settlement: &AgentRunSettlement,
+        purpose: &ExecutionPurpose,
+    ) -> TalosResult<()> {
+        if let AgentRunSettlement::Finished { .. } = settlement {
+            let _ = active.terminal_commit_tx.send(true);
+        } else if purpose.is_compaction() {
+            return Err(TalosError::new(
+                ErrorCode::ContextCompactionFailed,
+                "Agent compaction cannot wait for User input.",
+            ));
+        }
+        Ok(())
+    }
+
+    /// A product/transport failure does not interrupt an admitted Worker or
+    /// manufacture its terminal outcome. Recovery observes its durable facts.
     pub(super) async fn recover_failed_execution(
         &self,
         active: &ActiveTimelineStream,
-        expected_event_seq: i64,
-        commit_error: &TalosError,
+        _expected_event_seq: i64,
+        error: &TalosError,
     ) -> TalosResult<AgentRunSettlement> {
-        let cleanup = match self
-            .coordinator
-            .interrupt(talos_agent::AgentInterruptParams {
-                agent_id: active.agent_id.clone(),
-                identity: active.identity.clone(),
-            })
-            .await
-        {
-            Ok(outcome) => outcome,
-            Err(interrupt_error)
-                if interrupt_error.is_code(talos_error::ErrorCode::ResourceNotFound) =>
-            {
-                AgentInterruptOutcome::Completed
-            }
-            Err(interrupt_error) => {
-                talos_logging::report_error(commit_error);
-                return Err(interrupt_error);
-            }
-        };
-        self.settle_failed_execution(active, expected_event_seq, commit_error, cleanup)
-            .await
-    }
-
-    async fn settle_failed_execution(
-        &self,
-        active: &ActiveTimelineStream,
-        expected_event_seq: i64,
-        commit_error: &TalosError,
-        cleanup: AgentInterruptOutcome,
-    ) -> TalosResult<AgentRunSettlement> {
-        let failure = AgentRunFailure::from(
-            commit_error
-                .clone()
-                .context("Agent Turn stopped before canonical settlement"),
-        )
-        .retryable();
         let settlement = self
-            .settle_recovered_turn(
-                active.identity.clone(),
-                expected_event_seq,
-                failure,
-                cleanup,
-            )
-            .await
-            .inspect_err(|_| talos_logging::report_error(commit_error))?;
-        let _ = active.terminal_commit_tx.send(true);
+            .recovered_worker_settlement(&active.identity, error)
+            .await?;
         Ok(settlement)
     }
-}
-
-fn delivery_error(
-    active: &ActiveTimelineStream,
-    delivery: Option<Result<talos_agent::AgentResult<()>, tokio::task::JoinError>>,
-) -> Option<TalosError> {
-    let error = match delivery {
-        // Harness owns delivery errors and their ordering against cancellation.
-        Some(Ok(_)) | None => return None,
-        Some(Err(error)) => {
-            TalosError::internal_with_source("Agent input delivery task failed", error)
-        }
-    };
-    Some(error.context(format!(
-        "deliver durable Agent input for Session {} Turn {}",
-        active.identity.session_id, active.identity.turn_id,
-    )))
 }

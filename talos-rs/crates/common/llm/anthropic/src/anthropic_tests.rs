@@ -367,3 +367,34 @@ fn test_text_block_serialization_skips_null_cache_control() {
     assert!(!json.contains("cache_control"));
     assert!(!json.contains("null"));
 }
+
+#[test]
+fn adaptive_requests_keep_xhigh_and_max_distinct_without_manual_budgets() {
+    for (effort, expected) in [
+        (Some(ReasoningEffort::XHigh), Some("xhigh")),
+        (Some(ReasoningEffort::Max), Some("max")),
+        (None, None),
+    ] {
+        let mut request = ChatRequest::new_user("hello", "claude-opus-5-5");
+        request.reasoning_effort = effort;
+        request.request_parameters = serde_json::from_value(serde_json::json!({
+            "thinking": {"type": "adaptive"}
+        }))
+        .unwrap();
+        let parameters = request.request_parameters.clone();
+        let encoded = AnthropicProvider::build_request(request, Some(true)).unwrap();
+        let body = talos_llm_provider::serialize_with_parameters(encoded, &parameters).unwrap();
+        assert_eq!(body["thinking"], serde_json::json!({"type":"adaptive"}));
+        assert_eq!(
+            body.get("output_config"),
+            expected
+                .map(|effort| serde_json::json!({"effort":effort}))
+                .as_ref()
+        );
+    }
+    let mut legacy = ChatRequest::new_user("hello", "claude-haiku-4-5-20251001");
+    legacy.reasoning_effort = Some(ReasoningEffort::Max);
+    assert!(AnthropicProvider::build_request(legacy, None)
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::InvalidRequest));
+}

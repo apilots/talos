@@ -6,6 +6,11 @@ authors.workspace = true
 license.workspace = true
 description = "Talos embedded SDK client for in-process runtime access"
 
+[features]
+default = ["sync", "relay-client"]
+sync = ["talos-base/sync"]
+relay-client = ["talos-base/relay-client"]
+
 [dependencies]
 async-trait = { workspace = true }
 bytes = { workspace = true }
@@ -15,7 +20,7 @@ talos-base = { workspace = true }
 talos-error = { workspace = true }
 talos-gateway = { workspace = true }
 talos-sdk = { workspace = true }
-talos-service = { workspace = true }
+talos-service = { workspace = true, features = ["product"] }
 talos-types = { workspace = true }
 tokio = { workspace = true }
 

@@ -23,6 +23,13 @@ pub struct JsonRpcRequest {
     pub method: String,
     #[serde(default)]
     pub actor_credentials: Option<ActorCredentials>,
+    #[serde(
+        default,
+        rename = "computerId",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(rename = "computerId", optional)]
+    pub computer_id: Option<String>,
     #[serde(default)]
     #[schemars(schema_with = "crate::schema::json_value_schema")]
     #[ts(type = "unknown")]
@@ -40,6 +47,7 @@ impl JsonRpcRequest {
             id,
             method: method.into(),
             actor_credentials: None,
+            computer_id: None,
             params,
         }
     }

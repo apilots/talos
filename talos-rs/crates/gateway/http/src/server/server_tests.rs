@@ -28,7 +28,7 @@ use talos_store::profile::{
     ProfileUsageUpdate,
 };
 use talos_store::project::MockProjectStore;
-use talos_store::session::{AgentActiveTurnRecord, AgentExecutionStore};
+use talos_store::session::{AgentActiveTurnRecord, AgentExecutionStore, SessionStore};
 use talos_types::talos::TokenUsage;
 use talos_types::{
     DynamicToolResultParams, ModelInfo, PendingUserAction, SessionListRequest, UserActionParams,
@@ -250,6 +250,7 @@ async fn test_state_with_lifecycle(
         auth_disabled,
         lifecycle,
         config_store: None,
+        worker_fixture: None,
     })
     .await
 }
@@ -260,11 +261,18 @@ struct TestStateConfig {
     auth_disabled: bool,
     lifecycle: Arc<ServerLifecycle>,
     config_store: Option<Arc<dyn ConfigStore>>,
+    worker_fixture: Option<WorkerFixture>,
 }
 
 async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
-    let agent_execution_store = test_agent_execution_store().await;
-    build_test_state_with_agent_execution_store(config, agent_execution_store).await
+    let (product, _) = test_session_store().await;
+    build_test_state_with_stores(
+        config,
+        product.clone(),
+        Arc::new(MockProjectStore::new()),
+        Some(product),
+    )
+    .await
 }
 
 async fn build_test_state_with_agent_execution_store(
@@ -275,14 +283,16 @@ async fn build_test_state_with_agent_execution_store(
         config,
         agent_execution_store,
         Arc::new(MockProjectStore::new()),
+        None,
     )
     .await
 }
 
 async fn build_test_state_with_stores(
-    config: TestStateConfig,
+    mut config: TestStateConfig,
     agent_execution_store: Arc<dyn AgentExecutionStore>,
     project_store: Arc<dyn talos_store::project::ProjectStore>,
+    product_store: Option<Arc<dyn talos_store::session::SessionStore>>,
 ) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
     let event_service = event_service_from_store(config.event_store.clone());
@@ -300,7 +310,30 @@ async fn build_test_state_with_stores(
         config.base_config.storage.files.clone(),
     )
     .await;
-    let (session_store, nodes) = test_session_store().await;
+    let (seed_store, nodes) = test_session_store().await;
+    let session_store: Arc<dyn talos_store::session::SessionStore> = match product_store {
+        Some(store) => {
+            if store
+                .get_session_record("mock-session")
+                .await
+                .unwrap()
+                .is_none()
+            {
+                store
+                    .insert_session_record(
+                        &seed_store
+                            .get_session_record("mock-session")
+                            .await
+                            .unwrap()
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            store
+        }
+        None => seed_store,
+    };
     let reload_hook = test_config_reload_hook(config.base_config.clone());
     let plugins = talos_service::PluginManagerService::new(
         config.base_config.agent.kernel.plugins.clone(),
@@ -308,12 +341,35 @@ async fn build_test_state_with_stores(
     );
     let config_service =
         talos_service::ConfigService::new(config_store, plugins.execution_gate(), reload_hook);
-    let coordinator = Arc::new(TestAgentCoordinator(
-        config.base_config.clone(),
-        memory,
-        plugins.clone(),
-        config_service.clone(),
+    let execution_directory = tempfile::tempdir().unwrap();
+    let worker_store = Arc::new(
+        talos_store::execution::WorkerExecutionStore::open(
+            &execution_directory.path().join("worker.db"),
+        )
+        .await
+        .unwrap(),
+    );
+    if let Some(fixture) = config.worker_fixture.take() {
+        seed_worker_fixture(
+            &worker_store,
+            agent_execution_store.as_ref(),
+            &config.base_config,
+            fixture,
+        )
+        .await;
+    }
+    let harness = Arc::new(talos_agent::LocalExecutionHarness::new(
+        Arc::new(HttpFixtureHarness(worker_store.clone())),
+        worker_store,
     ));
+    let coordinator = Arc::new(TestAgentCoordinator {
+        config: config.base_config.clone(),
+        memory,
+        plugins: plugins.clone(),
+        configuration: config_service.clone(),
+        harness,
+        _execution_directory: execution_directory,
+    });
     let app = Arc::new(TalosService::new(
         coordinator,
         nodes,
@@ -340,17 +396,21 @@ async fn build_test_state_with_stores(
 async fn test_state_with_event_store_and_agent_execution_store(
     auth_disabled: bool,
     event_store: Arc<dyn AgentExecutionStore>,
-    agent_execution_store: Arc<dyn AgentExecutionStore>,
+    agent_execution_store: Arc<talos_store::session::DatabaseSessionStore>,
+    worker_fixture: Option<WorkerFixture>,
 ) -> Arc<HttpApiState> {
-    build_test_state_with_agent_execution_store(
+    build_test_state_with_stores(
         TestStateConfig {
             event_store,
             base_config: test_config(),
             auth_disabled,
             lifecycle: Arc::new(ServerLifecycle::new()),
             config_store: None,
+            worker_fixture,
         },
-        agent_execution_store,
+        agent_execution_store.clone(),
+        Arc::new(MockProjectStore::new()),
+        Some(agent_execution_store),
     )
     .await
 }
@@ -370,6 +430,7 @@ async fn test_state_with_config(
         auth_disabled,
         lifecycle: Arc::new(ServerLifecycle::new()),
         config_store: None,
+        worker_fixture: None,
     })
     .await
 }
@@ -402,12 +463,43 @@ async fn test_state_with_gateway_event_store_config(
     .await
 }
 
-struct TestAgentCoordinator(
-    talos_types::TalosConfig,
-    talos_service::MemoryService,
-    talos_service::PluginManagerService,
-    talos_service::ConfigService,
-);
+struct TestAgentCoordinator {
+    config: talos_types::TalosConfig,
+    memory: talos_service::MemoryService,
+    plugins: talos_service::PluginManagerService,
+    configuration: talos_service::ConfigService,
+    harness: Arc<talos_agent::LocalExecutionHarness>,
+    _execution_directory: tempfile::TempDir,
+}
+
+impl TestAgentCoordinator {
+    async fn new(
+        config: talos_types::TalosConfig,
+        memory: talos_service::MemoryService,
+        plugins: talos_service::PluginManagerService,
+        configuration: talos_service::ConfigService,
+    ) -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            talos_store::execution::WorkerExecutionStore::open(
+                &directory.path().join("execution.db"),
+            )
+            .await
+            .unwrap(),
+        );
+        Self {
+            config,
+            memory,
+            plugins,
+            configuration,
+            harness: Arc::new(talos_agent::LocalExecutionHarness::new(
+                Arc::new(HttpFixtureHarness(store.clone())),
+                store,
+            )),
+            _execution_directory: directory,
+        }
+    }
+}
 
 #[async_trait::async_trait]
 impl AgentCoordinator for TestAgentCoordinator {
@@ -418,12 +510,12 @@ impl AgentCoordinator for TestAgentCoordinator {
     ) -> TalosResult<Arc<dyn talos_coordinator::WorkerEnvironment>> {
         Ok(Arc::new(
             talos_service::WorkerEnvironmentService::new(
-                Arc::new(std::sync::RwLock::new(self.0.clone())),
+                Arc::new(std::sync::RwLock::new(self.config.clone())),
                 Some(std::env::temp_dir()),
             )
-            .with_config_service(self.3.clone())
-            .with_memory_service(self.1.clone())
-            .with_plugin_manager(self.2.clone()),
+            .with_config_service(self.configuration.clone())
+            .with_memory_service(self.memory.clone())
+            .with_plugin_manager(self.plugins.clone()),
         ))
     }
 
@@ -446,61 +538,39 @@ impl AgentCoordinator for TestAgentCoordinator {
     }
 
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
-        mock_agent_execution(params).await
+        talos_agent::AgentHarness::start(self.harness.as_ref(), params).await
     }
 
-    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentAdmission> {
-        unreachable!("HTTP handler fixtures do not own live Agent input")
+    async fn submit_input(&self, params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        talos_agent::AgentHarness::submit_input(self.harness.as_ref(), params).await
     }
 
     async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
-        let _ = params;
-        Ok(AgentInterruptOutcome::Cancelled)
+        talos_agent::AgentHarness::interrupt(self.harness.as_ref(), params).await
     }
 
     async fn compact_session(&self, params: AgentContext) -> TalosResult<AgentRunExecution> {
-        let identity = params.identity();
-        let started = CanonicalAgentEvent {
-            identity: identity.clone(),
-            sequence: 1,
-            occurred_at: 1,
-            payload: CanonicalAgentEventPayload::TurnStarted(AgentTurnStarted {}),
-        };
-        let terminal = CanonicalAgentEvent {
-            identity,
-            sequence: 2,
-            occurred_at: 2,
-            payload: CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                stop_reason: talos_agent_api::AgentStopReason::EndTurn,
-            }),
-        };
-        let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(1);
-        drop(progress_tx);
-        let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
-        Ok(AgentRunExecution {
-            admission: AgentAdmission {
-                events: vec![started],
-                permit: AgentAdmissionPermit::new(async move {
-                    settlement_tx
-                        .send(Ok(AgentRunSettlement::Finished {
-                            result: Ok(()),
-                            event: terminal,
-                            metrics: AgentRunMetrics::default(),
-                        }))
-                        .map_err(|_| {
-                            talos_error::TalosError::new(
-                                talos_error::ErrorCode::InternalError,
-                                "test receiver",
-                            )
-                        })?;
-                    Ok(())
-                }),
-            },
-            events: AgentProgressEventReceiver::new(progress_rx),
-            settlement: AgentRunSettlementReceiver::new(settlement_rx),
-        })
+        talos_agent::AgentHarness::compact_session(self.harness.as_ref(), params).await
     }
-
+    async fn read_session_events(
+        &self,
+        params: agent_protocol::AgentSessionEventsParams,
+    ) -> TalosResult<agent_protocol::AgentSessionEventsResult> {
+        talos_agent::AgentHarness::read_session_events(self.harness.as_ref(), params).await
+    }
+    async fn read_session_execution_state(
+        &self,
+        params: AgentSessionContext,
+    ) -> TalosResult<Option<agent_protocol::SessionExecutionState>> {
+        talos_agent::AgentHarness::read_session_execution_state(self.harness.as_ref(), params).await
+    }
+    async fn retire_session(
+        &self,
+        params: AgentSessionContext,
+        expected: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        talos_agent::AgentHarness::retire_session(self.harness.as_ref(), params, expected).await
+    }
     async fn clear_session(
         &self,
         params: AgentSessionContext,
@@ -537,6 +607,7 @@ async fn test_state_with_gateway_event_store_config_and_lifecycle(
         auth_disabled,
         lifecycle,
         config_store: Some(config_store),
+        worker_fixture: None,
     })
     .await
 }
@@ -634,3 +705,213 @@ mod messages;
 
 #[path = "tests/automation.rs"]
 mod automation;
+
+#[path = "tests/product_routing.rs"]
+mod product_routing_tests;
+
+struct HttpFixtureHarness(Arc<talos_store::execution::WorkerExecutionStore>);
+impl talos_agent::AgentHarness for HttpFixtureHarness {
+    fn start(
+        &self,
+        params: AgentRunParams,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<AgentRunExecution>> {
+        Box::pin(mock_agent_execution(params, self.0.clone()))
+    }
+    fn submit_input(
+        &self,
+        _params: AgentInputParams,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<AgentAdmission>> {
+        Box::pin(async { unreachable!("Fixture has no live input") })
+    }
+    fn interrupt(
+        &self,
+        _params: AgentInterruptParams,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<AgentInterruptOutcome>> {
+        Box::pin(async { Ok(AgentInterruptOutcome::Cancelled) })
+    }
+    fn compact_session(
+        &self,
+        params: AgentContext,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<AgentRunExecution>> {
+        Box::pin(async move {
+            let identity = params.identity();
+            let started = CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: 1,
+                occurred_at: 1,
+                payload: CanonicalAgentEventPayload::TurnStarted(AgentTurnStarted {}),
+            };
+            let terminal = CanonicalAgentEvent {
+                identity,
+                sequence: 2,
+                occurred_at: 2,
+                payload: CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: talos_agent_api::AgentStopReason::EndTurn,
+                }),
+            };
+            let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(1);
+            drop(progress_tx);
+            let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
+            Ok(AgentRunExecution {
+                admission: AgentAdmission {
+                    events: vec![started],
+                    permit: AgentAdmissionPermit::new(async move {
+                        settlement_tx
+                            .send(Ok(AgentRunSettlement::Finished {
+                                result: Ok(()),
+                                event: terminal,
+                                metrics: AgentRunMetrics::default(),
+                            }))
+                            .map_err(|_| {
+                                talos_error::TalosError::new(
+                                    talos_error::ErrorCode::InternalError,
+                                    "test receiver",
+                                )
+                            })?;
+                        Ok(())
+                    }),
+                },
+                events: AgentProgressEventReceiver::new(progress_rx),
+                settlement: AgentRunSettlementReceiver::new(settlement_rx),
+            })
+        })
+    }
+    fn clear_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected: talos_types::SessionHistoryCursor,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn close_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected: talos_types::SessionHistoryCursor,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn shutdown(
+        &self,
+        _timeout: std::time::Duration,
+    ) -> talos_agent::AgentFuture<'_, TalosResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+async fn seed_worker_fixture(
+    worker: &talos_store::execution::WorkerExecutionStore,
+    product: &dyn AgentExecutionStore,
+    config: &talos_types::TalosConfig,
+    fixture: WorkerFixture,
+) {
+    let events = fixture.events;
+    let identity = events.first().unwrap().identity.clone();
+    let Some((admission_end, input)) =
+        events
+            .iter()
+            .enumerate()
+            .find_map(|(index, event)| match &event.payload {
+                CanonicalAgentEventPayload::MessageCompleted(message)
+                    if message.role == talos_agent_api::AgentMessageRole::User =>
+                {
+                    Some((index, message.clone()))
+                }
+                _ => None,
+            })
+    else {
+        return;
+    };
+    let session = AgentSessionContext {
+        agent_id: "default".into(),
+        session_id: "mock-session".into(),
+        workspace: config.resolve_workspace("default", "static-token").unwrap(),
+    };
+    let context = agent_protocol::AgentContext {
+        tree_identity: talos_types::SessionTreeIdentity::Primary,
+        history_cursor: None,
+        session: session.clone(),
+        turn_id: identity.turn_id.clone(),
+        project_id: None,
+        working_directory: None,
+        environment: None,
+        model: test_model_info(),
+        model_selection: talos_types::ModelSelection::without_reasoning(talos_types::ModelRef {
+            provider: "bailian".into(),
+            id: "qwen-plus".into(),
+        }),
+        permission_mode: Default::default(),
+    };
+    let command = agent_protocol::AgentExecutionCommand::Run {
+        params: Box::new(AgentRunParams {
+            subagent_limit: None,
+            command: None,
+            automation_origin: None,
+            context,
+            input,
+            intent: agent_protocol::AgentRunIntent::Start,
+        }),
+    };
+    let mut reducer = talos_agent::AgentEventReducer::new(identity.clone());
+    for event in &events[..=admission_end] {
+        reducer.apply(event.clone()).unwrap();
+    }
+    worker
+        .admit(
+            &session,
+            &command,
+            events[..=admission_end].to_vec(),
+            &reducer.checkpoint(),
+        )
+        .await
+        .unwrap();
+    if admission_end + 1 < events.len() {
+        for event in &events[admission_end + 1..] {
+            reducer.apply(event.clone()).unwrap();
+        }
+        let settlement = if let Some(continuation) = fixture.continuation {
+            worker
+                .record_waiting_continuation(
+                    &session,
+                    &identity,
+                    events
+                        .last()
+                        .expect("Worker fixture waiting event")
+                        .sequence,
+                    &continuation,
+                )
+                .await
+                .unwrap();
+            Some(agent_protocol::AgentExecutionSettlement::WaitingForInput {
+                metrics: reducer.checkpoint().metrics.clone(),
+            })
+        } else {
+            None
+        };
+        worker
+            .append(
+                &session,
+                events[admission_end + 1..].to_vec(),
+                &reducer.checkpoint(),
+                settlement,
+            )
+            .await
+            .unwrap();
+    }
+    let page = worker
+        .read_events(agent_protocol::AgentSessionEventsParams {
+            session,
+            after_cursor: None,
+            limit: agent_protocol::MAX_EXECUTION_PAGE_EVENTS,
+        })
+        .await
+        .unwrap();
+    product
+        .project_worker_events(talos_store::session::WorkerProjectionParams {
+            execution_node_id: "embedded".into(),
+            session_id: identity.session_id,
+            after_cursor: None,
+            page,
+        })
+        .await
+        .unwrap();
+}

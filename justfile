@@ -88,6 +88,7 @@ sandbox-base *args:
 # Reject unused Cargo dependencies across the workspace.
 deps-check:
     cargo machete
+    python3 ../scripts/check_product_dependencies.py
 
 # Run fast Clippy checks for selected packages without linting path dependencies.
 clippy *args:

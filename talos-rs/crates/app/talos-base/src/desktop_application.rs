@@ -28,7 +28,7 @@ pub(crate) struct DesktopApplication {
     pub(crate) worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     local: Arc<dyn AppServerApplication>,
     cloud: tokio::sync::OnceCell<DesktopCloud>,
-    pub(crate) sync_host: Arc<crate::application_sync::ApplicationSyncHost>,
+    pub(crate) host: Arc<crate::application_host::ApplicationHost>,
 }
 
 impl DesktopApplication {
@@ -42,14 +42,20 @@ impl DesktopApplication {
             service: runtime.service.clone(),
             media: crate::desktop_media::DesktopMedia::new(host),
             account_change: Mutex::new(()),
-            sync_host: runtime.sync_host.clone(),
+            host: runtime.host.clone(),
             store: YamlConfigStore::new(runtime.config.source_path()),
             config: runtime.config.clone(),
             account: runtime.service.account.clone(),
             auth: runtime.auth_service.clone(),
             worker: runtime.worker_registration.clone(),
-            execution: runtime.worker.clone(),
-            rpc: runtime.worker_rpc.clone(),
+            execution: runtime
+                .worker
+                .clone()
+                .expect("Desktop composition owns its embedded Worker"),
+            rpc: runtime
+                .worker_rpc
+                .clone()
+                .expect("Desktop composition owns its embedded Worker"),
             device_name,
             worker_failures: runtime.worker_failures.clone(),
             local,
@@ -80,6 +86,8 @@ impl DesktopApplication {
     }
 
     pub(crate) async fn stop_registration(&self) -> TalosResult<()> {
+        #[cfg(feature = "relay-client")]
+        self.host.stop_product_relay().await;
         if let Some(worker) = self.worker.lock().await.take() {
             worker.shutdown().await?;
         }
@@ -120,7 +128,7 @@ impl DesktopApplication {
     async fn worker_identity(&self) -> TalosResult<DesktopWorkerIdentityResponse> {
         Ok(DesktopWorkerIdentityResponse {
             system_info: self.execution.system_info().clone(),
-            node_id: Some(self.sync_host.local_computer_id().await?),
+            node_id: Some(self.host.local_computer_id().await?),
             control_plane_endpoint: Some(self.config.cloud.agent_base_url.clone()),
             control_plane_trusted_ca_pem: crate::desktop_worker::control_plane_trusted_ca_pem(
                 &self.config.cloud,
@@ -175,25 +183,37 @@ impl AppServerApplication for DesktopApplication {
     async fn dispatch(
         &self,
         actor: &Actor,
-        request: ClientRequest,
+        mut request: ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
-        if let Some(call) = CloudCall::for_request(actor, &request.params, &self.sync_host)
+        if let Some(call) = CloudCall::for_request(actor, &request, &self.host)
             .await
             .map_err(project_error)?
         {
             let cloud = self.cloud().await.map_err(project_error)?;
+            let body = cloud.send(actor, call).await.map_err(project_error)?;
+            let body = if matches!(request.params, ClientRequestParams::DesktopOpen(_)) {
+                let mut grant: talos_types::DesktopViewGrant = serde_json::from_value(body)
+                    .map_err(|error| {
+                        project_error(TalosError::internal_with_source(
+                            "The Computer Server returned an invalid desktop grant.",
+                            error,
+                        ))
+                    })?;
+                // Keep redemption at its issuer; no remote ticket belongs to this host.
+                grant.ticket.insert_str(0, SERVER_TICKET);
+                value(grant).map_err(project_error)?
+            } else {
+                body
+            };
             return Ok(ApplicationResponse {
-                body: cloud.send(actor, call).await.map_err(project_error)?,
+                body,
                 started_turn: None,
             });
         }
+        request.computer_id = None;
         if let ClientRequestParams::Browser(params) = &request.params {
             if matches!(params.operation, talos_types::BrowserOperation::OpenLocal) {
-                let local_node = self
-                    .sync_host
-                    .local_computer_id()
-                    .await
-                    .map_err(project_error)?;
+                let local_node = self.host.local_computer_id().await.map_err(project_error)?;
                 if params.node_id.as_deref() != Some(local_node.as_str()) {
                     return Err(project_error(TalosError::localized(
                         talos_error::ErrorLocalization::BrowserCapabilityUnavailable {
@@ -207,9 +227,10 @@ impl AppServerApplication for DesktopApplication {
                     .dispatch(
                         actor,
                         ClientRequest {
+                            computer_id: None,
                             method: talos_app_protocol::ClientMethod::Browser,
                             params: ClientRequestParams::Browser(talos_types::BrowserRequest {
-                                node_id: params.node_id.clone(),
+                                node_id: Some("embedded".into()),
                                 operation: talos_types::BrowserOperation::Read,
                             }),
                         },
@@ -230,6 +251,11 @@ impl AppServerApplication for DesktopApplication {
                 });
             }
         }
+        let local_node = self.host.local_computer_id().await.map_err(project_error)?;
+        request
+            .params
+            .bind_computer_target_from_alias("embedded", Some(local_node.as_str()))
+            .map_err(project_error)?;
         let host_method = matches!(
             request.params,
             ClientRequestParams::DesktopStreamOpen(_)
@@ -289,6 +315,36 @@ impl AppServerApplication for DesktopApplication {
         source: talos_types::talos::SessionSource,
         request: StartTurnRequest,
     ) -> ApplicationResult<ApplicationResponse> {
+        let mut routed = ClientRequest {
+            computer_id: None,
+            method: talos_app_protocol::ClientMethod::TurnStart,
+            params: ClientRequestParams::TurnStart(request.clone()),
+        };
+        if let Some(call) = CloudCall::for_request(actor, &routed, &self.host)
+            .await
+            .map_err(project_error)?
+        {
+            return Ok(ApplicationResponse {
+                body: self
+                    .cloud()
+                    .await
+                    .map_err(project_error)?
+                    .send(actor, call)
+                    .await
+                    .map_err(project_error)?,
+                started_turn: None,
+            });
+        }
+        let local_node = self.host.local_computer_id().await.map_err(project_error)?;
+        routed
+            .params
+            .bind_computer_target_from_alias("embedded", Some(local_node.as_str()))
+            .map_err(project_error)?;
+        let ClientRequestParams::TurnStart(request) = routed.params else {
+            return Err(project_error(TalosError::internal(
+                "Turn routing lost its typed request.",
+            )));
+        };
         self.local.start_turn(actor, source, request).await
     }
 
@@ -298,6 +354,74 @@ impl AppServerApplication for DesktopApplication {
         params: SubscribeTimelineRequest,
     ) -> ApplicationResult<TimelineSubscription> {
         self.local.subscribe_timeline_events(actor, params).await
+    }
+
+    async fn subscribe_scoped_timeline_events(
+        &self,
+        actor: &Actor,
+        params: SubscribeTimelineRequest,
+        computer_id: Option<String>,
+    ) -> ApplicationResult<TimelineSubscription> {
+        let Some(target) = computer_id.filter(|target| target != "embedded") else {
+            return self.local.subscribe_timeline_events(actor, params).await;
+        };
+        if target == self.host.local_computer_id().await.map_err(project_error)? {
+            return self.local.subscribe_timeline_events(actor, params).await;
+        }
+        use talos_sdk::GatewayClient;
+        let token = actor.access_token.clone().ok_or_else(|| {
+            project_error(TalosError::new(
+                ErrorCode::Unauthenticated,
+                "Sign in to view a remote Computer.",
+            ))
+        })?;
+        let ca = talos_service::read_worker_trusted_ca(
+            self.config.cloud.agent_trusted_ca_file.as_deref(),
+        )
+        .map_err(project_error)?;
+        let mut client = talos_sdk::AppServerClient::connect_product_http(
+            &self.config.cloud.agent_base_url,
+            token,
+            target,
+            ca.as_deref(),
+        )
+        .map_err(project_error)?;
+        let mut subscription = client
+            .open_timeline_stream(params)
+            .await
+            .map_err(project_error)?;
+        let (sender, events) = tokio::sync::mpsc::channel(256);
+        tokio::spawn(async move {
+            let mut timeline = subscription.stream.into_inner();
+            loop {
+                let event = tokio::select! {
+                    _ = sender.closed() => break,
+                    event = timeline.recv() => match event { Some(event) => talos_service::TimelineSubscriptionMessage::Event(Box::new(event)), None => break },
+                    change = subscription.message_queue_changes.recv() => match change { Some(change) => talos_service::TimelineSubscriptionMessage::MessageQueueChanged(change), None => break },
+                    change = subscription.automation_changes.recv() => match change { Some(change) => talos_service::TimelineSubscriptionMessage::AutomationChanged(change), None => break },
+                };
+                if sender.send(event).await.is_err() {
+                    break;
+                }
+            }
+            if let Err(error) = client.shutdown().await {
+                talos_logging::report_error(&error);
+            }
+        });
+        Ok(TimelineSubscription {
+            subscription_id: subscription.response.subscription_id,
+            session_id: subscription.response.session_id,
+            high_water_mark_event_id: None,
+            replay: talos_agent_api::TimelineReplay {
+                events: Vec::new(),
+                high_water_mark_event_id: None,
+                next_cursor: None,
+                last_event_seq: 0,
+                cursor_status: talos_agent_api::TimelineCursorStatus::FromBeginning,
+            },
+            events,
+            has_live_turn: true,
+        })
     }
 
     async fn cancel_active_turn(
@@ -312,7 +436,7 @@ impl AppServerApplication for DesktopApplication {
     }
 
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()> {
-        self.sync_host.shutdown_refreshes().await;
+        self.host.shutdown_refreshes().await;
         self.media.close_all();
         self.stop_registration().await?;
         self.local.drain_background_tasks(timeout).await

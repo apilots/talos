@@ -47,11 +47,12 @@ pub trait ProjectStore: Send + Sync {
 
 pub struct StorageProjectStore {
     storage: Arc<dyn Storage>,
-    sync: Arc<crate::sync::StoreSyncBindings>,
+    sync: Arc<crate::capture::StoreCaptureBindings>,
 }
 
 impl StorageProjectStore {
-    /// Install the authorized capture boundary; imports bypass these workflows.
+    /// Attach an authorized replication consumer; transaction capture is always active.
+    #[cfg(feature = "sync")]
     pub fn with_sync(self, sync: Arc<crate::sync::StoreSyncAdapter>) -> Self {
         self.sync.install(sync).expect("initial Store sync binding");
         self
@@ -59,6 +60,7 @@ impl StorageProjectStore {
 
     /// Install a host-verified binding after login; existing transactions keep
     /// their original association until they commit.
+    #[cfg(feature = "sync")]
     pub fn install_sync(
         &self,
         adapter: std::sync::Arc<crate::sync::StoreSyncAdapter>,
@@ -77,10 +79,10 @@ impl StorageProjectStore {
         &self,
         project_id: &str,
     ) -> TalosResult<Box<dyn talos_storage::StorageTransaction>> {
-        crate::sync::capture::transaction(
+        crate::capture::transaction(
             self.storage.begin_transaction().await?,
             self.sync.clone(),
-            vec![talos_sync::SyncResourceKey::Project {
+            vec![crate::capture::ResourceKey::Project {
                 project_id: project_id.into(),
             }],
         )

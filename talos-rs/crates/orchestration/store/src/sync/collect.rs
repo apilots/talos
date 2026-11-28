@@ -1,6 +1,7 @@
 //! Project committed Store revisions into the existing outbox.
 use std::{sync::Arc, time::Duration};
 
+use crate::capture::source::{SessionRevision, SourceCut, SourceFields};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{Row, StorageTransaction};
 use talos_sync::{
@@ -8,11 +9,7 @@ use talos_sync::{
     TalosSync,
 };
 
-use super::{
-    capture, catalog, codec, metadata, reclaim, session,
-    source::{SessionRevision, SourceCut},
-    timeline, StoreSyncAdapter,
-};
+use super::{capture, catalog, codec, metadata, reclaim, session, timeline, StoreSyncAdapter};
 
 // Page by resource so an unreplayable revision only holds its own resource.
 const RESOURCES_PER_PASS: usize = 32;
@@ -85,7 +82,7 @@ impl StoreSyncAdapter {
             .storage
             .query(
                 "SELECT DISTINCT r.kind, r.resource_id FROM resource_revisions r
-             WHERE r.kind <> 'computer' AND r.owner_user_id IN (?2, ?3) AND r.kind || ':' || r.resource_id>?4 AND r.revision>COALESCE((
+             WHERE r.kind <> 'computer' AND NOT EXISTS (SELECT 1 FROM sessions legacy WHERE r.kind='session' AND legacy.session_key=r.resource_id AND legacy.execution_architecture='legacy_read_only') AND r.owner_user_id IN (?2, ?3) AND r.kind || ':' || r.resource_id>?4 AND r.revision>COALESCE((
                  SELECT MAX(c.revision) FROM sync_resource_capture c
                  WHERE c.hub_id=?1 AND c.account_id=?2 AND c.kind=r.kind AND c.resource_id=r.resource_id
              ),0)
@@ -137,7 +134,7 @@ impl StoreSyncAdapter {
         resource: &SyncResourceKey,
         after: i64,
     ) -> TalosResult<Option<Row>> {
-        Ok(tx.query("SELECT revision, execution_node_id, changes_json FROM resource_revisions WHERE kind=? AND resource_id=? AND owner_user_id IN (?,?) AND revision>? ORDER BY revision LIMIT 1", &[resource.kind().as_str(), resource.id(), &self.binding.source_user_id, &self.binding.scope.account_id, &after.to_string()]).await?.into_iter().next())
+        Ok(tx.query("SELECT revision, owner_user_id, execution_node_id, changes_json FROM resource_revisions WHERE kind=? AND resource_id=? AND owner_user_id IN (?,?) AND revision>? ORDER BY revision LIMIT 1", &[resource.kind().as_str(), resource.id(), &self.binding.source_user_id, &self.binding.scope.account_id, &after.to_string()]).await?.into_iter().next())
     }
 
     pub(super) async fn has_source_gap(
@@ -158,6 +155,42 @@ impl StoreSyncAdapter {
         resource: &SyncResourceKey,
         row: &Row,
     ) -> TalosResult<bool> {
+        if let SyncResourceKey::Session { session_id } = resource {
+            let existing = tx
+                .query(
+                    "SELECT execution_architecture FROM sessions WHERE session_key=?",
+                    &[session_id],
+                )
+                .await?;
+            if existing.first().is_some_and(|session| {
+                session.get_string("execution_architecture").as_deref() == Some("legacy_read_only")
+            }) {
+                return Ok(false);
+            }
+            if existing.is_empty() {
+                let revision: SessionRevision =
+                    serde_json::from_str(&metadata::text(row, "changes_json")?).map_err(codec)?;
+                let Some(source) = revision.after.as_ref().or(revision.before.as_ref()) else {
+                    return Ok(false);
+                };
+                let fields = match source.fields.as_ref() {
+                    Some(fields) => Some(fields.clone()),
+                    None => {
+                        self.retained_session_fields(tx, session_id, row, source.generation)
+                            .await?
+                    }
+                };
+                let architecture = fields
+                    .as_ref()
+                    .and_then(|fields| fields.row().get_string("execution_architecture"));
+                if !matches!(
+                    architecture.as_deref(),
+                    Some("worker" | "replica_read_only")
+                ) {
+                    return Ok(false);
+                }
+            }
+        }
         Ok(metadata::text(row, "execution_node_id")? != "embedded"
             || TalosSync::captures_embedded_resource(
                 tx,
@@ -166,6 +199,51 @@ impl StoreSyncAdapter {
                 resource.id(),
             )
             .await?)
+    }
+
+    async fn retained_session_fields(
+        &self,
+        tx: &mut dyn StorageTransaction,
+        id: &str,
+        row: &Row,
+        generation: u64,
+    ) -> TalosResult<Option<SourceFields>> {
+        // Event-only revisions omit metadata. A later full cut proves the
+        // retired generation's architecture without borrowing a recreated Session.
+        let rows = tx
+            .query(
+                "SELECT v.changes_json FROM resource_revisions v
+             JOIN session_event_retention r ON r.session_id=v.resource_id
+               AND r.deleted=1 AND r.through_generation>=?1
+             WHERE v.kind='session' AND v.resource_id=?2 AND v.owner_user_id=?3
+               AND v.execution_node_id=?4 AND v.revision>?5
+               AND (
+                 (json_extract(v.changes_json, '$.before.generation')=CAST(?1 AS INTEGER)
+                  AND json_type(v.changes_json, '$.before.fields')='object')
+                 OR (json_extract(v.changes_json, '$.after.generation')=CAST(?1 AS INTEGER)
+                  AND json_type(v.changes_json, '$.after.fields')='object')
+               )
+             ORDER BY v.revision LIMIT 1",
+                &[
+                    &generation.to_string(),
+                    id,
+                    &metadata::text(row, "owner_user_id")?,
+                    &metadata::text(row, "execution_node_id")?,
+                    &metadata::number(row, "revision")?.to_string(),
+                ],
+            )
+            .await?;
+        let Some(retained) = rows.first() else {
+            return Ok(None);
+        };
+        let retained: SessionRevision =
+            serde_json::from_str(&metadata::text(retained, "changes_json")?).map_err(codec)?;
+        Ok(retained
+            .after
+            .into_iter()
+            .chain(retained.before)
+            .find(|cut| cut.generation == generation && cut.fields.is_some())
+            .and_then(|cut| cut.fields))
     }
 
     pub(super) async fn collect_revision(&self, resource: &SyncResourceKey) -> TalosResult<bool> {
@@ -373,6 +451,6 @@ impl StoreSyncAdapter {
 fn source_fields(cut: &SourceCut) -> TalosResult<Row> {
     cut.fields
         .as_ref()
-        .map(super::source::SourceFields::row)
+        .map(SourceFields::row)
         .ok_or_else(|| TalosError::internal("Session revision is missing its metadata baseline."))
 }

@@ -27,10 +27,10 @@ pub use message::{
 };
 pub use notice::{decode_system_notice, encode_system_notice};
 pub use run::{
-    decode_admission_events, decode_input_params, decode_interrupt_outcome,
+    decode_admission_events, decode_command, decode_input_params, decode_interrupt_outcome,
     decode_interrupt_params, decode_run_params, decode_settlement, encode_admission_events,
-    encode_input_params, encode_interrupt_outcome, encode_interrupt_params, encode_run_params,
-    encode_settlement,
+    encode_command, encode_input_params, encode_interrupt_outcome, encode_interrupt_params,
+    encode_run_params, encode_settlement,
 };
 pub use tool_content::{decode_tool_content, encode_tool_content};
 

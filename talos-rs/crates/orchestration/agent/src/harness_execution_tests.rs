@@ -11,8 +11,9 @@ use super::*;
 
 #[tokio::test]
 async fn start_waits_for_durable_admission_permit() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
     let identity = AgentTurnRef::new("session-1", "turn-1");
     let execution = harness
         .start(run_params(identity.clone(), "message-1"))
@@ -45,9 +46,11 @@ async fn start_waits_for_durable_admission_permit() {
 
 #[tokio::test]
 async fn provider_failure_closes_open_output_before_terminal_settlement() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let harness = Harness::new(
         TEST_AGENT_ID.to_string(),
         FakeProvider::new(FakeMode::OpenThenFail),
+        journal.clone(),
     );
     let identity = AgentTurnRef::new("session-1", "turn-open-failure");
     let execution = harness
@@ -108,8 +111,9 @@ async fn provider_failure_closes_open_output_before_terminal_settlement() {
 
 #[tokio::test]
 async fn fresh_rich_input_is_rejected_before_provider_admission() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
     let identity = AgentTurnRef::new("session-1", "turn-rich-input");
     let mut params = run_params(identity, "message-1");
     params.input.blocks.push(AgentMessageBlock {
@@ -133,11 +137,12 @@ async fn fresh_rich_input_is_rejected_before_provider_admission() {
 
 #[tokio::test]
 async fn running_input_requires_dynamic_input_before_delivery() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Input).with_capabilities(AgentCapabilities {
         durable_continuation: true,
         ..AgentCapabilities::default()
     });
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
     let identity = AgentTurnRef::new("session-1", "turn-dynamic-input");
     let execution = harness
         .start(run_params(identity.clone(), "message-1"))
@@ -153,6 +158,7 @@ async fn running_input_requires_dynamic_input_before_delivery() {
 
     let error = match harness
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: TEST_AGENT_ID.to_string(),
             identity: identity.clone(),
             input: user_message(&identity, "message-2"),
@@ -181,8 +187,9 @@ async fn running_input_requires_dynamic_input_before_delivery() {
 
 #[tokio::test]
 async fn interrupt_wins_over_pending_input_delivery_failure() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::PendingInput);
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone());
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider.clone(), journal.clone());
     let identity = AgentTurnRef::new("session-1", "turn-pending-input");
     let execution = harness
         .start(run_params(identity.clone(), "message-1"))
@@ -198,6 +205,7 @@ async fn interrupt_wins_over_pending_input_delivery_failure() {
 
     let admission = harness
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: TEST_AGENT_ID.to_string(),
             identity: identity.clone(),
             input: user_message(&identity, "message-2"),
@@ -237,11 +245,12 @@ async fn interrupt_wins_over_pending_input_delivery_failure() {
 
 #[tokio::test]
 async fn waiting_result_requires_durable_continuation_capability() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Waiting).with_capabilities(AgentCapabilities {
         dynamic_input: true,
         ..AgentCapabilities::default()
     });
-    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider);
+    let harness = Harness::new(TEST_AGENT_ID.to_string(), provider, journal.clone());
     let identity = AgentTurnRef::new("session-1", "turn-waiting-capability");
     let execution = harness
         .start(run_params(identity, "message-1"))

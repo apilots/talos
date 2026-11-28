@@ -69,8 +69,8 @@ describe("timeline user action events", () => {
     });
   });
 
-  it("restores a cancelling turn without treating it as terminal", () => {
-    applyActiveTurnSnapshot("sess-1", activeTurn({ state: "cancelling" }));
+  it("shows a cancellation request without treating Worker execution as terminal", () => {
+    applyActiveTurnSnapshot("sess-1", activeTurn({ state: "running", cancellationRequested: true }));
 
     expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
       activeTurnId: "turn-1",

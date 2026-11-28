@@ -33,12 +33,6 @@ impl TimelineEventService {
     pub(crate) fn supports_history_supplements(&self) -> bool {
         self.execution_store.supports_history_supplements()
     }
-    pub(crate) async fn append_history_supplement(
-        &self,
-        value: talos_agent_api::trajectory::SessionHistorySupplement,
-    ) -> TalosResult<()> {
-        self.execution_store.append_history_supplement(value).await
-    }
     pub(crate) async fn read_terminal_history_supplement(
         &self,
         identity: &AgentTurnRef,
@@ -239,6 +233,23 @@ impl TimelineEventService {
         // No current subscribers is normal; replay retains the committed notice.
         let _ = self.live_tx.send(event.clone());
         Ok(event)
+    }
+
+    /// Publish only the notice newly committed with this settlement receipt.
+    pub(crate) async fn complete_worker_settlement_with_notice(
+        &self,
+        cursor: &agent_protocol::AgentSessionEventCursor,
+        notice: talos_agent_api::TimelineSystemNotice,
+    ) -> TalosResult<bool> {
+        let Some(record) = self
+            .execution_store
+            .complete_worker_settlement_with_notice(cursor, notice)
+            .await?
+        else {
+            return Ok(false);
+        };
+        let _ = self.live_tx.send(map_timeline_record(record));
+        Ok(true)
     }
 
     pub(crate) async fn display_active_turn(

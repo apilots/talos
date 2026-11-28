@@ -295,7 +295,7 @@ impl talos_agent::SessionHistoryReader for UnexpectedResourceCall {
     fn read(
         &self,
         _: talos_agent::SessionHistoryReadParams,
-    ) -> talos_agent::AgentFuture<'_, TalosResult<Vec<talos_agent_api::SessionHistoryTurn>>> {
+    ) -> talos_agent::AgentFuture<'_, TalosResult<Vec<talos_agent::SessionHistoryReadTurn>>> {
         unreachable!("registration must not read history")
     }
 }
@@ -392,13 +392,7 @@ fn control_server(
     sessions: Arc<dyn SessionStore>,
 ) -> NodeRpcServer {
     let resources = Arc::new(UnexpectedResourceCall);
-    let session_data = NodeSessionDataRpc::new(
-        nodes.clone(),
-        sessions,
-        resources.clone(),
-        resources.clone(),
-        resources.clone(),
-    );
+    let session_data = NodeSessionDataRpc::new(nodes.clone(), sessions, resources.clone());
     NodeRpcServer::new(
         config,
         nodes.clone(),

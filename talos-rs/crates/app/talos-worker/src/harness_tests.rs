@@ -51,3 +51,6 @@ async fn config_commit_is_excluded_until_the_actual_invocation_settles() {
             .success
     );
 }
+
+#[path = "harness_replay_tests.rs"]
+mod replay;

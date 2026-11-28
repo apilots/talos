@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use talos_agent_api::{
@@ -37,6 +37,7 @@ pub(super) struct FakeProvider {
     mode: FakeMode,
     capabilities: AgentCapabilities,
     pub(super) started: Arc<AtomicBool>,
+    pub(super) continuations: Arc<std::sync::Mutex<Vec<Option<AgentContinuationRef>>>>,
     started_notify: Arc<Notify>,
     pub(super) release: Arc<Notify>,
     pub(super) input_received: Arc<AtomicBool>,
@@ -49,6 +50,7 @@ pub(super) struct FakeProvider {
     pub(super) close_called: Arc<AtomicBool>,
     close_fails: bool,
     pub(super) shutdown_called: Arc<AtomicBool>,
+    pub(super) shutdown_count: Arc<AtomicUsize>,
 }
 
 #[derive(Clone)]
@@ -63,11 +65,19 @@ impl FakeProvider {
             capabilities: AgentCapabilities {
                 rich_input: Vec::new(),
                 dynamic_input: true,
-                user_actions: Vec::new(),
+                user_actions: if matches!(mode, FakeMode::Waiting) {
+                    vec![
+                        crate::AgentUserActionKind::Question,
+                        crate::AgentUserActionKind::SandboxApproval,
+                    ]
+                } else {
+                    Vec::new()
+                },
                 durable_continuation: true,
                 context_compaction: true,
             },
             started: Arc::new(AtomicBool::new(false)),
+            continuations: Default::default(),
             started_notify: Arc::new(Notify::new()),
             release: Arc::new(Notify::new()),
             input_received: Arc::new(AtomicBool::new(false)),
@@ -80,6 +90,7 @@ impl FakeProvider {
             close_called: Arc::new(AtomicBool::new(false)),
             close_fails: false,
             shutdown_called: Arc::new(AtomicBool::new(false)),
+            shutdown_count: Default::default(),
         }
     }
 
@@ -162,12 +173,18 @@ impl AgentProvider for FakeProvider {
 
     async fn shutdown(&self, _control: AgentOperationControl) -> AgentResult<()> {
         self.shutdown_called.store(true, Ordering::Release);
+        self.shutdown_count.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
 }
 
 impl AgentSession for FakeSession {
     async fn turn(&self, mut turn: SessionTurnParams) -> AgentResult<SessionTurnResult> {
+        self.provider
+            .continuations
+            .lock()
+            .unwrap()
+            .push(turn.continuation.clone());
         self.provider.started.store(true, Ordering::Release);
         self.provider.started_notify.notify_waiters();
         match self.provider.mode {
@@ -197,7 +214,7 @@ impl AgentSession for FakeSession {
                 }
             }
             FakeMode::LargeHistory => {
-                for _ in 0..6 {
+                for _ in 0..12 {
                     let message = turn.events.start_message(AgentMessageRole::Agent).await?;
                     let block = turn
                         .events
@@ -206,7 +223,7 @@ impl AgentSession for FakeSession {
                             AgentMessageBlockContent::AssistantText(
                                 talos_agent_api::AgentAssistantText {
                                     phase: talos_agent_api::AgentAssistantTextPhase::Commentary,
-                                    text: "x".repeat(768 * 1024),
+                                    text: "x".repeat(384 * 1024),
                                 },
                             ),
                         )
@@ -277,9 +294,20 @@ impl AgentSession for FakeSession {
                     })
                     .await?;
                 Ok(SessionTurnResult::WaitingForInput {
-                    pending: Box::new(AgentPendingInput::Message {
-                        action_id: "action-1".to_string(),
-                        prompt: "More input".to_string(),
+                    pending: Box::new(AgentPendingInput::UserAction {
+                        action: talos_types::PendingUserAction {
+                            action_id: "action-1".into(),
+                            call_id: "call-1".into(),
+                            item_id: None,
+                            state: talos_types::UserActionState::Pending,
+                            params: talos_types::UserActionParams::Question(
+                                talos_types::QuestionParams {
+                                    header: "Continue".into(),
+                                    question: "How should I continue?".into(),
+                                    options: vec![],
+                                },
+                            ),
+                        },
                     }),
                     continuation: AgentContinuationRef {
                         opaque_id: "continuation-1".to_string(),
@@ -351,10 +379,12 @@ impl AgentSession for FakeSession {
 
 pub(super) fn run_params(identity: AgentTurnRef, message_id: &str) -> AgentRunParams {
     AgentRunParams {
+        subagent_limit: None,
+        command: None,
+        automation_origin: None,
         context: context(identity.clone()),
         input: user_message(&identity, message_id),
-        checkpoint: None,
-        continuation: None,
+        intent: agent_protocol::AgentRunIntent::Start,
     }
 }
 
@@ -377,6 +407,7 @@ pub(super) fn user_message(
 
 pub(super) fn context(identity: AgentTurnRef) -> AgentContext {
     AgentContext {
+        tree_identity: talos_types::SessionTreeIdentity::Primary,
         history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),
@@ -438,4 +469,48 @@ fn interrupted() -> AgentResult<SessionTurnResult> {
         talos_error::ErrorCode::Cancelled,
         "fake Provider interrupted",
     ))
+}
+
+pub(super) async fn execution_store() -> (
+    tempfile::TempDir,
+    Arc<talos_store::execution::WorkerExecutionStore>,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        talos_store::execution::WorkerExecutionStore::open(
+            &directory.path().join("execution.sqlite"),
+        )
+        .await
+        .unwrap(),
+    );
+    (directory, store)
+}
+
+pub(super) fn response_params(
+    identity: AgentTurnRef,
+    message_id: &str,
+    action_id: &str,
+) -> AgentRunParams {
+    let mut params = run_params(identity, message_id);
+    params.intent = agent_protocol::AgentRunIntent::RespondUserAction;
+    params
+        .input
+        .blocks
+        .push(talos_agent_api::AgentMessageBlock {
+            block_id: format!("{message_id}-response"),
+            status: talos_agent_api::AgentMessageBlockStatus::Completed,
+            started_at: 1,
+            completed_at: Some(1),
+            content: AgentMessageBlockContent::UserContent(
+                talos_agent_api::AgentUserContent::UserActionResponse {
+                    action_id: action_id.into(),
+                    response: talos_types::UserActionResponse::Question(
+                        talos_types::QuestionAnswer::FreeForm {
+                            text: "Continue".into(),
+                        },
+                    ),
+                },
+            ),
+        });
+    params
 }

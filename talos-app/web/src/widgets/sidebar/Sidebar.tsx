@@ -1,8 +1,13 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+
+import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import type { ProjectView } from "@/shared/types/ui";
 import type { AccountType, AuthStatus } from "@/shared/types/account";
 import { SidebarAccountMenu } from "./SidebarAccountMenu";
 import { SidebarChatsSection } from "./SidebarChatsSection";
 import { SidebarHomeEntry } from "./SidebarHomeEntry";
+import { SidebarPinnedSection } from "./SidebarPinnedSection";
 import { SidebarPrimaryNav } from "./SidebarPrimaryNav";
 import { SidebarProjectSection, type SidebarProjectGroup } from "./SidebarProjectSection";
 import type { SidebarSessionItem } from "./SidebarSessionRow";
@@ -20,6 +25,7 @@ interface SidebarProps {
   computer?: import("@talos/sdk-core").AppProtocol.NodeInfo;
   computerEntry?: ReactNode;
   showAccount?: boolean;
+  pinnedSessions?: SidebarSessionItem[];
   chats: SidebarSessionItem[];
   connection: AuthConnectionState;
   currentPath: string;
@@ -31,6 +37,8 @@ interface SidebarProps {
   onRenameProject: (projectId: ProjectView["id"], name: string) => Promise<void> | void;
   onSelectThread: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => Promise<void> | void;
+  onTogglePinSession?: (sessionId: string, pinned: boolean) => Promise<void> | void;
+  pendingPinSessionIds?: ReadonlySet<string>;
   sessionActionPending?: boolean;
   projectActionPending?: boolean;
 }
@@ -39,6 +47,7 @@ export function Sidebar({
   computer,
   computerEntry,
   showAccount = true,
+  pinnedSessions = [],
   chats,
   connection,
   currentPath,
@@ -50,17 +59,125 @@ export function Sidebar({
   onRenameProject,
   onSelectThread,
   onDeleteSession,
+  onTogglePinSession,
+  pendingPinSessionIds,
   projectActionPending,
   sessionActionPending = false,
 }: SidebarProps) {
+  const { t } = useTranslation(["sidebar", "errors"]);
   const [sessionPendingDelete, setSessionPendingDelete] = useState<SidebarSessionItem | null>(null);
+  const [pinError, setPinError] = useState<ReturnType<typeof userVisibleError> | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const pendingPinFocusRef = useRef<{
+    sessionId: string;
+    sourceButton: HTMLButtonElement;
+  } | null>(null);
+
+  useEffect(() => {
+    const pending = pendingPinFocusRef.current;
+    if (!pending) {
+      return;
+    }
+    const activeElement = document.activeElement;
+    if (pending.sourceButton.isConnected) {
+      // Retain the recovery target during intermediate renders (e.g. pending state)
+      // while focus remains on the original pin button; clear it if focus moved away.
+      if (
+        activeElement !== pending.sourceButton ||
+        (pendingPinSessionIds && !pendingPinSessionIds.has(pending.sessionId))
+      ) {
+        pendingPinFocusRef.current = null;
+      }
+      return;
+    }
+    // Keep tracking a moved button until settlement so rollback can restore focus again.
+    pendingPinFocusRef.current = null;
+    const focusDroppedToBody =
+      !activeElement ||
+      activeElement === document.body ||
+      activeElement === document.documentElement;
+    if (!focusDroppedToBody) {
+      return;
+    }
+    const escapedId =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(pending.sessionId)
+        : pending.sessionId.replaceAll('"', '\\"');
+    const pinButton = sidebarRef.current?.querySelector<HTMLButtonElement>(
+      `[data-sidebar-pin-button="${escapedId}"]`,
+    );
+    const project = projectGroups.find((group) =>
+      group.sessions.some((session) => session.id === pending.sessionId),
+    );
+    const projectButton = project &&
+      Array.from(
+        sidebarRef.current?.querySelectorAll<HTMLButtonElement>("[data-sidebar-project-id]") ?? [],
+      ).find((button) => button.dataset.sidebarProjectId === project.project.id);
+    const section = project
+      ? "projects"
+      : chats.some((session) => session.id === pending.sessionId) ? "chats" : null;
+    // A collapsed destination has no Session button. Recover to its visible parent.
+    const targetButton = pinButton || projectButton ||
+      (section
+        ? sidebarRef.current?.querySelector<HTMLButtonElement>(`[data-sidebar-section="${section}"] > button`)
+        : null);
+    targetButton?.focus();
+    if (targetButton && pendingPinSessionIds?.has(pending.sessionId)) {
+      pendingPinFocusRef.current = { sessionId: pending.sessionId, sourceButton: targetButton };
+    }
+  }, [pinnedSessions, chats, projectGroups, pendingPinSessionIds]);
+
+  async function handleTogglePinSession(sessionId: string, pinned: boolean) {
+    if (!onTogglePinSession || pendingPinSessionIds?.has(sessionId)) {
+      return;
+    }
+    const active = document.activeElement;
+    const sourceButton =
+      active instanceof HTMLButtonElement &&
+      active.getAttribute("data-sidebar-pin-button") === sessionId
+        ? active
+        : null;
+    pendingPinFocusRef.current = sourceButton ? { sessionId, sourceButton } : null;
+    setPinError(null);
+    try {
+      await onTogglePinSession(sessionId, pinned);
+    } catch (error) {
+      if (
+        sourceButton &&
+        pendingPinFocusRef.current?.sourceButton === sourceButton &&
+        sourceButton.isConnected
+      ) {
+        pendingPinFocusRef.current = null;
+      }
+      setPinError(userVisibleError(error, t("sidebar:pinSessionFailed")));
+    }
+  }
 
   return (
-    <aside className="sticky top-0 flex h-full w-full shrink-0 flex-col border-r border-border/80 bg-sidebar px-4 py-4">
+    <aside
+      className="sticky top-0 flex h-full w-full shrink-0 flex-col border-r border-border/80 bg-sidebar px-4 py-4"
+      ref={sidebarRef}
+    >
       <SidebarHomeEntry computer={computer} />
       <SidebarPrimaryNav onCreateThread={onCreateThread} computerEntry={computerEntry} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {pinError ? (
+          <div
+            className="mb-2 rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3 py-2 text-xs text-danger"
+            role="alert"
+          >
+            {apiErrorMessage(pinError)}
+          </div>
+        ) : null}
+        <SidebarPinnedSection
+          currentPath={currentPath}
+          onDeleteSession={setSessionPendingDelete}
+          onSelectSession={onSelectThread}
+          onTogglePinSession={onTogglePinSession ? handleTogglePinSession : undefined}
+          pendingPinSessionIds={pendingPinSessionIds}
+          sessions={pinnedSessions}
+        />
         <SidebarProjectSection
           currentPath={currentPath}
           groups={projectGroups}
@@ -69,12 +186,16 @@ export function Sidebar({
           onRemoveProject={onRemoveProject}
           onRenameProject={onRenameProject}
           onSelectSession={onSelectThread}
+          onTogglePinSession={onTogglePinSession ? handleTogglePinSession : undefined}
+          pendingPinSessionIds={pendingPinSessionIds}
           projectActionPending={projectActionPending}
         />
         <SidebarChatsSection
           currentPath={currentPath}
           onDeleteSession={setSessionPendingDelete}
           onSelectSession={onSelectThread}
+          onTogglePinSession={onTogglePinSession ? handleTogglePinSession : undefined}
+          pendingPinSessionIds={pendingPinSessionIds}
           sessions={chats}
         />
       </div>
@@ -99,4 +220,3 @@ export function Sidebar({
     </aside>
   );
 }
-import { useState, type ReactNode } from "react";

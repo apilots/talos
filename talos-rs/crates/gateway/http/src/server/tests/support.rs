@@ -18,7 +18,7 @@ use talos_store::file::DatabaseFileStore;
 use talos_store::migration::run_migrations;
 use talos_store::project::ProjectStore;
 use talos_store::session::{
-    AgentExecutionStore, DatabaseSessionStore, SessionRecord, SessionStore, SessionTreeIdentity,
+    DatabaseSessionStore, SessionRecord, SessionStore, SessionTreeIdentity,
 };
 use talos_types::talos::{SessionSourceProvider, SessionSourceType, TalosToolProgressKind};
 
@@ -136,17 +136,19 @@ pub(crate) async fn test_session_store(
             project_id: None,
             worktree_binding: None,
             current_directory: None,
+            pinned: false,
         })
         .await
         .unwrap();
     (store, nodes)
 }
 
-pub(crate) async fn seed_running_agent_execution(
-    store: &dyn AgentExecutionStore,
-    session_id: &str,
-    turn_id: &str,
-) {
+pub(crate) struct WorkerFixture {
+    pub events: Vec<CanonicalAgentEvent>,
+    pub continuation: Option<talos_agent_api::AgentContinuationRef>,
+}
+
+pub(crate) async fn running_agent_events(session_id: &str, turn_id: &str) -> WorkerFixture {
     let identity = AgentTurnRef::new(session_id, turn_id);
     let (pipeline, _sink, _progress) = AgentEventPipeline::fresh(identity);
     let mut admission = vec![pipeline
@@ -167,23 +169,17 @@ pub(crate) async fn seed_running_agent_execution(
             .await
             .expect("test initial User message should be valid"),
     );
-    store
-        .commit_initial_admission(talos_store::session::CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: admission,
-            command: None,
-        })
-        .await
-        .expect("test initial admission should persist");
+    WorkerFixture {
+        events: admission,
+        continuation: None,
+    }
 }
 
-pub(crate) async fn seed_waiting_agent_execution(
-    store: &dyn AgentExecutionStore,
+pub(crate) async fn waiting_agent_events(
     session_id: &str,
     turn_id: &str,
     action: PendingUserAction,
-) {
+) -> WorkerFixture {
     let identity = AgentTurnRef::new(session_id, turn_id);
     let (pipeline, sink, mut progress) = AgentEventPipeline::fresh(identity.clone());
     let mut admission = vec![pipeline
@@ -204,15 +200,6 @@ pub(crate) async fn seed_waiting_agent_execution(
             .await
             .expect("test initial User message should be valid"),
     );
-    let initial = store
-        .commit_initial_admission(talos_store::session::CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: admission,
-            command: None,
-        })
-        .await
-        .expect("test initial admission should persist");
     let message = sink
         .start_message(AgentMessageRole::Agent)
         .await
@@ -221,10 +208,7 @@ pub(crate) async fn seed_waiting_agent_execution(
         .recv()
         .await
         .expect("test Provider message event should be emitted");
-    let message_commit = store
-        .commit_progress_event(message_started, initial.active_turn.last_event_seq)
-        .await
-        .expect("test Provider message should persist");
+    admission.push(message_started);
     let tool = sink
         .start_block(
             &message,
@@ -243,10 +227,7 @@ pub(crate) async fn seed_waiting_agent_execution(
         .recv()
         .await
         .expect("test Tool block event should be emitted");
-    let tool_commit = store
-        .commit_progress_event(tool_started, message_commit.active_turn.last_event_seq)
-        .await
-        .expect("test Tool block should persist");
+    admission.push(tool_started);
     let mut action = action;
     action.item_id = Some(tool.block_id().to_string());
     let waiting = pipeline
@@ -255,22 +236,26 @@ pub(crate) async fn seed_waiting_agent_execution(
         ))
         .await
         .expect("test waiting event should be valid");
-    store
-        .commit_waiting_settlement(
-            waiting,
-            talos_agent_api::AgentContinuationRef {
-                opaque_id: "continuation-test".to_string(),
-            },
-            tool_commit.active_turn.last_event_seq,
-        )
-        .await
-        .expect("test waiting settlement should persist");
+    admission.push(waiting);
+    WorkerFixture {
+        events: admission,
+        continuation: Some(talos_agent_api::AgentContinuationRef {
+            opaque_id: "continuation-test".into(),
+        }),
+    }
 }
 
-pub(crate) async fn mock_agent_execution(params: AgentRunParams) -> TalosResult<AgentRunExecution> {
+pub(crate) async fn mock_agent_execution(
+    params: AgentRunParams,
+    worker: Arc<talos_store::execution::WorkerExecutionStore>,
+) -> TalosResult<AgentRunExecution> {
     let identity = params.context.identity();
-    let resumed_lifecycles = params
-        .checkpoint
+    let checkpoint = if params.user_action_response().is_some() {
+        worker.checkpoint(&identity).await?
+    } else {
+        None
+    };
+    let resumed_lifecycles = checkpoint
         .as_ref()
         .map(|checkpoint| {
             checkpoint
@@ -297,7 +282,7 @@ pub(crate) async fn mock_agent_execution(params: AgentRunParams) -> TalosResult<
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let (pipeline, sink, progress, mut admission_events) = match params.checkpoint {
+    let (pipeline, sink, progress, mut admission_events) = match checkpoint {
         Some(checkpoint) => {
             let (pipeline, sink, progress) = AgentEventPipeline::resumed(identity, checkpoint)?;
             (pipeline, sink, progress, Vec::new())

@@ -13,6 +13,14 @@ impl TalosService {
     ) -> ServiceResult<()> {
         self.turns.install_automation(store, resolver)
     }
+    /// Install definition management for a host that owns no execution capability.
+    pub fn install_session_automation_definitions(
+        &self,
+        store: DatabaseAutomationStore,
+        resolver: Arc<dyn AutomationSkillResolver>,
+    ) -> ServiceResult<()> {
+        self.turns.install_automation_definitions(store, resolver)
+    }
     pub fn subscribe_automation_changed(
         &self,
     ) -> ServiceResult<tokio::sync::broadcast::Receiver<AutomationChangedNotification>> {
@@ -32,6 +40,9 @@ impl TalosService {
         request: AutomationRequest,
     ) -> ServiceResult<AutomationControlResult> {
         let session = self.access.load_session(actor, &request.session_id).await?;
+        self.sessions
+            .ensure_execution_supported(&session.id)
+            .await?;
         let automation = self.turns.automation_service()?;
         let start_goal = matches!(
             request.action,
@@ -45,6 +56,12 @@ impl TalosService {
                 action: LoopAction::Create { .. }
             }
         );
+        if !automation.executes() && (start_goal || created_loop) {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "This management entry does not own Agent execution.",
+            ));
+        }
         let explicit_target = match &request.action {
             AutomationAction::Goal {
                 action: GoalAction::Resume { goal_id },
@@ -98,7 +115,7 @@ impl TalosService {
             .messages
             .iter()
             .any(|m| !before.contains(&m.id));
-        if start_goal || created_loop || new_wake {
+        if automation.executes() && (start_goal || created_loop || new_wake) {
             if let Some(target) = result.created_object.clone().or(explicit_target) {
                 automation.allow_explicit_dispatch(&session.id, target, cancelled_boundary);
             }
@@ -130,6 +147,9 @@ impl TalosService {
                     "Automation Session was not found.",
                 )
             })?;
+        self.sessions
+            .ensure_execution_supported(&session.id)
+            .await?;
         self.turns
             .automation_service()?
             .execute(
@@ -170,6 +190,12 @@ impl TalosService {
                 let Some(session) = self.sessions.load_record(&id).await? else {
                     return Ok(());
                 };
+                match self.sessions.ensure_execution_supported(&session.id).await {
+                    Err(error) if error.is_code(talos_error::ErrorCode::InvalidRequest) => {
+                        return Ok(())
+                    }
+                    result => result?,
+                }
                 let ownership = if let Some(owner) = owner.as_ref() {
                     let Some(lease) = owner.try_for_scan(&session.id)? else {
                         return Ok(());
@@ -199,6 +225,9 @@ impl TalosService {
         let Some(automation) = self.turns.installed_automation() else {
             return Ok(());
         };
+        if !automation.executes() {
+            return Ok(());
+        }
         if !automation
             .snapshot(session_id)
             .await?
@@ -222,6 +251,9 @@ impl TalosService {
                     "Automation Session was not found.",
                 )
             })?;
+        self.sessions
+            .ensure_execution_supported(&session.id)
+            .await?;
         if self
             .sessions
             .remote_active_target(&session)

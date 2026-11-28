@@ -1,5 +1,6 @@
 //! Native multi-runtime scenarios over the shared controlled fixtures.
 use super::*;
+use talos_coordinator::AgentCoordinator;
 
 #[tokio::test]
 async fn shared_session_continues_on_the_same_worker_and_active_commands_return_to_its_coordinator()
@@ -323,7 +324,7 @@ pub(super) async fn run_topology(scenario: TopologyScenario) {
             )
             .await
             .unwrap();
-        peer.service.resume_account_sync(&actor);
+        peer.service.resume_account_host(&actor);
         wait_for("background local Computer identity published", async || {
             peer.service
                 .sync_status(&actor)
@@ -345,17 +346,12 @@ pub(super) async fn run_topology(scenario: TopologyScenario) {
             )
         );
         wait_for("background account Sync installed", async || {
-            peer.sync_host
-                .sync_stores
-                .handles
-                .lock()
-                .await
-                .contains_key(ACCOUNT)
+            peer.host.stores.handles.lock().await.contains_key(ACCOUNT)
         })
         .await;
         handles.push(
-            peer.sync_host
-                .sync_stores
+            peer.host
+                .stores
                 .handles
                 .lock()
                 .await
@@ -482,7 +478,7 @@ pub(super) async fn run_topology(scenario: TopologyScenario) {
     })
     .await;
     let state = worker_state(&a, "shared-session").await;
-    assert_eq!(state.coordinator_id.as_deref(), Some(b.sync_peer_id()));
+    assert_eq!(state.coordinator_id.as_deref(), Some(b.host_id()));
     assert!(model
         .prompts
         .lock()
@@ -809,8 +805,8 @@ pub(super) async fn run_topology(scenario: TopologyScenario) {
         .await
         .unwrap();
     handles[0] = a
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .handles
         .lock()
         .await

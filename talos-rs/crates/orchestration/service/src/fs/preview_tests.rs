@@ -204,3 +204,107 @@ fn source_text_takes_precedence_over_ambiguous_binary_filename_hints() {
         assert_eq!(content(read, 0).metadata.mime_type, "text/plain");
     }
 }
+
+#[tokio::test]
+async fn file_conversion_input_enforces_contiguous_bounded_chunks_and_complete_preparation() {
+    let resources = PreviewRoots::default();
+    let metadata = FilePreviewMetadata {
+        name: "report.docx".into(),
+        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document".into(),
+        size_bytes: u64::from(talos_types::FILE_PREVIEW_MAX_READ_BYTES) + 1,
+    };
+    let WorkerPreviewResponse::Opened { handle, .. } = resources
+        .operate(
+            "owner".into(),
+            WorkerPreviewRequest::OpenFile {
+                metadata: metadata.clone(),
+                expires_at: chrono::Utc::now().timestamp() + 60,
+                max_bytes: metadata.size_bytes,
+            },
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected open");
+    };
+    for request in [
+        WorkerPreviewRequest::PrepareDocument {
+            handle: handle.clone(),
+            max_bytes: metadata.size_bytes,
+        },
+        WorkerPreviewRequest::Write {
+            handle: handle.clone(),
+            offset: 1,
+            data: b"x".to_vec().into(),
+        },
+        WorkerPreviewRequest::Write {
+            handle: handle.clone(),
+            offset: 0,
+            data: vec![0; talos_types::FILE_PREVIEW_MAX_READ_BYTES as usize + 1].into(),
+        },
+    ] {
+        assert!(resources
+            .operate("owner".into(), request)
+            .await
+            .unwrap_err()
+            .is_code(ErrorCode::InvalidRequest));
+    }
+    for (offset, data) in [
+        (
+            0,
+            vec![0; talos_types::FILE_PREVIEW_MAX_READ_BYTES as usize],
+        ),
+        (u64::from(talos_types::FILE_PREVIEW_MAX_READ_BYTES), vec![0]),
+    ] {
+        assert_eq!(
+            resources
+                .operate(
+                    "owner".into(),
+                    WorkerPreviewRequest::Write {
+                        handle: handle.clone(),
+                        offset,
+                        data: data.into()
+                    }
+                )
+                .await
+                .unwrap(),
+            WorkerPreviewResponse::Written
+        );
+    }
+    assert_eq!(
+        resources
+            .operate(
+                "owner".into(),
+                WorkerPreviewRequest::PrepareDocument {
+                    handle: handle.clone(),
+                    max_bytes: 1
+                }
+            )
+            .await
+            .unwrap(),
+        WorkerPreviewResponse::Document(talos_types::FilePreviewDocument::Unavailable {
+            reason: talos_types::FilePreviewDocumentUnavailable::TooLarge
+        })
+    );
+    resources
+        .operate(
+            "owner".into(),
+            WorkerPreviewRequest::Close {
+                handle: handle.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(resources
+        .operate(
+            "owner".into(),
+            WorkerPreviewRequest::Write {
+                handle,
+                offset: 0,
+                data: bytes::Bytes::new()
+            }
+        )
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::ResourceNotFound));
+}

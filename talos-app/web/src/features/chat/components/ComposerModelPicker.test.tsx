@@ -208,3 +208,12 @@ it("uses only the declared effort stops and skips an unsupported High", () => {
   fireEvent.keyDown(slider, { key: "ArrowRight" });
   expect(onReasoningLevelChange).toHaveBeenCalledExactlyOnceWith("extra_high");
 });
+
+it("selects Max only when declared by the active model", () => {
+  const onReasoningLevelChange = vi.fn();
+  const maximum: ComposerModelOption = { ...models[0], selectionCapabilities: { ...effortCapabilities, reasoning_efforts: ["high", "xhigh", "max"] } };
+  renderComposer({ models: [maximum], selectedModel: maximum.id, reasoningLevel: "high", onReasoningLevelChange });
+  fireEvent.click(screen.getByRole("button", { name: "Qwen3 32B · High" }));
+  fireEvent.keyDown(screen.getByRole("slider", { name: "Reasoning depth" }), { key: "End" });
+  expect(onReasoningLevelChange).toHaveBeenCalledExactlyOnceWith("max");
+});

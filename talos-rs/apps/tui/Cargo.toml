@@ -11,6 +11,11 @@ autobins = false
 name = "talos"
 path = "src/main.rs"
 
+[features]
+default = ["sync", "relay-client"]
+sync = ["talos-base/sync", "talos-sdk-embedded/sync"]
+relay-client = ["talos-base/relay-client", "talos-sdk-embedded/relay-client"]
+
 [dependencies]
 ratatui = "0.28"
 crossterm = "0.28"
@@ -21,7 +26,7 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 talos-error = { workspace = true }
 talos-types = { workspace = true }
 talos-sdk = { path = "../sdk" }
-talos-sdk-embedded = { path = "../sdk-embedded" }
+talos-sdk-embedded = { path = "../sdk-embedded", default-features = false }
 talos-base = { workspace = true }
 talos-logging = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

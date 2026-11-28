@@ -181,7 +181,7 @@ Agent tool coverage. Fixture request records and event logs are retained with th
 normal scenario evidence.
 
 An additional Messages connection keeps explicit adaptive thinking while changing
-effort from medium to high in one session. Both tool-loop rounds must send the
+effort from xhigh to max in one session. Both tool-loop rounds must send the
 selected `output_config.effort`, retain thinking KV siblings and preserve signed
 history. This contract does not imply Chat/Responses endpoints accept adaptive.
 
@@ -235,6 +235,13 @@ do not encode execution categories. Workspace helpers also select group 21 becau
 it reuses their harness. LibreOffice and CJK fonts are installed only for scenarios
 that declare `soffice`, rather than every Web/Desktop job. Unknown shared
 infrastructure remains conservative.
+
+Local document-preview acceptance also requires CJK fonts visible to the actual
+headless converter. On macOS, a Fontconfig override alone does not configure
+LibreOffice's native font loader; install an appropriate CJK font through the
+OS or in a task-private LibreOffice bundle's `Contents/Resources/fonts/truetype`.
+Check the exported PDF's actual glyphs as well as extracted text: `/ActualText`
+can hide missing glyphs in some extractors. Keep the exact Chinese assertions.
 
 Computer live media teardown is covered separately by the Browser Worker
 acceptance and the owning ComputerDesktop component tests; this lightweight case
@@ -393,7 +400,7 @@ and three Talos Workers in isolated homes. Set `TALOS_CLOUD_SERVER_BIN` to the
 fixture executable or make `cloud-server` available on `PATH`; no Cloud source
 checkout is required. It also needs `protoc`, Python `grpcio`, `protobuf` and
 `PyYAML`. Execution scenarios also require a real provider key in `.env`. The attachment
-scenario uses `deepseek-v4-flash-vision-exp` by default; `TALOS_E2E_IMAGE_MODEL`
+scenario uses `deepseek-flash` by default; `TALOS_E2E_IMAGE_MODEL`
 can select another configured, accessible vision model.
 Management uses the existing protobuf descriptors and public RPCs; SQLite is
 opened read-only for persistence assertions. No fake Provider or direct database
@@ -515,7 +522,7 @@ under `scenarios/12_files/.tmp/`; the scenario EXIT trap stops the process and
 removes the directory, including on failure. No Docker or MinIO client is needed.
 
 `06_tools/public_deepseek_recovery` uses the dev YAML and the real public
-`https://api.deepseek.com` `deepseek-v4-flash` model. It requires
+`https://api.deepseek.com` `deepseek-flash` model. It requires
 `TALOS_LLM_DEEPSEEK_API_KEY`, performs a successful Bash call, a deliberate Read
 failure, and a recovery Bash write, then continues the same Session with another
 tool call. It checks streamed events, canonical call/result identities, terminal

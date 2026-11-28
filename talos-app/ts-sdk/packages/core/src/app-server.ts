@@ -47,6 +47,7 @@ import type {
   SessionUpdateResponse,
   SessionCompactResponse,
   SessionClearResponse,
+  SessionRebuildViewResponse,
   SessionDeleteResponse,
   RecoverTimelineResponse,
   UserCurrentResponse,
@@ -81,6 +82,7 @@ export type AppServerActiveTurnChangedHandler = (notification: AppProtocol.Sessi
 export type AppServerErrorHandler = (error: Error) => void;
 
 export interface AppServerRequestOptions {
+  computerId?: string;
   actorCredentials?: AppProtocol.ActorCredentials | null;
 }
 
@@ -384,6 +386,10 @@ export class AppServerClient {
 
   clearSessionById(sessionId: string): Promise<SessionClearResponse> {
     return this.clearSession({ sessionId });
+  }
+
+  rebuildSessionView(params: AppProtocol.SessionRebuildViewRequest): Promise<SessionRebuildViewResponse> {
+    return this.transport.request("session/rebuildView", params);
   }
 
   getActiveTurn(params: AppProtocol.SessionActiveTurnRequest): Promise<SessionActiveTurnResponse> {

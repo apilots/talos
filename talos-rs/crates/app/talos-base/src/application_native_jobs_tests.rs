@@ -21,6 +21,9 @@ const OWNER: &str = "native-job-owner";
 const FOREIGN: &str = "another-owner";
 const CRON: &str = "0 0 0 1 1 *";
 
+#[path = "application_native_job_identity_tests.rs"]
+mod identity_tests;
+
 fn migrations() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite")
 }
@@ -69,6 +72,7 @@ async fn insert_session(storage: Arc<SqliteStorage>, owner: &str) {
             project_id: None,
             worktree_binding: None,
             current_directory: None,
+            pinned: false,
         })
         .await
         .unwrap();
@@ -171,7 +175,7 @@ impl HostFixture {
             .unwrap();
         // Keep real host ownership and its database, but never run real maintenance on fixtures.
         runtime.automation.shutdown().await.unwrap();
-        *runtime.sync_host.local_owner.write().unwrap() = Some(OWNER.into());
+        *runtime.host.local_owner.write().unwrap() = Some(OWNER.into());
         let storage = crate::application_storage::connect_application_storage(&runtime.config)
             .await
             .unwrap();
@@ -183,10 +187,10 @@ impl HostFixture {
         .await
         .unwrap();
         let host = Arc::new(ApplicationNativeJobHost {
-            sync_host: Arc::downgrade(&runtime.sync_host),
+            host: Arc::downgrade(&runtime.host),
             storage: storage.clone(),
             automation,
-            execution_instance_id: runtime.sync_peer_id().into(),
+            execution_instance_id: runtime.host_id().into(),
         });
         Self {
             runtime,
@@ -199,7 +203,7 @@ impl HostFixture {
 
     async fn close(self) {
         self.host.automation.shutdown().await.unwrap();
-        self.runtime.shutdown_sync().await.unwrap();
+        self.runtime.shutdown_host().await.unwrap();
         self.runtime.shutdown().await.unwrap();
     }
 }
@@ -214,7 +218,7 @@ async fn real_host_requires_local_owner_and_exact_computer_without_admin_overrid
         .await
         .unwrap();
     assert_eq!(scope.computer_id, "embedded");
-    assert_eq!(scope.execution_instance_id, fixture.runtime.sync_peer_id());
+    assert_eq!(scope.execution_instance_id, fixture.runtime.host_id());
     for actor in [
         Actor::regular(FOREIGN),
         Actor::regular(FOREIGN).with_role(talos_auth::UserRole::Admin),
@@ -233,10 +237,10 @@ async fn real_host_requires_local_owner_and_exact_computer_without_admin_overrid
         ErrorCode::PermissionDenied,
     );
     let unavailable = ApplicationNativeJobHost {
-        sync_host: Weak::new(),
+        host: Weak::new(),
         storage: fixture.storage.clone(),
         automation: fixture.host.automation.clone(),
-        execution_instance_id: fixture.runtime.sync_peer_id().into(),
+        execution_instance_id: fixture.runtime.host_id().into(),
     };
     assert_code(
         unavailable

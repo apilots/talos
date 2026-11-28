@@ -244,6 +244,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::FileUpload,
                 params: ClientRequestParams::FileUpload(FileUploadParams {
                     request: FileUploadRequest {
@@ -265,6 +266,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::FileList,
                 params: ClientRequestParams::FileList(FileListRequest::default()),
             },
@@ -279,6 +281,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::FileRead,
                 params: ClientRequestParams::FileRead(FileReadRequest {
                     file_id: uploaded.file.file_id.clone(),
@@ -291,6 +294,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::FileUpdate,
                 params: ClientRequestParams::FileUpdate(FileUpdateRequest {
                     file_id: uploaded.file.file_id.clone(),
@@ -305,6 +309,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
         .dispatch(
             &actor,
             ClientRequest {
+                computer_id: None,
                 method: ClientMethod::FileDelete,
                 params: ClientRequestParams::FileDelete(FileDeleteRequest {
                     file_id: uploaded.file.file_id.clone(),

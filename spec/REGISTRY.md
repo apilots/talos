@@ -17,6 +17,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | --- | --- |
 | feat-062 | [Worker outbound WebSocket](feat-062-worker-outbound-websocket/design.md) | implemented |
 | refactor-047 | [Embedded Worker library calls](refactor-047-embedded-worker-library/design.md) | implemented |
+| refactor-046 | [Talos 产品架构与数据归属](refactor-046-worker-session-execution/design.md) | draft |
 | feat-061 | [Worker tool PATH resolution](feat-061-worker-tool-path/design.md) | draft |
 | feat-060 | [Browser automation benchmarks](feat-060-browser-automation-benchmarks/design.md) | active |
 | feat-059 | [Phase two benchmark execution](feat-059-benchmark-execution/design.md) | active |
@@ -49,7 +50,6 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | ID | Owner | Reason |
 | --- | --- | --- |
 | refactor-045 | Existing independent design branch | Allocated outside main; do not reuse. |
-| refactor-046 | `docs/worker-session-execution` | Deferred larger design; do not implement here. |
 | fix-010 | `docs/worker-memory-ownership` | Separate unmerged Memory/Dream parsing and retry proposal; do not reuse its allocated ID. |
 
 ## Archived Specs

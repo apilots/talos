@@ -157,7 +157,7 @@ impl TurnService {
         reservation: MessageQueueReservation,
     ) -> TalosResult<StartTurnResponse> {
         let service = self.clone();
-        super::await_admission(async move {
+        super::await_admission(self.execution.track_admission()?, async move {
             service
                 .submit_queue_reservation_owned(session, reservation)
                 .await
@@ -171,6 +171,7 @@ impl TurnService {
         reservation: MessageQueueReservation,
     ) -> TalosResult<StartTurnResponse> {
         let source = reservation.source().clone();
+        let session_id = session.id.clone();
         let preparation = self.prepare_queued_automation(&session, &reservation).await;
         let (input, origin) = match preparation {
             Ok(Some(value)) => value,
@@ -182,6 +183,10 @@ impl TurnService {
                 ));
             }
             Err(error) => {
+                if agent_protocol::AgentAdmissionUnconfirmed::contains(&error) {
+                    self.message_queue.release(reservation)?;
+                    return Err(error);
+                }
                 self.message_queue.release(reservation)?;
                 if let talos_types::QueuedMessageSource::Loop { loop_id, .. } = source {
                     self.automation_service()?
@@ -192,6 +197,7 @@ impl TurnService {
             }
         };
 
+        let queue_key = format!("queued:{}", reservation.message_id());
         let (auto_dispatch_tx, auto_dispatch_rx) = oneshot::channel();
         let result = self
             .submit_turn_owned(
@@ -202,18 +208,23 @@ impl TurnService {
                     input,
                     retry_of_message_id: None,
                 },
-                None,
+                Some(queue_key),
                 None,
                 Some(auto_dispatch_rx),
             )
             .await;
         match result {
             Ok(result) => {
-                self.message_queue.commit(reservation)?;
+                self.message_queue
+                    .acknowledge_admission(&session_id, reservation.message_id())?;
                 let _ = auto_dispatch_tx.send(());
                 Ok(result)
             }
             Err(error) => {
+                if agent_protocol::AgentAdmissionUnconfirmed::contains(&error) {
+                    self.message_queue.release(reservation)?;
+                    return Err(error);
+                }
                 self.message_queue.release(reservation)?;
                 if let talos_types::QueuedMessageSource::Loop { loop_id, .. } = source {
                     self.automation_service()?
@@ -260,6 +271,12 @@ impl TurnService {
         turn_id: &str,
         command: Option<CommandLease>,
     ) -> TalosResult<()> {
+        let scope = self
+            .execution
+            .sessions
+            .build_agent_session_context(&session)
+            .await?;
+        self.execution.project_worker(&scope).await?;
         let session_id = session.id.clone();
         let reservation = self.message_queue.reserve(&session_id, message_id)?;
         if reservation.source() != &talos_types::QueuedMessageSource::User {
@@ -291,7 +308,7 @@ impl TurnService {
         if !matches!(
             active_turn,
             Some(ref active)
-                if active.identity.turn_id == turn_id && active.state == ActiveTurnState::Running
+                if active.identity.turn_id == turn_id && active.state == ActiveTurnState::Running && !active.cancellation_requested
         ) {
             self.message_queue.release(reservation)?;
             return Err(TalosError::new(
@@ -305,11 +322,15 @@ impl TurnService {
             turn_id,
             message_id,
             input,
-            chrono::Utc::now().timestamp(),
+            command.as_ref().map_or_else(
+                || chrono::Utc::now().timestamp(),
+                |command| command.created_at / 1_000,
+            ),
         )?;
         self.execution
             .admit_queued_running_input(
                 AgentInputParams {
+                    command: None,
                     agent_id: session.agent_id,
                     identity,
                     input,

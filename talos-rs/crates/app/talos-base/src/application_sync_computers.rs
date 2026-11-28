@@ -1,5 +1,5 @@
 //! Current-host aliases and live Gateway reachability, using original Computer DTOs.
-use super::application_sync::ApplicationSyncHost;
+use super::application_host::ApplicationHost;
 use super::desktop_worker::validate_saved_node;
 use agent_client::{AgentNodeClient, AgentTlsTrust};
 use talos_auth::{RequestIdentity, UserRole};
@@ -8,8 +8,9 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::Actor;
 use talos_types::NodeInfo;
 
-impl ApplicationSyncHost {
+impl ApplicationHost {
     /// Presence follows current verified enrollment, not immutable capture aliases.
+    #[cfg(feature = "sync")]
     pub(crate) async fn refresh_presence_computers(
         &self,
         actor: &RequestIdentity,
@@ -44,12 +45,13 @@ impl ApplicationSyncHost {
         Ok(self
             .local_computer(actor)
             .await?
-            .or_else(|| actor.auth_disabled.then(|| "embedded".into())))
+            .or_else(|| (actor.auth_disabled && self.worker.is_some()).then(|| "embedded".into())))
     }
     pub(crate) async fn gateway_client(&self) -> TalosResult<AgentNodeClient> {
         gateway_client(&self.config).await
     }
     /// A saved UUID is identity, never proof of ownership for a newly logged-in account.
+    #[cfg(feature = "sync")]
     pub(crate) async fn verify_computer_aliases(
         &self,
         actor: &RequestIdentity,
@@ -83,7 +85,7 @@ impl ApplicationSyncHost {
         Ok(())
     }
     pub(crate) async fn owns_local_computer(&self, actor: &Actor) -> TalosResult<bool> {
-        if actor.auth_disabled {
+        if self.worker.is_none() || actor.auth_disabled {
             return Ok(false);
         }
         if let Some(owner) = talos_config::YamlConfigStore::new(self.config.source_path())
@@ -104,24 +106,13 @@ impl ApplicationSyncHost {
             .load_agent_node()?
             .runner
             .map_or_else(|| "embedded".into(), |runner| runner.node_id);
-        let identity = RequestIdentity {
-            user_id: actor.user_id.clone(),
-            username: actor.username.clone(),
-            role: actor.role,
-            user_type: actor.user_type,
-            auth_disabled: false,
-            access_token: actor.access_token.clone(),
-        };
+        use talos_store::node::AgentNodeStore;
         Ok(self
-            .sync
-            .account_binding(&identity)
+            .stores
+            .nodes
+            .get(&local)
             .await?
-            .is_some_and(|binding| {
-                binding
-                    .computers
-                    .iter()
-                    .any(|alias| alias.computer_id == local && alias.source_node_id == "embedded")
-            }))
+            .is_some_and(|node| node.owner_user_id.as_deref() == Some(actor.user_id.as_str())))
     }
     pub(crate) async fn local_computer(&self, actor: &Actor) -> TalosResult<Option<String>> {
         let local = self.local_computer_id().await?;
@@ -134,11 +125,13 @@ impl ApplicationSyncHost {
             }
             return Ok(computer_id.into());
         }
-        if self.local_computer(actor).await?.as_deref() == Some(computer_id) {
-            Ok("embedded".into())
-        } else {
-            Ok(computer_id.into())
+        if self.worker.is_some() && self.local_computer_id().await? == computer_id {
+            if self.owns_local_computer(actor).await? {
+                return Ok("embedded".into());
+            }
+            return Err(local_computer_denied(actor, computer_id));
         }
+        Ok(computer_id.into())
     }
     pub(crate) async fn resolve_computer(
         &self,
@@ -149,7 +142,7 @@ impl ApplicationSyncHost {
             return self.local_node(actor, computer_id).await;
         }
         let local = self.local_computer_id().await?;
-        if computer_id == "embedded" || computer_id == local {
+        if self.worker.is_some() && (computer_id == "embedded" || computer_id == local) {
             if self.owns_local_computer(actor).await? {
                 return Ok("embedded".into());
             }
@@ -231,17 +224,21 @@ impl ApplicationSyncHost {
             }
         }
         if info.node_id == "embedded" {
-            info.system_info = Some(self.worker.system_info().clone());
+            if let Some(worker) = &self.worker {
+                info.system_info = Some(worker.system_info().clone());
+            }
         }
         if info.node_id == "embedded" || actor.auth_disabled {
             return Ok(info);
         }
-        if self.config.agent_node.control_plane.is_none() {
+        if self.product_owner == talos_types::NodeProductOwner::Computer {
             self.computer_directory.apply(&actor.user_id, &mut info)?;
         }
         if own && info.node_id == local {
-            info.available = true;
-            info.system_info = Some(self.worker.system_info().clone());
+            if let Some(worker) = &self.worker {
+                info.available = true;
+                info.system_info = Some(worker.system_info().clone());
+            }
         }
         Ok(info)
     }

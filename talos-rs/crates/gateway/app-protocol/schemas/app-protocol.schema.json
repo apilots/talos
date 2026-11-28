@@ -17,6 +17,10 @@
           "default": null,
           "description": "Exact admitted automation Input; later User Steer messages remain ordinary."
         },
+        "cancellationRequested": {
+          "description": "Product management has requested cancellation; this is not an execution fact.",
+          "type": "boolean"
+        },
         "identity": {
           "$ref": "#/definitions/AgentTurnRef"
         },
@@ -64,7 +68,12 @@
           ]
         },
         "state": {
-          "$ref": "#/definitions/ActiveTurnState"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ActiveTurnState"
+            }
+          ],
+          "description": "Observed execution state, derived only from committed Worker facts."
         },
         "updatedAt": {
           "format": "int64",
@@ -72,6 +81,7 @@
         }
       },
       "required": [
+        "cancellationRequested",
         "identity",
         "lastEventId",
         "lastEventSeq",
@@ -4589,6 +4599,24 @@
           "properties": {
             "method": {
               "enum": [
+                "session/rebuildView"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionRebuildViewRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "session/active_turn"
               ],
               "type": "string"
@@ -7619,6 +7647,13 @@
                 "file"
               ],
               "type": "string"
+            },
+            "node_id": {
+              "description": "Conversion Worker. Omission selects only the embedded Computer.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -8215,6 +8250,12 @@
             }
           ],
           "default": null
+        },
+        "computerId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "id": {
           "$ref": "#/definitions/RequestId"
@@ -11546,7 +11587,7 @@
         },
         "reasoning_efforts": {
           "default": null,
-          "description": "Accepted effort levels, independent of configured thinking switches. Omitted/null permits standard levels; [] explicitly disables graded effort.",
+          "description": "Accepted effort levels, independent of configured thinking switches. Omitted/null permits the four standard levels; Max requires an explicit entry. An empty list explicitly disables graded effort.",
           "items": {
             "$ref": "#/definitions/ReasoningEffort"
           },
@@ -11740,7 +11781,8 @@
         "light",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "type": "string"
     },
@@ -12096,10 +12138,29 @@
       ],
       "type": "object"
     },
+    "ServerCapabilities": {
+      "description": "Optional modules assembled by this product host, independent of account settings.",
+      "properties": {
+        "relay": {
+          "type": "boolean"
+        },
+        "sync": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "relay",
+        "sync"
+      ],
+      "type": "object"
+    },
     "ServerInfo": {
       "properties": {
         "auth_enabled": {
           "type": "boolean"
+        },
+        "capabilities": {
+          "$ref": "#/definitions/ServerCapabilities"
         },
         "cloud_auth_url": {
           "type": [
@@ -12116,6 +12177,7 @@
       },
       "required": [
         "auth_enabled",
+        "capabilities",
         "name",
         "version"
       ],
@@ -12969,6 +13031,10 @@
         "nodeId": {
           "type": "string"
         },
+        "pinned": {
+          "default": false,
+          "type": "boolean"
+        },
         "projectId": {
           "default": null,
           "type": [
@@ -13078,6 +13144,10 @@
         },
         "nodeId": {
           "type": "string"
+        },
+        "pinned": {
+          "default": false,
+          "type": "boolean"
         },
         "projectId": {
           "default": null,
@@ -13308,11 +13378,42 @@
           ],
           "default": null
         },
+        "pinned": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "sessionId": {
           "default": "",
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "SessionRebuildViewRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionRebuildViewResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "$ref": "#/definitions/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ],
       "type": "object"
     },
     "SessionSourceProvider": {
@@ -15452,6 +15553,10 @@
           "default": null,
           "description": "Exact admitted automation Input; later User Steer messages remain ordinary."
         },
+        "cancellationRequested": {
+          "description": "Product management has requested cancellation; this is not an execution fact.",
+          "type": "boolean"
+        },
         "identity": {
           "$ref": "#/definitions/AgentTurnRef"
         },
@@ -15465,7 +15570,12 @@
           "type": "string"
         },
         "state": {
-          "$ref": "#/definitions/ActiveTurnState"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ActiveTurnState"
+            }
+          ],
+          "description": "Observed execution state, derived only from committed Worker facts."
         },
         "updatedAt": {
           "format": "int64",
@@ -15473,6 +15583,7 @@
         }
       },
       "required": [
+        "cancellationRequested",
         "identity",
         "lastEventId",
         "state",
@@ -17232,6 +17343,9 @@
     "session_loop": {
       "$ref": "#/definitions/SessionLoop"
     },
+    "session_rebuild_view_response": {
+      "$ref": "#/definitions/SessionRebuildViewResponse"
+    },
     "start_turn_request": {
       "$ref": "#/definitions/StartTurnRequest"
     },
@@ -17385,6 +17499,7 @@
     "session_history_response",
     "session_list_response",
     "session_loop",
+    "session_rebuild_view_response",
     "start_turn_request",
     "start_turn_response",
     "submit_turn_input_request",

@@ -8,8 +8,7 @@ use talos_types::WorkerDesktopOpen;
 use tokio::{sync::mpsc, time::timeout};
 use tokio_stream::wrappers::ReceiverStream;
 
-#[path = "desktop_relay.rs"]
-pub(crate) mod relay;
+pub(crate) use crate::desktop_relay as relay;
 use relay::{guard_transport, DesktopRelay};
 
 type MediaStream = Pin<Box<dyn Stream<Item = Result<pb::DesktopChunk, Status>> + Send>>;

@@ -1,12 +1,15 @@
 //! Shared Talos Agent execution runtime.
 //!
 //! Control-plane, Desktop and standalone hosts compose this same runtime.
-//! Network hosts wrap its existing Harnesses with authenticated direct or outbound gRPC.
+//! Network hosts expose the same Harnesses through the authenticated registered transport.
 
 mod browser_host;
+mod builtin_model;
 mod config;
+mod execution_history;
 mod harness;
 mod mcp;
+mod memory_reflection;
 mod output_logs;
 mod provider;
 mod registration;

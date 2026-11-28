@@ -1,7 +1,7 @@
-//! Imported terminal history must not race the original coordinator's Shared commit.
+//! Worker idleness controls manager transfer independently of product copies and Sync.
 use super::*;
 use agent_protocol::SessionExecutionState;
-use std::{future::Future, task::Poll, time::Duration};
+use std::time::Duration;
 use talos_agent::{
     AgentAdmission, AgentInputParams, AgentInterruptParams, AgentRunExecution, AgentRunParams,
 };
@@ -62,80 +62,62 @@ async fn fixture() -> (
 }
 
 #[tokio::test(start_paused = true)]
-async fn imported_terminal_history_waits_for_worker_shared_confirmation() {
+async fn idle_worker_allows_manager_transfer_without_shared_confirmation() {
     let (service, record, coordinator, _home) = fixture().await;
-    let mut prepare = std::pin::pin!(service.prepare_execution(&record));
-    assert!(
-        std::future::poll_fn(|context| Poll::Ready(prepare.as_mut().poll(context)))
-            .await
-            .is_pending(),
-        "matching imported history alone must not admit a different coordinator"
-    );
-    coordinator.state.lock().unwrap().handoff_ready = true;
-    assert_eq!(prepare.await.unwrap().id, record.id);
-    assert_eq!(
-        coordinator.state.lock().unwrap().coordinator_id.as_deref(),
-        Some(SOURCE)
-    );
-}
-
-#[tokio::test(start_paused = true)]
-async fn imported_terminal_history_waits_through_worker_cleanup_and_local_commit() {
-    let (service, record, coordinator, _home) = fixture().await;
-    let terminal_cursor = coordinator.state.lock().unwrap().history_cursor.clone();
-    {
-        let mut state = coordinator.state.lock().unwrap();
-        state.history_cursor = SessionHistoryCursor::default();
-        state.active_turn = Some(AgentTurnRef::new(&record.id, "finished-turn"));
-    }
-    let mut prepare = std::pin::pin!(service.prepare_execution(&record));
-    assert!(
-        std::future::poll_fn(|context| Poll::Ready(prepare.as_mut().poll(context)))
-            .await
-            .is_pending()
-    );
-    {
-        let mut state = coordinator.state.lock().unwrap();
-        state.active_turn = None;
-        state.history_cursor = terminal_cursor;
-    }
-    tokio::time::advance(Duration::from_millis(100)).await;
-    assert!(
-        std::future::poll_fn(|context| Poll::Ready(prepare.as_mut().poll(context)))
-            .await
-            .is_pending(),
-        "Local commit alone must not complete the cross-coordinator handoff"
-    );
-    coordinator.state.lock().unwrap().handoff_ready = true;
-    assert_eq!(prepare.await.unwrap().id, record.id);
-}
-
-#[tokio::test(start_paused = true)]
-async fn unconfirmed_shared_history_times_out_without_opening_worker_boundary() {
-    let (service, record, coordinator, _home) = fixture().await;
-    let error = service.prepare_execution(&record).await.unwrap_err();
-    assert_eq!(
-        error.error_code(),
-        talos_error::ErrorCode::ServiceUnavailable
-    );
     assert!(!coordinator.state.lock().unwrap().handoff_ready);
-}
-
-#[tokio::test(start_paused = true)]
-async fn current_coordinator_keeps_immediate_local_execution_without_sync() {
-    let (service, record, coordinator, _home) = fixture().await;
-    service.set_coordinator_id(SOURCE.into());
-    let before = tokio::time::Instant::now();
     assert_eq!(
         service.prepare_execution(&record).await.unwrap().id,
         record.id
     );
-    assert_eq!(tokio::time::Instant::now(), before);
-    assert!(!coordinator.state.lock().unwrap().handoff_ready);
 }
 
-#[tokio::test(start_paused = true)]
-async fn stale_imported_history_still_conflicts_without_waiting_or_releasing_worker() {
+#[tokio::test]
+async fn another_managers_nonterminal_turn_blocks_transfer_until_worker_is_idle() {
+    let (service, record, coordinator, _home) = fixture().await;
+    coordinator.state.lock().unwrap().active_turn = Some(AgentTurnRef::new(&record.id, "active"));
+    assert_eq!(
+        service
+            .prepare_execution(&record)
+            .await
+            .unwrap_err()
+            .error_code(),
+        talos_error::ErrorCode::ActiveTurnRunning
+    );
+    coordinator.state.lock().unwrap().active_turn = None;
+    assert_eq!(
+        service.prepare_execution(&record).await.unwrap().id,
+        record.id
+    );
+}
+
+#[tokio::test]
+async fn matching_imported_terminal_does_not_release_a_nonterminal_worker() {
+    let (service, record, coordinator, _home) = fixture().await;
+    coordinator.state.lock().unwrap().active_turn =
+        Some(AgentTurnRef::new(&record.id, "finished-turn"));
+    assert_eq!(
+        service
+            .prepare_execution(&record)
+            .await
+            .unwrap_err()
+            .error_code(),
+        talos_error::ErrorCode::ActiveTurnRunning
+    );
+}
+
+#[tokio::test]
+async fn current_manager_retains_the_active_session_for_worker_control() {
+    let (service, record, coordinator, _home) = fixture().await;
+    service.set_coordinator_id(SOURCE.into());
+    coordinator.state.lock().unwrap().active_turn = Some(AgentTurnRef::new(&record.id, "active"));
+    assert_eq!(
+        service.prepare_execution(&record).await.unwrap().id,
+        record.id
+    );
+}
+
+#[tokio::test]
+async fn stale_product_projection_cannot_override_an_idle_worker() {
     let (service, record, coordinator, _home) = fixture().await;
     coordinator
         .state
@@ -143,17 +125,10 @@ async fn stale_imported_history_still_conflicts_without_waiting_or_releasing_wor
         .unwrap()
         .history_cursor
         .completed_event_sequence += 1;
-    let before = tokio::time::Instant::now();
     assert_eq!(
-        service
-            .prepare_execution(&record)
-            .await
-            .unwrap_err()
-            .error_code(),
-        talos_error::ErrorCode::Conflict
+        service.prepare_execution(&record).await.unwrap().id,
+        record.id
     );
-    assert_eq!(tokio::time::Instant::now(), before);
-    assert!(!coordinator.state.lock().unwrap().handoff_ready);
 }
 
 #[async_trait]

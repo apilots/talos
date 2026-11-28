@@ -35,6 +35,7 @@ async fn registered_preview_keeps_actor_ownership_ranges_and_close_lifecycle() {
             &actor,
             FilePreviewPrepareRequest {
                 source: FilePreviewSource::File {
+                    node_id: None,
                     file_id: uploaded.file_id,
                 },
             },
@@ -507,4 +508,48 @@ async fn cli_conversation_creates_checkout_from_fetched_origin_main() {
         std::fs::read(repository.join("plan.md")).unwrap(),
         b"# Main checkout"
     );
+}
+
+#[tokio::test]
+async fn registered_office_preview_rejects_an_unavailable_selected_worker() {
+    let (service, _) = test_application(
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::Accepted,
+        }),
+        configured_test_config(),
+    )
+    .await;
+    let actor = Actor::regular("preview-owner");
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../talos-e2e/fixtures/resource-preview/matrix-word.docx");
+    let bytes = Bytes::from(std::fs::read(fixture).unwrap());
+    let uploaded = service
+        .files
+        .upload(
+            &actor,
+            FileUploadRequest {
+                filename: "report.docx".into(),
+                scope: FileScope::Personal,
+                tags: vec![],
+                metadata: BTreeMap::new(),
+            },
+            Box::pin(stream::iter([Ok(bytes)])),
+        )
+        .await
+        .unwrap()
+        .file;
+    let result = service
+        .prepare_file_preview(
+            &actor,
+            FilePreviewPrepareRequest {
+                source: FilePreviewSource::File {
+                    file_id: uploaded.file_id,
+                    node_id: Some("missing-worker".into()),
+                },
+            },
+        )
+        .await;
+    assert!(result
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::ResourceNotFound));
 }

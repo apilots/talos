@@ -13,7 +13,7 @@ class RecoveryBridge implements AppServerBridge {
   connect(): Promise<AppProtocol.InitializeResponse> {
     return Promise.resolve({
       protocol_version: AppProtocol.PROTOCOL_VERSION,
-      server_info: { name: "fake", version: "0.1.5", auth_enabled: false, cloud_auth_url: null },
+      server_info: { name: "fake", version: "0.1.5", auth_enabled: false, cloud_auth_url: null, capabilities: { sync: true, relay: true } },
     });
   }
 

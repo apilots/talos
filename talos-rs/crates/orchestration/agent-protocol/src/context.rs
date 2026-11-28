@@ -10,7 +10,7 @@ use talos_types::{
 /// Service derives this value from the product Session and Workspace owners.
 /// It is not a persistence Record, product Session aggregate, or Provider-native
 /// session identifier.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AgentSessionContext {
     pub agent_id: String,
     pub session_id: String,
@@ -23,9 +23,10 @@ pub struct AgentSessionContext {
 /// Session portion to acquire an Agent Session and passes the complete value to
 /// that Session. It is not a complete product Session, persistence Record,
 /// transport DTO, reloadable global config, or Provider-native session object.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AgentContext {
-    /// Original Store's complete causal history_cursor; Worker compares it atomically at admission.
+    pub tree_identity: talos_types::SessionTreeIdentity,
+    /// Caller causal hint. The Worker supplies its authoritative local cursor to execution.
     pub history_cursor: Option<talos_types::SessionHistoryCursor>,
     pub session: AgentSessionContext,
     pub turn_id: String,

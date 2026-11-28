@@ -6,9 +6,10 @@ import { formatDuration } from "@/shared/lib/formatDuration";
 import { AutomationModeIcon } from "@/shared/ui/AutomationModeIcon";
 import { taskPrompt } from "./model";
 import { AutomationTaskControls, type AutomationTaskControlsProps } from "./AutomationTaskControls";
+import { sessionPath } from "@/shared/api/session-route";
 
 /** A summary and one metadata line; execution details stay in the original chat. */
-export function AutomationListRow({ task, ...controls }: AutomationTaskControlsProps) {
+export function AutomationListRow({ task, computerId, ...controls }: AutomationTaskControlsProps & { computerId?: string }) {
   const { t, i18n } = useTranslation("automation");
   const prompt = taskPrompt(task);
   const label = task.type === "goal" ? "Goal" : "Loop";
@@ -41,7 +42,7 @@ export function AutomationListRow({ task, ...controls }: AutomationTaskControlsP
     </p>
     <div className="col-start-2 row-start-2 flex shrink-0 items-center justify-end gap-1 sm:row-span-2 sm:row-start-1" data-testid="automation-list-actions">
       <AutomationTaskControls task={task} {...controls} />
-      <Link className="shrink-0 rounded p-1 text-muted transition hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/25" to={`/sessions/${encodeURIComponent(task.value.sessionId)}`} aria-label={`${t("openSession")}: ${prompt}`} title={t("openSession")}><ArrowUpRight size={15} strokeWidth={1.3} aria-hidden="true" /></Link>
+      <Link className="shrink-0 rounded p-1 text-muted transition hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/25" to={sessionPath(task.value.sessionId, computerId)} aria-label={`${t("openSession")}: ${prompt}`} title={t("openSession")}><ArrowUpRight size={15} strokeWidth={1.3} aria-hidden="true" /></Link>
     </div>
   </article>;
 }

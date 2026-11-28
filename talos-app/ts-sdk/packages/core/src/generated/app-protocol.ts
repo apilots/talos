@@ -3,38 +3,20 @@
 import type { AutomationMode, LoopSchedule, GoalStatus, GoalPauseReason, LoopStatus, LoopStopReason, SessionGoal, SessionLoop, AutomationTurnOrigin, AutomationInputOrigin, SessionAutomationSnapshot, SessionAutomationReadRequest, AutomationListEntry, AutomationListScope, AutomationListRequest, AutomationListResponse, AutomationChangedNotification, AutomationAction, GoalAction, LoopAction, LoopWakeDecision, AutomationRequest, AutomationEffect, AutomationControlResult, AutomationObjectRef, AutomationCommandDescriptor, AutomationCommandCatalogRequest, AutomationCommandCatalogResponse, AutomationCommand, AutomationCommandResolveRequest, AutomationCommandResolveResponse, BuiltinJobId, BuiltinJobAction, BuiltinJobOutcome, BuiltinJobInfo, BuiltinJobListRequest, BuiltinJobListResponse, BuiltinJobControlRequest } from "./automation";
 export type { AutomationMode, LoopSchedule, GoalStatus, GoalPauseReason, LoopStatus, LoopStopReason, SessionGoal, SessionLoop, AutomationTurnOrigin, AutomationInputOrigin, SessionAutomationSnapshot, SessionAutomationReadRequest, AutomationListEntry, AutomationListScope, AutomationListRequest, AutomationListResponse, AutomationChangedNotification, AutomationAction, GoalAction, LoopAction, LoopWakeDecision, AutomationRequest, AutomationEffect, AutomationControlResult, AutomationObjectRef, AutomationCommandDescriptor, AutomationCommandCatalogRequest, AutomationCommandCatalogResponse, AutomationCommand, AutomationCommandResolveRequest, AutomationCommandResolveResponse, BuiltinJobId, BuiltinJobAction, BuiltinJobOutcome, BuiltinJobInfo, BuiltinJobListRequest, BuiltinJobListResponse, BuiltinJobControlRequest };
 
+import type { BrowserAction, BrowserTabAction, BrowserHostRequest, BrowserHostOperation, BrowserHostResponse, BrowserHostElement, BrowserHostPage, BrowserHostTab, BrowserHostCancel, BrowserHostUpload, BrowserHostFile, BrowserDownloadReceipt } from "./browser";
+export type { BrowserAction, BrowserTabAction, BrowserHostRequest, BrowserHostOperation, BrowserHostResponse, BrowserHostElement, BrowserHostPage, BrowserHostTab, BrowserHostCancel, BrowserHostUpload, BrowserHostFile, BrowserDownloadReceipt };
+
 import type { DesktopMediaFrame, DesktopStreamOpen, DesktopStreamSend, DesktopStreamClose, DesktopWorkerIdentityResponse, DesktopWorkerEnrollParams, DesktopViewGrant, DesktopOpenRequest } from "./desktop";
 export type { DesktopMediaFrame, DesktopStreamOpen, DesktopStreamSend, DesktopStreamClose, DesktopWorkerIdentityResponse, DesktopWorkerEnrollParams, DesktopViewGrant, DesktopOpenRequest };
+
+import type { FilePreviewDocument, FilePreviewDocumentUnavailable, FilePreviewSource, FilePreviewMetadata, FilePreviewPrepareRequest, FilePreviewDescriptor, FilePreviewReadRequest, FilePreviewContent, FilePreviewCloseRequest, FilePreviewCloseResponse } from "./file-preview";
+export type { FilePreviewDocument, FilePreviewDocumentUnavailable, FilePreviewSource, FilePreviewMetadata, FilePreviewPrepareRequest, FilePreviewDescriptor, FilePreviewReadRequest, FilePreviewContent, FilePreviewCloseRequest, FilePreviewCloseResponse };
 
 export type ProtocolVersion = { major: number, minor: number, };
 
 export const PROTOCOL_VERSION = {"major":0,"minor":5} as const;
 
 export type RequestId = string | number;
-
-export type BrowserAction = { "kind": "state" } | { "kind": "navigate", url: string, } | { "kind": "click", element: string, } | { "kind": "fill", element: string, text: string, } | { "kind": "key", key: string, } | { "kind": "scroll", deltaX: number, deltaY: number, } | { "kind": "tab", action: BrowserTabAction, tabId: string | null, url: string | null, } | { "kind": "screenshot" } | { "kind": "download" } | { "kind": "upload", element: string, fileId: string, };
-
-export type BrowserTabAction = "open" | "close" | "focus";
-
-export type BrowserHostRequest = { generation: string, epoch: number, userId: string, target: BrowserTargetKind, operation: BrowserHostOperation, };
-
-export type BrowserHostOperation = { "kind": "probe" } | { "kind": "execute", action: BrowserAction, targetId: string | null, element: BrowserHostElement | null, upload: BrowserHostUpload | null, } | { "kind": "acknowledgeDownloads", files: Array<BrowserDownloadReceipt>, } | { "kind": "connect" } | { "kind": "disconnect" } | { "kind": "show" } | { "kind": "releaseInputs" } | { "kind": "shutdown" };
-
-export type BrowserHostResponse = { "kind": "readiness", connected: boolean, } | { "kind": "done" } | { "kind": "observation", page: BrowserHostPage, loaderId: string | null, elements: Array<BrowserHostElement>, screenshot: string | null, downloads: Array<BrowserHostFile>, };
-
-export type BrowserHostElement = { backendNodeId: number, tag: string, attributes: { [key in string]?: string }, targetId: string, loaderId: string, };
-
-export type BrowserHostPage = { targetId: string, url: string, title: string, tabs: Array<BrowserHostTab>, text: string | null, };
-
-export type BrowserHostTab = { tabId: string, title: string, url: string, };
-
-export type BrowserHostCancel = { requestId: string, };
-
-export type BrowserHostUpload = { filename: string, dataBase64: string, };
-
-export type BrowserHostFile = { filename: string, dataBase64: string, };
-
-export type BrowserDownloadReceipt = { filename: string, sha256: string, };
 
 export type AppServerErrorCode = -32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002;
 export const AppServerErrorCode = {
@@ -49,9 +31,9 @@ export const AppServerErrorCode = {
 
 export type AppServerErrorBody = { code: AppServerErrorCode, message: string, };
 
-export type ClientMethod = "automation/read" | "automation/execute" | "automation/list" | "automation/commandCatalog" | "automation/resolveCommand" | "builtinJob/list" | "builtinJob/control" | "initialize" | "desktop/streamOpen" | "desktop/streamSend" | "desktop/streamClose" | "desktop/workerIdentity" | "desktop/workerEnroll" | "sync/status" | "sync/metrics" | "sync/enable" | "sync/disable" | "computer/list" | "computer/read" | "computer/create" | "computer/rename" | "computer/delete" | "computer/setStatus" | "computer/rotateCredential" | "computer/readManagedWorker" | "computer/createManagedWorker" | "computer/startManagedWorker" | "computer/stopManagedWorker" | "computer/resetManagedWorker" | "computer/deleteManagedWorker" | "profile/read" | "trajectory/capabilities" | "trajectory/readTurn" | "trajectory/readRequest" | "trajectory/readTool" | "trajectory/readPayload" | "session/list" | "session/get" | "session/patch" | "session/delete" | "session/close" | "session/compact" | "session/clear" | "session/active_turn" | "session/history" | "timeline/recover" | "project/create" | "project/list" | "project/read" | "project/patch" | "project/delete" | "fs/directory/read" | "fs/directory/create" | "turn/start" | "turn/interrupt" | "turn/input" | "turn/retry" | "messageQueue/add" | "messageQueue/list" | "messageQueue/update" | "messageQueue/delete" | "messageQueue/reorder" | "messageQueue/start" | "event/subscribe" | "event/unsubscribe" | "model/list" | "config/get" | "config/update" | "config/delete" | "config/reload" | "file/upload" | "file/list" | "file/read" | "file/content" | "file/preview/prepare" | "file/preview/read" | "file/preview/close" | "file/update" | "file/delete" | "memory/file/list" | "memory/file/read" | "memory/file/write" | "workspace/info" | "workspace/doc/list" | "workspace/doc/read" | "workspace/doc/write" | "skills/list" | "skills/refresh" | "skills/suggest" | "skills/read" | "skills/resolve" | "plugin/source/list" | "plugin/source/add" | "plugin/source/refresh" | "plugin/source/remove" | "plugin/search" | "browser/operate" | "desktop/open" | "mcp/server/list" | "mcp/server/credentials/update" | "mcp/server/auth/start" | "mcp/server/auth/read" | "mcp/server/import" | "plugin/list" | "plugin/read" | "plugin/install" | "plugin/update" | "plugin/uninstall" | "plugin/enable" | "plugin/disable" | "auth/logout" | "auth/login/start" | "auth/login/status" | "auth/login/cancel" | "auth/session/read" | "auth/session/clear" | "user/current" | "memory/search" | "memory/get";
+export type ClientMethod = "automation/read" | "automation/execute" | "automation/list" | "automation/commandCatalog" | "automation/resolveCommand" | "builtinJob/list" | "builtinJob/control" | "initialize" | "desktop/streamOpen" | "desktop/streamSend" | "desktop/streamClose" | "desktop/workerIdentity" | "desktop/workerEnroll" | "sync/status" | "sync/metrics" | "sync/enable" | "sync/disable" | "computer/list" | "computer/read" | "computer/create" | "computer/rename" | "computer/delete" | "computer/setStatus" | "computer/rotateCredential" | "computer/readManagedWorker" | "computer/createManagedWorker" | "computer/startManagedWorker" | "computer/stopManagedWorker" | "computer/resetManagedWorker" | "computer/deleteManagedWorker" | "profile/read" | "trajectory/capabilities" | "trajectory/readTurn" | "trajectory/readRequest" | "trajectory/readTool" | "trajectory/readPayload" | "session/list" | "session/get" | "session/patch" | "session/delete" | "session/close" | "session/compact" | "session/clear" | "session/rebuildView" | "session/active_turn" | "session/history" | "timeline/recover" | "project/create" | "project/list" | "project/read" | "project/patch" | "project/delete" | "fs/directory/read" | "fs/directory/create" | "turn/start" | "turn/interrupt" | "turn/input" | "turn/retry" | "messageQueue/add" | "messageQueue/list" | "messageQueue/update" | "messageQueue/delete" | "messageQueue/reorder" | "messageQueue/start" | "event/subscribe" | "event/unsubscribe" | "model/list" | "config/get" | "config/update" | "config/delete" | "config/reload" | "file/upload" | "file/list" | "file/read" | "file/content" | "file/preview/prepare" | "file/preview/read" | "file/preview/close" | "file/update" | "file/delete" | "memory/file/list" | "memory/file/read" | "memory/file/write" | "workspace/info" | "workspace/doc/list" | "workspace/doc/read" | "workspace/doc/write" | "skills/list" | "skills/refresh" | "skills/suggest" | "skills/read" | "skills/resolve" | "plugin/source/list" | "plugin/source/add" | "plugin/source/refresh" | "plugin/source/remove" | "plugin/search" | "browser/operate" | "desktop/open" | "mcp/server/list" | "mcp/server/credentials/update" | "mcp/server/auth/start" | "mcp/server/auth/read" | "mcp/server/import" | "plugin/list" | "plugin/read" | "plugin/install" | "plugin/update" | "plugin/uninstall" | "plugin/enable" | "plugin/disable" | "auth/logout" | "auth/login/start" | "auth/login/status" | "auth/login/cancel" | "auth/session/read" | "auth/session/clear" | "user/current" | "memory/search" | "memory/get";
 
-export type ClientRequestParams = { "method": "automation/read", "params": SessionAutomationReadRequest } | { "method": "automation/execute", "params": AutomationRequest } | { "method": "automation/list", "params": AutomationListRequest } | { "method": "automation/commandCatalog", "params": AutomationCommandCatalogRequest } | { "method": "automation/resolveCommand", "params": AutomationCommandResolveRequest } | { "method": "builtinJob/list", "params": BuiltinJobListRequest } | { "method": "builtinJob/control", "params": BuiltinJobControlRequest } | { "method": "initialize", "params": InitializeParams } | { "method": "desktop/streamOpen", "params": DesktopStreamOpen } | { "method": "desktop/streamSend", "params": DesktopStreamSend } | { "method": "desktop/streamClose", "params": DesktopStreamClose } | { "method": "desktop/workerIdentity", "params": null } | { "method": "desktop/workerEnroll", "params": DesktopWorkerEnrollParams } | { "method": "sync/status", "params": null } | { "method": "sync/metrics", "params": null } | { "method": "sync/enable", "params": SyncEnableRequest } | { "method": "sync/disable", "params": null } | { "method": "computer/list", "params": ComputerListRequest } | { "method": "computer/read", "params": GetNodeRequest } | { "method": "computer/create", "params": CreateNodeRequest } | { "method": "computer/rename", "params": RenameComputerRequest } | { "method": "computer/delete", "params": DeleteComputerRequest } | { "method": "computer/setStatus", "params": SetComputerStatusRequest } | { "method": "computer/rotateCredential", "params": RotateCredentialRequest } | { "method": "computer/readManagedWorker", "params": ManagedWorkerParams | null } | { "method": "computer/createManagedWorker", "params": ManagedWorkerParams | null } | { "method": "computer/startManagedWorker", "params": ManagedWorkerActionRequest } | { "method": "computer/stopManagedWorker", "params": ManagedWorkerActionRequest } | { "method": "computer/resetManagedWorker", "params": ManagedWorkerActionRequest } | { "method": "computer/deleteManagedWorker", "params": DeleteManagedWorkerRequest } | { "method": "profile/read", "params": ProfileReadRequest } | { "method": "trajectory/capabilities", "params": null } | { "method": "trajectory/readTurn", "params": TrajectoryReadTurnRequest } | { "method": "trajectory/readRequest", "params": TrajectoryReadModelRequestRequest } | { "method": "trajectory/readTool", "params": TrajectoryReadToolRequest } | { "method": "trajectory/readPayload", "params": TrajectoryReadPayloadRequest } | { "method": "session/list", "params": SessionListRequest } | { "method": "session/get", "params": SessionGetRequest } | { "method": "session/patch", "params": SessionPatchRequest } | { "method": "session/delete", "params": SessionDeleteRequest } | { "method": "session/close", "params": SessionCloseRequest } | { "method": "session/compact", "params": SessionCompactRequest } | { "method": "session/clear", "params": SessionClearRequest } | { "method": "session/active_turn", "params": SessionActiveTurnRequest } | { "method": "session/history", "params": SessionHistoryRequest } | { "method": "timeline/recover", "params": RecoverTimelineRequest } | { "method": "project/create", "params": ProjectCreateRequest } | { "method": "project/list", "params": ProjectListRequest } | { "method": "project/read", "params": ProjectReadRequest } | { "method": "project/patch", "params": ProjectPatchRequest } | { "method": "project/delete", "params": ProjectDeleteRequest } | { "method": "fs/directory/read", "params": FsDirectoryReadRequest } | { "method": "fs/directory/create", "params": FsDirectoryCreateRequest } | { "method": "turn/start", "params": StartTurnRequest } | { "method": "turn/interrupt", "params": InterruptTurnRequest } | { "method": "turn/input", "params": SubmitTurnInputRequest } | { "method": "turn/retry", "params": RetryTurnRequest } | { "method": "messageQueue/add", "params": MessageQueueAddRequest } | { "method": "messageQueue/list", "params": MessageQueueListRequest } | { "method": "messageQueue/update", "params": MessageQueueUpdateRequest } | { "method": "messageQueue/delete", "params": MessageQueueDeleteRequest } | { "method": "messageQueue/reorder", "params": MessageQueueReorderRequest } | { "method": "messageQueue/start", "params": MessageQueueStartRequest } | { "method": "event/subscribe", "params": SubscribeTimelineRequest } | { "method": "event/unsubscribe", "params": EventUnsubscribeRequest } | { "method": "model/list", "params": ModelListRequest } | { "method": "config/get", "params": ConfigGetRequest } | { "method": "config/update", "params": ConfigUpdateRequest } | { "method": "config/delete", "params": ConfigDeleteRequest } | { "method": "config/reload", "params": ConfigReloadRequest } | { "method": "file/upload", "params": FileUploadParams } | { "method": "file/list", "params": FileListRequest } | { "method": "file/read", "params": FileReadRequest } | { "method": "file/content", "params": FileReadRequest } | { "method": "file/preview/prepare", "params": FilePreviewPrepareRequest } | { "method": "file/preview/read", "params": FilePreviewReadRequest } | { "method": "file/preview/close", "params": FilePreviewCloseRequest } | { "method": "file/update", "params": FileUpdateRequest } | { "method": "file/delete", "params": FileDeleteRequest } | { "method": "memory/file/list", "params": MemoryFileListRequest } | { "method": "memory/file/read", "params": MemoryFileReadRequest } | { "method": "memory/file/write", "params": MemoryFileWriteRequest } | { "method": "workspace/info", "params": WorkspaceInfoRequest } | { "method": "workspace/doc/list", "params": WorkspaceDocListRequest } | { "method": "workspace/doc/read", "params": WorkspaceDocReadRequest } | { "method": "workspace/doc/write", "params": WorkspaceDocWriteRequest } | { "method": "skills/list", "params": SkillsListRequest } | { "method": "skills/refresh", "params": SkillsRefreshRequest } | { "method": "skills/suggest", "params": SkillsSuggestRequest } | { "method": "skills/read", "params": SkillsReadRequest } | { "method": "skills/resolve", "params": SkillsResolveRequest } | { "method": "plugin/source/list", "params": PluginSourceListRequest } | { "method": "plugin/source/add", "params": PluginSourceAddRequest } | { "method": "plugin/source/refresh", "params": PluginSourceRefreshRequest } | { "method": "plugin/source/remove", "params": PluginSourceRemoveRequest } | { "method": "plugin/search", "params": PluginSearchRequest } | { "method": "browser/operate", "params": BrowserRequest } | { "method": "desktop/open", "params": DesktopOpenRequest } | { "method": "mcp/server/list", "params": McpServerListRequest } | { "method": "mcp/server/credentials/update", "params": McpCredentialsUpdateRequest } | { "method": "mcp/server/auth/start", "params": McpAuthenticationStartRequest } | { "method": "mcp/server/auth/read", "params": McpAuthenticationReadRequest } | { "method": "mcp/server/import", "params": McpServerImportRequest } | { "method": "plugin/list", "params": PluginListRequest } | { "method": "plugin/read", "params": PluginReadRequest } | { "method": "plugin/install", "params": PluginInstallRequest } | { "method": "plugin/update", "params": PluginUpdateRequest } | { "method": "plugin/uninstall", "params": PluginUninstallRequest } | { "method": "plugin/enable", "params": PluginEnableRequest } | { "method": "plugin/disable", "params": PluginDisableRequest } | { "method": "auth/logout", "params": AuthLogoutRequest } | { "method": "auth/login/start", "params": CloudLoginStartRequest } | { "method": "auth/login/status", "params": CloudLoginStatusRequest } | { "method": "auth/login/cancel", "params": CloudLoginCancelRequest } | { "method": "auth/session/read", "params": AuthSessionReadRequest } | { "method": "auth/session/clear", "params": AuthSessionClearRequest } | { "method": "user/current", "params": UserCurrentRequest } | { "method": "memory/search", "params": MemorySearchRequest } | { "method": "memory/get", "params": MemoryGetRequest };
+export type ClientRequestParams = { "method": "automation/read", "params": SessionAutomationReadRequest } | { "method": "automation/execute", "params": AutomationRequest } | { "method": "automation/list", "params": AutomationListRequest } | { "method": "automation/commandCatalog", "params": AutomationCommandCatalogRequest } | { "method": "automation/resolveCommand", "params": AutomationCommandResolveRequest } | { "method": "builtinJob/list", "params": BuiltinJobListRequest } | { "method": "builtinJob/control", "params": BuiltinJobControlRequest } | { "method": "initialize", "params": InitializeParams } | { "method": "desktop/streamOpen", "params": DesktopStreamOpen } | { "method": "desktop/streamSend", "params": DesktopStreamSend } | { "method": "desktop/streamClose", "params": DesktopStreamClose } | { "method": "desktop/workerIdentity", "params": null } | { "method": "desktop/workerEnroll", "params": DesktopWorkerEnrollParams } | { "method": "sync/status", "params": null } | { "method": "sync/metrics", "params": null } | { "method": "sync/enable", "params": SyncEnableRequest } | { "method": "sync/disable", "params": null } | { "method": "computer/list", "params": ComputerListRequest } | { "method": "computer/read", "params": GetNodeRequest } | { "method": "computer/create", "params": CreateNodeRequest } | { "method": "computer/rename", "params": RenameComputerRequest } | { "method": "computer/delete", "params": DeleteComputerRequest } | { "method": "computer/setStatus", "params": SetComputerStatusRequest } | { "method": "computer/rotateCredential", "params": RotateCredentialRequest } | { "method": "computer/readManagedWorker", "params": ManagedWorkerParams | null } | { "method": "computer/createManagedWorker", "params": ManagedWorkerParams | null } | { "method": "computer/startManagedWorker", "params": ManagedWorkerActionRequest } | { "method": "computer/stopManagedWorker", "params": ManagedWorkerActionRequest } | { "method": "computer/resetManagedWorker", "params": ManagedWorkerActionRequest } | { "method": "computer/deleteManagedWorker", "params": DeleteManagedWorkerRequest } | { "method": "profile/read", "params": ProfileReadRequest } | { "method": "trajectory/capabilities", "params": null } | { "method": "trajectory/readTurn", "params": TrajectoryReadTurnRequest } | { "method": "trajectory/readRequest", "params": TrajectoryReadModelRequestRequest } | { "method": "trajectory/readTool", "params": TrajectoryReadToolRequest } | { "method": "trajectory/readPayload", "params": TrajectoryReadPayloadRequest } | { "method": "session/list", "params": SessionListRequest } | { "method": "session/get", "params": SessionGetRequest } | { "method": "session/patch", "params": SessionPatchRequest } | { "method": "session/delete", "params": SessionDeleteRequest } | { "method": "session/close", "params": SessionCloseRequest } | { "method": "session/compact", "params": SessionCompactRequest } | { "method": "session/clear", "params": SessionClearRequest } | { "method": "session/rebuildView", "params": SessionRebuildViewRequest } | { "method": "session/active_turn", "params": SessionActiveTurnRequest } | { "method": "session/history", "params": SessionHistoryRequest } | { "method": "timeline/recover", "params": RecoverTimelineRequest } | { "method": "project/create", "params": ProjectCreateRequest } | { "method": "project/list", "params": ProjectListRequest } | { "method": "project/read", "params": ProjectReadRequest } | { "method": "project/patch", "params": ProjectPatchRequest } | { "method": "project/delete", "params": ProjectDeleteRequest } | { "method": "fs/directory/read", "params": FsDirectoryReadRequest } | { "method": "fs/directory/create", "params": FsDirectoryCreateRequest } | { "method": "turn/start", "params": StartTurnRequest } | { "method": "turn/interrupt", "params": InterruptTurnRequest } | { "method": "turn/input", "params": SubmitTurnInputRequest } | { "method": "turn/retry", "params": RetryTurnRequest } | { "method": "messageQueue/add", "params": MessageQueueAddRequest } | { "method": "messageQueue/list", "params": MessageQueueListRequest } | { "method": "messageQueue/update", "params": MessageQueueUpdateRequest } | { "method": "messageQueue/delete", "params": MessageQueueDeleteRequest } | { "method": "messageQueue/reorder", "params": MessageQueueReorderRequest } | { "method": "messageQueue/start", "params": MessageQueueStartRequest } | { "method": "event/subscribe", "params": SubscribeTimelineRequest } | { "method": "event/unsubscribe", "params": EventUnsubscribeRequest } | { "method": "model/list", "params": ModelListRequest } | { "method": "config/get", "params": ConfigGetRequest } | { "method": "config/update", "params": ConfigUpdateRequest } | { "method": "config/delete", "params": ConfigDeleteRequest } | { "method": "config/reload", "params": ConfigReloadRequest } | { "method": "file/upload", "params": FileUploadParams } | { "method": "file/list", "params": FileListRequest } | { "method": "file/read", "params": FileReadRequest } | { "method": "file/content", "params": FileReadRequest } | { "method": "file/preview/prepare", "params": FilePreviewPrepareRequest } | { "method": "file/preview/read", "params": FilePreviewReadRequest } | { "method": "file/preview/close", "params": FilePreviewCloseRequest } | { "method": "file/update", "params": FileUpdateRequest } | { "method": "file/delete", "params": FileDeleteRequest } | { "method": "memory/file/list", "params": MemoryFileListRequest } | { "method": "memory/file/read", "params": MemoryFileReadRequest } | { "method": "memory/file/write", "params": MemoryFileWriteRequest } | { "method": "workspace/info", "params": WorkspaceInfoRequest } | { "method": "workspace/doc/list", "params": WorkspaceDocListRequest } | { "method": "workspace/doc/read", "params": WorkspaceDocReadRequest } | { "method": "workspace/doc/write", "params": WorkspaceDocWriteRequest } | { "method": "skills/list", "params": SkillsListRequest } | { "method": "skills/refresh", "params": SkillsRefreshRequest } | { "method": "skills/suggest", "params": SkillsSuggestRequest } | { "method": "skills/read", "params": SkillsReadRequest } | { "method": "skills/resolve", "params": SkillsResolveRequest } | { "method": "plugin/source/list", "params": PluginSourceListRequest } | { "method": "plugin/source/add", "params": PluginSourceAddRequest } | { "method": "plugin/source/refresh", "params": PluginSourceRefreshRequest } | { "method": "plugin/source/remove", "params": PluginSourceRemoveRequest } | { "method": "plugin/search", "params": PluginSearchRequest } | { "method": "browser/operate", "params": BrowserRequest } | { "method": "desktop/open", "params": DesktopOpenRequest } | { "method": "mcp/server/list", "params": McpServerListRequest } | { "method": "mcp/server/credentials/update", "params": McpCredentialsUpdateRequest } | { "method": "mcp/server/auth/start", "params": McpAuthenticationStartRequest } | { "method": "mcp/server/auth/read", "params": McpAuthenticationReadRequest } | { "method": "mcp/server/import", "params": McpServerImportRequest } | { "method": "plugin/list", "params": PluginListRequest } | { "method": "plugin/read", "params": PluginReadRequest } | { "method": "plugin/install", "params": PluginInstallRequest } | { "method": "plugin/update", "params": PluginUpdateRequest } | { "method": "plugin/uninstall", "params": PluginUninstallRequest } | { "method": "plugin/enable", "params": PluginEnableRequest } | { "method": "plugin/disable", "params": PluginDisableRequest } | { "method": "auth/logout", "params": AuthLogoutRequest } | { "method": "auth/login/start", "params": CloudLoginStartRequest } | { "method": "auth/login/status", "params": CloudLoginStatusRequest } | { "method": "auth/login/cancel", "params": CloudLoginCancelRequest } | { "method": "auth/session/read", "params": AuthSessionReadRequest } | { "method": "auth/session/clear", "params": AuthSessionClearRequest } | { "method": "user/current", "params": UserCurrentRequest } | { "method": "memory/search", "params": MemorySearchRequest } | { "method": "memory/get", "params": MemoryGetRequest };
 
 export type InitializeParams = { client_info: ClientInfo, capabilities: ClientCapabilities, actor_credentials: ActorCredentials | null, };
 
@@ -61,7 +43,9 @@ export type ClientInfo = { name: string, title: string | null, version: string, 
 
 export type ClientKind = "desktop" | "cli" | "sdk";
 
-export type ServerInfo = { name: string, version: string, auth_enabled: boolean, cloud_auth_url: string | null, };
+export type ServerInfo = { name: string, version: string, auth_enabled: boolean, cloud_auth_url: string | null, capabilities: ServerCapabilities, };
+
+export type ServerCapabilities = { sync: boolean, relay: boolean, };
 
 export type ClientCapabilities = { protocol_version: ProtocolVersion, supports_server_requests: boolean, supports_event_replay: boolean, };
 
@@ -90,7 +74,7 @@ export type SessionListEntry = {
  * Includes running, waiting-for-input and cancelling Turns.
  * False does not assert a successful terminal outcome.
  */
-hasActiveTurn: boolean, nodeId: string, id: string, sessionKind: "standard" | "talo", title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, };
+hasActiveTurn: boolean, nodeId: string, id: string, sessionKind: "standard" | "talo", title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, pinned: boolean, };
 
 export type SessionListResponse = { sessions: Array<SessionListEntry>, };
 
@@ -98,7 +82,7 @@ export type SessionGetRequest = { sessionId: string, };
 
 export type SessionGetResponse = { session: SessionInfo, };
 
-export type SessionPatchRequest = { sessionId: string, conf: SessionConf | null, currentDirectory: OptionalCurrentDirectoryPatch | null, };
+export type SessionPatchRequest = { sessionId: string, conf: SessionConf | null, currentDirectory: OptionalCurrentDirectoryPatch | null, pinned?: boolean, };
 
 export type SessionUpdateResponse = { session: SessionInfo, };
 
@@ -118,7 +102,11 @@ export type SessionClearRequest = { sessionId: string, };
 
 export type SessionClearResponse = { session: SessionInfo, };
 
-export type SessionInfo = { nodeId: string, id: string, sessionKind: "standard" | "talo", title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, };
+export type SessionRebuildViewRequest = { sessionId: string, };
+
+export type SessionRebuildViewResponse = { session: SessionInfo, };
+
+export type SessionInfo = { nodeId: string, id: string, sessionKind: "standard" | "talo", title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, pinned: boolean, };
 
 export type SessionUsage = { tokens: TokenUsage, context: ContextUsage | null, };
 
@@ -296,13 +284,29 @@ export type TimelineActiveTurn = {
 /**
  * Exact admitted automation Input; later User Steer messages remain ordinary.
  */
-automationInput: AutomationInputOrigin | null, identity: AgentTurnRef, initialMessageId: string | null, state: ActiveTurnState, lastEventId: string, updatedAt: number, };
+automationInput: AutomationInputOrigin | null, identity: AgentTurnRef, initialMessageId: string | null,
+/**
+ * Observed execution state, derived only from committed Worker facts.
+ */
+state: ActiveTurnState,
+/**
+ * Product management has requested cancellation; this is not an execution fact.
+ */
+cancellationRequested: boolean, lastEventId: string, updatedAt: number, };
 
 export type ActiveTurnSnapshot = { lastSequence: number, lastEventSeq: number, messages: Array<AgentMessage>, metrics: AgentRunMetrics, pendingInput: AgentPendingInput | null, notices: Array<TimelineEvent>,
 /**
  * Exact admitted automation Input; later User Steer messages remain ordinary.
  */
-automationInput: AutomationInputOrigin | null, identity: AgentTurnRef, initialMessageId: string | null, state: ActiveTurnState, lastEventId: string, updatedAt: number, };
+automationInput: AutomationInputOrigin | null, identity: AgentTurnRef, initialMessageId: string | null,
+/**
+ * Observed execution state, derived only from committed Worker facts.
+ */
+state: ActiveTurnState,
+/**
+ * Product management has requested cancellation; this is not an execution fact.
+ */
+cancellationRequested: boolean, lastEventId: string, updatedAt: number, };
 
 export type ActiveTurnState = "running" | "waitingForInput" | "cancelling";
 
@@ -598,7 +602,8 @@ reasoning_replay?: ReasoningReplay,
 request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort,
 /**
  * Accepted effort levels, independent of configured thinking switches.
- * Omitted/null permits standard levels; [] explicitly disables graded effort.
+ * Omitted/null permits the four standard levels; Max requires an explicit entry.
+ * An empty list explicitly disables graded effort.
  */
 reasoning_efforts?: Array<ReasoningEffort> | null, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
@@ -731,13 +736,14 @@ reasoning_replay?: ReasoningReplay,
 request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort,
 /**
  * Accepted effort levels, independent of configured thinking switches.
- * Omitted/null permits standard levels; [] explicitly disables graded effort.
+ * Omitted/null permits the four standard levels; Max requires an explicit entry.
+ * An empty list explicitly disables graded effort.
  */
 reasoning_efforts?: Array<ReasoningEffort> | null, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
 export type LlmProtocol = "chat" | "responses" | "messages";
 
-export type ReasoningEffort = "light" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = "light" | "medium" | "high" | "xhigh" | "max";
 
 export type ModelSpeed = "standard" | "fast";
 
@@ -794,46 +800,6 @@ export type FileReadRequest = { fileId: string, };
 export type FileReadResponse = { file: FileInfo, };
 
 export type FileContentResponse = { file: FileInfo, dataBase64: string, };
-
-export type FilePreviewDocument = { "kind": "pdf", resourcePath: string, } | { "kind": "unavailable", reason: FilePreviewDocumentUnavailable, };
-
-export type FilePreviewDocumentUnavailable = "converterUnavailable" | "conversionFailed" | "tooLarge";
-
-export type FilePreviewSource = { "kind": "file", fileId: string, } | { "kind": "sessionPath", sessionId: string, path: string, };
-
-export type FilePreviewMetadata = { name: string, mimeType: string, sizeBytes: number, };
-
-export type FilePreviewPrepareRequest = { source: FilePreviewSource, };
-
-export type FilePreviewDescriptor = {
-/**
- * Ephemeral scoped capability. Never persist or share this identifier.
- */
-previewId: string,
-/**
- * URL path relative to the preview root; never a host filesystem path.
- */
-entryPath: string,
-/**
- * Configured per-preview HTTP origin; native transports supply their own URL adapter.
- */
-resourceBaseUrl: string | null, metadata: FilePreviewMetadata,
-/**
- * Additional document capability; absent means browser/text presentation of the source.
- */
-document: FilePreviewDocument | null, expiresAt: number, };
-
-export type FilePreviewReadRequest = { previewId: string, resourcePath: string, offset: number,
-/**
- * At most one MiB per request. Zero reads metadata only.
- */
-limit: number, };
-
-export type FilePreviewContent = { metadata: FilePreviewMetadata, offset: number, dataBase64: string, };
-
-export type FilePreviewCloseRequest = { previewId: string, };
-
-export type FilePreviewCloseResponse = { closed: boolean, };
 
 export type FileUpdateRequest = { fileId: string, tags?: Array<string>, metadata?: { [key in string]?: string }, };
 
@@ -1524,7 +1490,7 @@ export type RequestUserInputParams = { prompt: string, };
 
 export type RequestUserInputResponse = { text: string, };
 
-export type JsonRpcRequest = { jsonrpc: string, id: RequestId, method: string, actor_credentials: ActorCredentials | null, params: unknown, };
+export type JsonRpcRequest = { jsonrpc: string, id: RequestId, method: string, actor_credentials: ActorCredentials | null, computerId?: string, params: unknown, };
 
 export type JsonRpcResponse = { jsonrpc: string, id: RequestId, result: unknown, };
 

@@ -7,7 +7,7 @@
 ```text
 TalosService
     |
-    +-- owns product lifecycle and durable state transitions
+    +-- owns product lifecycle, management requests and fact projection
     |
     v
 Coordinator
@@ -22,7 +22,7 @@ AgentRegistry
     v
 AgentHarness
     |
-    +-- owns common live lifecycle, admission, cancellation, and event consistency
+    +-- owns Worker execution, durable admission, cancellation and event consistency
     |
     v
 AgentProvider SPI
@@ -38,7 +38,7 @@ AgentProvider SPI
 Agent progress + unique settlement
     |
     v
-Service -> Store commit -> Timeline publication -> SDK / client
+Worker journal commit -> product Store projection -> Timeline -> SDK / client
 ```
 
 `TalosService` is the product-facing facade. Protocol adapters call it instead
@@ -90,6 +90,20 @@ Kernel Provider. Codex, Claude Code, and Pi are not exposed as selectable kinds
 until their Provider implementations, typed configs, capabilities, and
 composition-root branches exist; there is no fallback to Kernel.
 
+Host shutdown first stops product scheduling and new admission. The owning
+Worker stops its local Harness execution and joins its execution recorders while
+source registration and read authorization remain available for product delivery
+to drain. Coordinator then performs the single final Session/Provider teardown.
+Standalone Worker shutdown uses the same recorder-before-Provider ordering. The
+local `stop_execution` lifecycle port has no RPC counterpart.
+
+Closing a product host detaches observation of independently hosted Workers at
+observation wait boundaries; it does not interrupt their admitted Turns or invent
+terminal events. In-flight admission, input and product transactions finish their
+existing handoff, preserving source cursors, command identities and unapplied
+business receipts. Completion during shutdown may settle accounting but cannot
+dispatch another queued, Goal or Loop Turn.
+
 ## Kernel-backed Turn execution
 
 The following flow is the built-in `KernelAgentProvider` path. Other Providers
@@ -97,37 +111,29 @@ may use different private backends, but must return the same standardized Agent
 events, results, capabilities, cancellation behavior, and continuation behavior.
 
 ```text
-Client             Service / Store             Harness / Kernel Provider
-  |                       |                                |
-  |-- Turn request ------>| validate + build AgentContext   |
-  |                       |-- reserve execution ---------->|
-  |                       |<-- admission + paused permit --|
-  |                       |                                |
-  |                       | commit admission + active      |
-  |                       | + idempotency state             |
-  |                       |-- consume permit ------------->|
-  |<-- accepted ACK ------|                                |
-  |                       |                 build bounded context
-  |                       |                 from memory/history/Skills
-  |                       |                                |
-  |                       |                 +---- model call <-----+
-  |                       |                 |                     |
-  |                       |                 +-- text/reasoning     |
-  |                       |                 |                     |
-  |                       |                 +-- tool request      |
-  |                       |                     policy/approval   |
-  |                       |                     sandbox/execution |
-  |                       |                     bounded result ---+
-  |                       |                                |
-  |                       |<-- progress -------------------|
-  |<-- committed events --| persist, then publish           |
-  |                       |<-- unique settlement ----------|
-  |                       | commit waiting OR terminal     |
-  |<-- committed fact ----| publish                         |
+Client               Product Service              Worker / Harness / Provider
+  |                         |                                  |
+  |-- Turn request -------->| validate product policy           |
+  |                         |-- domain command --------------->|
+  |                         |<-- paused execution -------------|
+  |                         |-- commit original admission ---->|
+  |                         |                  Worker journal commits first
+  |                         |                  then releases Provider execution
+  |                         |<-- admitted facts / receipt ------|
+  |<-- accepted ACK --------|                                  |
+  |                         |                  bounded local history / context
+  |                         |                  model -> tools -> bounded result
+  |                         |                                  |
+  |                         |<-- already-committed progress -----|
+  |<-- product Timeline ----| atomic projection + source cursor |
+  |                         |<-- committed waiting / terminal ---|
+  |<-- product result ------| idempotent accounting / scheduling|
 ```
 
 ACK confirms admission, not completion; events may race with ACK delivery.
-Execution starts only after durable admission. Owned admission tasks prevent
+Execution starts only after the Worker commits its own durable admission. The
+product view may lag an already-running Provider and catches up from the same
+committed facts. Owned admission tasks prevent
 request cancellation from orphaning an accepted operation. Progress delivery
 excludes waiting/terminal facts; the separate channel carries the unique
 settlement per invocation, including cumulative logical-Turn metrics. A missing
@@ -138,12 +144,23 @@ step. Elapsed active time and the attempted round include that failed request;
 usage remains limited to observed token accounting. Settlement retains the
 original typed error and the latest canonical metrics.
 
+Management submits Start or RespondUserAction intent, never a Provider reference
+or checkpoint. The Worker resolves and validates its own waiting state, exact
+action and checkpoint before entering the Provider. Product data loss or stale
+continuation copies cannot become an execution prerequisite.
+
+Product cancellation requests are separate from observed execution state:
+cancellationRequested describes the management request; state and its event
+cursor remain projections of committed Worker facts. A rejected request clears
+only its matching management token. Sync retains its existing protocol and
+replicates observed execution state, not transient management request tokens.
+
 ## Settlement, state and recovery
 
 ```text
 Committed admission --> Running -- waiting settlement --> WaitingForInput
                            |                                    |
-                           |                          claim + same-Turn resume
+                           |                          Worker-local validation + same-Turn resume
                            |<-----------------------------------+
                            |
                            +-- completion/failure --> terminal commit
@@ -219,8 +236,12 @@ Agent progress / settlement             Service product-effect failure
 Only Agent facts --> Agent reducer / checkpoint / Provider continuation
 ```
 
-Title generation and eligible memory reflection run before terminal commit;
-their failures produce warnings without replacing the main execution result.
+Eligible Memory reflection runs on the Worker before its terminal commit. Title
+generation is a Worker semantic operation over its retained successful Turn; the
+product consumes the retained proposal and actual usage during completion. Both
+use the target Worker configuration. Auxiliary failures produce warnings without
+replacing the main execution result; product accounting retries read the same
+Worker result without another model call.
 Other completion effects, including usage and queue handling, have their own
 failure boundaries. Notices can therefore precede or follow the terminal fact.
 Interactive clients retain Session subscriptions; Turn-limited subscriptions
@@ -301,7 +322,7 @@ Execution plan and sandbox selection
       `-- MCP server tool
       |
       v
-Typed result -> Agent event -> Service commit -> Timeline
+Typed result -> Worker fact commit -> product projection -> Timeline
       |
       `------> bounded next model input
 ```

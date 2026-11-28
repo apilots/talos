@@ -163,16 +163,32 @@ class Cluster:
             timezone = 'Pacific/Honolulu' if 'control_plane' in node_config else 'Pacific/Kiritimati'
             document['timezone'] = timezone
             document['agent']['kernel']['timezone'] = timezone
+        if self.dream_maintenance and 'control_plane' not in node_config:
+            document['workspaces'] = {'default_workspace_id': 'remote-team', 'definitions': [
+                {'workspace_id': 'remote-team', 'root_prefix': 'worker-workspaces'}]}
         if self.dream_maintenance and 'control_plane' in node_config:
+            document['agent_node']['embedded_worker'] = False
+            document['agent']['agents'] = [{'id': 'default', 'name': 'Disabled local Agent', 'enabled': False}]
             document.setdefault('automation', {})['dream_memory_maintenance'] = {
                 'cron': '0/15 * * * * *', 'batch_size': 10, 'max_batches': 1}
+            # Remote maintenance must not depend on a Server execution model or credential.
+            document['llm'] = {
+                'provider': 'dream-server-unavailable', 'model': 'server-only-model',
+                'custom_providers': {'dream-server-unavailable': {
+                    'name': 'Unavailable Server model', 'protocol': 'chat',
+                    'base_url': 'http://127.0.0.1:9', 'models': [{'id': 'server-only-model'}]}}}
+            document['agent']['inner_model'] = {
+                'provider': 'dream-server-unavailable', 'id': 'server-only-model'}
         path = conf / 'talos.yaml'
         path.write_text(yaml.safe_dump(document, sort_keys=False))
         env_template = Path(os.environ.get('TALOS_TEST_ENV_TEMPLATE', ROOT / '.env'))
         if env_template.is_file():
             shutil.copyfile(env_template, home / '.env')
             (home / '.env').chmod(0o600)
-        return dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(path), TALOS_RESOURCE_DIR=str(ROOT))
+        env = dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(path), TALOS_RESOURCE_DIR=str(ROOT))
+        if self.dream_maintenance and 'control_plane' in node_config:
+            env = {key: value for key, value in env.items() if not key.startswith('TALOS_LLM_')}
+        return env
 
     def start_control_plane(self):
         """Start real Auth and Server without requiring execution Workers or models."""
@@ -227,13 +243,25 @@ class Cluster:
             self.nodes['alice-a'], self.nodes['alice-b'] = self.nodes['alice-b'], self.nodes['alice-a']
         self.healthy_all()
         models = data(http(self.url + '/v1/models?nodeId=' + self.nodes['alice-a']['node_id'], token=self.users['alice']['access_token']))['models']
-        preferred = os.environ.get('TALOS_E2E_PREFERRED_MODELS', 'deepseek-v4-flash').split(',')
+        preferred = os.environ.get('TALOS_E2E_PREFERRED_MODELS', 'deepseek-flash').split(',')
         self.model = next((model for identifier in preferred for model in models if model['id'] == identifier), models[0])
 
     def start_server(self):
         self.server = self.start_process('server', [os.environ.get('TALOS_E2E_SERVER_BIN', str(ROOT / 'talos-rs/target/debug/talos-server'))], self.server_env)
         wait_for(lambda: http(self.url + '/health'), 'Server startup')
         grpc.channel_ready_future(self.channel).result(timeout=20)
+
+    def register_offline_native(self, record):
+        """Publish durable Native ownership through real control APIs, then go offline."""
+        node = record['node']['nodeId']
+        registered = self.rpc('AgentNodeControl', 'Register', {
+            'auth': {'node_id': node, 'token': record['credential']['token']},
+            'params': {'deployments': [{'agent_id': 'default'}],
+                       'product_owner': 'NODE_PRODUCT_OWNER_SERVER'}})
+        require('registered' in registered, f'Native registration failed: {registered}')
+        stopped = self.rpc('AgentNodeControl', 'Unregister', {
+            'auth': {'node_id': node, 'token': registered['registered']['lease_token']}, 'params': {}})
+        require('completed' in stopped, f'Native unregister failed: {stopped}')
 
     def start_worker(self, name):
         node = self.nodes[name]

@@ -197,19 +197,11 @@ fn waiting_and_failed_settlements_keep_business_result_and_user_action() {
     };
     let waiting = AgentRunSettlement::WaitingForInput {
         event: waiting_event.clone(),
-        continuation: talos_agent_api::AgentContinuationRef {
-            opaque_id: "provider-state".into(),
-        },
         metrics: AgentRunMetrics::default(),
     };
     match decode_settlement(encode_settlement(waiting).unwrap()).unwrap() {
-        AgentRunSettlement::WaitingForInput {
-            event,
-            continuation,
-            ..
-        } => {
+        AgentRunSettlement::WaitingForInput { event, .. } => {
             assert_eq!(event, waiting_event);
-            assert_eq!(continuation.opaque_id, "provider-state");
         }
         _ => panic!("waiting settlement changed variant"),
     }
@@ -246,4 +238,18 @@ fn block(id: &str, content: AgentMessageBlockContent) -> AgentMessageBlock {
         started_at: 1,
         completed_at: Some(2),
     }
+}
+
+#[test]
+fn maximum_reasoning_selection_preserves_its_wire_value() {
+    let selection = talos_types::ModelSelection::new(
+        talos_types::ModelRef {
+            provider: "openai".to_owned(),
+            id: "gpt-6.2-sol".to_owned(),
+        },
+        Some(talos_types::ReasoningEffort::Max),
+    );
+    let wire = encode_model_selection(selection.clone());
+    assert_eq!(wire.reasoning_effort, Some(5));
+    assert_eq!(decode_model_selection(Some(wire)).unwrap(), selection);
 }

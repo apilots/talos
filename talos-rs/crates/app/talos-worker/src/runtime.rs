@@ -1,14 +1,14 @@
 use std::path::Path;
 use std::sync::{Arc, RwLock};
+use talos_fs::FileSystem;
 
 use agent_protocol::{AgentHarness, Deployment};
 use talos_agent::{
     create_agent_harness, AgentDefinitionLoader, AgentUserContentKind, AttachmentReader,
-    SessionHistoryReader,
 };
 use talos_agent_provider_kernel::{
     FileKernelSessionArtifactStore, KernelAgentProvider, KernelAgentProviderParams,
-    KernelMemoryProgressStore, KernelSessionArtifactStore, SkillRootsResolver,
+    KernelSessionArtifactStore, SkillRootsResolver,
 };
 use talos_config::{AgentKernelConfig, AgentProviderConfig, Config};
 use talos_error::{ErrorCode, TalosError, TalosResult};
@@ -27,8 +27,6 @@ use crate::{create_llm_provider, prepare_mcp};
 
 #[derive(Clone)]
 pub struct TalosWorkerResources {
-    pub session_history_reader: Arc<dyn SessionHistoryReader>,
-    pub memory_progress_store: Arc<dyn KernelMemoryProgressStore>,
     pub attachment_reader: Arc<dyn AttachmentReader>,
     pub tool_image_store: Arc<dyn ToolImageStore>,
     pub agent_control: Option<Arc<dyn AgentControl>>,
@@ -42,7 +40,6 @@ pub struct TalosWorker {
     system_info: talos_types::NodeSystemInfo,
     harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
     config: Arc<RwLock<Config>>,
-    provider_router: Arc<ReloadableLlmProviderRouter>,
     tool_registry: Arc<ToolRegistry>,
     plugin_manager: PluginManagerService,
     memory_service: MemoryService,
@@ -52,6 +49,9 @@ pub struct TalosWorker {
     mcp_credentials: McpCredentialStore,
     config_service: talos_service::ConfigService,
     background_tasks: Arc<talos_guard_task::GuardTasks>,
+    execution_store: Arc<talos_store::execution::WorkerExecutionStore>,
+    pub(crate) _execution_namespace: Arc<talos_fs::FileLock>,
+    pub(crate) execution_boundary: Arc<std::sync::Mutex<Option<crate::rpc_host::WorkerBoundary>>>,
 }
 
 impl TalosWorker {
@@ -66,6 +66,30 @@ impl TalosWorker {
         resources: TalosWorkerResources,
         host: talos_types::BrowserHostKind,
     ) -> TalosResult<Self> {
+        let namespace_lock = config.talos_paths().data_dir.join("worker/execution.lock");
+        let execution_namespace = Arc::new(
+            talos_fs::std_fs()
+                .try_file_lock(&namespace_lock)?
+                .ok_or_else(|| {
+                    TalosError::new(
+                        ErrorCode::SessionHeld,
+                        "Worker execution namespace is already in use.",
+                    )
+                })?,
+        );
+        let execution_store = Arc::new(
+            talos_store::execution::WorkerExecutionStore::open(
+                &config
+                    .talos_paths()
+                    .data_dir
+                    .join("worker/execution.sqlite"),
+            )
+            .await?,
+        );
+        crate::execution_history::recover_interrupted(&execution_store).await?;
+        let local_history = Arc::new(crate::execution_history::WorkerExecutionHistory(
+            execution_store.clone(),
+        ));
         let resource_dir = std::env::var_os("TALOS_RESOURCE_DIR").map(std::path::PathBuf::from);
         let host = crate::browser_host::select_host(host, resource_dir.as_deref());
         let active_config = Arc::new(RwLock::new(config.clone()));
@@ -206,7 +230,8 @@ impl TalosWorker {
 
         let session_artifact_store: Arc<dyn KernelSessionArtifactStore> =
             Arc::new(FileKernelSessionArtifactStore);
-        let resource_bindings = crate::resource_binding::ResourceBindings::new();
+        let resource_bindings =
+            crate::resource_binding::ResourceBindings::new(local_history.clone());
         let mut harnesses = Vec::new();
         let mut providers = Vec::new();
         for definition in AgentDefinitionLoader::load(&config.agent)? {
@@ -225,8 +250,8 @@ impl TalosWorker {
                         kernel_config: kernel,
                         skill_roots_resolver: skill_roots_resolver.clone(),
                         session_artifact_store: session_artifact_store.clone(),
-                        session_history_reader: resources.session_history_reader.clone(),
-                        memory_progress_store: resources.memory_progress_store.clone(),
+                        session_history_reader: local_history.clone(),
+                        memory_progress_store: local_history.clone(),
                         dream_memory_store: Arc::new(memory_service.clone()),
                         user_workspace_memory_reader: user_workspace_memory.clone(),
                         attachment_reader: resources.attachment_reader.clone(),
@@ -243,7 +268,27 @@ impl TalosWorker {
                 definition.id.clone(),
                 Arc::new(crate::harness::WorkerHarness {
                     provider: provider.clone(),
-                    execution: create_agent_harness(definition.id, provider),
+                    execution: Arc::new(
+                        talos_agent::LocalExecutionHarness::new(
+                            create_agent_harness(definition.id, provider, execution_store.clone()),
+                            execution_store.clone(),
+                        )
+                        .with_terminal_observer({
+                            let reflection =
+                                crate::memory_reflection::UserWorkspaceMemoryReflection {
+                                    config: active_config.clone(),
+                                    provider: llm_provider_router.clone(),
+                                    history: execution_store.clone(),
+                                    memory: user_workspace_memory.clone(),
+                                };
+                            Arc::new(move |context, event| {
+                                let reflection = reflection.clone();
+                                Box::pin(async move { reflection.reflect(&context, &event).await })
+                            })
+                        }),
+                    ),
+                    model_router: llm_provider_router.clone(),
+                    history: execution_store.clone(),
                     workspace_memory: user_workspace_memory.clone(),
                     execution_gate: plugin_manager.execution_gate(),
                     browser: browser.clone(),
@@ -293,12 +338,14 @@ impl TalosWorker {
             output_logs_changed.clone(),
         );
         Ok(Self {
+            execution_store,
+            _execution_namespace: execution_namespace,
+            execution_boundary: Default::default(),
             background_tasks,
             system_info,
             resource_bindings,
             harnesses,
             config: active_config,
-            provider_router,
             tool_registry,
             plugin_manager,
             memory_service,
@@ -311,6 +358,18 @@ impl TalosWorker {
     }
 
     /// The same node-local environment is used by embedded and network hosts.
+    pub fn memory_progress_store(
+        &self,
+    ) -> Arc<dyn talos_agent_provider_kernel::KernelMemoryProgressStore> {
+        Arc::new(crate::execution_history::WorkerExecutionHistory(
+            self.execution_store.clone(),
+        ))
+    }
+
+    pub fn execution_store(&self) -> Arc<talos_store::execution::WorkerExecutionStore> {
+        self.execution_store.clone()
+    }
+
     pub fn environment(&self) -> Arc<dyn agent_protocol::WorkerEnvironment> {
         Arc::new(
             talos_service::WorkerEnvironmentService::new(
@@ -333,7 +392,7 @@ impl TalosWorker {
         self.config_service.clone()
     }
 
-    pub fn harnesses(&self) -> &[(String, Arc<dyn AgentHarness>)] {
+    pub(crate) fn harnesses(&self) -> &[(String, Arc<dyn AgentHarness>)] {
         &self.harnesses
     }
 
@@ -352,10 +411,6 @@ impl TalosWorker {
 
     pub fn config(&self) -> Arc<RwLock<Config>> {
         self.config.clone()
-    }
-
-    pub fn provider_router(&self) -> Arc<ReloadableLlmProviderRouter> {
-        self.provider_router.clone()
     }
 
     pub fn tool_registry(&self) -> Arc<ToolRegistry> {
@@ -383,10 +438,32 @@ impl TalosWorker {
         Ok(())
     }
 
+    /// Stop only this physical Worker's executions, preserving resources and source reads.
+    /// The owning coordinator performs final Harness teardown after product delivery drains.
+    pub async fn stop_execution(&self, timeout: std::time::Duration) -> TalosResult<()> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        for (_, harness) in &self.harnesses {
+            harness
+                .stop_execution(deadline.saturating_duration_since(tokio::time::Instant::now()))
+                .await?;
+        }
+        if !self
+            .execution_store
+            .interrupted_executions()
+            .await?
+            .is_empty()
+        {
+            return Err(TalosError::internal(
+                "Worker execution facts remain unfinished after stopping.",
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn shutdown(&self) -> TalosResult<()> {
+        self.stop_execution_host().await?;
         let mut result = self
-            .background_tasks
-            .shutdown()
+            .shutdown_background_tasks()
             .await
             .inspect_err(talos_logging::report_error);
         for (_, harness) in &self.harnesses {
@@ -404,6 +481,12 @@ impl TalosWorker {
         result
             .and(browser)
             .and(self.plugin_manager.shutdown_mcp().await)
+    }
+
+    /// Stop and join node-local maintenance without closing Harnesses owned by a coordinator.
+    /// Embedded hosts must call this before releasing Plugin resources or the data directory.
+    pub async fn shutdown_background_tasks(&self) -> TalosResult<()> {
+        self.background_tasks.shutdown().await
     }
 }
 
@@ -441,6 +524,20 @@ fn sandbox_runtime_paths(config: &Config) -> SandboxRuntimePaths {
 struct OfficialBrowserBootstrap(PluginManagerService);
 impl talos_guard_task::GuardTask for OfficialBrowserBootstrap {
     async fn run(&self, context: talos_guard_task::GuardTaskContext) -> TalosResult<()> {
-        tokio::select! { _=context.cancelled()=>Ok(()), result=self.0.bootstrap_official_browser()=>result }
+        if context.is_cancelled() {
+            return Ok(());
+        }
+        // Source refresh owns blocking filesystem operations. Dropping its future
+        // on cancellation would detach those writes from the shutdown join.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let bootstrap = self.0.bootstrap_official_browser(&stop);
+        tokio::pin!(bootstrap);
+        tokio::select! {
+            result = &mut bootstrap => result,
+            _ = context.cancelled() => {
+                stop.cancel();
+                bootstrap.await
+            }
+        }
     }
 }

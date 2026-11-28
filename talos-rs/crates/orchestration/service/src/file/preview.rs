@@ -2,7 +2,8 @@
 //! Archives use the original metadata/download path without indexing or extraction.
 use bytes::Bytes;
 use process_wrap::tokio::{CommandWrap, KillOnDrop};
-use std::{path::Path, process::Stdio, time::Duration};
+use std::path::Path;
+use std::{process::Stdio, time::Duration};
 use talos_types::{
     FilePreviewBytes, FilePreviewDocument, FilePreviewDocumentUnavailable as Unavailable,
     FilePreviewMetadata,
@@ -14,9 +15,6 @@ pub(crate) struct PreparedDocument {
     pdf: Bytes,
 }
 
-pub(crate) fn needs_document(metadata: &FilePreviewMetadata) -> bool {
-    office(metadata)
-}
 pub(crate) async fn prepare(
     metadata: &FilePreviewMetadata,
     bytes: Bytes,
@@ -53,7 +51,8 @@ impl PreparedDocument {
         }
     }
 }
-fn office(metadata: &FilePreviewMetadata) -> bool {
+#[cfg(feature = "product")]
+pub(crate) fn needs_document(metadata: &FilePreviewMetadata) -> bool {
     metadata
         .mime_type
         .starts_with("application/vnd.openxmlformats-officedocument.")

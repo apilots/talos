@@ -22,6 +22,24 @@ use tonic::{
 
 struct DreamHarness(Arc<dyn AgentHarness>);
 impl AgentHarness for DreamHarness {
+    fn generate_session_title(
+        &self,
+        params: agent_protocol::AgentSessionTitleParams,
+    ) -> agent_protocol::AgentFuture<
+        '_,
+        agent_protocol::AgentResult<Option<agent_protocol::AgentSessionTitleResult>>,
+    > {
+        Box::pin(async move {
+            assert_eq!(params.identity.session_id, params.session.session_id);
+            Ok(Some(agent_protocol::AgentSessionTitleResult {
+                outcome: agent_protocol::AgentSessionTitleOutcome::Generated {
+                    title: "Worker title".into(),
+                },
+                model_usage: Some(dream_result().formation.unwrap().model_usage),
+            }))
+        })
+    }
+
     fn start(
         &self,
         params: agent_protocol::AgentRunParams,
@@ -78,20 +96,14 @@ impl AgentHarness for DreamHarness {
     }
     fn form_dream_memory(
         &self,
-        _: agent_protocol::AgentSessionContext,
-        model_call: agent_protocol::DreamMemoryModelCall,
-    ) -> agent_protocol::AgentFuture<'_, agent_protocol::AgentResult<Option<u64>>> {
+        params: agent_protocol::DreamMemoryParams,
+    ) -> agent_protocol::AgentFuture<
+        '_,
+        agent_protocol::AgentResult<agent_protocol::DreamMemoryResult>,
+    > {
         Box::pin(async move {
-            let reply = model_call(agent_protocol::dream_pb::decode_prompt(
-                pb::DreamMemoryModelPrompt {
-                    system: "Form memory".into(),
-                    user: "Session facts".into(),
-                },
-            ))
-            .await?;
-            assert_eq!(reply.content, "formed memory");
-            assert_eq!(reply.usage.total_tokens, 3);
-            Ok(Some(17))
+            assert!(params.after_cursor.is_none());
+            Ok(dream_result())
         })
     }
 }
@@ -142,68 +154,6 @@ impl pb::agent_node_control_server::AgentNodeControl for Control {
     }
 }
 
-// A second management node has no incoming listener: its SDK opens an
-// authenticated outgoing stream and receives the original Worker protocol.
-struct RelayControl(
-    Arc<AgentExecutionConnection>,
-    CancellationToken,
-    mpsc::Sender<Arc<AgentExecutionConnection>>,
-);
-#[tonic::async_trait]
-impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for RelayControl {
-    async fn invoke_active_command(
-        &self,
-        _: tonic::Request<pb::ActiveSessionCommandRequest>,
-    ) -> Result<tonic::Response<pb::ActiveSessionCommandResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented(
-            "This transport fixture has no management Service.",
-        ))
-    }
-    type ConnectStream = Pin<
-        Box<dyn tokio_stream::Stream<Item = Result<pb::ControlToCoordinatorFrame, Status>> + Send>,
-    >;
-    async fn connect(
-        &self,
-        request: Request<Streaming<pb::CoordinatorToControlFrame>>,
-    ) -> Result<Response<Self::ConnectStream>, Status> {
-        assert_eq!(
-            request.metadata().get("authorization").unwrap(),
-            "Bearer account-secret"
-        );
-        let mut input = request.into_inner();
-        let first = input.message().await?.unwrap();
-        let Some(pb::coordinator_to_control_frame::Body::Connect(first)) = first.body else {
-            unreachable!()
-        };
-        assert_eq!(first.computer_id, "node-1");
-        let auth = NodeAuth {
-            node_id: first.computer_id,
-            token: "account-secret".into(),
-        };
-        let (output, task, resources) = agent_client::serve_coordinator_connection(
-            Arc::new(agent_client::AgentEnvironmentClient::from_connection(
-                self.0.clone(),
-                NodeAuth {
-                    node_id: "node-1".into(),
-                    token: "lease-secret".into(),
-                },
-            )),
-            auth,
-            uuid::Uuid::new_v4().to_string(),
-            first.peer_id,
-            input,
-            self.1.child_token(),
-            /* stream_heartbeat */ false,
-        )
-        .await;
-        self.2.send(resources).await.unwrap();
-        tokio::spawn(async move {
-            let _ = task.await.unwrap();
-        });
-        Ok(Response::new(output))
-    }
-}
-
 struct Connected {
     client: RemoteAgentClient,
     connection: Arc<AgentExecutionConnection>,
@@ -211,27 +161,26 @@ struct Connected {
     stop: CancellationToken,
     worker: tokio::task::JoinHandle<agent_protocol::AgentResult<()>>,
     server: tokio::task::JoinHandle<()>,
-    relay_server: Option<tokio::task::JoinHandle<()>>,
-    relay_connection: Option<Arc<AgentExecutionConnection>>,
-    callback_connection: Option<Arc<AgentExecutionConnection>>,
-    callbacks: Arc<CallbackProbe>,
-    caller_scope: Arc<std::sync::RwLock<Option<pb::CoordinatorCallContext>>>,
 }
 impl Connected {
-    async fn new(harness: Arc<dyn AgentHarness>) -> Self {
-        Self::connect(vec![(TEST_AGENT_ID.into(), harness)], false).await
+    async fn new(harness: Arc<Harness<FakeProvider>>) -> Self {
+        let execution_store = harness.inner.execution_store.clone();
+        Self::connect(vec![(TEST_AGENT_ID.into(), harness)], execution_store).await
     }
-    async fn through_coordinator(harness: Arc<dyn AgentHarness>) -> Self {
-        Self::connect(vec![(TEST_AGENT_ID.into(), harness)], true).await
+    async fn with_harnesses(
+        harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
+        execution_store: Arc<talos_store::execution::WorkerExecutionStore>,
+    ) -> Self {
+        Self::connect(harnesses, execution_store).await
     }
-    async fn with_harnesses(harnesses: Vec<(String, Arc<dyn AgentHarness>)>) -> Self {
-        Self::connect(harnesses, true).await
-    }
-    async fn connect(harnesses: Vec<(String, Arc<dyn AgentHarness>)>, relay: bool) -> Self {
+    async fn connect(
+        harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
+        execution_store: Arc<talos_store::execution::WorkerExecutionStore>,
+    ) -> Self {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let pem = certificate.cert.pem().into_bytes();
         let identity = Identity::from_pem(&pem, certificate.signing_key.serialize_pem());
-        let relay_identity = identity.clone();
         let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = socket.local_addr().unwrap();
         drop(socket);
@@ -250,6 +199,18 @@ impl Connected {
                 .unwrap();
         });
         let home = tempfile::tempdir().unwrap();
+        let harnesses = harnesses
+            .into_iter()
+            .map(|(id, harness)| {
+                (
+                    id,
+                    Arc::new(crate::LocalExecutionHarness::new(
+                        harness,
+                        execution_store.clone(),
+                    )) as Arc<dyn AgentHarness>,
+                )
+            })
+            .collect();
         let adapter = AgentHarnessRpcAdapter::new(
             "node-1".into(),
             Arc::new(std::sync::RwLock::new(
@@ -263,12 +224,6 @@ impl Connected {
             harnesses,
         );
         let worker_home = home;
-        let caller_scope = Arc::new(std::sync::RwLock::new(None));
-        let scope = caller_scope.clone();
-        let adapter = adapter.with_resource_binder(Arc::new(move |_, _, caller| {
-            *scope.write().unwrap() = caller.cloned();
-            Box::pin(async { Ok(Box::new(()) as Box<dyn Send>) })
-        }));
         adapter
             .install_registration(
                 Registration {
@@ -304,56 +259,8 @@ impl Connected {
             .await
             .unwrap()
             .unwrap();
-        let callbacks = Arc::new(CallbackProbe::default());
-        let (relay_server, relay_connection, callback_connection, client) = if relay {
-            let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let address = socket.local_addr().unwrap();
-            drop(socket);
-            let server_stop = stop.clone();
-            let (callback_sender, mut callback_ready) = mpsc::channel(1);
-            let service = RelayControl(connection.clone(), stop.clone(), callback_sender);
-            let server = tokio::spawn(async move {
-                Server::builder()
-                    .tls_config(ServerTlsConfig::new().identity(relay_identity))
-                    .unwrap()
-                    .add_service(
-                        pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(service),
-                    )
-                    .serve_with_shutdown(address, server_stop.cancelled())
-                    .await
-                    .unwrap();
-            });
-            let caller = AgentNodeClient::connect(
-                &format!("https://{address}"),
-                AgentTlsTrust::Certificate(pem),
-            )
-            .await
-            .unwrap();
-            let (peer, auth) = caller
-                .connect_coordinator_with_resources(
-                    "account-secret",
-                    &uuid::Uuid::new_v4().to_string(),
-                    "node-1",
-                    callbacks.clone(),
-                )
-                .await
-                .unwrap();
-            let client =
-                RemoteAgentClient::from_connection(peer.clone(), TEST_AGENT_ID.into(), auth);
-            (
-                Some(server),
-                Some(peer),
-                callback_ready.recv().await,
-                client,
-            )
-        } else {
-            (
-                None,
-                None,
-                None,
-                RemoteAgentClient::from_connection(connection.clone(), TEST_AGENT_ID.into(), auth),
-            )
-        };
+        let client =
+            RemoteAgentClient::from_connection(connection.clone(), TEST_AGENT_ID.into(), auth);
         Self {
             client,
             connection,
@@ -361,17 +268,9 @@ impl Connected {
             stop,
             worker,
             server,
-            relay_server,
-            relay_connection,
-            callback_connection,
-            callbacks,
-            caller_scope,
         }
     }
     async fn close(self) {
-        if let Some(peer) = self.relay_connection {
-            peer.close();
-        }
         self.connection.close();
         // Stop and drain the carrier before revoking its lease; buffered receipt
         // acknowledgements still belong to this live connection until it exits.
@@ -389,18 +288,17 @@ impl Connected {
         self.adapter.drain_disconnected().await.unwrap();
         self.stop.cancel();
         self.server.await.unwrap();
-        if let Some(server) = self.relay_server {
-            server.await.unwrap();
-        }
     }
 }
 
 #[tokio::test]
-async fn coordinator_relay_preserves_admission_input_settlement_and_management() {
+async fn registered_worker_preserves_admission_input_settlement_and_management() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Input);
-    let fixture = Connected::through_coordinator(Arc::new(Harness::new(
+    let fixture = Connected::new(Arc::new(Harness::new(
         TEST_AGENT_ID.into(),
         provider.clone(),
+        journal.clone(),
     )))
     .await;
     let identity = talos_agent_api::AgentTurnRef::new("session-1", "outbound-input");
@@ -415,6 +313,7 @@ async fn coordinator_relay_preserves_admission_input_settlement_and_management()
     let input = fixture
         .client
         .submit_input(AgentInputParams {
+            command: None,
             agent_id: TEST_AGENT_ID.into(),
             identity: identity.clone(),
             input: user_message(&identity, "message-2"),
@@ -470,7 +369,16 @@ async fn coordinator_relay_preserves_admission_input_settlement_and_management()
         .unwrap();
     fixture
         .client
-        .close_session(session_params(), history_cursor)
+        .close_session(
+            session_params(),
+            fixture
+                .client
+                .read_session_execution_state(session_params())
+                .await
+                .unwrap()
+                .unwrap()
+                .history_cursor,
+        )
         .await
         .unwrap();
     fixture
@@ -488,10 +396,12 @@ async fn coordinator_relay_preserves_admission_input_settlement_and_management()
 
 #[tokio::test]
 async fn outbound_cancel_before_commit_and_disconnect_after_commit_release_execution() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::Release);
     let fixture = Connected::new(Arc::new(Harness::new(
         TEST_AGENT_ID.into(),
         provider.clone(),
+        journal.clone(),
     )))
     .await;
     let first = fixture
@@ -540,21 +450,30 @@ async fn outbound_cancel_before_commit_and_disconnect_after_commit_release_execu
 
 #[tokio::test]
 async fn stalled_outbound_consumer_fails_only_its_call_while_other_calls_progress() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::FloodProgress);
     let independent = FakeProvider::new(FakeMode::Release);
-    let fixture = Connected::with_harnesses(vec![
-        (
-            TEST_AGENT_ID.into(),
-            Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone())),
-        ),
-        (
-            "agent-2".into(),
-            Arc::new(DreamHarness(Arc::new(Harness::new(
+    let fixture = Connected::with_harnesses(
+        vec![
+            (
+                TEST_AGENT_ID.into(),
+                Arc::new(Harness::new(
+                    TEST_AGENT_ID.into(),
+                    provider.clone(),
+                    journal.clone(),
+                )),
+            ),
+            (
                 "agent-2".into(),
-                independent.clone(),
-            )))),
-        ),
-    ])
+                Arc::new(DreamHarness(Arc::new(Harness::new(
+                    "agent-2".into(),
+                    independent.clone(),
+                    journal.clone(),
+                )))),
+            ),
+        ],
+        journal.clone(),
+    )
     .await;
     let independent_client = RemoteAgentClient::from_connection(
         fixture.connection.clone(),
@@ -609,30 +528,37 @@ async fn stalled_outbound_consumer_fails_only_its_call_while_other_calls_progres
             run.settlement.recv().await.unwrap(),
             AgentRunSettlement::Finished { .. }
         ));
-        let model_call: agent_protocol::DreamMemoryModelCall = Arc::new(|messages| {
-            assert_eq!(messages[0].content, "Form memory");
-            assert_eq!(messages[1].content, "Session facts");
-            Box::pin(async {
-                agent_protocol::dream_pb::decode_reply(pb::DreamMemoryModelReply {
-                    content: "formed memory".into(),
-                    usage: Some(pb::TokenUsage {
-                        input_tokens: 2,
-                        output_tokens: 1,
-                        total_tokens: 3,
-                        ..Default::default()
-                    }),
-                })
-            })
-        });
         let mut session = session_params();
         session.agent_id = "agent-2".into();
         session.session_id = "session-4".into();
         assert_eq!(
             independent_client
-                .form_dream_memory(session, model_call)
+                .form_dream_memory(agent_protocol::DreamMemoryParams {
+                    session: session.clone(),
+                    after_cursor: None
+                })
                 .await
                 .unwrap(),
-            Some(17)
+            dream_result()
+        );
+        let result = independent_client
+            .generate_session_title(agent_protocol::AgentSessionTitleParams {
+                mode: agent_protocol::AgentSessionTitleMode::Generate,
+                identity: talos_agent_api::AgentTurnRef::new(&session.session_id, "title-turn"),
+                session,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            result.model_usage,
+            Some(dream_result().formation.unwrap().model_usage)
+        );
+        assert_eq!(
+            result.outcome,
+            agent_protocol::AgentSessionTitleOutcome::Generated {
+                title: "Worker title".into()
+            }
         );
     };
     let (failed, ()) = tokio::time::timeout(Duration::from_secs(8), async {
@@ -664,11 +590,15 @@ async fn stalled_outbound_consumer_fails_only_its_call_while_other_calls_progres
 }
 
 #[tokio::test]
-async fn coordinator_relay_backpressures_a_consuming_progress_stream() {
+async fn registered_worker_backpressures_a_consuming_progress_stream() {
+    let (_journal_directory, journal) = crate::harness::test_support::execution_store().await;
     let provider = FakeProvider::new(FakeMode::BurstProgress);
-    let fixture =
-        Connected::through_coordinator(Arc::new(Harness::new(TEST_AGENT_ID.into(), provider)))
-            .await;
+    let fixture = Connected::new(Arc::new(Harness::new(
+        TEST_AGENT_ID.into(),
+        provider,
+        journal.clone(),
+    )))
+    .await;
     let mut run = fixture
         .client
         .start(run_params(
@@ -697,101 +627,31 @@ async fn coordinator_relay_backpressures_a_consuming_progress_stream() {
     fixture.close().await;
 }
 
-#[derive(Default)]
-struct CallbackProbe(std::sync::Mutex<Vec<String>>);
-impl agent_client::AgentResourceRpcHandler for CallbackProbe {
-    fn dispatch(
-        &self,
-        scope: pb::CoordinatorCallContext,
-        mut requests: agent_client::AgentResourceRequests,
-    ) -> Pin<
-        Box<
-            dyn std::future::Future<Output = Result<agent_client::AgentResourceResponses, Status>>
-                + Send
-                + '_,
-        >,
-    > {
-        Box::pin(async move {
-            let request = requests.next().await.transpose()?.unwrap();
-            let pb::worker_rpc_call::Request::ReadSessionHistory(request) = request else {
-                unreachable!()
-            };
-            assert_eq!(request.caller.as_ref(), Some(&scope));
-            assert_eq!(request.auth.unwrap().token, "account-secret");
-            self.0
-                .lock()
-                .unwrap()
-                .push(request.params.unwrap().session_id);
-            Ok(Box::pin(tokio_stream::once(Ok(
-                pb::worker_rpc_result::Response::ReadSessionHistory(Box::new(
-                    pb::ReadSessionHistoryResponse {
-                        result: Some(pb::read_session_history_response::Result::Turns(
-                            pb::SessionHistoryTurns { data: vec![] },
-                        )),
-                    },
-                )),
-            ))) as agent_client::AgentResourceResponses)
-        })
+fn dream_result() -> agent_protocol::DreamMemoryResult {
+    agent_protocol::DreamMemoryResult {
+        processed_until_seq: 17,
+        formation: Some(agent_protocol::DreamMemoryFormation {
+            covers_until_seq: Some(17),
+            model_usage: agent_protocol::AgentMemoryModelUsage {
+                request_id: "worker-dream-call".into(),
+                model_ref: talos_types::ModelRef {
+                    provider: "worker-provider".into(),
+                    id: "worker-model".into(),
+                },
+                usage: talos_types::TokenUsage {
+                    input_tokens: 2,
+                    output_tokens: 1,
+                    total_tokens: 3,
+                    ..Default::default()
+                },
+                completed_at: 100,
+                timezone: "Asia/Shanghai".into(),
+            },
+            failure: None,
+        }),
+        next_cursor: agent_protocol::DreamMemoryCursor {
+            generation: 0,
+            offset: 7,
+        },
     }
-}
-
-#[tokio::test]
-async fn reverse_callback_matches_the_live_invocation_and_rejects_other_session_scope() {
-    let provider = FakeProvider::new(FakeMode::Input);
-    let fixture = Connected::through_coordinator(Arc::new(Harness::new(
-        TEST_AGENT_ID.into(),
-        provider.clone(),
-    )))
-    .await;
-    let identity = talos_agent_api::AgentTurnRef::new("session-1", "callback-turn");
-    let run = fixture
-        .client
-        .start(run_params(identity.clone(), "message-callback"))
-        .await
-        .unwrap();
-    run.admission.permit.consume().await.unwrap();
-    provider.wait_started().await;
-    let caller = fixture.caller_scope.read().unwrap().clone().unwrap();
-    let call = |caller: &pb::CoordinatorCallContext| {
-        pb::worker_rpc_call::Request::ReadSessionHistory(Box::new(pb::ReadSessionHistoryRequest {
-            caller: Some(caller.clone()),
-            auth: None,
-            params: Some(pb::ReadSessionHistoryParams {
-                session_id: "session-1".into(),
-                completed_event_seq: None,
-                limit: 1,
-            }),
-        }))
-    };
-    let connection = fixture.callback_connection.as_ref().unwrap();
-    let mut response = connection
-        .invoke_resource(tokio_stream::once(Ok(call(&caller))), caller.clone(), 5000)
-        .await
-        .unwrap();
-    assert!(matches!(
-        response.next().await.unwrap().unwrap(),
-        pb::worker_rpc_result::Response::ReadSessionHistory(_)
-    ));
-    assert_eq!(*fixture.callbacks.0.lock().unwrap(), ["session-1"]);
-    let mut wrong = caller;
-    wrong.session.as_mut().unwrap().session_id = "other-session".into();
-    let mut response = connection
-        .invoke_resource(tokio_stream::once(Ok(call(&wrong))), wrong, 5000)
-        .await
-        .unwrap();
-    let error =
-        agent_protocol::error_pb::decode_status(response.next().await.unwrap().unwrap_err());
-    assert!(error.is_code(talos_error::ErrorCode::PermissionDenied));
-    assert_eq!(fixture.callbacks.0.lock().unwrap().len(), 1);
-    fixture
-        .client
-        .interrupt(AgentInterruptParams {
-            agent_id: TEST_AGENT_ID.into(),
-            identity,
-        })
-        .await
-        .unwrap();
-    drop(run.events);
-    drop(run.settlement);
-    fixture.close().await;
 }

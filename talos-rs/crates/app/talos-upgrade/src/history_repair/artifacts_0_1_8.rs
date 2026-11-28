@@ -23,11 +23,17 @@ pub(super) async fn prepare(
             .fetch_all(&mut *db)
             .await
             .map_err(source_error)?;
-    let live_actions: Vec<String> =
-        sqlx::query_scalar("SELECT action_id FROM agent_continuation_bindings")
-            .fetch_all(&mut *db)
-            .await
-            .map_err(source_error)?;
+    let waiting: Vec<String> = sqlx::query_scalar("SELECT e.payload_json FROM agent_active_turns active JOIN visible_agent_events e ON e.event_seq=active.last_event_seq WHERE json_extract(e.payload_json,'$.type')='waitingForInput'")
+        .fetch_all(&mut *db).await.map_err(source_error)?;
+    let live_actions = waiting
+        .into_iter()
+        .map(
+            |raw| match serde_json::from_str::<AgentEventPayload>(&raw).map_err(source_error)? {
+                AgentEventPayload::WaitingForInput(pending) => Ok(pending.action_id().to_owned()),
+                _ => Err(invalid("live action has no canonical waiting event")),
+            },
+        )
+        .collect::<TalosResult<Vec<_>>>()?;
     let mut files = Vec::new();
     let mut inputs = Vec::new();
     let backup = context

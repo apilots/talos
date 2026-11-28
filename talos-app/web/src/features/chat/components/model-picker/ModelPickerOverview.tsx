@@ -29,7 +29,7 @@ export function ModelPickerOverview({ model, modelName, providerName, effort, fa
   const [preview, setPreview] = useState(effectiveEffort);
   useEffect(() => setPreview(effectiveEffort), [effectiveEffort]);
   const defaultEffort = reasoningLevelForEffort(capabilities?.default_reasoning_effort ?? null);
-  const label = (level: ReasoningLevel) => level === "none" ? t("modelPicker.off") : reasoningControl === "toggle" ? t("modelPicker.on") : t(level === "extra_high" ? "reasoningExtraHigh" : level === "light" ? "reasoningLight" : level === "medium" ? "reasoningMedium" : "reasoningHigh");
+  const label = (level: ReasoningLevel) => level === "none" ? t("modelPicker.off") : reasoningControl === "toggle" ? t("modelPicker.on") : t(level === "max" ? "reasoningMax" : level === "extra_high" ? "reasoningExtraHigh" : level === "light" ? "reasoningLight" : level === "medium" ? "reasoningMedium" : "reasoningHigh");
   const unsupportedEffort = reasoningControl === "effort" && !levels.includes(effort);
   const reasoningDisabled = reasoningControl === "none" || !onEffortChange;
 

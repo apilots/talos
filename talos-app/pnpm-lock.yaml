@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   '@novnc/novnc@1.5.0':
-    hash: cmu3vvfkfrr24o2gmi7mndf3vy
+    hash: bacemanm3fmk5q5mv75zlmh3jq
     path: patches/@novnc__novnc@1.5.0.patch
 
 importers:
@@ -178,7 +178,7 @@ importers:
         version: 6.43.15
       '@novnc/novnc':
         specifier: 1.5.0
-        version: 1.5.0(patch_hash=cmu3vvfkfrr24o2gmi7mndf3vy)
+        version: 1.5.0(patch_hash=bacemanm3fmk5q5mv75zlmh3jq)
       '@radix-ui/react-alert-dialog':
         specifier: 1.2.1
         version: 1.2.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
@@ -5370,7 +5370,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
-  '@novnc/novnc@1.5.0(patch_hash=cmu3vvfkfrr24o2gmi7mndf3vy)': {}
+  '@novnc/novnc@1.5.0(patch_hash=bacemanm3fmk5q5mv75zlmh3jq)': {}
 
   '@oxc-parser/binding-android-arm-eabi@0.156.0':
     optional: true

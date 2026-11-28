@@ -7,7 +7,7 @@
 use talos_agent::AgentEventReducer;
 use talos_agent_api::{
     ActiveTurnState, AgentAssistantTextPhase, AgentEventPayload, AgentMessage,
-    AgentMessageBlockContent,
+    AgentMessageBlockContent, TimelineActiveTurn,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_types::{
@@ -37,8 +37,8 @@ impl SubagentService {
                 .build_turn_snapshot(
                     subagent,
                     agent_id,
-                    active.identity.turn_id,
-                    Some(active.state),
+                    active.identity.turn_id.clone(),
+                    Some(active),
                 )
                 .await;
         }
@@ -65,8 +65,7 @@ impl SubagentService {
             .timeline
             .display_active_turn(&subagent.session_id)
             .await?
-            .filter(|active| active.identity.turn_id == turn_id)
-            .map(|active| active.state);
+            .filter(|active| active.identity.turn_id == turn_id);
         let agent_id = self.subagent_agent_id(&subagent).await?;
         self.build_turn_snapshot(subagent, agent_id, turn_id.to_string(), active_state)
             .await
@@ -77,7 +76,7 @@ impl SubagentService {
         subagent: SubagentRef,
         agent_id: String,
         turn_id: String,
-        active_state: Option<ActiveTurnState>,
+        active_state: Option<TimelineActiveTurn>,
     ) -> TalosResult<SubagentSnapshot> {
         let identity = talos_agent_api::AgentTurnRef::new(&subagent.session_id, &turn_id);
         let mut reducer = AgentEventReducer::new(identity.clone());
@@ -94,7 +93,12 @@ impl SubagentService {
             .await?;
         let last_event = last_event.ok_or_else(|| missing_turn_state(&subagent.session_id))?;
         let messages = reducer.checkpoint().messages;
-        let outcome = build_outcome(active_state, turn_id, &last_event.payload, &messages)?;
+        let outcome = build_outcome(
+            active_state.as_ref(),
+            turn_id,
+            &last_event.payload,
+            &messages,
+        )?;
         Ok(SubagentSnapshot {
             subagent,
             agent_id,
@@ -118,7 +122,7 @@ impl SubagentService {
 }
 
 fn build_outcome(
-    active_state: Option<ActiveTurnState>,
+    active_state: Option<&TimelineActiveTurn>,
     turn_id: String,
     last_event: &AgentEventPayload,
     messages: &[AgentMessage],
@@ -144,7 +148,10 @@ fn build_outcome(
                 truncated,
             })
         }
-        _ => match active_state {
+        _ if active_state.is_some_and(|active| active.cancellation_requested) => {
+            Ok(SubagentOutcome::Cancelling { turn_id })
+        }
+        _ => match active_state.map(|active| active.state) {
             Some(ActiveTurnState::Running) => Ok(SubagentOutcome::Running { turn_id }),
             Some(ActiveTurnState::WaitingForInput) => {
                 Ok(SubagentOutcome::WaitingUserAction { turn_id })

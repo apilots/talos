@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1120" role="img" aria-labelledby="title desc" lang="zh-CN">
+<title id="title">Worker 存储边界与服务复用</title>
+<desc id="desc">产品运行时持有产品配置、任务、派生 Timeline 和结算。每个 Worker 自持节点服务与命名空间；已本地能力及 Provider 私有文件保持原后端，执行事实和 Memory 形成进度解除产品库与远端历史回调。蓝箭头表示调用或写入，绿箭头表示已提交事件、游标及结果交付。产品库和执行库分别拥有事务。</desc>
+<style>
+text { font-family:'PingFang SC','Microsoft YaHei',sans-serif; fill:#f0f4f8; font-size:21px; }
+.title { font-size:37px; font-weight:650; }
+.head { font-size:25px; font-weight:600; }
+.sub { font-size:18px; fill:#a8b8c9; }
+.small { font-size:16px; fill:#a8b8c9; }
+.call { fill:none; stroke:#8fc2ff; stroke-width:2; marker-end:url(#blue); }
+.event { fill:none; stroke:#74dbbd; stroke-width:2; marker-end:url(#green); }
+</style>
+<defs>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8fc2ff"/></marker>
+<marker id="green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#74dbbd"/></marker>
+</defs>
+<rect width="100%" height="100%" fill="#10161d"/>
+<text x="40" y="60" class="title">Worker 存储边界 · 已本地的复用 · 执行事实下沉</text>
+<text x="40" y="104" class="sub">共享服务 / 类型化接口 / Store 实现；每 Worker 独立实例、命名空间与数据，同 Worker 多入口共享状态和锁</text>
+<rect x="40" y="200" width="420" height="660" rx="18" fill="#203b36"/>
+<text x="65" y="245" class="head">共享产品运行时</text>
+<text x="65" y="286" class="sub">TalosService + 产品 Store</text>
+<text x="65" y="337">Session / Project 配置</text>
+<text x="65" y="377">Goal / Loop 定义与计划</text>
+<text x="65" y="417">Automation 管理与调度</text>
+<text x="65" y="457">Timeline 物化视图</text>
+<text x="65" y="497">用量 / 业务结算</text>
+<rect x="65" y="550" width="370" height="145" rx="13" fill="#172b29"/>
+<text x="85" y="585" class="sub">产品策略：SessionMessageSendPolicy</text>
+<text x="85" y="621" class="sub">产品 API + 宿主原 ConfigStore</text>
+<text x="85" y="657" class="small">不写远端 Worker 配置，不随 nodeId 改归属</text>
+<text x="65" y="753" class="sub">Desktop / TUI → 所属本机持有</text>
+<text x="65" y="788" class="sub">云产品 → 所属 Server 持有</text>
+<text x="65" y="830" class="small">产品库独立事务，只物化已提交执行事实</text>
+<rect x="660" y="160" width="900" height="750" rx="20" fill="#17212c" stroke="#344355"/>
+<text x="690" y="203" class="head">每个 Worker 的边界（内嵌 / 独立复用同一内核）</text>
+<rect x="700" y="230" width="820" height="98" rx="13" fill="#243c56"/>
+<text x="725" y="267">受保护 Harness / WorkerEnvironment API</text>
+<text x="725" y="304" class="sub">lib / WSS / gRPC → 同一实例、配置状态、execution gate 与资源生命周期</text>
+<path d="M465 290H690" class="call"/>
+<text x="485" y="220" class="small">输入 / 辅助执行 / 资源请求</text>
+<text x="485" y="246" class="small">控制命令 · API 调用</text>
+<path d="M890 333V377" class="call"/>
+<path d="M1320 333V377" class="call"/>
+<rect x="700" y="390" width="390" height="190" rx="13" fill="#203b36"/>
+<text x="725" y="429" class="head">复用已本地节点服务</text>
+<text x="725" y="467" class="sub">ConfigService · MemoryService</text>
+<text x="725" y="501" class="sub">PluginManagerService</text>
+<text x="725" y="535" class="sub">McpCredentialStore · BrowserRuntime</text>
+<text x="725" y="563" class="small">配置 / Office 转换归目标 Worker</text>
+<rect x="1130" y="390" width="390" height="190" rx="13" fill="#243c56"/>
+<text x="1155" y="429" class="head">已下沉执行持久化</text>
+<text x="1155" y="467" class="sub">准入输入 · 历史 / 有序事件</text>
+<text x="1155" y="501" class="sub">执行检查点 · 终态</text>
+<text x="1155" y="535" class="sub">Memory / 标题结果与实际用量</text>
+<text x="1155" y="563" class="small">拆执行记录，不搬完整产品 Session 库</text>
+<path d="M895 585V632" class="call"/>
+<path d="M1325 585V632" class="call"/>
+<rect x="700" y="645" width="820" height="225" rx="13" fill="#192735"/>
+<text x="725" y="684" class="head">Worker 自己的数据 · 沿既有 owner / 后端保存</text>
+<text x="725" y="725" class="sub">配置 YAML / env / 凭证 · 插件状态 · Memory 文件 + memory-index.sqlite</text>
+<text x="725" y="762" class="sub">worker/execution.sqlite：执行事实 / 检查点 / 辅助调用事实，独立事务</text>
+<text x="725" y="799" class="sub">Provider 私有产物：KernelSessionArtifactStore / FileKernelSessionArtifactStore</text>
+<text x="725" y="836" class="small">原 Provider 文件继续原路径保存，不要求再次迁移进执行库；按节点 / Session / scope 隔离</text>
+<path d="M1530 485H1542V949H500V740H470" class="event"/>
+<text x="735" y="938" class="sub">已提交事件 / 游标 / 结果 → 产品物化（独立事务，无跨库直接写表）</text>
+<rect x="40" y="990" width="1520" height="90" rx="13" fill="#192735"/>
+<text x="65" y="1024" class="sub">蓝箭头：调用 / 持久化写入；绿箭头：已提交事实交付。存储图不表达实现库编译依赖。</text>
+<text x="65" y="1056" class="sub">移除 SessionMemoryProgress / RemoteMemoryProgress 的产品库或 Server 进度回调，执行不再反查 Server 历史。</text>
+</svg>

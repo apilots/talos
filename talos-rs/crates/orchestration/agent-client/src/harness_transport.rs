@@ -86,6 +86,35 @@ macro_rules! unary {
 }
 impl HarnessTransport {
     unary!(
+        generate_session_title,
+        GenerateSessionTitleRequest,
+        GenerateSessionTitleResponse,
+        GenerateSessionTitle,
+        SessionTitle,
+        |_: &pb::GenerateSessionTitleRequest| Duration::from_secs(300),
+        Unary
+    );
+
+    unary!(
+        read_execution_payload,
+        ReadExecutionPayloadRequest,
+        ReadExecutionPayloadResponse,
+        ReadExecutionPayload,
+        ExecutionPayload,
+        |_: &pb::ReadExecutionPayloadRequest| Duration::from_secs(10),
+        Unary
+    );
+    unary!(
+        read_session_events,
+        ReadSessionEventsRequest,
+        ReadSessionEventsResponse,
+        ReadSessionEvents,
+        SessionEvents,
+        |_: &pb::ReadSessionEventsRequest| Duration::from_secs(10),
+        Unary
+    );
+
+    unary!(
         set_registration_admission,
         SetRegistrationAdmissionRequest,
         EmptyResponse,
@@ -103,15 +132,6 @@ impl HarnessTransport {
         SessionExecutionState,
         |_: &pb::ReadSessionExecutionStateRequest| Duration::from_secs(10),
         Unary
-    );
-    unary!(
-        commit_session_execution_state,
-        CommitSessionExecutionStateRequest,
-        EmptyResponse,
-        CommitSessionExecutionState,
-        Empty,
-        |_: &pb::CommitSessionExecutionStateRequest| Duration::from_secs(10),
-        ControlUnary
     );
     streaming!(start, StartRequest, RunResponse, Start, Run, 0, Streaming);
     streaming!(
@@ -155,6 +175,15 @@ impl HarnessTransport {
         SessionRequest,
         EmptyResponse,
         ClearSession,
+        Empty,
+        |_: &pb::SessionRequest| Duration::from_secs(30),
+        Unary
+    );
+    unary!(
+        retire_session,
+        SessionRequest,
+        EmptyResponse,
+        RetireSession,
         Empty,
         |_: &pb::SessionRequest| Duration::from_secs(30),
         Unary

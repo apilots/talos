@@ -38,7 +38,7 @@ pub(super) async fn verify(
         )
         .await
         .unwrap();
-    target.service.resume_account_sync(actor);
+    target.service.resume_account_host(actor);
     wait_for("enrollment receiver document sync", async || {
         target.service.sync_status(actor).await.unwrap().connection
             == SyncConnectionState::Connected
@@ -86,7 +86,7 @@ pub(super) async fn verify(
             .is_some()
     })
     .await;
-    let identity = source.sync_host.verified_actor(actor).await.unwrap();
+    let identity = source.host.verified_actor(actor).await.unwrap();
     let desktop = crate::desktop_application::DesktopApplication::new(
         &source,
         "Fresh capture regression".into(),
@@ -147,7 +147,7 @@ pub(super) async fn verify(
         .await
         .unwrap();
     source
-        .sync_host
+        .host
         .observe_registration_removal(&identity, &old)
         .await
         .unwrap();
@@ -189,11 +189,7 @@ pub(super) async fn verify(
         .unwrap()
         .is_none());
     let other = talos_service::Actor::regular("other-account").with_access_token(OTHER_TOKEN);
-    source
-        .sync_host
-        .refresh_enrolled_capture(&other)
-        .await
-        .unwrap();
+    source.host.refresh_enrolled_capture(&other).await.unwrap();
     assert!(source
         .sync
         .account_binding(&identity)
@@ -203,7 +199,7 @@ pub(super) async fn verify(
         .computers
         .is_empty());
     let pending_uuid = verify_suspend_interleaving(&source, &desktop, actor).await;
-    source.service.resume_account_sync_after_login(actor);
+    source.service.resume_account_host_after_login(actor);
     let fresh = desktop
         .enroll_worker(None, Some(actor))
         .await
@@ -300,7 +296,7 @@ pub(super) async fn verify(
         .await
         .unwrap();
     source
-        .sync_host
+        .host
         .observe_registration_removal(&identity, &fresh)
         .await
         .unwrap();
@@ -316,8 +312,8 @@ pub(super) async fn verify(
     assert_eq!(disabled.configured_enabled, Some(false));
     assert_eq!(disabled.connection, SyncConnectionState::Disabled);
     assert!(!source
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .handles
         .lock()
         .await
@@ -346,7 +342,7 @@ async fn verify_suspend_interleaving(
 ) -> String {
     // Finish Worker enrollment while leaving the capture reconciliation in flight.
     let fresh = crate::desktop_worker::WorkerEnrollment {
-        sync_host: &source.sync_host,
+        host: &source.host,
         config: &desktop.config,
         store: &desktop.store,
         account: &desktop.account,
@@ -369,21 +365,21 @@ async fn verify_suspend_interleaving(
         .verify_access_token(REFRESHED_TOKEN)
         .await
         .unwrap();
-    let maintenance = source.sync_host.suspend_refresh(actor).await;
-    let lifecycle = source.sync_host.lifecycle.lock().await;
+    let maintenance = source.host.suspend_refresh(actor).await;
+    let lifecycle = source.host.lifecycle.lock().await;
     let mut suspend = std::pin::pin!(source.service.suspend_account_sync(actor));
     std::future::poll_fn(|context| {
         assert!(std::future::Future::poll(suspend.as_mut(), context).is_pending());
         std::task::Poll::Ready(())
     })
     .await;
-    let mut capture = std::pin::pin!(source.sync_host.refresh_enrolled_capture(&refreshed));
+    let mut capture = std::pin::pin!(source.host.refresh_enrolled_capture(&refreshed));
     std::future::poll_fn(|context| {
         assert!(std::future::Future::poll(capture.as_mut(), context).is_pending());
         std::task::Poll::Ready(())
     })
     .await;
-    assert!(!source.sync_host.account_connections_allowed(&actor.user_id));
+    assert!(!source.host.account_connections_allowed(&actor.user_id));
     drop(lifecycle);
     // Complete pre-suspend before allowing the queued enrollment to make progress.
     tokio::time::timeout(Duration::from_secs(5), suspend)
@@ -395,27 +391,21 @@ async fn verify_suspend_interleaving(
         .unwrap()
         .unwrap();
     assert!(!source
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .handles
         .lock()
         .await
         .contains_key(&actor.user_id));
     assert!(!source
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .credentials
         .read()
         .unwrap()
         .contains_key(&actor.user_id));
-    assert!(source
-        .sync_host
-        .sync_stores
-        .connections
-        .lock()
-        .await
-        .values()
-        .all(|(owner, _)| owner != &actor.user_id));
+    #[cfg(feature = "relay-client")]
+    assert!(source.host.product_relay.lock().await.is_none());
     assert!(source
         .sync
         .saved_bindings()
@@ -426,17 +416,17 @@ async fn verify_suspend_interleaving(
     drop(maintenance);
     // A new credential must not let a delayed completion undo pre-suspend.
     source
-        .sync_host
+        .host
         .refresh_enrolled_capture(&refreshed)
         .await
         .unwrap();
     assert!(!source
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .handles
         .lock()
         .await
         .contains_key(&actor.user_id));
-    assert!(!source.sync_host.account_connections_allowed(&actor.user_id));
+    assert!(!source.host.account_connections_allowed(&actor.user_id));
     fresh
 }

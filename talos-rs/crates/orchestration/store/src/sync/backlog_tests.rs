@@ -1,3 +1,4 @@
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -28,53 +29,45 @@ async fn local_turns_finish_and_cancel_while_sync_backlog_is_being_read() {
             .await
             .unwrap();
         sessions
-            .commit_initial_admission(CommitInitialAdmissionParams {
-                subagent_limit: None,
-                automation_origin: None,
-                events: vec![
-                    event(
-                        identity,
-                        1,
-                        AgentEventPayload::TurnStarted(AgentTurnStarted {}),
-                    ),
-                    event(
-                        identity,
-                        2,
-                        AgentEventPayload::MessageCompleted(AgentMessage {
-                            message_id: format!("message-{}", identity.turn_id),
-                            turn_id: identity.turn_id.clone(),
-                            role: AgentMessageRole::User,
-                            status: AgentMessageStatus::Completed,
-                            blocks: vec![],
-                            created_at: 1,
-                            completed_at: Some(1),
-                        }),
-                    ),
-                ],
-                command: None,
-            })
+            .project_test_events(TestWorkerEvents::new(vec![
+                event(
+                    identity,
+                    1,
+                    AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+                ),
+                event(
+                    identity,
+                    2,
+                    AgentEventPayload::MessageCompleted(AgentMessage {
+                        message_id: format!("message-{}", identity.turn_id),
+                        turn_id: identity.turn_id.clone(),
+                        role: AgentMessageRole::User,
+                        status: AgentMessageStatus::Completed,
+                        blocks: vec![],
+                        created_at: 1,
+                        completed_at: Some(1),
+                    }),
+                ),
+            ]))
             .await
             .unwrap();
     }
     for sequence in 3..35 {
-        let active = sessions
+        let _active = sessions
             .get_agent_active_turn(&completion.session_id)
             .await
             .unwrap()
             .unwrap();
         sessions
-            .commit_progress_event(
-                event(
-                    &completion,
-                    sequence,
-                    AgentEventPayload::MessageBlockDelta(AgentMessageBlockDelta {
-                        message_id: "assistant-message".into(),
-                        block_id: "assistant-text".into(),
-                        delta: AgentMessageBlockDeltaContent::Text("streamed response ".repeat(64)),
-                    }),
-                ),
-                active.last_event_seq,
-            )
+            .project_test_events(TestWorkerEvents::new(vec![event(
+                &completion,
+                sequence,
+                AgentEventPayload::MessageBlockDelta(AgentMessageBlockDelta {
+                    message_id: "assistant-message".into(),
+                    block_id: "assistant-text".into(),
+                    delta: AgentMessageBlockDeltaContent::Text("streamed response ".repeat(64)),
+                }),
+            )]))
             .await
             .unwrap();
     }
@@ -105,7 +98,8 @@ async fn local_turns_finish_and_cancel_while_sync_backlog_is_being_read() {
         );
         let stop = async {
             let admission = sessions.begin_cancellation(&cancellation).await.unwrap();
-            assert_eq!(admission.active_turn.state, ActiveTurnState::Cancelling);
+            assert_eq!(admission.active_turn.state, ActiveTurnState::Running);
+            assert!(admission.active_turn.cancellation_requested);
             complete(
                 sessions,
                 &cancellation,
@@ -164,7 +158,7 @@ async fn complete(
     sequence: u64,
     payload: AgentEventPayload,
 ) {
-    let active = sessions
+    let _active = sessions
         .get_agent_active_turn(&identity.session_id)
         .await
         .unwrap()
@@ -172,12 +166,18 @@ async fn complete(
     let completed_turn_metrics =
         matches!(payload, AgentEventPayload::TurnCompleted(_)).then(AgentRunMetrics::default);
     sessions
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: event(identity, sequence, payload),
-            expected_event_seq: active.last_event_seq,
-            completed_turn_metrics,
+        .project_test_events(TestWorkerEvents {
+            metrics: completed_turn_metrics,
+            ..TestWorkerEvents::new(vec![event(identity, sequence, payload)])
         })
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
 }
 

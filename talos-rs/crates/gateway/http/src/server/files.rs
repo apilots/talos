@@ -203,11 +203,41 @@ pub(super) async fn read_file_handler(
     Ok(api_success(response))
 }
 
+/// Transport projection of the existing bounded FileService preview range.
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct FileContentQuery {
+    offset: Option<u64>,
+    limit: Option<u32>,
+}
+
 pub(super) async fn read_file_content_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(file_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<FileContentQuery>,
 ) -> Result<JsonResponse<talos_types::FileContentResponse>, ApiError> {
+    if query.offset.is_some() || query.limit.is_some() {
+        use base64::Engine;
+        let invalid = || {
+            ApiError::from_talos_error(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "File content offset and positive limit are required together.",
+            ))
+        };
+        let start = query.offset.ok_or_else(invalid)?;
+        let limit = query.limit.filter(|limit| *limit > 0).ok_or_else(invalid)?;
+        let end = start.checked_add(u64::from(limit)).ok_or_else(invalid)?;
+        let content = state
+            .app
+            .files
+            .read_preview_range(&shared_actor(&auth.0), &file_id, start..end)
+            .await
+            .map_err(ApiError::from_talos_error)?;
+        return Ok(api_success(talos_types::FileContentResponse {
+            file: content.file,
+            data_base64: base64::engine::general_purpose::STANDARD.encode(content.bytes),
+        }));
+    }
     let response = state
         .gateway
         .read_file_content(&shared_actor(&auth.0), FileReadRequest { file_id })

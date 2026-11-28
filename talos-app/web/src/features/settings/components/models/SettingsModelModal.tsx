@@ -45,7 +45,7 @@ export function SettingsModelModal({
   const isAdd = mode === "add";
   const returnFocus = useSettingsDialogFocus();
   const formId = useId();
-  const efforts = form.reasoning_efforts?.length ? REASONING_EFFORTS.filter((effort) => form.reasoning_efforts?.includes(effort)) : REASONING_EFFORTS;
+  const efforts = form.reasoning_efforts?.length ? REASONING_EFFORTS.filter((effort) => form.reasoning_efforts?.includes(effort)) : REASONING_EFFORTS.filter((effort) => effort !== "max");
   const validDefault = !form.reasoning || efforts.includes(form.reasoning_effort);
 
   return (
@@ -138,7 +138,7 @@ export function SettingsModelModal({
           <RequestParametersEditor rows={form.request_parameters} onChange={(request_parameters) => onChange({ ...form, request_parameters })}>
             <fieldset className="mt-4 space-y-3 rounded-xl border border-border/70 bg-background/40 p-3 text-sm" disabled={!form.reasoning}>
               <label className="flex items-center gap-2">
-                <input type="checkbox" checked={form.reasoning_efforts !== undefined} onChange={(event) => onChange({ ...form, reasoning_efforts: event.target.checked ? [...REASONING_EFFORTS] : undefined })} />
+                <input type="checkbox" checked={form.reasoning_efforts !== undefined} onChange={(event) => onChange({ ...form, reasoning_efforts: event.target.checked ? REASONING_EFFORTS.filter((effort) => effort !== "max") : undefined })} />
                 {t("modelsPanel.restrictReasoningEfforts")}
               </label>
               <p className="text-xs text-muted">{t("modelsPanel.reasoningEffortsHint")}</p>

@@ -1,3 +1,4 @@
+use super::product_scope::ProductQuery;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -8,7 +9,7 @@ use talos_auth::RequestIdentity;
 use talos_types::{
     SessionClearRequest, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
     SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest, SessionListRequest,
-    SessionPatchRequest,
+    SessionPatchRequest, SessionRebuildViewRequest,
 };
 
 use super::access::shared_actor;
@@ -25,7 +26,7 @@ pub(super) struct SessionHistoryQuery {
 pub(super) async fn list_sessions_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Query(request): Query<SessionListRequest>,
+    ProductQuery(request): ProductQuery<SessionListRequest>,
 ) -> Result<JsonResponse<talos_types::SessionListResponse>, ApiError> {
     let response = state
         .gateway
@@ -137,6 +138,22 @@ pub(super) async fn clear_session_handler(
     let session = state
         .gateway
         .clear_session(&shared_actor(&actor.0), SessionClearRequest { session_id })
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(session))
+}
+
+pub(super) async fn rebuild_session_view_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
+    Path(session_id): Path<String>,
+) -> Result<JsonResponse<talos_types::SessionRebuildViewResponse>, ApiError> {
+    let session = state
+        .gateway
+        .rebuild_session_view(
+            &shared_actor(&actor.0),
+            SessionRebuildViewRequest { session_id },
+        )
         .await
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(session))

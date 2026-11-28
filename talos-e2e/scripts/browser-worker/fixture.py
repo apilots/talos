@@ -1,5 +1,6 @@
 """Secretless real Server -> outbound Docker Worker -> built-in MCP acceptance."""
 import copy
+from contextlib import ExitStack
 import re
 import base64
 import json
@@ -7,7 +8,6 @@ import os
 from pathlib import Path
 import signal
 import socket
-import sqlite3
 import subprocess
 import sys
 import threading
@@ -307,8 +307,11 @@ def browser_task(url,node,attachment,label,verify_cookie=False):
                     break
     (REPORT / (label+'-events.json')).write_text(json.dumps(events))
     require(events and events[-1]['payload']['type'] == 'turnCompleted', 'Turn did not complete: ' + str(events[-1]['payload'] if events else 'no events'))
-    # Title generation must commit before the successful terminal fact reaches clients.
-    completed = data(http(url + '/v1/sessions/' + session))['session']
+    # Worker termination and derived product metadata have separate owners.
+    def generated_title():
+        current = data(http(url + '/v1/sessions/' + session))['session']
+        return current if current['title'] == SESSION_TITLE else None
+    completed = wait(generated_title, 'Generated product Session title')
     listed = data(http(url + '/v1/sessions'))['sessions']
     require(completed['title'] == SESSION_TITLE, 'Completed Session detail has an invalid generated title')
     require(any(item['id'] == session and item['title'] == SESSION_TITLE for item in listed),
@@ -339,11 +342,9 @@ def browser_task(url,node,attachment,label,verify_cookie=False):
     require('data:image' not in json.dumps(events) and 'base64' not in json.dumps(events), 'Timeline persisted inline image bytes')
     return session,events,results
 
-def remote_cli_environment(document, node, server_home, container):
+def remote_cli_environment(document, node, container):
     home=RUN/('desktop-media-'+uuid.uuid4().hex[:8]);home.mkdir()
-    (home/'data').mkdir()
-    # Seed the owned directory snapshot; G/H routing and media authorization remain real.
-    with sqlite3.connect(server_home/'data/talos.db') as source, sqlite3.connect(home/'data/talos.db') as target:source.backup(target)
+    # A cold client discovers remote products through Server APIs, without copying data.
     desktop=copy.deepcopy(document);desktop['agent_node']={}
     (home/'conf').mkdir();conf=home/'conf/talos.yaml';conf.write_text(json.dumps(desktop))
     (home/'auth').mkdir();(home/'auth/cloud-session.json').write_text(json.dumps({'schema_version':2,'cloud_api_base_url':desktop['cloud']['api_base_url'],'access_token':TOKEN,'token_type':'Bearer','expires_at_ms':int(time.time()*1000)+3600000,'last_used_at_ms':int(time.time()*1000),'user':USER}))
@@ -353,8 +354,8 @@ def remote_cli_environment(document, node, server_home, container):
     env['TALOS_E2E_WORKER_CONTAINER']=container
     return env
 
-def native_media(document,node,server_home,container):
-    env = remote_cli_environment(document, node, server_home, container)
+def native_media(document,node,container):
+    env = remote_cli_environment(document, node, container)
     electron=ROOT/'talos-app/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'
     if not electron.exists():electron=ROOT/'talos-app/desktop/node_modules/electron/dist/electron'
     with (REPORT/'native-docker-media.log').open('wb') as log:
@@ -389,6 +390,7 @@ def run(plugin_packages_only=False):
     print('FIXTURE_PORT', mock.server_port, flush=True)
     threading.Thread(target=mock.serve_forever, daemon=True).start()
     http_port, rpc_port = free_port(), free_port()
+    ingress = f'https://127.0.0.1:{free_port()}'
     home = RUN / ('server-' + uuid.uuid4().hex[:8])
     cert, key = RUN / 'tls.crt', RUN / 'tls.key'
     subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=host.docker.internal',
@@ -396,7 +398,7 @@ def run(plugin_packages_only=False):
         '-addext', 'keyUsage=critical,digitalSignature,keyEncipherment', '-addext', 'extendedKeyUsage=serverAuth',
         '-keyout', str(key), '-out', str(cert)], check=True, capture_output=True)
     document = config(home, http_port, mock.server_port)
-    document['cloud'].update(agent_base_url=f'https://127.0.0.1:{rpc_port}', agent_trusted_ca_file=str(cert))
+    document['cloud'].update(agent_base_url=ingress, agent_trusted_ca_file=str(cert))
     document['agent_node'] = {'control_plane': {'bind_address': f'0.0.0.0:{rpc_port}', 'tls_certificate_file': str(cert),
         'tls_private_key_file': str(key)}}
     conf = home / 'talos.yaml'
@@ -408,10 +410,12 @@ def run(plugin_packages_only=False):
     server = subprocess.Popen([str(SERVER)], env=env, stdout=log, stderr=log)
     name = 'talos-browser-task-' + uuid.uuid4().hex[:8]
     volume = name + '-home'
+    ingress_stack = ExitStack()
     try:
         url = f'http://127.0.0.1:{http_port}'
         print('SERVER_PORT', http_port, 'AGENT_PORT', rpc_port, flush=True)
         wait(lambda: http(url + '/health'), 'Server startup')
+        start_ingress(ingress_stack, RUN, ingress, url, rpc_port, cert, key)
         # Restore both real account contexts once before business/ownership checks.
         for token, user in ACCOUNTS.items():
             restored = data(http(url + '/v1/user', token=token))
@@ -450,7 +454,7 @@ HTTPServer(('127.0.0.1',18080),H).serve_forever()
         wait(lambda: data(http(url + '/v1/computers/' + node)).get('available'), 'Outbound Worker registration')
         if plugin_packages_only:
             from plugin_cli import remote_packages
-            remote_packages(node, name, remote_cli_environment(document, node, home, name), REPORT)
+            remote_packages(node, name, remote_cli_environment(document, node, name), REPORT)
             return
         snapshot = data(http(url + '/v1/browser', {'nodeId': node, 'operation': {'kind': 'read'}}))
         require(snapshot['host'] == 'docker' and snapshot['enabled'], 'Wrong canonical browser capability')
@@ -474,7 +478,7 @@ HTTPServer(('127.0.0.1',18080),H).serve_forever()
         from media import media,pressure_and_expiry
         media(url,node,name,http,data,wait,REPORT)
         if os.environ.get('TALOS_E2E_NATIVE_MEDIA')=='1':
-            desktop_env = native_media(document,node,home,name)
+            desktop_env = native_media(document,node,name)
             from plugin_cli import remote_cli
             remote_cli(url,node,name,desktop_env,http,data,REPORT)
             browser_task(url,node,attachment,'desktop-resumed-task')
@@ -575,6 +579,7 @@ print(json.dumps({'lockSha256':metadata['lockSha256'],'browserUseVersion':versio
             print('UI_REVIEW',url+'/sessions/'+session,flush=True)
             time.sleep(review_seconds)
     finally:
+        ingress_stack.close()
         with (REPORT / 'task-worker.log').open('wb') as worker_log:
             subprocess.run(['docker', 'logs', name], stdout=worker_log, stderr=worker_log)
         subprocess.run(['docker', 'rm', '-f', name], capture_output=True)
@@ -584,8 +589,6 @@ print(json.dumps({'lockSha256':metadata['lockSha256'],'browserUseVersion':versio
         except subprocess.TimeoutExpired: server.kill(); server.wait(timeout=5)
         log.close(); mock.shutdown(); mock.server_close()
 
-if __name__ == '__main__':
-    run(plugin_packages_only=sys.argv[1:] == ['--plugin-packages-only'])
 
 
 def start_ingress(stack, directory, ingress, web, rpc_port, cert, key):
@@ -636,3 +639,7 @@ def stop(process):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+
+
+if __name__ == '__main__':
+    run(plugin_packages_only=sys.argv[1:] == ['--plugin-packages-only'])

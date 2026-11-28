@@ -332,6 +332,7 @@ async fn recovery_restores_the_server_owned_pending_action() {
             identity: talos_sdk::AgentTurnRef::new("sess-test", "turn-test"),
             initial_message_id: Some("msg-1".to_string()),
             state: talos_sdk::ActiveTurnState::WaitingForInput,
+            cancellation_requested: false,
             last_event_id: "ev_1".to_string(),
             updated_at: 1,
         }),

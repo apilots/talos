@@ -54,8 +54,8 @@ pub(super) async fn verify_late_enrollment(
         .computers
         .is_empty());
     let project = runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .projects
         .create_project_for_owner(
             "Created before automatic enrollment",
@@ -64,7 +64,7 @@ pub(super) async fn verify_late_enrollment(
         )
         .await
         .unwrap();
-    runtime.service.resume_account_sync(actor);
+    runtime.service.resume_account_host(actor);
     wait_for("background late enrollment", async || {
         runtime
             .service
@@ -100,7 +100,7 @@ pub(super) async fn verify_late_enrollment(
         .await
         .unwrap()
         .unwrap();
-    let handle = runtime.sync_host.sync_stores.handles.lock().await[ACCOUNT].clone();
+    let handle = runtime.host.stores.handles.lock().await[ACCOUNT].clone();
     let resource = talos_sync::SyncResourceKey::Project {
         project_id: project.project_id.clone(),
     };
@@ -124,8 +124,8 @@ pub(super) async fn verify_late_enrollment(
         .unwrap()
         .unwrap();
     runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .projects
         .patch_project(
             &project.project_id,
@@ -174,44 +174,15 @@ pub(super) async fn verify_late_enrollment(
         handle.status().connection,
         talos_sync::SyncConnectionState::Connected
     );
-    wait_for("late-enrolled management connection ready", async || {
-        runtime
-            .sync_host
-            .sync_stores
-            .connections
-            .lock()
-            .await
-            .get(&local)
-            .and_then(|(_, connection)| connection.upgrade())
-            .is_some_and(|connection| !connection.is_closed())
-    })
-    .await;
-    let connection = runtime.sync_host.sync_stores.connections.lock().await[&local]
-        .1
-        .upgrade()
-        .expect("enrolled management connection");
-    connection.close();
-    wait_for(
-        "management connection recovers from stream closure",
-        async || {
-            runtime
-                .sync_host
-                .sync_stores
-                .connections
-                .lock()
-                .await
-                .get(&local)
-                .and_then(|(_, connection)| connection.upgrade())
-                .is_some_and(|current| !current.is_closed() && !Arc::ptr_eq(&connection, &current))
-        },
-    )
-    .await;
+    // Product transport lifecycle must not restart optional replication.
+    #[cfg(feature = "relay-client")]
+    {
+        runtime.host.stop_product_relay().await;
+        runtime.host.refresh_product_relay().await.unwrap();
+    }
     assert!(
-        Arc::ptr_eq(
-            &handle,
-            &runtime.sync_host.sync_stores.handles.lock().await[ACCOUNT]
-        ),
-        "G stream recovery must reuse H's existing handle"
+        Arc::ptr_eq(&handle, &runtime.host.stores.handles.lock().await[ACCOUNT]),
+        "Product transport restart must reuse the original Sync handle"
     );
     close(runtime).await;
 }

@@ -31,13 +31,15 @@ def run(cluster):
     records = []
     for name in ('开发笔记本', '旧测试工作站'):
         records.append(data(public(cluster, '/v1/computers', 'POST', {'displayName': name, 'credentialExpiresAt': 2_000_000_000})))
+    for record in records:
+        cluster.register_offline_native(record)
     nodes = [record['node']['nodeId'] for record in records]
     project_names = ('Laptop Project', 'Workstation Project')
     directory = cluster.root / 'shared-project'
     directory.mkdir()
     # Project creation validates the directory on an online Worker. Seed only
-    # the disposable Store so the browser can exercise the real HTTP list
-    # path on two registered Computers without starting Workers or a model.
+    # the disposable Store with retained Server-owned Native Worker state so
+    # offline list/delete paths need neither execution Workers nor a model.
     with sqlite3.connect(cluster.server_home / 'data/talos.db') as database:
         database.executemany(
             'INSERT INTO projects (project_id, name, user_id, execution_node_id, directory, created_at, updated_at) '
@@ -108,7 +110,7 @@ def run(cluster):
         page.screenshot(path=str(REPORT / 'computers-removed-en.png'), full_page=True)
         saved = page.evaluate('JSON.parse(localStorage.getItem("talos-web-ui")).state.selectedComputers')
         require('' in saved.values() and old not in saved.values(), 'Deleted selection redirected or remained selected')
-        rejected = cluster.rpc('AgentNodeControl', 'Register', {'auth': {'node_id': old, 'token': records[1]['credential']['token']}, 'params': {'deployments': [{'agent_id': 'default'}]}})
+        rejected = cluster.rpc('AgentNodeControl', 'Register', {'auth': {'node_id': old, 'token': records[1]['credential']['token']}, 'params': {'deployments': [{'agent_id': 'default'}], 'product_owner': 'NODE_PRODUCT_OWNER_SERVER'}})
         require(rejected.get('failure', {}).get('error', {}).get('code') == 'ERROR_CODE_UNAUTHENTICATED', 'Deleted registration credential was accepted')
         require(data(public(cluster, path, 'DELETE'))['nodeId'] == old, 'Deletion retry is not idempotent')
 

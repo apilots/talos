@@ -54,6 +54,10 @@ where
         Box::pin(Harness::close_session(self, params))
     }
 
+    fn stop_execution(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(Harness::stop_execution(self, timeout))
+    }
+
     fn shutdown(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
         Box::pin(Harness::shutdown(self, timeout))
     }

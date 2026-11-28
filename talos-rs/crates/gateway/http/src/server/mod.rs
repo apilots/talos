@@ -1,4 +1,5 @@
 mod access;
+mod app_request;
 mod auth;
 mod auth_session;
 mod automation;
@@ -21,6 +22,8 @@ mod message_queue;
 mod messages;
 mod misc;
 mod plugin;
+pub mod product_routing;
+mod product_scope;
 mod profile;
 mod projects;
 mod sessions;
@@ -88,6 +91,7 @@ use self::projects::{
 use self::sessions::{
     clear_session_handler, close_session_handler, compact_session_handler, delete_session_handler,
     get_session_handler, get_session_history_handler, list_sessions_handler, patch_session_handler,
+    rebuild_session_view_handler,
 };
 use self::skills::{
     list_skills_handler, read_skill_handler, refresh_skills_handler, resolve_skills_handler,
@@ -118,6 +122,8 @@ pub struct HttpServer {
     auth_disabled: bool,
     webui_dir: Option<PathBuf>,
     lifecycle: Arc<ServerLifecycle>,
+    product_router: Option<Arc<dyn product_routing::ProductRequestRouter>>,
+    extra_routes: Router,
 }
 
 impl HttpServer {
@@ -143,7 +149,26 @@ impl HttpServer {
             auth_disabled: false,
             webui_dir: None,
             lifecycle: Arc::new(ServerLifecycle::new()),
+            product_router: None,
+            extra_routes: Router::new(),
         }
+    }
+
+    /// Attach product routing at the HTTP boundary without importing a Relay implementation.
+    #[must_use]
+    pub fn with_product_router(
+        mut self,
+        router: Arc<dyn product_routing::ProductRequestRouter>,
+    ) -> Self {
+        self.product_router = Some(router);
+        self
+    }
+
+    /// Compose optional transport routes on the existing product listener.
+    #[must_use]
+    pub fn with_routes(mut self, routes: Router) -> Self {
+        self.extra_routes = routes;
+        self
     }
 
     /// Disable auth checks for local mock mode.
@@ -175,9 +200,9 @@ impl HttpServer {
         result
     }
 
-    pub async fn run_with_shutdown(&self, shutdown: CancellationToken) -> TalosResult<()> {
-        info!("Starting HTTP server on {}:{}", self.host, self.port);
-        let state = Arc::new(HttpApiState::from_service(
+    /// Build the original product handlers for in-process dispatch without opening a listener.
+    pub fn router(&self) -> Router {
+        let mut state = HttpApiState::from_service(
             self.service.clone(),
             #[cfg(test)]
             self.event_service.clone(),
@@ -185,9 +210,12 @@ impl HttpServer {
             self.auth_service.clone(),
             self.auth_disabled,
             self.lifecycle.clone(),
-        ));
+        );
+        state.product_router = self.product_router.clone();
+        let state = Arc::new(state);
 
         let mut app = Router::new()
+            .route("/v1/app/request", post(app_request::dispatch))
             .route("/health", get(health_handler))
             .route("/v1/file-previews", post(file_preview::prepare))
             .route("/v1/file-previews/read", post(file_preview::read))
@@ -344,6 +372,10 @@ impl HttpServer {
                 "/v1/sessions/:session_id/clear",
                 post(clear_session_handler),
             )
+            .route(
+                "/v1/sessions/:session_id/rebuild-view",
+                post(rebuild_session_view_handler),
+            )
             .route("/v1/turns/start", post(start_turn_handler))
             .route("/v1/turns/retry", post(retry_turn_handler))
             .route("/v1/turns/interrupt", post(interrupt_turn_handler))
@@ -397,6 +429,11 @@ impl HttpServer {
             .route("/v1/*path", any(api_not_found_handler))
             .method_not_allowed_fallback(api_method_not_allowed_handler)
             .with_state(state.clone())
+            .merge(self.extra_routes.clone())
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                product_routing::route_product_request,
+            ))
             .layer(middleware::from_fn(errors::normalize_extractor_rejection))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
@@ -418,6 +455,12 @@ impl HttpServer {
             );
         }
 
+        app
+    }
+
+    pub async fn run_with_shutdown(&self, shutdown: CancellationToken) -> TalosResult<()> {
+        info!("Starting HTTP server on {}:{}", self.host, self.port);
+        let app = self.router();
         let listener = tokio::net::TcpListener::bind(self.listen_addr())
             .await
             .map_err(|e| {
@@ -462,3 +505,5 @@ async fn api_method_not_allowed_handler() -> Response {
 #[cfg(test)]
 #[path = "server_tests.rs"]
 mod tests;
+
+pub use file_preview::PersonalPreviewRoute;

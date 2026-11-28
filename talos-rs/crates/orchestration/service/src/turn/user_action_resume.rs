@@ -1,12 +1,10 @@
 use super::*;
 use talos_agent_api::{
-    ActiveTurnState, AgentEventPayload as CanonicalAgentEventPayload, AgentInterruptOutcome,
-    AgentMessageBlockContent, AgentMessageRole, AgentPendingInput, AgentUserContent,
+    ActiveTurnState, AgentEventPayload as CanonicalAgentEventPayload, AgentMessageBlockContent,
+    AgentMessageRole, AgentPendingInput, AgentUserContent,
 };
-use talos_store::session::{
-    AgentActiveTurnRecord, AgentContinuationBindingStatus, AgentEventRecord,
-};
-use talos_types::{QuestionAnswer, UserActionParams};
+use talos_store::session::{AgentActiveTurnRecord, AgentEventRecord};
+use talos_types::UserActionParams;
 
 impl TurnService {
     pub(crate) async fn submit_user_action(
@@ -46,6 +44,7 @@ impl TurnService {
             .filter(|active| {
                 active.identity == identity
                     && active.state == ActiveTurnState::WaitingForInput
+                    && !active.cancellation_requested
                     && active.current_action_id.as_deref() == Some(action_id)
             })
             .ok_or_else(|| {
@@ -64,7 +63,10 @@ impl TurnService {
             &format!("msg_action_{action_id}"),
             action_id,
             response.clone(),
-            chrono::Utc::now().timestamp(),
+            command.as_ref().map_or_else(
+                || chrono::Utc::now().timestamp(),
+                |command| command.created_at / 1_000,
+            ),
         )?;
         let completion = match self
             .execution
@@ -116,7 +118,7 @@ impl TurnService {
         dispatch: bool,
     ) -> TalosResult<()> {
         let service = self.clone();
-        super::await_admission(async move {
+        super::await_admission(self.execution.track_admission()?, async move {
             service
                 .recover_active_turn_owned(session, active, dispatch)
                 .await
@@ -127,187 +129,38 @@ impl TurnService {
     async fn recover_active_turn_owned(
         &self,
         session: talos_store::session::SessionRecord,
-        active: AgentActiveTurnRecord,
+        _active: AgentActiveTurnRecord,
         dispatch: bool,
     ) -> TalosResult<()> {
-        let ownership = self.pin_session(&session.id)?;
-        let Some(active) = self
-            .canonical_active_turn(&session.id)
-            .await?
-            .filter(|current| current.identity == active.identity)
-        else {
-            return Ok(());
-        };
-        if self.is_turn_execution_active(&active.identity) {
-            return Ok(());
-        }
-        let binding = self
-            .execution
-            .execution_store
-            .get_agent_continuation_binding(&active.identity)
-            .await?;
-        if active.state == ActiveTurnState::WaitingForInput
-            && binding.as_ref().is_some_and(|binding| {
-                matches!(&binding.status, AgentContinuationBindingStatus::Waiting)
-            })
-        {
-            return Ok(());
-        }
-        if active.state == ActiveTurnState::Cancelling {
-            return self
-                .terminate_recovered_turn(
-                    &session,
-                    active,
-                    talos_error::ErrorCode::Cancelled,
-                    "Agent Turn cancellation recovered after confirmed cleanup",
-                    dispatch,
-                )
-                .await;
-        }
-        let Some(binding) = binding else {
-            return self
-                .terminate_recovered_turn(
-                    &session,
-                    active,
-                    talos_error::ErrorCode::ServiceUnavailable,
-                    self.dead_owner_reason(
-                        "Agent Turn has no durable continuation after Service restart",
-                    ),
-                    dispatch,
-                )
-                .await;
-        };
-        let AgentContinuationBindingStatus::Claimed { claim_id } = &binding.status else {
-            return self
-                .terminate_recovered_turn(
-                    &session,
-                    active,
-                    talos_error::ErrorCode::ServiceUnavailable,
-                    self.dead_owner_reason(
-                        "Agent Turn continuation state cannot resume after Service restart",
-                    ),
-                    dispatch,
-                )
-                .await;
-        };
-        let events = self
-            .canonical_user_action_events(&active.identity, &binding.action_id)
-            .await?;
-        let message = events.iter().find_map(|event| match &event.payload {
-            CanonicalAgentEventPayload::MessageCompleted(message)
-                if message.message_id == claim_id.as_str()
-                    && message.role == AgentMessageRole::User
-                    && submitted_user_action_response(
-                        std::slice::from_ref(event),
-                        &binding.action_id,
-                    )
-                    .is_some() =>
-            {
-                Some((message.clone(), event.event_seq))
-            }
-            _ => None,
-        });
-        let Some((message, admission_tail)) = message else {
-            return self
-                .terminate_recovered_turn(
-                    &session,
-                    active,
-                    talos_error::ErrorCode::ServiceUnavailable,
-                    self.dead_owner_reason(
-                        "Claimed Agent continuation is missing its canonical User response",
-                    ),
-                    dispatch,
-                )
-                .await;
-        };
-        if active.last_event_seq != admission_tail {
-            return self.terminate_recovered_turn(
-                &session,
-                active,
-                talos_error::ErrorCode::ServiceUnavailable,
-                self.dead_owner_reason(
-                    "Claimed Agent continuation already produced progress and cannot be replayed safely",
-                ),
-                dispatch,
-            ).await;
-        }
-        let admission_guard = self
-            .execution_gate
-            .for_node(&session.execution_node_id)
-            .read_owned()
-            .await;
         let context = self
             .execution
             .sessions
-            .build_agent_context(&session, active.identity.clone())
+            .build_agent_session_context(&session)
             .await?;
-        let resume = match self
+        self.execution.project_worker(&context).await?;
+        let state = self
             .execution
-            .resume_waiting_input(context, message, None)
-            .await
-        {
-            Ok(completion) => {
-                self.complete_resumed_turn(
-                    session.clone(),
-                    active.identity.clone(),
-                    completion,
-                    ownership,
-                );
-                Ok(())
-            }
-            Err(error) => Err(error),
-        };
-        drop(admission_guard);
-        match resume {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                let resumed = format!(
-                    "Agent continuation could not resume after Service restart: {}",
-                    error.diagnostic_message()
-                );
-                self.terminate_recovered_turn(
-                    &session,
-                    active,
-                    error.error_code(),
-                    self.dead_owner_reason(&resumed),
-                    dispatch,
+            .coordinator
+            .read_session_execution_state(context)
+            .await?
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::ServiceUnavailable,
+                    "Worker execution state is unavailable.",
                 )
-                .await
-            }
+            })?;
+        let projected = self.canonical_active_turn(&session.id).await?;
+        if projected.as_ref().map(|turn| &turn.identity) != state.active_turn.as_ref() {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Product execution view is awaiting Worker facts.",
+            ));
         }
-    }
-
-    fn dead_owner_reason<'a>(&self, fallback: &'a str) -> &'a str {
-        if self.session_owner().is_some() {
-            "owner process exited"
-        } else {
-            fallback
+        if !self.execution.has_live_execution(&session.id) {
+            self.recover_worker_settlements(&session.id, dispatch)
+                .await?;
         }
-    }
-
-    async fn terminate_recovered_turn(
-        &self,
-        session: &talos_store::session::SessionRecord,
-        active: AgentActiveTurnRecord,
-        code: talos_error::ErrorCode,
-        message: &str,
-        dispatch: bool,
-    ) -> TalosResult<()> {
-        let outcome = self
-            .recover_terminal_turn(
-                session,
-                &active.identity,
-                talos_agent::AgentRunFailure::from(TalosError::new(code, message)),
-                dispatch,
-            )
-            .await?;
-        match outcome {
-            AgentInterruptOutcome::Cancelled | AgentInterruptOutcome::Completed => Ok(()),
-            AgentInterruptOutcome::CleanupUnconfirmed { task_count } => Err(TalosError::new(
-                talos_error::ErrorCode::RunCleanupUnconfirmed,
-                format!("Agent cleanup is unconfirmed for {task_count} task(s)"),
-            )),
-        }
+        Ok(())
     }
 
     async fn canonical_user_action_events(
@@ -371,11 +224,9 @@ impl TurnService {
         }
         let active = self.canonical_active_turn(&identity.session_id).await?;
         match active.filter(|active| active.identity == *identity) {
+            Some(active) if active.cancellation_requested => Ok(UserActionState::ExecutionUnknown),
             Some(active) if active.state == ActiveTurnState::Running => {
                 Ok(UserActionState::Resuming)
-            }
-            Some(active) if active.state == ActiveTurnState::Cancelling => {
-                Ok(UserActionState::ExecutionUnknown)
             }
             Some(_) => Ok(UserActionState::ResponseAccepted),
             None => Err(TalosError::internal(
@@ -423,46 +274,5 @@ fn validate_user_action_response(
     params: &UserActionParams,
     response: &UserActionResponse,
 ) -> TalosResult<()> {
-    match (params, response) {
-        (UserActionParams::DynamicToolResult(_), UserActionResponse::DynamicToolResult(_)) => {
-            Ok(())
-        }
-        (UserActionParams::Question(params), UserActionResponse::Question(answer)) => {
-            match answer {
-                QuestionAnswer::SelectedOption { option_id } => {
-                    if !params.options.iter().any(|option| option.id == *option_id) {
-                        return Err(TalosError::new(
-                            talos_error::ErrorCode::InvalidRequest,
-                            format!("question option `{option_id}` does not exist"),
-                        ));
-                    }
-                }
-                QuestionAnswer::FreeForm { text } => {
-                    if text.trim().is_empty() || text.len() > 4096 {
-                        return Err(TalosError::new(
-                            talos_error::ErrorCode::InvalidRequest,
-                            "question free-form answer must contain 1 to 4096 bytes",
-                        ));
-                    }
-                }
-            }
-            Ok(())
-        }
-        (
-            UserActionParams::SandboxApproval(params),
-            UserActionResponse::SandboxApproval(decision),
-        ) => {
-            if !params.available_decisions.contains(decision) {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    format!("sandbox approval decision `{decision:?}` is not available"),
-                ));
-            }
-            Ok(())
-        }
-        _ => Err(TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            "user action response variant does not match its parameters",
-        )),
-    }
+    params.validate_response(response)
 }

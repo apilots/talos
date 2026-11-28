@@ -39,6 +39,9 @@ pub(crate) struct MessageQueueReservation {
 }
 
 impl MessageQueueReservation {
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session_id
+    }
     pub(crate) fn source(&self) -> &talos_types::QueuedMessageSource {
         &self.source
     }
@@ -328,6 +331,25 @@ impl SessionMessageQueueService {
             self.publish_changed(&session_id, revision);
             Ok(self.snapshot(queue))
         })
+    }
+
+    /// Retire a queued row once the Worker source proves that exact message admitted.
+    pub(crate) fn acknowledge_admission(&self, session: &str, message_id: &str) -> TalosResult<()> {
+        self.with_queue(session, QueueAccess::Existing, |queue| {
+            if let Some(index) = queue
+                .messages
+                .iter()
+                .position(|message| message.id == message_id)
+            {
+                let revision = next_revision(queue.revision)?;
+                queue.messages.remove(index);
+                queue.busy_message_ids.remove(message_id);
+                queue.revision = revision;
+                self.publish_changed(session, revision);
+            }
+            Ok(())
+        })?;
+        Ok(())
     }
 
     pub(crate) fn is_reserved(&self, id: &str, session: &str) -> TalosResult<bool> {

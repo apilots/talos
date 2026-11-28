@@ -510,6 +510,11 @@ fn test_build_request_maps_reasoning_to_bailian_fields() {
 #[test]
 fn bailian_builds_documented_qwen_effort_and_output_limit() {
     for (model, effort, expected) in [
+        ("qwen4-max", Some(ReasoningEffort::Light), Some("low")),
+        ("qwen4-max", Some(ReasoningEffort::High), Some("high")),
+        ("qwen4-max", Some(ReasoningEffort::XHigh), Some("xhigh")),
+        ("qwen4-max", Some(ReasoningEffort::Max), Some("max")),
+        ("qwen4-max", None, Some("none")),
         (
             "qwen4-max-preview",
             Some(ReasoningEffort::High),
@@ -760,4 +765,13 @@ async fn bailian_decodes_its_cache_fields_in_json_and_sse() {
             assert_eq!(mapped, expected, "{wire_usage}");
         }
     }
+}
+
+#[test]
+fn legacy_budget_models_reject_maximum_effort() {
+    let mut request = ChatRequest::new_user("hello", "qwen3.7-plus");
+    request.reasoning_effort = Some(ReasoningEffort::Max);
+    assert!(BailianProvider::build_request(request, false)
+        .unwrap_err()
+        .is_code(ErrorCode::InvalidRequest));
 }

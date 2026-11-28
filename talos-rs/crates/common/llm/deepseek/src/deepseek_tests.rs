@@ -149,6 +149,7 @@ fn chat_maps_supported_efforts_and_omits_disabled_reasoning() {
         (ReasoningEffort::Light, "low"),
         (ReasoningEffort::Medium, "high"),
         (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Max, "max"),
     ] {
         let request = ChatRequest::builder()
             .model("deepseek-v4-pro")
@@ -193,11 +194,11 @@ fn chat_maps_xhigh_effort_to_max() {
 }
 
 #[test]
-fn messages_maps_effort_without_budget_tokens() {
+fn messages_maps_maximum_effort_without_budget_tokens() {
     let request = ChatRequest::builder()
         .model("deepseek-v4-pro")
         .message("hello")
-        .reasoning_effort(Some(ReasoningEffort::XHigh))
+        .reasoning_effort(Some(ReasoningEffort::Max))
         .build();
 
     let request = DeepSeekProvider::build_messages_request(request, None)

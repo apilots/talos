@@ -1,179 +1,25 @@
-//! Host composition over original Stores, authenticated SDKs and notifications.
-use std::{collections::HashMap, sync::Arc};
-
+//! Optional replication adapter over the existing host, protocol and Store capture.
+use super::application_host::{ApplicationHost, ApplicationStores};
+use std::sync::Arc;
 use talos_auth::RequestIdentity;
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_store::{
-    file::DatabaseFileStore, node::DatabaseAgentNodeStore, project::StorageProjectStore,
-    session::DatabaseSessionStore, sync::StoreSyncAdapter,
-};
+use talos_store::{session::DatabaseSessionStore, sync::StoreSyncAdapter};
 use talos_sync::{SyncBindParams, SyncHandle, SyncStartParams};
 
-pub(crate) struct ApplicationSyncStores {
-    pub storage: Arc<dyn talos_storage::Storage>,
-    pub sessions: Arc<DatabaseSessionStore>,
-    pub projects: Arc<StorageProjectStore>,
-    pub nodes: Arc<DatabaseAgentNodeStore>,
-    pub files: Arc<DatabaseFileStore>,
-    pub handles: tokio::sync::Mutex<HashMap<String, Arc<SyncHandle>>>,
-    pub observers: std::sync::Mutex<super::application_sync_observer::SyncObservers>,
-    pub credentials: std::sync::RwLock<HashMap<String, talos_sync_sdk::CredentialCallback>>,
-    pub connections: tokio::sync::Mutex<
-        HashMap<
-            String,
-            (
-                String,
-                std::sync::Weak<agent_client::AgentExecutionConnection>,
-            ),
-        >,
-    >,
-}
-
-pub(crate) struct ApplicationSyncHost {
-    pub self_weak: std::sync::Weak<Self>,
-    pub computer_directory: super::application_computer_directory::ComputerDirectory,
-    pub registration_retirement: tokio::sync::Mutex<()>,
-    pub config: talos_config::Config,
-    pub sync: Arc<talos_sync::TalosSync>,
-    pub sync_stores: Arc<ApplicationSyncStores>,
-    pub auth_service: Arc<dyn talos_auth::AuthService>,
-    pub service: Arc<talos_service::TalosService>,
-    pub coordinator: Arc<talos_coordinator::CoordinatorImpl>,
-    pub event_service: Arc<talos_service::TimelineEventService>,
-    pub data: crate::NodeSessionDataRpc,
-    pub images: crate::NodeToolImageRpc,
-    pub control: Arc<dyn talos_tools::AgentControl>,
-    pub automation: Arc<dyn talos_tools::AutomationControl>,
-    pub worker: talos_worker::TalosWorker,
-    pub worker_rpc: Arc<talos_worker::WorkerRpcHost>,
-    pub worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
-    pub worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
-    pub trusted_local_host: bool,
-    pub local_owner: std::sync::RwLock<Option<String>>,
-    pub tokens: std::sync::RwLock<
-        HashMap<
-            String,
-            Arc<std::sync::RwLock<super::application_sync_management::AccountCredential>>,
-        >,
-    >,
-    pub lifecycle: tokio::sync::Mutex<()>,
-    pub background: std::sync::Mutex<super::application_sync_background::RefreshTasks>,
-    pub failures: std::sync::RwLock<HashMap<String, talos_error::ApiError>>,
-}
-
-/// Closing an unpublished stream also stops its reader/resource tasks on cancellation.
-struct UnpublishedConnection {
-    connection: Arc<agent_client::AgentExecutionConnection>,
-    published: bool,
-}
-
-impl Drop for UnpublishedConnection {
-    fn drop(&mut self) {
-        if !self.published {
-            self.connection.close();
-        }
-    }
-}
-
-impl Drop for ApplicationSyncHost {
-    fn drop(&mut self) {
-        // Resource callbacks also retain the Stores. Break observer captures here
-        // even when the host is dropped without its asynchronous shutdown path.
-        self.sync_stores
-            .observers
-            .lock()
-            .expect("Sync observers lock")
-            .drain();
-    }
-}
-
 impl crate::TalosApplicationRuntime {
-    pub async fn shutdown_sync(&self) -> TalosResult<()> {
-        self.sync_host.shutdown().await
-    }
     pub async fn start_account_sync(
         &self,
         actor: &RequestIdentity,
         binding: SyncBindParams,
         credentials: talos_sync_sdk::CredentialCallback,
     ) -> TalosResult<Arc<SyncHandle>> {
-        self.sync_host
+        self.host
             .start_account_sync(actor, binding, credentials)
             .await
     }
-    pub async fn connect_computer(
-        &self,
-        actor: &RequestIdentity,
-        computer_id: &str,
-    ) -> TalosResult<()> {
-        self.sync_host.connect_computer(actor, computer_id).await
-    }
 }
 
-impl ApplicationSyncHost {
-    pub(crate) async fn shutdown(&self) -> TalosResult<()> {
-        self.shutdown_refreshes().await;
-        for account_id in self.sync_stores.handles.lock().await.keys() {
-            self.service.remove_sync_handle(account_id);
-        }
-        {
-            let mut connections = self.sync_stores.connections.lock().await;
-            self.tokens.write().expect("management tokens lock").clear();
-            let removed = connections.drain().collect::<Vec<_>>();
-            for (_, (_, connection)) in &removed {
-                if let Some(connection) = connection.upgrade() {
-                    connection.close();
-                }
-            }
-            for (computer, _) in removed {
-                self.coordinator.unregister_remote_node(&computer).await;
-            }
-        }
-        self.sync_stores.shutdown().await
-    }
-
-    fn coordinator_resource_handler(
-        &self,
-        computer_id: String,
-    ) -> Arc<dyn agent_client::AgentResourceRpcHandler> {
-        Arc::new(crate::agent_node_rpc::CoordinatorResources {
-            service: self.service.clone(),
-            computer_id,
-            data: self.data.clone(),
-            images: self.images.clone(),
-            control: self.control.clone(),
-            automation: self.automation.clone(),
-            files: self.service.files.clone(),
-            auth: self.auth_service.clone(),
-        })
-    }
-
-    pub(crate) async fn install_account_access(
-        &self,
-        actor: &RequestIdentity,
-        credentials: talos_sync_sdk::CredentialCallback,
-    ) -> TalosResult<()> {
-        self.sync_stores
-            .credentials
-            .write()
-            .expect("Sync credentials lock")
-            .insert(actor.user_id.clone(), credentials.clone());
-        Ok(())
-    }
-
-    pub(crate) fn install_peer_access(&self) {
-        let peer = Arc::new(super::application_sync_files::GatewayPeerAccess {
-            host: self.self_weak.clone(),
-            config: self.config.clone(),
-            stores: self.sync_stores.clone(),
-        });
-        self.service.files.set_peer_access(peer.clone());
-        if self.config.agent_node.control_plane.is_none() {
-            self.service.nodes.set_remote_management(peer.clone());
-        }
-        self.service.set_active_session_commands(peer);
-    }
-
+impl ApplicationHost {
     pub(crate) fn install_capture(
         &self,
         binding: talos_sync::SyncBinding,
@@ -188,7 +34,7 @@ impl ApplicationSyncHost {
                 .user_permission_mode,
         );
         let adapter = Arc::new(StoreSyncAdapter::new(
-            self.sync_stores.storage.clone(),
+            self.stores.storage.clone(),
             self.sync.clone(),
             binding,
             Arc::new(move |record| {
@@ -214,16 +60,16 @@ impl ApplicationSyncHost {
                     usage: record.usage.clone(),
                     project_id: record.project_id.clone(),
                     current_directory: record.current_directory.clone(),
+                    pinned: record.pinned,
                 })
             }),
         ));
-        self.sync_stores.sessions.install_sync(adapter.clone())?;
-        self.sync_stores.projects.install_sync(adapter.clone())?;
-        self.sync_stores.files.install_sync(adapter.clone())?;
+        self.stores.sessions.install_sync(adapter.clone())?;
+        self.stores.projects.install_sync(adapter.clone())?;
+        self.stores.files.install_sync(adapter.clone())?;
         adapter.start_capture();
         Ok(adapter)
     }
-
     /// Compose one account after original Auth verification. Anonymous history
     /// claiming and UI defaults belong to the product login flow, not this API.
     pub async fn start_account_sync(
@@ -272,7 +118,7 @@ impl ApplicationSyncHost {
         }
         self.verify_computer_aliases(&verified, &binding.computers)
             .await?;
-        let mut installed = self.sync_stores.handles.lock().await;
+        let mut installed = self.stores.handles.lock().await;
         if self.refreshes_closed() {
             return Err(TalosError::new(
                 ErrorCode::ServiceUnavailable,
@@ -286,9 +132,9 @@ impl ApplicationSyncHost {
             // Retain the retired scope until the replacement is fully installed.
             // A transient bind/install failure must remain discoverable for retry.
             let previous = handle.clone();
-            self.service.remove_sync_handle(&verified.user_id);
+
             let observer = self
-                .sync_stores
+                .stores
                 .observers
                 .lock()
                 .expect("Sync observers lock")
@@ -325,152 +171,11 @@ impl ApplicationSyncHost {
             },
         )?);
         adapter.attach_handle(Arc::downgrade(&handle));
-        self.service
-            .install_sync_handle(verified.user_id.clone(), handle.clone());
+
         self.observe_sync(&verified.user_id, &handle);
         installed.insert(verified.user_id, handle.clone());
         Ok(handle)
     }
-
-    /// Publish an owned remote Computer using G's authenticated SDK, including
-    /// when the local directory has not received the Computer through Sync.
-    pub async fn connect_computer(
-        &self,
-        actor: &RequestIdentity,
-        computer_id: &str,
-    ) -> TalosResult<()> {
-        let token = actor.access_token.as_deref().ok_or_else(|| {
-            TalosError::new(
-                ErrorCode::Unauthenticated,
-                "Computer access requires a signed-in account.",
-            )
-        })?;
-        let verified = self.auth_service.verify_access_token(token).await?;
-        if verified.auth_disabled || verified.user_id != actor.user_id {
-            return Err(TalosError::new(
-                ErrorCode::PermissionDenied,
-                "Computer account does not match.",
-            ));
-        }
-        let config = self.config.reload()?;
-        let local = config
-            .agent_node
-            .runner
-            .as_ref()
-            .is_some_and(|runner| runner.node_id == computer_id);
-        let generation = {
-            let connections = self.sync_stores.connections.lock().await;
-            if !self.account_connections_allowed(&actor.user_id) {
-                return Err(account_stopped());
-            }
-            if connections
-                .get(computer_id)
-                .filter(|(owner, _)| owner == &actor.user_id)
-                .and_then(|(_, connection)| connection.upgrade())
-                .is_some_and(|connection| !connection.is_closed())
-            {
-                return Ok(());
-            }
-            let existing = self
-                .tokens
-                .read()
-                .expect("management tokens lock")
-                .get(&actor.user_id)
-                .cloned();
-            match existing {
-                Some(credential) => credential,
-                None => self.account_credential(actor)?,
-            }
-        };
-        let gateway = self.gateway_client().await?;
-        let directory_started = std::time::Instant::now();
-        let remote = if local {
-            None
-        } else {
-            let node = gateway.get_node(token, computer_id).await?;
-            if node.node_id != computer_id
-                || node.mode != talos_types::NodeMode::Remote
-                || node.owner_user_id.as_deref() != Some(verified.user_id.as_str())
-            {
-                return Err(TalosError::authorization_denied());
-            }
-            Some(node)
-        };
-        let deployments = gateway.get_deployments(token, computer_id).await?;
-        let (connection, auth) = gateway
-            .connect_coordinator_with_resources(
-                token,
-                self.sync.peer_id(),
-                computer_id,
-                self.coordinator_resource_handler(computer_id.into()),
-            )
-            .await?;
-        let mut pending = UnpublishedConnection {
-            connection,
-            published: false,
-        };
-        let mut agents = Vec::new();
-        if !local {
-            for deployment in deployments {
-                let harness = agent_client::RemoteAgentClient::from_connection(
-                    pending.connection.clone(),
-                    deployment.agent_id.clone(),
-                    auth.clone(),
-                )
-                .with_coordinator_id(self.sync.peer_id().into())?;
-                agents.push((
-                    deployment.agent_id,
-                    Arc::new(harness) as Arc<dyn talos_agent::AgentHarness>,
-                ));
-            }
-        }
-        let mut connections = self.sync_stores.connections.lock().await;
-        if !self.account_connections_allowed(&actor.user_id)
-            || !self
-                .tokens
-                .read()
-                .expect("management tokens lock")
-                .get(&actor.user_id)
-                .is_some_and(|current| Arc::ptr_eq(current, &generation))
-        {
-            return Err(account_stopped());
-        }
-        if connections
-            .get(computer_id)
-            .filter(|(owner, _)| owner == &actor.user_id)
-            .and_then(|(_, connection)| connection.upgrade())
-            .is_some_and(|connection| !connection.is_closed())
-        {
-            return Ok(());
-        }
-        if let Some(node) = remote {
-            self.cache_server_computer(&actor.user_id, &node, directory_started)
-                .await?;
-            self.coordinator
-                .replace_remote_node(
-                    computer_id.into(),
-                    agents,
-                    Arc::new(agent_client::AgentEnvironmentClient::from_connection(
-                        pending.connection.clone(),
-                        auth,
-                    )),
-                )
-                .await?;
-        }
-        connections.insert(
-            computer_id.into(),
-            (actor.user_id.clone(), Arc::downgrade(&pending.connection)),
-        );
-        pending.published = true;
-        Ok(())
-    }
-}
-
-fn account_stopped() -> TalosError {
-    TalosError::new(
-        ErrorCode::Unauthenticated,
-        "Computer account is no longer active.",
-    )
 }
 
 /// Recover a bounded notification gap from the original durable projections.
@@ -485,6 +190,7 @@ pub(super) async fn publish_account_changes(
     loop {
         let records = sessions
             .list_session_records(&SessionQuery {
+                worker_execution_only: true,
                 user_id: Some(account_id.into()),
                 limit: Some(64),
                 offset: Some(offset),
@@ -502,7 +208,7 @@ pub(super) async fn publish_account_changes(
     }
 }
 
-impl ApplicationSyncStores {
+impl ApplicationStores {
     pub(crate) async fn remove_handle(&self, account_id: &str) -> Option<Arc<SyncHandle>> {
         let (handle, observer) = {
             let mut handles = self.handles.lock().await;
@@ -544,15 +250,6 @@ impl ApplicationSyncStores {
     }
 
     pub(crate) async fn shutdown(&self) -> TalosResult<()> {
-        for connection in self
-            .connections
-            .lock()
-            .await
-            .drain()
-            .filter_map(|(_, (_, connection))| connection.upgrade())
-        {
-            connection.close();
-        }
         self.credentials
             .write()
             .expect("Sync credentials lock")

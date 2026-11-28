@@ -28,7 +28,7 @@ talos-agent-api = { workspace = true }
 talos-types = { path = "../../../crates/common/types" }
 talos-error = { path = "../../../crates/infra/error" }
 talos-config = { path = "../../../crates/infra/config" }
-talos-service = { workspace = true }
+talos-service = { workspace = true, features = ["product"] }
 
 # Utils
 chrono = { version = "0.4", features = ["serde"] }

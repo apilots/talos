@@ -73,10 +73,33 @@ impl SessionPromptContextSource for KernelSessionPromptContextSource {
                         session_id: self.session_id.clone(),
                         window,
                         limit: turn_limit,
+                        message_limit: config.source_message_limit.unwrap_or(
+                            config
+                                .recent_messages_limit
+                                .saturating_add(config.recent_tool_results_limit)
+                                .saturating_add(
+                                    config.recent_tool_exchanges_limit.saturating_mul(2),
+                                )
+                                .max(1),
+                        ),
                     })
                     .await?
             };
             let mut context = build_context(&turns, &config);
+            if config.recent_window == SessionPromptRecentWindow::OldestUncovered
+                && turns.first().zip(context.source_turns.first()).is_some_and(
+                    |(window, source)| {
+                        !window.message_event_sequences.is_empty()
+                            && source.completed_event_seq <= window.read_after_event_seq
+                    },
+                )
+            {
+                return Err(talos_error::TalosError::new(
+                    talos_error::ErrorCode::ContextWindowExceeded,
+                    "One history message exceeds the configured prompt projection window.",
+                ));
+            }
+
             context.summaries = if config.include_summary {
                 self.artifacts
                     .load_summaries(
@@ -102,10 +125,14 @@ impl SessionPromptContextSource for KernelSessionPromptContextSource {
 }
 
 fn build_context(
-    turns: &[SessionHistoryTurn],
+    windows: &[talos_agent::SessionHistoryReadTurn],
     config: &SessionPromptContextConfig,
 ) -> SessionPromptContext {
-    let uncovered = |turn: &&SessionHistoryTurn| {
+    let turns = windows
+        .iter()
+        .map(|window| &window.turn)
+        .collect::<Vec<_>>();
+    let uncovered = |turn: &&&SessionHistoryTurn| {
         config.compact_cursor.is_none_or(|cursor| {
             u64::try_from(turn.completed_event_seq)
                 .is_ok_and(|sequence| sequence > cursor.covers_until_seq)
@@ -114,7 +141,7 @@ fn build_context(
     let mut recent_messages = turns
         .iter()
         .filter(uncovered)
-        .flat_map(messages_from_turn)
+        .flat_map(|turn| messages_from_turn(turn))
         .collect::<Vec<_>>();
     if config.compact_cursor.is_some()
         && config.recent_window == SessionPromptRecentWindow::Latest
@@ -124,7 +151,7 @@ fn build_context(
         let mut backfill = turns
             .iter()
             .filter(|turn| !uncovered(turn))
-            .flat_map(messages_from_turn)
+            .flat_map(|turn| messages_from_turn(turn))
             .collect::<Vec<_>>();
         if backfill.len() > missing {
             backfill = backfill.split_off(backfill.len() - missing);
@@ -158,22 +185,117 @@ fn build_context(
     );
     SessionPromptContext {
         summaries: Vec::new(),
-        source_turns: turns
-            .iter()
-            .map(|turn| SessionPromptSourceTurn {
-                turn_id: turn.identity.turn_id.clone(),
-                completed_event_seq: turn.completed_event_seq,
-                completed_at: turn.completed_at,
-            })
-            .collect(),
+        source_turns: projection_coverage(
+            windows,
+            config,
+            &recent_messages,
+            &recent_tool_results,
+            &recent_tool_exchanges,
+        ),
         recent_messages,
         recent_tool_results,
         recent_tool_exchanges,
     }
 }
 
+fn projection_coverage(
+    windows: &[talos_agent::SessionHistoryReadTurn],
+    config: &SessionPromptContextConfig,
+    messages: &[SessionPromptMessage],
+    results: &[SessionToolResultContext],
+    exchanges: &[SessionToolExchangeContext],
+) -> Vec<SessionPromptSourceTurn> {
+    let mut coverage = Vec::new();
+    for window in windows {
+        let mut until = window.read_after_event_seq;
+        let mut complete = true;
+        let all_exchanges = tool_exchanges_from_turn(&window.turn, config.tool_exchange_max_chars);
+        let mut facts = window.message_event_sequences.iter().collect::<Vec<_>>();
+        facts.sort_by_key(|(_, sequence)| *sequence);
+        for (message_id, sequence) in facts {
+            // Inspect the already bounded canonical message to verify that each
+            // enabled projection survived its independent configured window.
+            let Some(message) = turn_messages(&window.turn)
+                .iter()
+                .find(|message| &message.message_id == message_id)
+            else {
+                complete = false;
+                break;
+            };
+            let canonical = std::slice::from_ref(message);
+            let result_calls = canonical
+                .iter()
+                .flat_map(|message| &message.blocks)
+                .filter_map(|block| match &block.content {
+                    AgentMessageBlockContent::ToolResult(result) => Some(result.call_id.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let retained = (config.recent_messages_limit == 0
+                || messages_from_canonical(canonical, &window.turn)
+                    .iter()
+                    .all(|entry| {
+                        messages
+                            .iter()
+                            .any(|kept| kept.header.id == entry.header.id)
+                    }))
+                && (config.recent_tool_results_limit == 0
+                    || tool_results_from_canonical(
+                        canonical,
+                        &window.turn,
+                        config.tool_output_max_chars,
+                    )
+                    .iter()
+                    .all(|entry| results.iter().any(|kept| kept.header.id == entry.header.id)))
+                && (config.recent_tool_exchanges_limit == 0
+                    || tool_exchanges_from_canonical(
+                        canonical,
+                        &window.turn,
+                        config.tool_exchange_max_chars,
+                    )
+                    .iter()
+                    .all(|entry| {
+                        exchanges
+                            .iter()
+                            .any(|kept| kept.header.id == entry.header.id)
+                    }) && all_exchanges
+                        .iter()
+                        .filter(|entry| result_calls.contains(&entry.call_id.as_str()))
+                        .all(|entry| {
+                            exchanges
+                                .iter()
+                                .any(|kept| kept.header.id == entry.header.id)
+                        }));
+            if !retained {
+                complete = false;
+                break;
+            }
+            until = until.max(*sequence);
+        }
+        if complete {
+            until = window.covered_until_event_seq;
+        }
+        coverage.push(SessionPromptSourceTurn {
+            turn_id: window.turn.identity.turn_id.clone(),
+            completed_event_seq: until,
+            completed_at: window.turn.completed_at,
+        });
+        if !complete && config.recent_window == SessionPromptRecentWindow::OldestUncovered {
+            break;
+        }
+    }
+    coverage
+}
+
 fn messages_from_turn(turn: &SessionHistoryTurn) -> Vec<SessionPromptMessage> {
-    turn_messages(turn)
+    messages_from_canonical(turn_messages(turn), turn)
+}
+
+fn messages_from_canonical(
+    canonical: &[AgentMessage],
+    turn: &SessionHistoryTurn,
+) -> Vec<SessionPromptMessage> {
+    canonical
         .iter()
         .filter_map(|message| {
             let role = match message.role {
@@ -225,7 +347,15 @@ fn tool_results_from_turn(
     turn: &SessionHistoryTurn,
     max_chars: usize,
 ) -> Vec<SessionToolResultContext> {
-    turn_messages(turn)
+    tool_results_from_canonical(turn_messages(turn), turn, max_chars)
+}
+
+fn tool_results_from_canonical(
+    canonical: &[AgentMessage],
+    turn: &SessionHistoryTurn,
+    max_chars: usize,
+) -> Vec<SessionToolResultContext> {
+    canonical
         .iter()
         .flat_map(|message| &message.blocks)
         .filter_map(|block| match &block.content {
@@ -252,7 +382,15 @@ fn tool_exchanges_from_turn(
     turn: &SessionHistoryTurn,
     max_chars: usize,
 ) -> Vec<SessionToolExchangeContext> {
-    let results = turn_messages(turn)
+    tool_exchanges_from_canonical(turn_messages(turn), turn, max_chars)
+}
+
+fn tool_exchanges_from_canonical(
+    canonical: &[AgentMessage],
+    turn: &SessionHistoryTurn,
+    max_chars: usize,
+) -> Vec<SessionToolExchangeContext> {
+    let results = canonical
         .iter()
         .flat_map(|message| &message.blocks)
         .filter_map(|block| match &block.content {
@@ -263,7 +401,7 @@ fn tool_exchanges_from_turn(
             _ => None,
         })
         .collect::<HashMap<_, _>>();
-    turn_messages(turn)
+    canonical
         .iter()
         .flat_map(|message| &message.blocks)
         .filter_map(|block| match &block.content {
@@ -345,3 +483,7 @@ fn select_window<T>(mut values: Vec<T>, limit: usize, window: SessionPromptRecen
         }
     }
 }
+
+#[cfg(test)]
+#[path = "history_tests.rs"]
+mod tests;

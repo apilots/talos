@@ -123,11 +123,13 @@ it("opens the managed desktop through the authenticated Server SDK and keeps the
 
 it("prepares an attachment on its Server and uses the issued native grant for presentation and release", async () => {
   const { invoke, prepareCloud } = desktopAccount();
-  invoke.mockResolvedValueOnce({ status: "success", data: { session: { id: "managed-chat", sessionKind: "talo" } } });
+  const scope = connectionScope(useAppStore.getState().connection);
+  useAppStore.getState().selectComputer(scope, "talo");
+  productQueries.setQueryData(managedWorkerKey(scope), { instance: { nodeId: "talo", conversationSessionId: "managed-chat" } });
   const { files } = await getTalosClient({ sessionId: "managed-chat", readOnly: true });
   const source = { kind: "file", fileId: "cloud-file" } satisfies AppProtocol.FilePreviewSource;
   const descriptor = await files.preview.prepare({ source });
-  expect(prepareCloud).toHaveBeenCalledWith({ source }, { credential: { type: "existing_session_token", token: "alice-token" } });
+  expect(prepareCloud).toHaveBeenCalledWith({ source: { ...source, nodeId: "talo" } }, { credential: { type: "existing_session_token", token: "alice-token" } }, "talo");
   expect(files.preview.resourceUrl(descriptor)).toBe("talos-preview://server-preview/report.pdf");
   await files.preview.close({ previewId: descriptor.previewId });
   expect(invoke).toHaveBeenCalledWith("file/preview/close", { previewId: "server-preview" }, expect.anything());

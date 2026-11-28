@@ -1,7 +1,7 @@
+use super::product_scope::{ProductJson, ProductQuery};
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
-use axum::Json as BodyJson;
+use axum::extract::State;
 use talos_auth::RequestIdentity;
 use talos_types::{
     SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsReadResponse,
@@ -15,7 +15,7 @@ use super::state::HttpApiState;
 pub(super) async fn list_skills_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
-    Query(params): Query<SkillsListRequest>,
+    ProductQuery(params): ProductQuery<SkillsListRequest>,
 ) -> Result<JsonResponse<SkillsListResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let response = state
@@ -27,7 +27,7 @@ pub(super) async fn list_skills_handler(
 }
 
 pub(super) async fn refresh_skills_handler(
-    Query(params): Query<talos_types::SkillsRefreshRequest>,
+    ProductQuery(params): ProductQuery<talos_types::SkillsRefreshRequest>,
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
 ) -> Result<JsonResponse<SkillsListResponse>, ApiError> {
@@ -43,7 +43,7 @@ pub(super) async fn refresh_skills_handler(
 pub(super) async fn suggest_skills_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
-    Query(params): Query<SkillsSuggestRequest>,
+    ProductQuery(params): ProductQuery<SkillsSuggestRequest>,
 ) -> Result<JsonResponse<SkillsSuggestResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let response = state
@@ -57,7 +57,7 @@ pub(super) async fn suggest_skills_handler(
 pub(super) async fn read_skill_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
-    BodyJson(params): BodyJson<SkillsReadRequest>,
+    ProductJson(params): ProductJson<SkillsReadRequest>,
 ) -> Result<JsonResponse<SkillsReadResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let response = state
@@ -71,7 +71,7 @@ pub(super) async fn read_skill_handler(
 pub(super) async fn resolve_skills_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
-    BodyJson(params): BodyJson<SkillsResolveRequest>,
+    ProductJson(params): ProductJson<SkillsResolveRequest>,
 ) -> Result<JsonResponse<SkillsResolveResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let response = state

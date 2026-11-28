@@ -89,6 +89,7 @@ struct HarnessInner<P: AgentProvider> {
     agent_id: String,
     capabilities: AgentCapabilities,
     provider: P,
+    execution_store: Arc<talos_store::execution::WorkerExecutionStore>,
     accepting: AtomicBool,
     active: DashMap<String, ActiveOperation>,
     active_changed: Notify,
@@ -110,13 +111,18 @@ where
     P: AgentProvider,
 {
     /// Create one Harness host for an immutable Agent Definition binding.
-    pub(crate) fn new(agent_id: String, provider: P) -> Self {
+    pub(crate) fn new(
+        agent_id: String,
+        provider: P,
+        execution_store: Arc<talos_store::execution::WorkerExecutionStore>,
+    ) -> Self {
         let capabilities = provider.capabilities().clone();
         Self {
             inner: Arc::new(HarnessInner {
                 agent_id,
                 capabilities,
                 provider,
+                execution_store,
                 accepting: AtomicBool::new(true),
                 active: DashMap::new(),
                 active_changed: Notify::new(),
@@ -251,3 +257,7 @@ mod rpc_tests;
 #[cfg(test)]
 #[path = "rpc_connect_tests.rs"]
 mod rpc_connect_tests;
+
+#[cfg(test)]
+#[path = "local_execution_tests.rs"]
+mod local_execution_tests;

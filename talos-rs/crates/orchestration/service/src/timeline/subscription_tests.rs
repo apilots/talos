@@ -1,3 +1,4 @@
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,9 +7,7 @@ use talos_agent_api::{
     AgentStopReason, AgentTurnCompleted, AgentTurnRef, TimelineCursorStatus,
 };
 use talos_storage::SqliteStorage;
-use talos_store::session::{
-    AgentExecutionStore, CommitTerminalSettlementParams, DatabaseSessionStore,
-};
+use talos_store::session::{AgentExecutionStore, DatabaseSessionStore};
 
 use super::TimelineSubscriptionService;
 use crate::test_support::{commit_test_running_turn, run_test_migrations};
@@ -61,7 +60,9 @@ async fn live_subscription_recovers_a_notice_published_after_a_newer_agent_fact(
         .subscribe(TimelineSubscribeCommand {
             session_id: identity.session_id.clone(),
             turn_id: None,
-            after_event_id: Some(TimelineEventId::from_seq(commit.active_turn.last_event_seq)),
+            after_event_id: Some(TimelineEventId::from_seq(
+                commit.active_turn.as_ref().unwrap().last_event_seq,
+            )),
             replay_limit: 1,
             close_when_idle: false,
             close_on_terminal: false,
@@ -82,18 +83,18 @@ async fn live_subscription_recovers_a_notice_published_after_a_newer_agent_fact(
         .await
         .unwrap();
     let progress = store
-        .commit_progress_event(
-            AgentEvent {
-                identity,
-                sequence: commit.events.last().unwrap().sequence + 1,
-                occurred_at: 12,
-                payload: AgentEventPayload::MetricsUpdated(Default::default()),
-            },
-            commit.active_turn.last_event_seq,
-        )
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity,
+            sequence: commit.events.last().unwrap().sequence + 1,
+            occurred_at: 12,
+            payload: AgentEventPayload::MetricsUpdated(Default::default()),
+        }]))
         .await
         .unwrap();
-    let expected = vec![notice.event_seq, progress.active_turn.last_event_seq];
+    let expected = vec![
+        notice.event_seq,
+        progress.active_turn.as_ref().unwrap().last_event_seq,
+    ];
     events.publish_committed(progress.events);
     let mut received = Vec::new();
     for _ in 0..2 {
@@ -132,7 +133,8 @@ async fn replay_returns_canonical_events_and_an_active_turn_projection() {
     assert_eq!(active.identity, identity);
     assert_eq!(
         active.last_event_id,
-        TimelineEventId::from_seq(admission.active_turn.last_event_seq).to_string()
+        TimelineEventId::from_seq(admission.active_turn.as_ref().unwrap().last_event_seq)
+            .to_string()
     );
 }
 
@@ -188,24 +190,27 @@ async fn subscription_drains_sparse_turn_pages_before_live_handoff() {
     )
     .await;
     store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity: first_identity,
-                sequence: first_admission
-                    .events
-                    .last()
-                    .expect("first admission should persist events")
-                    .sequence
-                    + 1,
-                occurred_at: 11,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: first_admission.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity: first_identity,
+            sequence: first_admission
+                .events
+                .last()
+                .expect("first admission should persist events")
+                .sequence
+                + 1,
+            occurred_at: 11,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .expect("first Turn should complete");
 
     let second_identity = AgentTurnRef::new("session-1", "turn-2");
@@ -246,24 +251,27 @@ async fn subscription_drains_sparse_turn_pages_before_live_handoff() {
     }
 
     let terminal = store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity: second_identity.clone(),
-                sequence: second_admission
-                    .events
-                    .last()
-                    .expect("second admission should persist events")
-                    .sequence
-                    + 1,
-                occurred_at: 12,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: second_admission.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity: second_identity.clone(),
+            sequence: second_admission
+                .events
+                .last()
+                .expect("second admission should persist events")
+                .sequence
+                + 1,
+            occurred_at: 12,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .expect("second Turn should complete");
     let terminal_id = terminal.event_seq;
     events.publish_committed([terminal]);
@@ -303,24 +311,27 @@ async fn subscription_after_high_water_receives_one_terminal_then_closes() {
         .await
         .expect("subscription should open");
     let terminal = store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity,
-                sequence: admission
-                    .events
-                    .last()
-                    .expect("admission should persist events")
-                    .sequence
-                    + 1,
-                occurred_at: 11,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: admission.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity,
+            sequence: admission
+                .events
+                .last()
+                .expect("admission should persist events")
+                .sequence
+                + 1,
+            occurred_at: 11,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .expect("terminal event should commit");
     events.publish_committed([terminal]);
 
@@ -392,19 +403,22 @@ async fn completion_between_subscription_reads_delivers_terminal_before_idle_clo
     .expect("the first subscription read should complete");
 
     let terminal = store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity,
-                sequence: admission.events.last().unwrap().sequence + 1,
-                occurred_at: 11,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: admission.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity,
+            sequence: admission.events.last().unwrap().sequence + 1,
+            occurred_at: 11,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     let terminal_seq = terminal.event_seq;
     events.publish_committed([terminal]);
@@ -500,7 +514,9 @@ async fn automation_invalidation_is_session_scoped_and_does_not_consume_an_event
             TimelineSubscribeCommand {
                 session_id: "session-1".into(),
                 turn_id: None,
-                after_event_id: Some(TimelineEventId::from_seq(commit.active_turn.last_event_seq)),
+                after_event_id: Some(TimelineEventId::from_seq(
+                    commit.active_turn.as_ref().unwrap().last_event_seq,
+                )),
                 replay_limit: 10,
                 close_when_idle: false,
                 close_on_terminal: false,
@@ -528,19 +544,22 @@ async fn automation_invalidation_is_session_scoped_and_does_not_consume_an_event
         matches!(change, TimelineSubscriptionMessage::AutomationChanged(change) if change.session_id=="session-1")
     );
     let terminal = store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity,
-                sequence: commit.events.last().unwrap().sequence + 1,
-                occurred_at: 12,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: commit.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity,
+            sequence: commit.events.last().unwrap().sequence + 1,
+            occurred_at: 12,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     let next_seq = terminal.event_seq;
     events.publish_committed([terminal]);

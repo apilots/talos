@@ -49,13 +49,14 @@ use talos_types::{
     SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
     SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
     SessionGetResponse, SessionHistoryRequest, SessionListRequest, SessionListResponse,
-    SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
-    SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
-    SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest,
-    StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
-    UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    SessionPatchRequest, SessionRebuildViewRequest, SessionRebuildViewResponse,
+    SessionUpdateResponse, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
+    SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse,
+    SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest, StartTurnResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest, UserCurrentResponse,
+    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
+    WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -118,6 +119,8 @@ impl AppServerClientConfig {
 }
 
 pub struct AppServerClient {
+    product_http: Option<ProductHttpTransport>,
+    computer_id: Option<String>,
     ownership: AppServerOwnership,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
@@ -129,6 +132,36 @@ pub struct AppServerClient {
     notifications: mpsc::Receiver<TimelineEventNotification>,
     actor_credentials: Option<ActorCredentials>,
     use_cloud_session_cache: bool,
+}
+
+#[derive(Clone)]
+enum ProductHttpScope {
+    Computer(String),
+    SourcePeer(String),
+}
+
+#[derive(Clone)]
+struct ProductHttpTransport {
+    client: reqwest::Client,
+    origin: reqwest::Url,
+    scope: ProductHttpScope,
+    access_token: String,
+    tasks: Arc<std::sync::Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+}
+
+impl Drop for ProductHttpTransport {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.tasks) == 1 {
+            for task in self
+                .tasks
+                .lock()
+                .expect("Product subscription tasks lock")
+                .values()
+            {
+                task.abort();
+            }
+        }
+    }
 }
 
 struct SubscriptionStream {
@@ -189,6 +222,8 @@ impl AppServerClient {
             notifications_tx,
         );
         Ok(Self {
+            product_http: None,
+            computer_id: None,
             ownership: AppServerOwnership::OwnedChild,
             child: Some(child),
             stdin: Some(stdin),
@@ -283,6 +318,17 @@ impl AppServerClient {
     }
 
     pub(crate) async fn shutdown(&mut self) -> TalosResult<()> {
+        if let Some(http) = self.product_http.take() {
+            for task in http
+                .tasks
+                .lock()
+                .expect("Product subscription tasks lock")
+                .drain()
+                .map(|(_, task)| task)
+            {
+                task.abort();
+            }
+        }
         let stdin = self.stdin.take();
         let child = self.child.take();
 

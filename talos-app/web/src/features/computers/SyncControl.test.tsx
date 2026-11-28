@@ -13,6 +13,7 @@ import { setTalosClientFactory, resetTalosClientFactory, type TalosWebClient } f
 vi.mock("react-i18next", async (importOriginal) => ({ ...await importOriginal<typeof import("react-i18next")>(), useTranslation: () => ({ t: (key: string) => key }) }));
 const off = { connection: "disabled", configuredEnabled: false, pendingChanges: 2,
   lastAcknowledgedAt: null, lastError: null, localComputerId: "mine", canClaimLocalHistory: true };
+const capabilities = { read: vi.fn() };
 const sync = { status: vi.fn(), enable: vi.fn(), disable: vi.fn() };
 function show(metrics?: typeof topologyMetrics, metricsError?: unknown) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -20,8 +21,9 @@ function show(metrics?: typeof topologyMetrics, metricsError?: unknown) {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  capabilities.read.mockResolvedValue({ sync: true, relay: true });
   useAppStore.setState({ connection: { ...useAppStore.getInitialState().connection, authStatus: "authenticated", userId: "alice" } });
-  setTalosClientFactory(() => ({ sync } as unknown as TalosWebClient));
+  setTalosClientFactory(() => ({ sync, capabilities } as unknown as TalosWebClient));
 });
 afterEach(() => { cleanup(); resetTalosClientFactory(); });
 it("requires explicit consent to claim local history and preserves pending changes while sharing is off", async () => {
@@ -77,4 +79,14 @@ it("preserves a specific conflict when telemetry fails too", async () => {
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("syncConflict"));
   expect(screen.getAllByRole("alert")).toHaveLength(1);
   expect(screen.getByRole("alert")).toHaveTextContent("The stored Worker binding differs.");
+});
+
+it("disables sharing when this product has no Sync capability", async () => {
+  capabilities.read.mockResolvedValue({ sync:false, relay:true });
+  sync.status.mockResolvedValue(off);
+  show();
+  await screen.findByText("syncNotAvailable");
+  expect(screen.getByRole("switch")).toBeDisabled();
+  expect(screen.queryByRole("checkbox")).toBeNull();
+  expect(sync.enable).not.toHaveBeenCalled();
 });

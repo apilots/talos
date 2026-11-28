@@ -3,9 +3,6 @@ use std::sync::Arc;
 
 use crate::timeline::TimelineEventId;
 use crate::TimelineEventService;
-use talos_agent::{
-    AgentFuture, AgentResult, SessionHistoryReadParams, SessionHistoryReader, SessionHistoryWindow,
-};
 use talos_agent_api::{
     AgentEventPayload, AgentRunFailure, AgentRunOutput, AgentRunResult, SessionHistoryResponse,
     SessionHistoryTurn,
@@ -18,11 +15,11 @@ const DEFAULT_HISTORY_PAGE_SIZE: usize = 100;
 const MAX_HISTORY_PAGE_SIZE: usize = 1000;
 const HISTORY_CURSOR_PREFIX: &str = "history_";
 
-/// Service-owned canonical Session history reader.
+/// Product-owned Session history view for display and local historical reads.
 ///
 /// History is reduced only from durable Agent events. It does not merge Kernel
 /// artifacts, legacy Timeline items, or transport DTOs into a second history
-/// model.
+/// model. Provider context is read exclusively from the Worker's execution Store.
 #[derive(Clone)]
 pub struct SessionHistoryService {
     event_service: Arc<TimelineEventService>,
@@ -40,13 +37,6 @@ impl SessionHistoryService {
             .read_terminal_history_supplement(identity)
             .await
     }
-    pub async fn append_history_supplement(
-        &self,
-        value: talos_agent_api::trajectory::SessionHistorySupplement,
-    ) -> TalosResult<()> {
-        self.event_service.append_history_supplement(value).await
-    }
-
     pub(crate) async fn read_execution_payload(
         &self,
         identity: &talos_agent_api::AgentTurnRef,
@@ -171,72 +161,6 @@ impl SessionHistoryService {
         Ok(())
     }
 
-    async fn read_window(
-        &self,
-        params: SessionHistoryReadParams,
-    ) -> TalosResult<Vec<SessionHistoryTurn>> {
-        if params.limit == 0 {
-            return Ok(Vec::new());
-        }
-        for _ in 0..MAX_HISTORY_READ_ATTEMPTS {
-            let generation = self
-                .event_service
-                .history_generation(&params.session_id)
-                .await?;
-            let result = self.read_window_at_cut(params.clone()).await;
-            if generation
-                == self
-                    .event_service
-                    .history_generation(&params.session_id)
-                    .await?
-            {
-                return result;
-            }
-            if matches!(params.window, SessionHistoryWindow::OldestAfter { completed_event_seq } if completed_event_seq > 0)
-            {
-                return Err(invalid_history_cursor());
-            }
-        }
-        Err(history_changed())
-    }
-
-    async fn read_window_at_cut(
-        &self,
-        params: SessionHistoryReadParams,
-    ) -> TalosResult<Vec<SessionHistoryTurn>> {
-        let limit = params.limit.clamp(1, MAX_HISTORY_PAGE_SIZE);
-        let mut turns = match params.window {
-            SessionHistoryWindow::Latest => {
-                let terminals = self
-                    .event_service
-                    .list_latest_terminal_events(&params.session_id, None, limit)
-                    .await?;
-                let mut turns = Vec::with_capacity(terminals.len());
-                for terminal in terminals {
-                    turns.push(self.reduce_terminal(terminal).await?);
-                }
-                turns
-            }
-            SessionHistoryWindow::OldestAfter {
-                completed_event_seq,
-            } => self
-                .read_completed_after(&params.session_id, completed_event_seq, None, limit)
-                .await?
-                .into_iter()
-                .map(|(_, turn)| turn)
-                .collect(),
-        };
-        let high_water = self
-            .event_service
-            .latest_event_id(&params.session_id)
-            .await?
-            .map(|id| id.event_seq())
-            .transpose()?
-            .unwrap_or_default();
-        self.attach_notices(&mut turns, high_water).await?;
-        Ok(turns)
-    }
-
     async fn read_completed_after(
         &self,
         session_id: &str,
@@ -341,22 +265,6 @@ impl SessionHistoryService {
             completed_event_seq: terminal.event_seq,
             completed_at: event.occurred_at,
         })
-    }
-}
-
-impl SessionHistoryReader for SessionHistoryService {
-    fn append_supplement(
-        &self,
-        supplement: talos_agent_api::trajectory::SessionHistorySupplement,
-    ) -> AgentFuture<'_, AgentResult<()>> {
-        Box::pin(async move { self.append_history_supplement(supplement).await })
-    }
-
-    fn read(
-        &self,
-        params: SessionHistoryReadParams,
-    ) -> AgentFuture<'_, AgentResult<Vec<SessionHistoryTurn>>> {
-        Box::pin(async move { self.read_window(params).await })
     }
 }
 

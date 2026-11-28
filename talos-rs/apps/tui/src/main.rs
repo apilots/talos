@@ -56,7 +56,11 @@ async fn run(
     match mode {
         cli::TerminalMode::Tui => run_embedded_tui(log_guard, ownership).await,
         cli::TerminalMode::Command(command) => {
-            let mut client = create_embedded_client(log_guard, ownership).await?;
+            let mut client = if cli::product_only(&command) {
+                create_product_client(log_guard).await?
+            } else {
+                create_embedded_client(log_guard, ownership).await?
+            };
             ensure_authenticated(&mut client, CloudLoginClientKind::Cli, "Talos CLI").await?;
             cli::run_cli_with_client(command, client).await
         }
@@ -76,6 +80,18 @@ async fn create_embedded_client(
     *log_guard = Some(app_server.log_guard);
     let client = EmbeddedServerClient::from_runtime(app_server.runtime).await?;
     Ok(client)
+}
+
+async fn create_product_client(
+    log_guard: &mut Option<talos_logging::LogGuard>,
+) -> Result<EmbeddedServerClient, Box<dyn std::error::Error>> {
+    let options = talos_base::TalosServerOptions {
+        logging_stdout: Some(false),
+        ..Default::default()
+    };
+    let server = talos_base::run_embedded_product_server(Some(&options)).await?;
+    *log_guard = Some(server.log_guard);
+    Ok(EmbeddedServerClient::from_product_runtime(server.runtime).await?)
 }
 
 async fn run_embedded_tui(

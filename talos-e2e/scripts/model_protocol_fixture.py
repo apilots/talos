@@ -22,13 +22,13 @@ PROVIDERS.update({"response-fixture": ("responses", "protocol_default"),
                   "chat-progress-fixture": ("chat", "protocol_default"),
                   "chat-idle-fixture": ("chat", "protocol_default"),
                   "chat-total-fixture": ("chat", "protocol_default")})
-MARKER = re.compile(r"PROTOCOL_CASE=([a-z_-]+):(on|off|medium|high)")
+MARKER = re.compile(r"PROTOCOL_CASE=([a-z_-]+):(on|off|medium|high|xhigh|max)")
 
 
 def modes(provider):
     if provider in ("chat-idle-fixture", "chat-total-fixture"):
         return ("on",)
-    return ("medium", "high") if provider == "message-adaptive-fixture" else ("on", "off")
+    return ("xhigh", "max") if provider == "message-adaptive-fixture" else ("on", "off")
 
 
 def http(base, path):
@@ -51,6 +51,7 @@ def model(protocol, replay, *, adaptive=False):
                                   else {"type": "enabled", "budget_tokens": 2048})
     return {"id": MODEL, "name": "Opaque fixture model", "context_window": 131072,
         "reasoning": True, "reasoning_effort": "medium", "reasoning_replay": replay,
+        "reasoning_efforts": ["light", "medium", "high", "xhigh", "max"] if adaptive else None,
         "speed": "standard", "input": ["text"],
         "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
         "request_parameters": parameters}
@@ -253,8 +254,15 @@ def serve(directory):
                 if (directory / "gateway-url").exists():
                     base = (directory / "gateway-url").read_text()
                     session_id = (directory / "current-session").read_text()
-                    sessions = http(base, "/v1/sessions")["sessions"]
-                    session = next(row for row in sessions if row["id"] == session_id)
+                    # Worker execution can precede its product projection. Keep the
+                    # upstream response pending until visibility, within its 1s deadline.
+                    visible_until = time.monotonic() + 0.5
+                    while True:
+                        sessions = http(base, "/v1/sessions")["sessions"]
+                        session = next(row for row in sessions if row["id"] == session_id)
+                        if session["hasActiveTurn"] is True or time.monotonic() >= visible_until:
+                            break
+                        time.sleep(0.01)
                     assert session["hasActiveTurn"] is True, session
 
                 with lock:
@@ -361,7 +369,8 @@ def verify(base, directory):
     catalog = http(base, "/v1/models")["models"]
     adaptive_model = next(item for item in catalog if item["provider"] == "message-adaptive-fixture")
     assert adaptive_model["selection_capabilities"]["reasoning"] == "effort", adaptive_model
-    print("CASE messages_adaptive_effort PASS session=medium-to-high thinking=preserved tool_history=preserved")
+    assert "max" in adaptive_model["selection_capabilities"]["reasoning_efforts"], adaptive_model
+    print("CASE messages_adaptive_effort PASS session=xhigh-to-max thinking=preserved tool_history=preserved")
 
 
 
@@ -376,7 +385,7 @@ if __name__ == "__main__":
     elif action == "payload":
         provider, mode, workspace = arguments
         print(json.dumps({"input": {"content": [{"type": "text", "text": f"PROTOCOL_CASE={provider}:{mode}. Run the controlled Bash tool and return its result."}]},
-            "modelSelection": {"modelRef": {"provider": provider, "id": MODEL}, "reasoningEffort": None if mode == "off" else "high" if mode == "high" else "medium"},
+            "modelSelection": {"modelRef": {"provider": provider, "id": MODEL}, "reasoningEffort": None if mode == "off" else mode if mode in ("high", "xhigh", "max") else "medium"},
             "userPermissionMode": "fullAccess", "currentDirectory": workspace}))
     else:
         raise ValueError(f"Unknown action: {action}")

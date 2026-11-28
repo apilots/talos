@@ -4,13 +4,15 @@ use std::sync::Arc;
 use talos_agent_api::AgentEventPayload;
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{Row, Storage};
-use talos_types::{AgentPath, ContextUsage, SessionUsage, DEFAULT_SESSION_TITLE};
+use talos_types::{AgentPath, ContextUsage, DEFAULT_SESSION_TITLE};
 
 use super::{
     AccumulateSessionUsageParams, AgentExecutionStore, PatchSessionParams, SessionQuery,
-    SessionRecord, SessionRecordPatch, SessionSummary, SessionTreeIdentity, SessionTreeScope,
+    SessionRecord, SessionSummary, SessionTreeIdentity, SessionTreeScope,
 };
 
+mod dream;
+mod patch;
 mod record;
 mod sync_binding;
 
@@ -25,7 +27,44 @@ pub trait SessionStore: Send + Sync {
     }
     async fn insert_session_record(&self, record: &SessionRecord) -> TalosResult<()>;
 
+    /// Rejects legacy or imported history before any execution, wakeup, or memory work.
+    /// New products create a fresh Session rather than adopting old execution state.
+    async fn ensure_worker_execution_session(&self, session_id: &str) -> TalosResult<()>;
+
     async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>>;
+
+    /// Product consumption position for retained Worker Dream execution facts.
+    async fn dream_memory_cursor(
+        &self,
+        _session_id: &str,
+    ) -> TalosResult<Option<agent_protocol::DreamMemoryCursor>> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Dream Memory consumption is unavailable.",
+        ))
+    }
+
+    /// Qualify maintenance from already committed product source mappings before waking.
+    async fn has_pending_dream_memory(&self, _session_id: &str) -> TalosResult<bool> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Dream Memory eligibility is unavailable.",
+        ))
+    }
+
+    /// Advance only after idempotent Profile settlement has succeeded.
+    async fn advance_dream_memory_cursor(
+        &self,
+        _session_id: &str,
+        _expected: Option<&agent_protocol::DreamMemoryCursor>,
+        _next: &agent_protocol::DreamMemoryCursor,
+        _covers_until_seq: Option<u64>,
+    ) -> TalosResult<()> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Dream Memory consumption is unavailable.",
+        ))
+    }
 
     /// Canonical completed Agent sequence; no source DB cursor or execution claim.
     async fn get_history_cursor(
@@ -117,7 +156,7 @@ pub trait SessionStore: Send + Sync {
 
 pub struct DatabaseSessionStore {
     pub(crate) storage: Arc<dyn Storage>,
-    pub(crate) sync: Arc<crate::sync::StoreSyncBindings>,
+    pub(crate) sync: Arc<crate::capture::StoreCaptureBindings>,
 }
 
 impl DatabaseSessionStore {
@@ -153,6 +192,27 @@ impl DatabaseSessionStore {
 
 #[async_trait]
 impl SessionStore for DatabaseSessionStore {
+    async fn dream_memory_cursor(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<agent_protocol::DreamMemoryCursor>> {
+        dream::read_cursor(self, session_id).await
+    }
+
+    async fn has_pending_dream_memory(&self, session_id: &str) -> TalosResult<bool> {
+        dream::has_pending(self, session_id).await
+    }
+
+    async fn advance_dream_memory_cursor(
+        &self,
+        session_id: &str,
+        expected: Option<&agent_protocol::DreamMemoryCursor>,
+        next: &agent_protocol::DreamMemoryCursor,
+        covers_until_seq: Option<u64>,
+    ) -> TalosResult<()> {
+        dream::advance_cursor(self, session_id, expected, next, covers_until_seq).await
+    }
+
     async fn claim_local_history(&self, user_id: &str) -> TalosResult<()> {
         DatabaseSessionStore::claim_local_history(self, user_id).await
     }
@@ -161,17 +221,25 @@ impl SessionStore for DatabaseSessionStore {
         &self,
         session_id: &str,
     ) -> TalosResult<Option<talos_types::SessionInfo>> {
-        let mut tx = self.storage.begin_read_transaction().await?;
-        let Some(adapter) = self.sync.session(&mut *tx, session_id).await? else {
+        #[cfg(not(feature = "sync"))]
+        {
+            let _ = session_id;
+            Ok(None)
+        }
+        #[cfg(feature = "sync")]
+        {
+            let mut tx = self.storage.begin_read_transaction().await?;
+            let Some(adapter) = self.sync.session(&mut *tx, session_id).await? else {
+                tx.commit().await?;
+                return Ok(None);
+            };
+            let snapshot = adapter
+                .sync
+                .session_snapshot(&mut *tx, &adapter.binding, session_id)
+                .await?;
             tx.commit().await?;
-            return Ok(None);
-        };
-        let snapshot = adapter
-            .sync
-            .session_snapshot(&mut *tx, &adapter.binding, session_id)
-            .await?;
-        tx.commit().await?;
-        Ok(snapshot.map(|s| s.session))
+            Ok(snapshot.map(|s| s.session))
+        }
     }
     async fn get_history_cursor(
         &self,
@@ -223,11 +291,39 @@ impl SessionStore for DatabaseSessionStore {
     ) -> TalosResult<bool> {
         let mut transaction = self.begin_session_transaction(&identity.session_id).await?;
         let affected = transaction.execute(
-            "UPDATE sessions SET title = ? WHERE session_key = ? AND title = ? AND EXISTS (SELECT 1 FROM agent_active_turns WHERE session_id = ? AND turn_id = ? AND state = 'running')",
+            "UPDATE sessions SET title = ? WHERE session_key = ? AND title = ? AND EXISTS (SELECT 1 FROM visible_agent_events WHERE session_id = ? AND turn_id = ? AND sequence IS NOT NULL AND json_extract(payload_json, '$.type') = 'turnCompleted')",
             &[title, &identity.session_id, DEFAULT_SESSION_TITLE, &identity.session_id, &identity.turn_id],
         ).await?;
         transaction.commit().await?;
         Ok(affected > 0)
+    }
+
+    async fn ensure_worker_execution_session(&self, session_id: &str) -> TalosResult<()> {
+        let rows = self
+            .storage
+            .query(
+                "SELECT execution_architecture FROM sessions WHERE session_key = ?",
+                &[session_id],
+            )
+            .await?;
+        match rows
+            .first()
+            .and_then(|row| row.get_string("execution_architecture"))
+            .as_deref()
+        {
+            Some("worker") => Ok(()),
+            Some("legacy_read_only" | "replica_read_only") => Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "This Session is read-only history. Create a new Session to run an Agent.",
+            )),
+            None => Err(TalosError::new(
+                talos_error::ErrorCode::ResourceNotFound,
+                "Session not found.",
+            )),
+            Some(_) => Err(TalosError::internal(
+                "Session has an invalid execution architecture.",
+            )),
+        }
     }
 
     async fn insert_session_record(&self, record: &SessionRecord) -> TalosResult<()> {
@@ -247,6 +343,7 @@ impl SessionStore for DatabaseSessionStore {
             };
         let row = Row::new(
             vec![
+                "execution_architecture".to_string(),
                 "session_key".to_string(),
                 "session_kind".to_string(),
                 "user_id".to_string(),
@@ -273,8 +370,10 @@ impl SessionStore for DatabaseSessionStore {
                 "project_id".to_string(),
                 "current_directory".to_string(),
                 "worktree_binding_json".to_string(),
+                "pinned".to_string(),
             ],
             vec![
+                Value::String("worker".to_owned()),
                 Value::String(record.id.clone()),
                 Value::String(record.session_kind.as_str().to_owned()),
                 Value::String(record.user_id.clone()),
@@ -327,6 +426,7 @@ impl SessionStore for DatabaseSessionStore {
                     .transpose()?
                     .map(Value::String)
                     .unwrap_or(Value::Null),
+                Value::Number(serde_json::Number::from(i64::from(record.pinned))),
             ],
         );
         let mut transaction = self.begin_session_transaction(&record.id).await?;
@@ -382,7 +482,7 @@ impl SessionStore for DatabaseSessionStore {
         let rows = self
             .storage
             .query(
-                "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
+                "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json, pinned FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
                 &[tree_root_session_id, agent_path.as_str()],
             )
             .await?;
@@ -390,10 +490,13 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let mut sql = "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json FROM sessions".to_string();
+        let mut sql = "SELECT session_key, session_kind, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory, worktree_binding_json, pinned FROM sessions".to_string();
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);
+        if query.worker_execution_only {
+            clauses.push("execution_architecture = 'worker'");
+        }
         if let Some(node_id) = query.execution_node_id.as_deref() {
             clauses.push("execution_node_id = ?");
             params.push(node_id.to_string());
@@ -473,6 +576,9 @@ impl SessionStore for DatabaseSessionStore {
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);
+        if query.worker_execution_only {
+            clauses.push("execution_architecture = 'worker'");
+        }
         if let Some(node_id) = query.execution_node_id.as_deref() {
             clauses.push("execution_node_id = ?");
             params.push(node_id.to_string());
@@ -565,53 +671,7 @@ impl SessionStore for DatabaseSessionStore {
         &self,
         params: PatchSessionParams,
     ) -> TalosResult<Option<SessionRecord>> {
-        let mut transaction = self
-            .begin_session_transaction(params.session_id.as_str())
-            .await?;
-        let active = transaction
-            .query(
-                "SELECT 1 AS active FROM agent_active_turns WHERE session_id = ? LIMIT 1",
-                &[params.session_id.as_str()],
-            )
-            .await?;
-        if !active.is_empty() {
-            transaction.rollback().await?;
-            return Err(TalosError::new(
-                talos_error::ErrorCode::ActiveTurnRunning,
-                format!("session `{}` already has an active turn", params.session_id),
-            ));
-        }
-
-        let last_activity = params.last_activity.to_string();
-        let affected = match params.change {
-            SessionRecordPatch::Settings {
-                conf,
-                current_directory,
-            } => {
-                let conf_json = Self::build_conf_json(&conf)?;
-                let directory = current_directory.map(|path| path.display().to_string());
-                transaction.execute(
-                    "UPDATE sessions SET conf_json = ?, current_directory = NULLIF(?, ''), last_activity = ? WHERE session_key = ?",
-                    &[&conf_json, directory.as_deref().unwrap_or_default(), &last_activity, &params.session_id],
-                ).await?
-            }
-            SessionRecordPatch::Worktree(binding) => {
-                let binding = Self::serialize_worktree_binding(&binding)?;
-                transaction.execute(
-                    "UPDATE sessions SET worktree_binding_json = ?, last_activity = ? WHERE session_key = ?",
-                    &[&binding, &last_activity, &params.session_id],
-                ).await?
-            }
-        };
-        if affected == 0 {
-            transaction.rollback().await?;
-            return Ok(None);
-        }
-        let record =
-            Self::fetch_session_in_transaction(transaction.as_mut(), params.session_id.as_str())
-                .await?;
-        transaction.commit().await?;
-        Ok(record)
+        self.patch_session_record(params).await
     }
 
     async fn accumulate_session_usage(
@@ -647,80 +707,8 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn clear_session_history(&self, session_id: &str, cleared_at: u64) -> TalosResult<bool> {
-        let mut transaction = self.begin_session_transaction(session_id).await?;
-        let active = transaction
-            .query(
-                "SELECT 1 AS active FROM agent_active_turns WHERE session_id = ? LIMIT 1",
-                &[session_id],
-            )
-            .await?;
-        if !active.is_empty() {
-            transaction.rollback().await?;
-            return Err(TalosError::new(
-                talos_error::ErrorCode::ActiveTurnRunning,
-                "cannot clear a Session with an active Agent Turn",
-            ));
-        }
-
-        transaction
-            .execute(
-                "DELETE FROM agent_continuation_bindings WHERE session_id = ?",
-                &[session_id],
-            )
-            .await?;
-        transaction
-            .execute(
-                "DELETE FROM agent_command_idempotency WHERE session_id = ?",
-                &[session_id],
-            )
-            .await?;
-        if self.sync.is_empty() {
-            transaction
-                .execute(
-                    "DELETE FROM agent_events WHERE session_id = ?",
-                    &[session_id],
-                )
-                .await?;
-            transaction
-                .execute(
-                    "DELETE FROM session_command_revisions WHERE session_id = ?",
-                    &[session_id],
-                )
-                .await?;
-        } else {
-            crate::sync::source::retire_history(
-                &mut *transaction,
-                session_id,
-                /*deleted*/ false,
-            )
-            .await?;
-        }
-        let usage_json = Self::build_usage_json(&SessionUsage::default())?;
-        let cleared_at = cleared_at.to_string();
-        let affected = transaction
-            .execute(
-                r#"
-                UPDATE sessions
-                SET title = ?, last_activity = ?, message_count = 0,
-                    latest_turn_seq = 0, memory_processed_until_event_seq = 0,
-                    history_generation = history_generation + 1,
-                    usage_json = ?
-                WHERE session_key = ?
-                "#,
-                &[
-                    DEFAULT_SESSION_TITLE,
-                    cleared_at.as_str(),
-                    usage_json.as_str(),
-                    session_id,
-                ],
-            )
-            .await?;
-        if affected == 0 {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-        transaction.commit().await?;
-        Ok(true)
+        self.clear_session_history_record(session_id, cleared_at)
+            .await
     }
 
     async fn update_context_usage(
@@ -810,9 +798,8 @@ impl SessionStore for DatabaseSessionStore {
 
     async fn delete_session_record(&self, session_id: &str) -> TalosResult<bool> {
         let mut transaction = self.begin_session_transaction(session_id).await?;
-        if !self.sync.is_empty() {
-            crate::sync::source::retain_deleted_events(&mut *transaction, &[session_id]).await?;
-        }
+        super::worker_projection::ensure_settled(&mut *transaction, &[session_id]).await?;
+        crate::capture::source::retain_deleted_events(&mut *transaction, &[session_id]).await?;
         let affected = transaction
             .execute("DELETE FROM sessions WHERE session_key = ?", &[session_id])
             .await?;
@@ -827,16 +814,22 @@ impl SessionStore for DatabaseSessionStore {
             .iter()
             .map(|row| row.get_string("session_key").expect("persisted Session ID"))
             .collect();
-        let mut transaction =
-            crate::sync::source::transaction(transaction, self.sync.clone(), session_ids.clone())
-                .await?;
-        if !self.sync.is_empty() {
-            crate::sync::source::retain_deleted_events(
-                &mut *transaction,
-                &session_ids.iter().map(String::as_str).collect::<Vec<_>>(),
-            )
-            .await?;
-        }
+        let mut transaction = crate::capture::source::transaction(
+            transaction,
+            self.sync.clone(),
+            session_ids.clone(),
+        )
+        .await?;
+        super::worker_projection::ensure_settled(
+            &mut *transaction,
+            &session_ids.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+        .await?;
+        crate::capture::source::retain_deleted_events(
+            &mut *transaction,
+            &session_ids.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+        .await?;
         let affected = transaction
             .execute(
                 "DELETE FROM sessions WHERE session_key = ? OR tree_root_session_id = ?",

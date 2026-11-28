@@ -62,8 +62,8 @@ export async function listSessions(nodeId?: string) {
   return response.sessions;
 }
 
-export async function getSession(sessionId: string) {
-  return getTalosClient().sessions.get({ sessionId });
+export async function getSession(sessionId: string, computerId?: string) {
+  return (await getTalosClient(computerId ? { nodeId: computerId, readOnly: true } : { sessionId, readOnly: true })).sessions.get({ sessionId });
 }
 
 export function generateSessionId() {
@@ -180,6 +180,17 @@ export async function updateSessionPermissionMode(
   return response.session;
 }
 
+export async function updateSessionPinned(sessionId: string, pinned: boolean) {
+  const request: SessionPatchRequest = {
+    sessionId,
+    conf: null,
+    currentDirectory: null,
+    pinned,
+  };
+  const response = await (await getTalosClient({ sessionId })).sessions.patch(request);
+  return response.session;
+}
+
 export async function submitTurnInput(
   request: SubmitTurnInputRequest,
 ): Promise<SubmitTurnInputResponse> {
@@ -206,12 +217,12 @@ export async function clearSession(sessionId: string) {
   return response.session;
 }
 
-export async function getActiveTurn(sessionId: string) {
-  return (await getTalosClient({ sessionId, readOnly: true })).sessions.activeTurn({ sessionId });
+export async function getActiveTurn(sessionId: string, computerId?: string) {
+  return (await getTalosClient(computerId ? { nodeId: computerId, readOnly: true } : { sessionId, readOnly: true })).sessions.activeTurn({ sessionId });
 }
 
-export async function getSessionHistory(sessionId: string) {
-  const client = await getTalosClient({ sessionId, readOnly: true });
+export async function getSessionHistory(sessionId: string, computerId?: string) {
+  const client = await getTalosClient(computerId ? { nodeId: computerId, readOnly: true } : { sessionId, readOnly: true });
   const history = await client.sessions.history({ sessionId, cursor: null, limit: null });
   while (history.nextCursor) {
     const page = await client.sessions.history({ sessionId, cursor: history.nextCursor, limit: null });

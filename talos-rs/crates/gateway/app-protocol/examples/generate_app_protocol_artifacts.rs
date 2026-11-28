@@ -23,6 +23,11 @@ fn main() {
     )
     .expect("automation typescript fixture should be written");
     fs::write(
+        ts_path.with_file_name("browser.ts"),
+        talos_app_protocol::schema::generate_browser_typescript(),
+    )
+    .expect("browser typescript fixture should be written");
+    fs::write(
         ts_path.with_file_name("desktop.ts"),
         talos_app_protocol::schema::generate_desktop_typescript(),
     )
@@ -32,6 +37,11 @@ fn main() {
         talos_app_protocol::schema::generate_worker_runtime_typescript(),
     )
     .expect("worker runtime typescript fixture should be written");
+    fs::write(
+        ts_path.with_file_name("file-preview.ts"),
+        talos_app_protocol::schema::generate_file_preview_typescript(),
+    )
+    .expect("file preview typescript fixture should be written");
     fs::write(ts_path, talos_app_protocol::schema::generate_typescript())
         .expect("typescript fixture should be written");
 }

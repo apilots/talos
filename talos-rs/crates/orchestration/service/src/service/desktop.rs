@@ -48,6 +48,9 @@ impl TalosService {
         actor: &Actor,
         request: DesktopOpenRequest,
     ) -> TalosResult<DesktopViewGrant> {
+        if actor.auth_disabled && request.node_id != "embedded" {
+            return Err(denied());
+        }
         let node_id = self
             .connect_selected_computer(actor, &request.node_id)
             .await?;
@@ -55,15 +58,9 @@ impl TalosService {
             return Err(denied());
         }
         let _admission = self.nodes.acquire_managed_worker(actor, &node_id).await?;
-        let environment = self.access.worker_environment(actor, &node_id).await?;
+        let environment = self.access.desktop_environment(actor, &node_id).await?;
         let snapshot = environment
-            .browser(
-                actor.worker_environment_context(),
-                BrowserRequest {
-                    node_id: None,
-                    operation: BrowserOperation::Read,
-                },
-            )
+            .snapshot(crate::access::worker_environment_context(actor))
             .await?;
         if let BrowserDisplayCapability::Unavailable { reason } = snapshot.display {
             return Err(TalosError::localized(
@@ -98,8 +95,8 @@ impl TalosService {
             .await?;
         let result = async {
             environment
-                .desktop_open(
-                    actor.worker_environment_context(),
+                .open(
+                    crate::access::worker_environment_context(actor),
                     WorkerDesktopOpen {
                         binding: binding.clone(),
                         nonce: reservation.nonce,
@@ -184,15 +181,12 @@ impl TalosService {
         {
             return Err(denied());
         }
-        let environment = self.worker_environment(actor, Some(&route.node_id)).await?;
+        let environment = self
+            .access
+            .desktop_environment(actor, &route.node_id)
+            .await?;
         let snapshot = environment
-            .browser(
-                actor.worker_environment_context(),
-                BrowserRequest {
-                    node_id: None,
-                    operation: BrowserOperation::Read,
-                },
-            )
+            .snapshot(crate::access::worker_environment_context(actor))
             .await?;
         if !snapshot.enabled
             || snapshot.control.generation != route.binding.generation

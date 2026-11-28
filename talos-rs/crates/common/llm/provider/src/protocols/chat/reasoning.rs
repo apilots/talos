@@ -1,7 +1,7 @@
 use super::{
     ChatCompletionReasoningDetail, ChatCompletionResponseMessage, ChatReasoningContinuationFormat,
 };
-use crate::{ReasoningBlock, ReasoningContinuation, ReasoningOutput};
+use crate::{ReasoningBlock, ReasoningContinuation, ReasoningEffort, ReasoningOutput};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
 type ChatReasoningFields = (
@@ -133,4 +133,15 @@ pub(super) fn response_reasoning(message: &ChatCompletionResponseMessage) -> Rea
         },
         None => ReasoningOutput::default(),
     }
+}
+
+pub fn reasoning_effort(effort: ReasoningEffort) -> String {
+    match effort {
+        ReasoningEffort::Light => "low",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
+        ReasoningEffort::XHigh => "xhigh",
+        ReasoningEffort::Max => "max",
+    }
+    .to_string()
 }

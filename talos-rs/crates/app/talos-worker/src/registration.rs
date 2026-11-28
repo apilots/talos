@@ -1,4 +1,4 @@
-use crate::standalone::{read_credential, RemoteMemoryProgress};
+use crate::standalone::read_credential;
 use crate::{TalosWorker, TalosWorkerResources, WorkerRpcHost};
 use agent_client::{
     AgentHarnessRpcAdapter, AgentNodeClient, AgentNodeRunner, AgentSessionDataClient, AgentTlsTrust,
@@ -16,6 +16,7 @@ pub struct RegisteredWorker {
     shutdown: CancellationToken,
     runner: Option<tokio::task::JoinHandle<TalosResult<()>>>,
     adapter: AgentHarnessRpcAdapter,
+    lease_updates: tokio::sync::watch::Receiver<Option<agent_client::AgentNodeLeaseUpdate>>,
 }
 
 impl RegisteredWorker {
@@ -33,9 +34,16 @@ impl RegisteredWorker {
         let runner = config.agent_node.runner.clone().ok_or_else(|| {
             TalosError::new(ErrorCode::InvalidRequest, "Worker identity is missing")
         })?;
-        let (worker, adapter, node) = prepare_registered_worker(config, &runner).await?;
+        let (worker, adapter, node, lease_updates) =
+            prepare_registered_worker(config, &runner).await?;
         worker.activate_mcp()?;
-        Ok(Self::spawn(Some(worker), adapter, node, on_failure))
+        Ok(Self::spawn(
+            Some(worker),
+            adapter,
+            node,
+            lease_updates,
+            on_failure,
+        ))
     }
 
     /// Verify the protected local credential at its control plane without
@@ -75,8 +83,10 @@ impl RegisteredWorker {
         worker: &TalosWorker,
         rpc: Arc<WorkerRpcHost>,
         runner: &AgentNodeRunnerConfig,
+        product_owner: talos_types::NodeProductOwner,
         on_failure: Option<Arc<dyn Fn(TalosError) + Send + Sync>>,
     ) -> TalosResult<Self> {
+        worker.ensure_execution_host(&rpc)?;
         let config = worker
             .config()
             .read()
@@ -95,7 +105,7 @@ impl RegisteredWorker {
         )
         .await?;
         worker.use_remote_resource_rpc(resources.clone());
-        let observer = lease_observer(
+        let (observer, lease_updates) = lease_observer(
             adapter.clone(),
             Some(resources),
             &config,
@@ -107,15 +117,17 @@ impl RegisteredWorker {
             credential,
             worker.deployments(),
         )
+        .with_product_owner(product_owner)
         .with_system_info(worker.system_info().clone())
         .with_lease_observer(observer);
-        Ok(Self::spawn(None, adapter, node, on_failure))
+        Ok(Self::spawn(None, adapter, node, lease_updates, on_failure))
     }
 
     fn spawn(
         owned_worker: Option<TalosWorker>,
         adapter: AgentHarnessRpcAdapter,
         node: AgentNodeRunner,
+        lease_updates: tokio::sync::watch::Receiver<Option<agent_client::AgentNodeLeaseUpdate>>,
         on_failure: Option<Arc<dyn Fn(TalosError) + Send + Sync>>,
     ) -> Self {
         let node = node.with_execution_adapter(adapter.clone());
@@ -131,10 +143,19 @@ impl RegisteredWorker {
         });
         Self {
             owned_worker,
+            lease_updates,
             shutdown,
             runner: Some(task),
             adapter,
         }
+    }
+
+    /// Internal host signal for the existing authenticated registration lease.
+    /// It is never logged, serialized, or published as product data.
+    pub fn lease_updates(
+        &self,
+    ) -> tokio::sync::watch::Receiver<Option<agent_client::AgentNodeLeaseUpdate>> {
+        self.lease_updates.clone()
     }
 
     /// Observe a runner failure while an independent host waits for process shutdown.
@@ -211,7 +232,12 @@ impl Drop for RegisteredWorker {
 pub(crate) async fn prepare_registered_worker(
     config: Config,
     runner: &AgentNodeRunnerConfig,
-) -> TalosResult<(TalosWorker, AgentHarnessRpcAdapter, AgentNodeRunner)> {
+) -> TalosResult<(
+    TalosWorker,
+    AgentHarnessRpcAdapter,
+    AgentNodeRunner,
+    tokio::sync::watch::Receiver<Option<agent_client::AgentNodeLeaseUpdate>>,
+)> {
     let credential = read_credential(&runner.credential_file, &config.talos_paths().conf_dir)?;
     let node_client = registration_client(&config, runner).await?;
     let trust = registration_trust(runner)?;
@@ -228,8 +254,6 @@ pub(crate) async fn prepare_registered_worker(
     let worker = TalosWorker::build_with_browser_host(
         config.clone(),
         TalosWorkerResources {
-            session_history_reader: shared_resources.clone(),
-            memory_progress_store: Arc::new(RemoteMemoryProgress(resources.clone())),
             attachment_reader: shared_resources.clone(),
             tool_image_store: shared_resources.clone(),
             agent_control: Some(shared_resources.clone()),
@@ -284,7 +308,14 @@ pub(crate) async fn prepare_registered_worker(
             talos_logging::report_error(&error);
         }
     }));
-    let observer = lease_observer(
+    let (host, _) = worker.execution_host(
+        &runner.node_id,
+        talos_error::SessionOwnerKind::Server,
+        talos_agent::SessionHold::Turn,
+        || adapter,
+    )?;
+    let adapter = host.adapter();
+    let (observer, lease_updates) = lease_observer(
         adapter.clone(),
         Some(resources),
         &config,
@@ -296,9 +327,10 @@ pub(crate) async fn prepare_registered_worker(
         credential,
         worker.deployments(),
     )
+    .with_product_owner(talos_types::NodeProductOwner::Server)
     .with_system_info(worker.system_info().clone())
     .with_lease_observer(observer);
-    Ok((worker, adapter, node))
+    Ok((worker, adapter, node, lease_updates))
 }
 
 async fn registration_client(
@@ -343,16 +375,22 @@ fn lease_observer(
     resources: Option<AgentSessionDataClient>,
     config: &Config,
     credential: String,
-) -> agent_client::AgentNodeLeaseObserver {
+) -> (
+    agent_client::AgentNodeLeaseObserver,
+    tokio::sync::watch::Receiver<Option<agent_client::AgentNodeLeaseUpdate>>,
+) {
     // Only the managed home can provision identities or own this recovery state.
     let paths = config.talos_paths();
     let store = (config.source_path() == paths.config_file)
         .then(|| YamlConfigStore::with_env_path(config.source_path(), paths.env_file));
-    Arc::new(move |update| {
+    let (lease_tx, lease_rx) = tokio::sync::watch::channel(None);
+    let observer: agent_client::AgentNodeLeaseObserver = Arc::new(move |update| {
         let Some(update) = update else {
             adapter.clear_registration();
+            lease_tx.send_replace(None);
             return Ok(());
         };
+        let published = update.clone();
         if let Some(resources) = &resources {
             resources.update_auth(update.auth.clone())?;
         }
@@ -368,6 +406,8 @@ fn lease_observer(
         if let Some(store) = &store {
             store.complete_node_enrollment(&update.auth.node_id, &credential)?;
         }
+        lease_tx.send_replace(Some(published));
         Ok(())
-    })
+    });
+    (observer, lease_rx)
 }

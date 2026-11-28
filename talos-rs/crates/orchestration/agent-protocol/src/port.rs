@@ -1,6 +1,5 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use talos_agent_api::AgentInterruptOutcome;
@@ -13,22 +12,39 @@ use crate::{
 /// Object-safe future used only by the outer Agent Harness port.
 pub type AgentFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// Invocation-scoped model callback. The control plane owns model selection and usage.
-/// Dream formation consumes only System/User text and response content/token usage.
-pub type DreamMemoryModelCall = Arc<
-    dyn Fn(
-            Vec<talos_llm_provider::ChatMessage>,
-        ) -> AgentFuture<'static, AgentResult<talos_llm_provider::ChatResponse>>
-        + Send
-        + Sync,
->;
-
 /// Provider-neutral execution host resolved and invoked by Coordinator.
 ///
 /// Implementations own live admission, event settlement, input delivery, and
 /// bounded Provider lifecycle. They must not own product persistence, queues,
 /// complete Session aggregates, transport DTOs, or Provider-native APIs.
 pub trait AgentHarness: Send + Sync {
+    /// Read already committed execution facts. Every transport preserves the
+    /// same authorization, generation, byte and record limits.
+    fn read_session_events(
+        &self,
+        _params: crate::AgentSessionEventsParams,
+    ) -> AgentFuture<'_, AgentResult<crate::AgentSessionEventsResult>> {
+        Box::pin(async {
+            Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Agent execution replay is unavailable.",
+            ))
+        })
+    }
+
+    /// Read sealed trajectory content at its execution owner, never a Server prompt callback.
+    fn read_execution_payload(
+        &self,
+        _params: crate::AgentExecutionPayloadParams,
+    ) -> AgentFuture<'_, AgentResult<crate::AgentExecutionPayloadResult>> {
+        Box::pin(async {
+            Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Worker execution payload reads are unavailable.",
+            ))
+        })
+    }
+
     /// Read the Worker's causal boundary; no history or execution claim is returned.
     fn read_session_execution_state(
         &self,
@@ -36,13 +52,20 @@ pub trait AgentHarness: Send + Sync {
     ) -> AgentFuture<'_, AgentResult<Option<crate::SessionExecutionState>>> {
         Box::pin(async { Ok(None) })
     }
-    /// Publish a committed terminal boundary. In-process Provider hosts have no
-    /// transport gate; product hosts use the gated Worker library or RPC handle.
-    fn commit_session_execution_state(
+    /// Execution-owner-only lookup of an exact committed start request.
+    /// Returns None for a new command and never reserves or starts Provider work.
+    /// Carriers must not use start as a replay probe. Unsupported owners fail explicitly;
+    /// this local journal hook is not an additional network operation.
+    fn replay_admitted_run(
         &self,
-        _params: crate::CommitSessionExecutionStateParams,
-    ) -> AgentFuture<'_, AgentResult<()>> {
-        Box::pin(async { Ok(()) })
+        _params: AgentRunParams,
+    ) -> AgentFuture<'_, AgentResult<Option<AgentRunExecution>>> {
+        Box::pin(async {
+            Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Worker admission replay is unavailable.",
+            ))
+        })
     }
 
     /// Admit one fresh or continued logical Turn.
@@ -74,6 +97,21 @@ pub trait AgentHarness: Send + Sync {
     ) -> AgentFuture<'_, AgentResult<()>>;
 
     /// Release Provider-owned live resources for one idle Session.
+    /// Permanently retire a deleted Session after confirmed idle Provider cleanup.
+    /// The Worker retains a local tombstone and rejects future admission for this identity.
+    fn retire_session(
+        &self,
+        _session: AgentSessionContext,
+        _expected: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(async {
+            Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Worker Session retirement is unavailable.",
+            ))
+        })
+    }
+
     fn close_session(
         &self,
         params: AgentSessionContext,
@@ -99,14 +137,47 @@ pub trait AgentHarness: Send + Sync {
         memory_unavailable()
     }
 
+    /// Propose a title from one successful local Turn, retaining its result and actual usage.
+    /// No model routing, prompts or product history cross this boundary. A missing result
+    /// means no title input or retained result exists; product metadata remains caller-owned.
+    fn generate_session_title(
+        &self,
+        _params: crate::AgentSessionTitleParams,
+    ) -> AgentFuture<'_, AgentResult<Option<crate::AgentSessionTitleResult>>> {
+        Box::pin(async {
+            Ok(Some(crate::AgentSessionTitleResult {
+                outcome: crate::AgentSessionTitleOutcome::Failed {
+                    error: talos_error::TalosError::new(
+                        talos_error::ErrorCode::ServiceUnavailable,
+                        "Session title generation is unavailable on this Worker.",
+                    )
+                    .to_api_error(),
+                },
+                model_usage: None,
+            }))
+        })
+    }
+
     /// Form one idle Session's memory using execution-node policy, date and files.
-    /// The caller must exclude concurrent Turn admission and persist model usage.
+    /// The caller excludes Turn admission and idempotently settles returned usage before
+    /// advancing its own consumption cursor. The Worker retains execution facts.
     fn form_dream_memory(
         &self,
-        _context: AgentSessionContext,
-        _model_call: DreamMemoryModelCall,
-    ) -> AgentFuture<'_, AgentResult<Option<u64>>> {
+        _params: crate::DreamMemoryParams,
+    ) -> AgentFuture<'_, AgentResult<crate::DreamMemoryResult>> {
         memory_unavailable()
+    }
+
+    /// Local Worker-host phase: stop admission and settle active execution while
+    /// retaining Provider resources and authorized committed-fact reads.
+    /// Remote clients do not own this phase and expose no transport operation for it.
+    fn stop_execution(&self, _timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(async {
+            Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Local Worker execution stopping is unavailable.",
+            ))
+        })
     }
 
     /// Stop admission and release all Harness/Provider process resources.

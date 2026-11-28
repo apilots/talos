@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 
 async fn directory(a: &Peer, b: &Peer) {
     registered_computer(a).await;
@@ -123,10 +124,9 @@ async fn cancellation_is_display_only_and_command_replay_retains_original_respon
     let identity = AgentTurnRef::new("session-cancel", "original-turn");
     let initial = a
         .sessions
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: vec![
+        .project_test_events(TestWorkerEvents {
+            command: Some(lease),
+            ..TestWorkerEvents::new(vec![
                 event(
                     "session-cancel",
                     "original-turn",
@@ -147,8 +147,7 @@ async fn cancellation_is_display_only_and_command_replay_retains_original_respon
                         completed_at: Some(10),
                     }),
                 ),
-            ],
-            command: Some(lease),
+            ])
         })
         .await
         .unwrap();
@@ -175,7 +174,9 @@ async fn cancellation_is_display_only_and_command_replay_retains_original_respon
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(display.state, ActiveTurnState::Cancelling);
+    assert!(cancelling.active_turn.cancellation_requested);
+    assert_eq!(display.state, ActiveTurnState::Running);
+    assert!(!display.cancellation_requested);
     sqlx::query("UPDATE sync_documents SET snapshot_blob=? WHERE kind='session' AND resource_id='session-cancel'")
         .bind(retained).execute(b.storage.pool()).await.unwrap();
     assert_eq!(
@@ -191,7 +192,7 @@ async fn cancellation_is_display_only_and_command_replay_retains_original_respon
     );
     assert_ne!(
         display.last_event_id,
-        TimelineEventId::from_seq(initial.active_turn.last_event_seq).to_string()
+        TimelineEventId::from_seq(initial.active_turn.as_ref().unwrap().last_event_seq).to_string()
     );
     a.sessions.restore_cancellation(cancelling).await.unwrap();
     exchange(&a, &b, resource.clone()).await;
@@ -232,23 +233,26 @@ async fn cancellation_is_display_only_and_command_replay_retains_original_respon
         .is_none());
     let terminal = a
         .sessions
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: event(
-                "session-cancel",
-                "original-turn",
-                3,
-                AgentEventPayload::TurnFailed(AgentTurnFailed {
-                    error: talos_error::ApiError::with_message(
-                        talos_error::ErrorCode::Cancelled,
-                        "Cancelled",
-                    ),
-                    retryable: false,
-                }),
-            ),
-            expected_event_seq: initial.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![event(
+            "session-cancel",
+            "original-turn",
+            3,
+            AgentEventPayload::TurnFailed(AgentTurnFailed {
+                error: talos_error::ApiError::with_message(
+                    talos_error::ErrorCode::Cancelled,
+                    "Cancelled",
+                ),
+                retryable: false,
+            }),
+        )]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     a.sessions
         .advance_memory_processed_until_event_seq("session-cancel", 0, terminal.event_seq as u64)
@@ -309,54 +313,52 @@ async fn enabling_capture_preserves_a_large_existing_history_at_the_pre_mutation
         .insert_session_record(&record("large-history"))
         .await
         .unwrap();
-    let admitted = local
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: vec![
-                event(
-                    "large-history",
-                    "turn",
-                    1,
-                    AgentEventPayload::TurnStarted(AgentTurnStarted {}),
-                ),
-                event(
-                    "large-history",
-                    "turn",
-                    2,
-                    AgentEventPayload::MessageCompleted(AgentMessage {
-                        message_id: "message".into(),
-                        turn_id: "turn".into(),
-                        role: AgentMessageRole::User,
-                        status: AgentMessageStatus::Completed,
-                        blocks: vec![],
-                        created_at: 1,
-                        completed_at: Some(1),
-                    }),
-                ),
-            ],
-            command: None,
-        })
+    let _admitted = local
+        .project_test_events(TestWorkerEvents::new(vec![
+            event(
+                "large-history",
+                "turn",
+                1,
+                AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+            ),
+            event(
+                "large-history",
+                "turn",
+                2,
+                AgentEventPayload::MessageCompleted(AgentMessage {
+                    message_id: "message".into(),
+                    turn_id: "turn".into(),
+                    role: AgentMessageRole::User,
+                    status: AgentMessageStatus::Completed,
+                    blocks: vec![],
+                    created_at: 1,
+                    completed_at: Some(1),
+                }),
+            ),
+        ]))
         .await
         .unwrap();
     local
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: event(
-                "large-history",
-                "turn",
-                3,
-                AgentEventPayload::TurnFailed(AgentTurnFailed {
-                    error: talos_error::ApiError::with_message(
-                        talos_error::ErrorCode::Cancelled,
-                        "Cancelled",
-                    ),
-                    retryable: false,
-                }),
-            ),
-            expected_event_seq: admitted.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![event(
+            "large-history",
+            "turn",
+            3,
+            AgentEventPayload::TurnFailed(AgentTurnFailed {
+                error: talos_error::ApiError::with_message(
+                    talos_error::ErrorCode::Cancelled,
+                    "Cancelled",
+                ),
+                retryable: false,
+            }),
+        )]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     for n in 0..270 {
         local
@@ -374,7 +376,15 @@ async fn enabling_capture_preserves_a_large_existing_history_at_the_pre_mutation
             .await
             .unwrap();
     }
-    // First captured mutation must establish all baseline pages before this patch.
+    // Model a released pre-capture database: its canonical history predates
+    // transactional revisions. This patch must establish all baseline pages.
+    a.storage
+        .execute(
+            "DELETE FROM resource_revisions WHERE kind='session' AND resource_id='large-history'",
+            &[],
+        )
+        .await
+        .unwrap();
     a.sessions
         .patch_session(PatchSessionParams {
             session_id: "large-history".into(),
@@ -384,6 +394,7 @@ async fn enabling_capture_preserves_a_large_existing_history_at_the_pre_mutation
                     user_permission_mode: Some(UserPermissionMode::FullAccess),
                 },
                 current_directory: None,
+                pinned: None,
             },
             last_activity: 500,
         })

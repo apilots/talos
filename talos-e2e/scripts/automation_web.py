@@ -1,4 +1,4 @@
-"""Real Web slash/Add and prompt activation against the shared secretless model fixture."""
+"""Real authenticated Web automation against shared Auth and secretless model fixtures."""
 import json
 import base64
 import os
@@ -8,19 +8,28 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import sys
 import tempfile
+import threading
 import time
 import urllib.request
 import uuid
-from urllib.parse import urlsplit
+from http.server import ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 
 import yaml
 from playwright.sync_api import expect, sync_playwright
 
 from automation_model_fixture import assert_selection, prepare
+from session_pinning import verify_session_pinning
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.environ['TALOS_SCENARIO_REPORT_DIR'])
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'computer_workspace'))
+from deletion_auth_fixture import Handler as ContractAuthHandler, TOKENS, USERS
+from fixture import Cluster, data, http, wait_for_enrolled_computer
+
+AUTH_TOKEN = 'e2e-automation-admin'
 
 
 def wait_for(probe, description, seconds=40):
@@ -61,7 +70,7 @@ def assert_input(contents, mode, entry, prompt):
         assert_selection(contents, mode, prompt)
 
 
-def home_retry(page, origin, database, fixture, project):
+def home_retry(page, origin, database, fixture, project, computer_id):
     page.goto(origin)
     assert page.evaluate('!isSecureContext && typeof crypto.randomUUID === "undefined"')
     prompt = 'AUTO_CASE=pending_' + uuid.uuid4().hex + ' Check report progress every 1 minute'
@@ -138,14 +147,19 @@ def home_retry(page, origin, database, fixture, project):
         page.screenshot(path=str(REPORT / 'home-http-restored-options.png'), full_page=True)
         page.keyboard.press('Escape')
         page.get_by_role('button', name='Send', exact=True).click()
-        page.wait_for_url('**/sessions/' + submissions[0][1]['sessionId'])
+        session_path = '/sessions/' + submissions[0][1]['sessionId']
+        page.wait_for_url(lambda url: urlsplit(str(url)).path == session_path)
+        assert parse_qs(urlsplit(page.url).query).get('computerId') == [computer_id]
         assert len(submissions) == 2 and submissions[0] == submissions[1], submissions
+        pinning = verify_session_pinning(
+            page, origin, database, submissions[0][1]['sessionId'], project['name'], REPORT,
+        )
         (fixture / f'{marker}.release-busy').touch()
         expect(page.get_by_text('Ordinary User Turn finished', exact=True)).to_be_visible(timeout=30000)
         assert len(user_inputs(database, submissions[0][1]['sessionId'])) == 1
         page.screenshot(path=str(REPORT / 'home-http-restored-retry.png'), full_page=True)
         print('CASE home_http_restored_retry PASS origin=HTTP response=lost reload=settings metadata=partialFailure,retry retry=sameRequest admitted=once')
-        return {'sessionId': submissions[0][1]['sessionId'], 'submissions': 2, 'admitted': 1, 'restoredFiles': 2, 'partialMetadataRecovery': True}
+        return {'sessionId': submissions[0][1]['sessionId'], 'submissions': 2, 'admitted': 1, 'restoredFiles': 2, 'partialMetadataRecovery': True, 'pinning': pinning}
     finally:
         (fixture / f'{marker}.release-busy').touch()
         page.unroute('**/v1/turns/start', admit)
@@ -184,8 +198,8 @@ def queue_and_steer(page, session, turn):
     messages = queued.value.json()['data']['messages']
     assert len(messages) == 1 and messages[0]['source']['type'] == 'user', messages
     url = urlsplit(page.url)
-    with urllib.request.urlopen(f'{url.scheme}://{url.netloc}/v1/sessions/{session}/active-turn') as response:
-        assert json.load(response)['data']['activeTurn']['identity']['turnId'] == turn
+    active = data(http(f'{url.scheme}://{url.netloc}/v1/sessions/{session}/active-turn', token=AUTH_TOKEN))
+    assert active['activeTurn']['identity']['turnId'] == turn
     waiting = page.get_by_test_id('waiting-messages')
     expect(waiting).to_contain_text(human)
     expect(composer).to_have_value('')
@@ -246,8 +260,7 @@ def composer_send_policy(page, origin, config_path, fixture, session):
     expect(composer).to_have_value('')
     page.screenshot(path=str(REPORT / 'composer-after-admission.png'), full_page=True)
     print('CASE composer_draft_submission PASS draft_retained_before_admission=true composer_cleared_while_model_running=true')
-    with urllib.request.urlopen(f'{origin}/v1/sessions/{session}/active-turn') as response:
-        turn = json.load(response)['data']['activeTurn']['identity']['turnId']
+    turn = data(http(f'{origin}/v1/sessions/{session}/active-turn', token=AUTH_TOKEN))['activeTurn']['identity']['turnId']
     follow_up = 'Use this follow-up in the current run.'
     composer.fill(follow_up)
     policy_reads = []
@@ -270,7 +283,7 @@ def composer_send_policy(page, origin, config_path, fixture, session):
     page.screenshot(path=str(REPORT / 'composer-steer-running.png'), full_page=True)
     saved_while_running = page.request.put(origin + '/v1/config', data={
         'type': 'sessionMessageSendPolicy', 'value': 'queue',
-    })
+    }, headers={'Authorization': 'Bearer ' + AUTH_TOKEN})
     assert saved_while_running.ok, saved_while_running.text()
     assert yaml.safe_load(config_path.read_text())['agent']['message_queue']['default_send_policy'] == 'queue'
     (fixture / f'{marker}.release-busy').touch()
@@ -357,6 +370,10 @@ def run(home):
     home.joinpath('.env').write_text('')
     processes = []
     logs = []
+    topology = Cluster()
+    TOKENS[AUTH_TOKEN] = {**USERS['alice'], 'user_id': 'user-1', 'role': 'admin'}
+    auth = ThreadingHTTPServer(('127.0.0.1', 0), ContractAuthHandler)
+    threading.Thread(target=auth.serve_forever, daemon=True).start()
     try:
         def start(name, arguments, env=None):
             log = (REPORT / (name + '.log')).open('w')
@@ -366,7 +383,8 @@ def run(home):
             return process
         model = start('model', ['python3', str(ROOT / 'talos-e2e/scripts/automation_model_fixture.py'), 'serve', str(fixture)])
         wait_for(lambda: (fixture / 'port').exists() if model.poll() is None else False, 'controlled upstream')
-        config_path = home / 'talos.yaml'
+        config_path = home / 'conf/talos.yaml'
+        config_path.parent.mkdir()
         prepare(ROOT / 'conf/talos-dev.yaml', config_path, int((fixture / 'port').read_text()))
         config = yaml.safe_load(config_path.read_text())
         provider = config['llm']['custom_providers']['automation-fixture']
@@ -374,6 +392,14 @@ def run(home):
         config['llm']['custom_providers']['automation-fixture-alt'] = {**provider, 'name': 'Alternate controlled'}
         port = free_port()
         config['gateway'].update(host='127.0.0.1', port=port)
+        config['gateway']['auth'] = True
+        config['cloud']['api_base_url'] = f'http://127.0.0.1:{auth.server_port}'
+        config['cloud'].update(agent_base_url=f'https://127.0.0.1:{topology.rpc_port}',
+                               agent_trusted_ca_file=str(topology.cert))
+        config['agent_node']['control_plane'] = {
+            'bind_address': f'127.0.0.1:{topology.rpc_port}',
+            'tls_certificate_file': str(topology.cert), 'tls_private_key_file': str(topology.key),
+        }
         config_path.write_text(yaml.safe_dump(config, sort_keys=False))
         env = {**os.environ, 'TALOS_HOME': str(home), 'TALOS_CONFIG': str(config_path),
                'TALOS_RESOURCE_DIR': str(ROOT), 'TALOS_WEBUI_DIR': str(ROOT / 'talos-app/web/dist')}
@@ -386,11 +412,18 @@ def run(home):
             except OSError:
                 return False
         wait_for(healthy, 'real Server', 90)
+        # Restore the verified administrator through the normal product bootstrap.
+        user = data(http(origin + '/v1/user', token=AUTH_TOKEN))['user']
+        assert user['user_id'] == 'user-1' and user['role'] == 'admin', user
+        computer_id = wait_for_enrolled_computer(
+            lambda: data(http(origin + '/v1/sync/status', token=AUTH_TOKEN))['localComputerId'],
+            'Administrator-owned local Worker enrollment',
+        )
         project_directory = home / 'admission-project'
         project_directory.mkdir()
         with urllib.request.urlopen(urllib.request.Request(origin + '/v1/projects',
                 data=json.dumps({'name': 'Admission project', 'directory': str(project_directory)}).encode(),
-                headers={'Content-Type': 'application/json'})) as response:
+                headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN})) as response:
             assert response.status == 200
             project = json.load(response)['data']['project']
         with sync_playwright() as playwright:
@@ -398,11 +431,12 @@ def run(home):
                 '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), headless=True,
                 args=['--host-resolver-rules=MAP talos-http.test 127.0.0.1', '--no-proxy-server'])
             context = browser.new_context(viewport={'width': 1280, 'height': 900}, locale='en-US')
+            context.add_init_script('if (window === window.top) sessionStorage.setItem("talos-web-auth-token", ' + json.dumps(AUTH_TOKEN) + ');')
             context.add_init_script('if (!localStorage.getItem("talos-web-ui")) localStorage.setItem("talos-web-ui",JSON.stringify({state:{locale:"en",uiTheme:"light"},version:0}));')
             page = context.new_page()
             page.goto(origin)
             try:
-                retry = home_retry(page, f'http://talos-http.test:{port}', home / 'data/talos.db', fixture, project)
+                retry = home_retry(page, f'http://talos-http.test:{port}', home / 'data/talos.db', fixture, project, computer_id)
                 page.goto(origin)
                 results = [complete(page, home / 'data/talos.db', fixture, 'goal', 'add'),
                            complete(page, home / 'data/talos.db', fixture, 'loop', 'slash'),
@@ -418,6 +452,8 @@ def run(home):
             finally:
                 browser.close()
     finally:
+        auth.shutdown()
+        auth.server_close()
         for process in reversed(processes):
             process.terminate()
             try:
@@ -427,6 +463,7 @@ def run(home):
                 process.wait()
         for log in logs:
             log.close()
+        topology.close()
         for name in ('errors.jsonl', 'retired-streams.jsonl'):
             if (fixture / name).exists():
                 shutil.copy2(fixture / name, REPORT / name)

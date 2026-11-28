@@ -1,6 +1,6 @@
 //! Source FileService transport through the same account-authenticated Gateway.
 use agent_protocol::AgentFuture;
-use std::{sync::Arc, time::Instant};
+use std::time::Instant;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::{file::FilePeerAccess, FileContent};
 use talos_types::{
@@ -8,11 +8,26 @@ use talos_types::{
 };
 
 pub(crate) struct GatewayPeerAccess {
-    pub host: std::sync::Weak<super::application_sync::ApplicationSyncHost>,
+    pub host: std::sync::Weak<super::application_host::ApplicationHost>,
     pub config: talos_config::Config,
-    pub stores: Arc<super::application_sync::ApplicationSyncStores>,
 }
 impl GatewayPeerAccess {
+    async fn source_client(
+        &self,
+        owner: &str,
+        peer: &str,
+    ) -> TalosResult<talos_sdk::AppServerClient> {
+        let ca = talos_service::read_worker_trusted_ca(
+            self.config.cloud.agent_trusted_ca_file.as_deref(),
+        )?;
+        talos_sdk::AppServerClient::connect_source_product_http(
+            &self.config.cloud.agent_base_url,
+            self.token(owner).await?,
+            peer.into(),
+            ca.as_deref(),
+        )
+    }
+
     async fn gateway(&self) -> TalosResult<agent_client::AgentNodeClient> {
         super::application_sync_computers::gateway_client(&self.config).await
     }
@@ -45,43 +60,13 @@ impl GatewayPeerAccess {
             .await
     }
     async fn token(&self, owner: &str) -> TalosResult<String> {
-        let callback = self
-            .stores
-            .credentials
-            .read()
-            .expect("Sync credentials lock")
-            .get(owner)
-            .cloned()
-            .ok_or_else(|| {
-                TalosError::new(
-                    ErrorCode::Unauthenticated,
-                    "Management account is not signed in.",
-                )
-            })?;
-        let credential = callback().await.map_err(|error| {
-            TalosError::from_source(
-                match error.code {
-                    talos_sync_types::SyncErrorCode::Unauthenticated => ErrorCode::Unauthenticated,
-                    talos_sync_types::SyncErrorCode::PermissionDenied => {
-                        ErrorCode::PermissionDenied
-                    }
-                    talos_sync_types::SyncErrorCode::Timeout => ErrorCode::Timeout,
-                    talos_sync_types::SyncErrorCode::ServiceUnavailable => {
-                        ErrorCode::ServiceUnavailable
-                    }
-                    _ => ErrorCode::InternalError,
-                },
-                "Management account credentials are unavailable.",
-                error,
+        let host = self.host.upgrade().ok_or_else(|| {
+            TalosError::new(
+                ErrorCode::ServiceUnavailable,
+                "Management host has stopped.",
             )
         })?;
-        if credential.account_id != owner {
-            return Err(TalosError::new(
-                ErrorCode::PermissionDenied,
-                "Management account does not match.",
-            ));
-        }
-        Ok(credential.access_token)
+        host.token_for_owner(owner)
     }
 }
 impl FilePeerAccess for GatewayPeerAccess {
@@ -93,13 +78,25 @@ impl FilePeerAccess for GatewayPeerAccess {
         max_bytes: u64,
     ) -> AgentFuture<'a, TalosResult<FileContent>> {
         Box::pin(async move {
-            let token = self.token(owner).await?;
-            let (file, bytes) = self
-                .gateway()
-                .await?
-                .read_peer_file(&token, peer, request, max_bytes)
-                .await?;
-            Ok(FileContent { file, bytes })
+            use talos_sdk::GatewayClient;
+            let mut source = self.source_client(owner, peer).await?;
+            let metadata = source.read_file(request.clone()).await?;
+            if metadata.file.size_bytes > max_bytes {
+                return Err(TalosError::new(
+                    ErrorCode::InvalidRequest,
+                    "File source exceeds the requested byte limit.",
+                ));
+            }
+            let content = source.read_file_content(request).await?;
+            if content.data.len() as u64 > max_bytes {
+                return Err(TalosError::internal(
+                    "File source exceeded its declared size.",
+                ));
+            }
+            Ok(FileContent {
+                file: content.file,
+                bytes: content.data,
+            })
         })
     }
     fn read_range<'a>(
@@ -110,12 +107,15 @@ impl FilePeerAccess for GatewayPeerAccess {
         range: std::ops::Range<u64>,
     ) -> AgentFuture<'a, TalosResult<FileContent>> {
         Box::pin(async move {
-            let (file, bytes) = self
-                .gateway()
+            let content = self
+                .source_client(owner, peer)
                 .await?
-                .read_peer_file_range(&self.token(owner).await?, peer, request, range)
+                .read_product_file_range(&request.file_id, range)
                 .await?;
-            Ok(FileContent { file, bytes })
+            Ok(FileContent {
+                file: content.file,
+                bytes: content.data,
+            })
         })
     }
     fn update<'a>(
@@ -125,9 +125,10 @@ impl FilePeerAccess for GatewayPeerAccess {
         request: FileUpdateRequest,
     ) -> AgentFuture<'a, TalosResult<FileUpdateResponse>> {
         Box::pin(async move {
-            self.gateway()
+            use talos_sdk::GatewayClient;
+            self.source_client(owner, peer)
                 .await?
-                .update_peer_file(&self.token(owner).await?, peer, request)
+                .update_file(request)
                 .await
         })
     }
@@ -138,31 +139,52 @@ impl FilePeerAccess for GatewayPeerAccess {
         request: FileDeleteRequest,
     ) -> AgentFuture<'a, TalosResult<FileDeleteResponse>> {
         Box::pin(async move {
-            self.gateway()
+            use talos_sdk::GatewayClient;
+            self.source_client(owner, peer)
                 .await?
-                .delete_peer_file(&self.token(owner).await?, peer, request)
-                .await
-        })
-    }
-}
-
-impl agent_protocol::ActiveSessionCommands for GatewayPeerAccess {
-    fn invoke<'a>(
-        &'a self,
-        owner: &'a str,
-        target: agent_protocol::ActiveSessionTarget,
-        command: agent_protocol::ActiveSessionCommand,
-    ) -> AgentFuture<'a, TalosResult<agent_protocol::ActiveSessionReply>> {
-        Box::pin(async move {
-            self.gateway()
-                .await?
-                .invoke_active_command(&self.token(owner).await?, target, command)
+                .delete_file(request)
                 .await
         })
     }
 }
 
 impl talos_service::ComputerManagement for GatewayPeerAccess {
+    fn list<'a>(
+        &'a self,
+        actor: &'a talos_service::Actor,
+        request: talos_types::ComputerListRequest,
+    ) -> AgentFuture<'a, TalosResult<talos_types::ComputerListResponse>> {
+        Box::pin(async move {
+            self.host
+                .upgrade()
+                .ok_or_else(|| {
+                    TalosError::new(
+                        ErrorCode::ServiceUnavailable,
+                        "Computer directory host has stopped.",
+                    )
+                })?
+                .computer_directory
+                .list(&actor.user_id, request)
+        })
+    }
+    fn read<'a>(
+        &'a self,
+        actor: &'a talos_service::Actor,
+        request: talos_types::GetNodeRequest,
+    ) -> AgentFuture<'a, TalosResult<talos_types::NodeInfo>> {
+        Box::pin(async move {
+            self.host
+                .upgrade()
+                .ok_or_else(|| {
+                    TalosError::new(
+                        ErrorCode::ServiceUnavailable,
+                        "Computer directory host has stopped.",
+                    )
+                })?
+                .computer_directory
+                .read(&actor.user_id, &request.node_id)
+        })
+    }
     fn delete<'a>(
         &'a self,
         actor: &'a talos_service::Actor,

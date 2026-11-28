@@ -11,6 +11,8 @@ pub(crate) struct WorkerHarness {
     pub execution: Arc<dyn AgentHarness>,
     pub config: Arc<std::sync::RwLock<talos_config::Config>>,
     pub execution_gate: Arc<tokio::sync::RwLock<()>>,
+    pub model_router: Arc<dyn talos_llm_provider::LlmProviderRouter>,
+    pub history: Arc<talos_store::execution::WorkerExecutionStore>,
     pub workspace_memory: Arc<UserWorkspaceMemoryService>,
     pub browser: Arc<talos_browser::BrowserRuntime>,
 }
@@ -41,6 +43,36 @@ impl WorkerHarness {
 }
 
 impl AgentHarness for WorkerHarness {
+    fn read_session_execution_state(
+        &self,
+        session: AgentSessionContext,
+    ) -> AgentFuture<'_, AgentResult<Option<SessionExecutionState>>> {
+        self.execution.read_session_execution_state(session)
+    }
+
+    fn read_execution_payload(
+        &self,
+        params: AgentExecutionPayloadParams,
+    ) -> AgentFuture<'_, AgentResult<AgentExecutionPayloadResult>> {
+        self.execution.read_execution_payload(params)
+    }
+    fn read_session_events(
+        &self,
+        params: AgentSessionEventsParams,
+    ) -> AgentFuture<'_, AgentResult<AgentSessionEventsResult>> {
+        self.execution.read_session_events(params)
+    }
+
+    fn replay_admitted_run(
+        &self,
+        mut params: AgentRunParams,
+    ) -> AgentFuture<'_, AgentResult<Option<AgentRunExecution>>> {
+        Box::pin(async move {
+            self.resolve_context(&mut params.context)?;
+            self.execution.replay_admitted_run(params).await
+        })
+    }
+
     fn start(&self, params: AgentRunParams) -> AgentFuture<'_, AgentResult<AgentRunExecution>> {
         Box::pin(async move {
             let guard = self.execution_gate.clone().read_owned().await;
@@ -87,6 +119,14 @@ impl AgentHarness for WorkerHarness {
         self.execution
             .clear_session(context, expected_history_cursor)
     }
+    fn retire_session(
+        &self,
+        context: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>> {
+        self.execution
+            .retire_session(context, expected_history_cursor)
+    }
     fn close_session(
         &self,
         context: AgentSessionContext,
@@ -95,31 +135,96 @@ impl AgentHarness for WorkerHarness {
         self.execution
             .close_session(context, expected_history_cursor)
     }
+    fn stop_execution(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
+        self.execution.stop_execution(timeout)
+    }
+
     fn shutdown(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
         self.execution.shutdown(timeout)
     }
 
+    fn generate_session_title(
+        &self,
+        params: AgentSessionTitleParams,
+    ) -> AgentFuture<'_, AgentResult<Option<AgentSessionTitleResult>>> {
+        Box::pin(self.generate_title(params))
+    }
+
     fn form_dream_memory(
         &self,
-        context: AgentSessionContext,
-        model_call: DreamMemoryModelCall,
-    ) -> AgentFuture<'_, AgentResult<Option<u64>>> {
+        params: DreamMemoryParams,
+    ) -> AgentFuture<'_, AgentResult<DreamMemoryResult>> {
         Box::pin(async move {
             let _guard = self.execution_gate.clone().read_owned().await;
-            let root = context.workspace.root.clone();
+            let mut params = params;
+            {
+                let config = self.config.read().expect("Worker config lock poisoned");
+                params.session.workspace = config.resolve_workspace(
+                    &params.session.workspace.workspace_id,
+                    &params.session.workspace.user_id,
+                )?;
+            }
+            let replay = self.history.read_dream_formation(&params).await?;
+            if replay.formation.is_some() {
+                return Ok(replay);
+            }
+            let context = params.session;
+            let observation = Arc::new(tokio::sync::Mutex::new(None));
+            let observed = observation.clone();
+            let history = self.history.clone();
+            let session = context.clone();
             let result = self
                 .provider
                 .resources_for(&context)?
                 .form_dream_memory(
                     talos_agent_provider_kernel::KernelDreamMemoryParams {
                         session_id: context.session_id.clone(),
-                        workspace_root: root,
-                        memory_scope: scope(context),
+                        workspace_root: context.workspace.root.clone(),
+                        memory_scope: scope(context.clone()),
                     },
-                    move |messages| model_call(messages),
+                    |messages| async move {
+                        let (response, usage) =
+                            crate::builtin_model::chat(&self.config, &self.model_router, messages)
+                                .await?;
+                        let formation = DreamMemoryFormation {
+                            covers_until_seq: None,
+                            model_usage: usage,
+                            failure: Some(
+                                talos_error::TalosError::new(
+                                    talos_error::ErrorCode::ServiceUnavailable,
+                                    "Dream Memory formation was interrupted after its model call.",
+                                )
+                                .to_api_error(),
+                            ),
+                        };
+                        let cursor = history.append_dream_formation(&session, &formation).await?;
+                        *observed.lock().await = Some((cursor, formation));
+                        Ok(response)
+                    },
                 )
+                .await;
+            let Some((cursor, mut formation)) = observation.lock().await.take() else {
+                result?;
+                return Ok(replay);
+            };
+            match result {
+                Ok(result) => {
+                    formation.covers_until_seq = result.covers_until_seq;
+                    formation.failure = None;
+                }
+                Err(error) => {
+                    talos_logging::report_error(&error);
+                    formation.failure = Some(error.to_api_error());
+                }
+            }
+            self.history
+                .finish_dream_formation(&context, &cursor, &formation)
                 .await?;
-            Ok(result.covers_until_seq)
+            Ok(DreamMemoryResult {
+                formation: Some(formation),
+                next_cursor: cursor,
+                processed_until_seq: self.history.memory_progress(&context.session_id).await?,
+            })
         })
     }
 
@@ -193,6 +298,9 @@ fn guard_execution(
     execution.settlement = AgentRunSettlementReceiver::new(receiver);
     execution
 }
+
+#[path = "session_title.rs"]
+mod session_title;
 
 #[cfg(test)]
 #[path = "harness_tests.rs"]

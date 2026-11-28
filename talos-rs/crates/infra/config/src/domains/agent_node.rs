@@ -7,11 +7,23 @@ use super::network::GatewayConfig;
 
 /// Network configuration for the control plane and a standalone Agent node.
 /// Neither section is required for the existing embedded-only server.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AgentNodeConfig {
+    /// Assemble a local Worker in Talos Server. Personal products always own one.
+    pub embedded_worker: bool,
     pub control_plane: Option<AgentNodeControlConfig>,
     pub runner: Option<AgentNodeRunnerConfig>,
+}
+
+impl Default for AgentNodeConfig {
+    fn default() -> Self {
+        Self {
+            embedded_worker: true,
+            control_plane: None,
+            runner: None,
+        }
+    }
 }
 
 /// TLS listener serving node registration and authenticated management.

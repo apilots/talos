@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 
 #[tokio::test]
 async fn wait_returns_an_already_completed_child() {
@@ -36,7 +37,7 @@ async fn wait_reduces_a_completed_child_beyond_the_legacy_event_page() {
     let parent = create_parent(&services).await;
     let (child, turn_id) = create_running_child(&services, parent.clone()).await;
     let identity = talos_agent_api::AgentTurnRef::new(&child.session_id, &turn_id);
-    let active = services
+    services
         .store
         .get_agent_active_turn(&child.session_id)
         .await
@@ -47,41 +48,42 @@ async fn wait_reduces_a_completed_child_beyond_the_legacy_event_page() {
         .list_agent_turn_events(&identity, 64)
         .await
         .unwrap();
-    let mut expected_event_seq = active.last_event_seq;
     let mut sequence = events.last().unwrap().sequence + 1;
 
     for _ in 0..260 {
-        let committed = services
+        services
             .store
-            .commit_progress_event(
-                CanonicalAgentEvent {
-                    identity: identity.clone(),
-                    sequence,
-                    occurred_at: 2,
-                    payload: CanonicalAgentEventPayload::MetricsUpdated(AgentRunMetrics::default()),
-                },
-                expected_event_seq,
-            )
+            .project_test_events(TestWorkerEvents::new(vec![CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence,
+                occurred_at: 2,
+                payload: CanonicalAgentEventPayload::MetricsUpdated(AgentRunMetrics::default()),
+            }]))
             .await
             .unwrap();
-        expected_event_seq = committed.active_turn.last_event_seq;
         sequence += 1;
     }
     services
         .store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: CanonicalAgentEvent {
+        .project_test_events(TestWorkerEvents {
+            metrics: Some(AgentRunMetrics::default()),
+            ..TestWorkerEvents::new(vec![CanonicalAgentEvent {
                 identity,
                 sequence,
                 occurred_at: 2,
                 payload: CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
                     stop_reason: AgentStopReason::EndTurn,
                 }),
-            },
-            expected_event_seq,
-            completed_turn_metrics: Some(AgentRunMetrics::default()),
+            }])
         })
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
 
     let result = services
@@ -144,13 +146,16 @@ async fn wait_pending_snapshot_exposes_bounded_latest_commentary() {
     let parent = create_parent(&services).await;
     let (child, turn_id) = create_running_child(&services, parent.clone()).await;
     commit_agent_text(
+        services.sessions.as_ref(),
         services.store.as_ref(),
         services.timeline.as_ref(),
-        &child.session_id,
-        &turn_id,
+        services.journal.as_ref(),
+        &talos_agent_api::AgentTurnRef::new(&child.session_id, &turn_id),
         "commentary-1",
-        AgentAssistantTextPhase::Commentary,
-        format!("reviewing\n{}", "x".repeat(3_000)),
+        AgentAssistantText {
+            phase: AgentAssistantTextPhase::Commentary,
+            text: format!("reviewing\n{}", "x".repeat(3_000)),
+        },
     )
     .await;
 
@@ -173,8 +178,10 @@ async fn failed_outcome_exposes_a_bounded_preview_with_truncation_marker() {
     let parent = create_parent(&services).await;
     let (child, turn_id) = create_running_child(&services, parent.clone()).await;
     settle_canonical_turn(
+        services.sessions.as_ref(),
         services.store.as_ref(),
         services.timeline.as_ref(),
+        services.journal.as_ref(),
         &child.session_id,
         &turn_id,
         CanonicalAgentEventPayload::TurnFailed(talos_agent_api::AgentTurnFailed {
@@ -239,22 +246,29 @@ async fn concurrent_waiters_observe_live_completion() {
     };
     let timeline = services.timeline.clone();
     let store = services.store.clone();
+    let sessions = services.sessions.clone();
+    let journal = services.journal.clone();
     let session_id = child.session_id;
     let complete = tokio::spawn(async move {
         tokio::task::yield_now().await;
         commit_agent_text(
+            sessions.as_ref(),
             store.as_ref(),
             timeline.as_ref(),
-            &session_id,
-            &turn_id,
+            journal.as_ref(),
+            &talos_agent_api::AgentTurnRef::new(&session_id, &turn_id),
             "message-child-answer",
-            AgentAssistantTextPhase::FinalAnswer,
-            "AGENT_CHILD_OK".to_string(),
+            AgentAssistantText {
+                phase: AgentAssistantTextPhase::FinalAnswer,
+                text: "AGENT_CHILD_OK".to_string(),
+            },
         )
         .await;
         settle_canonical_turn(
+            sessions.as_ref(),
             store.as_ref(),
             timeline.as_ref(),
+            journal.as_ref(),
             &session_id,
             &turn_id,
             CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {

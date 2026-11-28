@@ -2,6 +2,7 @@ use super::*;
 use crate::node::{AgentNodeStore, DatabaseAgentNodeStore};
 use crate::project::{ProjectStore, StorageProjectStore};
 use crate::session::*;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use talos_agent_api::*;
 use talos_auth::{RequestIdentity, UserRole};
 use talos_storage::{SqliteStorage, Storage};
@@ -57,6 +58,7 @@ fn projection(record: &SessionRecord) -> TalosResult<SessionInfo> {
         usage: record.usage.clone(),
         project_id: record.project_id.clone(),
         current_directory: record.current_directory.clone(),
+        pinned: record.pinned,
     })
 }
 async fn peer(local: bool) -> Peer {
@@ -180,6 +182,7 @@ fn record(id: &str) -> SessionRecord {
         project_id: None,
         worktree_binding: None,
         current_directory: Some("/worker/custom".into()),
+        pinned: false,
     }
 }
 fn event(id: &str, turn: &str, sequence: u64, payload: AgentEventPayload) -> AgentEvent {
@@ -212,47 +215,43 @@ async fn run(peer: &Peer, session: &str, turn: &str) {
             completed_at: Some(10),
         }),
     );
-    let commit = peer
+    let _commit = peer
         .sessions
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: vec![started, message],
-            command: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![started, message]))
         .await
         .unwrap();
     peer.sessions.begin_cancellation(&identity).await.unwrap();
-    peer.sessions
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: event(
-                session,
-                turn,
-                3,
-                AgentEventPayload::TurnFailed(AgentTurnFailed {
-                    error: talos_error::ApiError::with_message(
-                        talos_error::ErrorCode::ProviderUnavailable,
-                        "Provider became unavailable",
-                    ),
-                    retryable: true,
-                }),
-            ),
-            expected_event_seq: commit.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+    let terminal = peer
+        .sessions
+        .project_test_events(TestWorkerEvents::new(vec![event(
+            session,
+            turn,
+            3,
+            AgentEventPayload::TurnFailed(AgentTurnFailed {
+                error: talos_error::ApiError::with_message(
+                    talos_error::ErrorCode::ProviderUnavailable,
+                    "Provider became unavailable",
+                ),
+                retryable: true,
+            }),
+        )]))
         .await
         .unwrap();
     peer.sessions
-        .append_timeline_notice(TimelineSystemNotice {
-            identity,
-            occurred_at: 11,
-            notice: AgentSystemNotice {
-                level: TalosTimelineNoticeLevel::Info,
-                content: SystemNoticeContent::Text("Original completion notice".into()),
+        .complete_worker_settlement_with_notice(
+            &terminal.cursor,
+            TimelineSystemNotice {
+                identity,
+                occurred_at: 11,
+                notice: AgentSystemNotice {
+                    level: TalosTimelineNoticeLevel::Info,
+                    content: SystemNoticeContent::Text("Original completion notice".into()),
+                },
             },
-        })
+        )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("Worker completion notice should be published");
 }
 async fn exchange(source: &Peer, destination: &Peer, resource: SyncResourceKey) {
     if matches!(resource, SyncResourceKey::Computer { .. }) {
@@ -388,6 +387,7 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
     assert_eq!(imported_project.session_count, 0);
     let mut talo = record("session-1");
     talo.session_kind = SessionKind::Talo;
+    talo.pinned = true;
     talo.worktree_binding = Some(talos_types::SessionWorktreeBinding {
         checkout_root: "/worker/feature".into(),
         git_directory: "/worker/repository/.git/worktrees/feature".into(),
@@ -400,6 +400,15 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
         .await
         .unwrap()
         .insert_session_record(&projection)
+        .await
+        .unwrap();
+    // This historical projection predates always-on source capture. New Store
+    // mutations without an adapter must remain pending and block stale imports.
+    b.storage
+        .execute(
+            "DELETE FROM resource_revisions WHERE kind='session' AND resource_id='session-1'",
+            &[],
+        )
         .await
         .unwrap();
     a.sessions.insert_session_record(&talo).await.unwrap();
@@ -416,6 +425,7 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
         .unwrap()
         .unwrap();
     assert_eq!(imported.session_kind, SessionKind::Talo);
+    assert!(imported.pinned);
     assert_eq!(imported.worktree_binding, talo.worktree_binding);
     assert_eq!(imported.conf, record("session-1").conf);
     assert_eq!(
@@ -477,48 +487,99 @@ async fn original_stores_capture_full_facts_and_materialize_without_execution_or
     );
 }
 #[tokio::test]
-async fn failed_store_admission_rolls_back_facts_and_capture_together() {
+async fn failed_product_projection_rolls_back_facts_and_capture_together() {
     let a = peer(true).await;
     a.sessions
         .insert_session_record(&record("session-1"))
         .await
         .unwrap();
-    let before = a
-        .storage
-        .query("SELECT COUNT(*) AS count FROM sync_outbox", &[])
+    let before = a.storage.query("SELECT (SELECT COUNT(*) FROM sync_outbox) AS outbox, (SELECT COUNT(*) FROM resource_revisions) AS capture", &[]).await.unwrap().remove(0);
+    a.storage
+        .execute(
+            "CREATE TRIGGER reject_projection_cursor BEFORE INSERT ON worker_projection_cursors
+         WHEN NEW.session_id='session-1'
+         BEGIN SELECT RAISE(ABORT, 'test product cursor failure'); END",
+            &[],
+        )
         .await
-        .unwrap()[0]
-        .get_i64("count");
+        .unwrap();
+    let events = vec![
+        event(
+            "session-1",
+            "turn-1",
+            1,
+            AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+        ),
+        event(
+            "session-1",
+            "turn-1",
+            2,
+            AgentEventPayload::MessageCompleted(AgentMessage {
+                message_id: "message-1".into(),
+                turn_id: "turn-1".into(),
+                role: AgentMessageRole::User,
+                status: AgentMessageStatus::Completed,
+                blocks: vec![],
+                created_at: 10,
+                completed_at: Some(10),
+            }),
+        ),
+    ];
     let error = a
         .sessions
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: vec![event(
-                "session-1",
-                "turn-1",
-                1,
-                AgentEventPayload::TurnStarted(AgentTurnStarted {}),
-            )],
-            command: None,
-        })
+        .project_test_events(TestWorkerEvents::new(events.clone()))
         .await
         .unwrap_err();
-    assert_eq!(error.to_api_error().code, talos_error::ErrorCode::Conflict);
-    assert_eq!(
-        a.storage
-            .query("SELECT COUNT(*) AS count FROM sync_outbox", &[])
-            .await
-            .unwrap()[0]
-            .get_i64("count"),
-        before
-    );
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InternalError);
+    let after = a.storage.query("SELECT (SELECT COUNT(*) FROM sync_outbox) AS outbox, (SELECT COUNT(*) FROM resource_revisions) AS capture, (SELECT COUNT(*) FROM worker_event_projection) AS receipts", &[]).await.unwrap().remove(0);
+    assert_eq!(after.get_i64("outbox"), before.get_i64("outbox"));
+    assert_eq!(after.get_i64("capture"), before.get_i64("capture"));
+    assert_eq!(after.get_i64("receipts"), Some(0));
+    assert!(a
+        .sessions
+        .worker_event_cursor("session-1")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(a
+        .sessions
+        .get_agent_active_turn("session-1")
+        .await
+        .unwrap()
+        .is_none());
     assert!(a
         .sessions
         .list_timeline_events_after("session-1", 0, 100)
         .await
         .unwrap()
         .is_empty());
+    a.storage
+        .execute("DROP TRIGGER reject_projection_cursor", &[])
+        .await
+        .unwrap();
+    let accepted = a
+        .sessions
+        .project_test_events(TestWorkerEvents::new(events))
+        .await
+        .unwrap();
+    assert_eq!(accepted.events.len(), 2);
+    assert_eq!(
+        accepted.active_turn.unwrap().initial_message_id.as_deref(),
+        Some("message-1")
+    );
+    assert_eq!(
+        a.sessions.worker_event_cursor("session-1").await.unwrap(),
+        Some(accepted.cursor)
+    );
+    let queued = a
+        .storage
+        .query("SELECT COUNT(*) AS count FROM resource_revisions", &[])
+        .await
+        .unwrap()
+        .remove(0)
+        .get_i64("count")
+        .unwrap();
+    assert!(queued > before.get_i64("capture").unwrap());
 }
 
 #[tokio::test]

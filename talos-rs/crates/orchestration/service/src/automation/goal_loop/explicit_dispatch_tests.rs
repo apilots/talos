@@ -2,29 +2,35 @@ use super::initial_delay_tests::create;
 use super::*;
 use talos_error::ErrorCode;
 
-async fn cancel_user_turn(service: &TalosService, store: &DatabaseSessionStore) {
-    let (identity, commit) = admitted(
-        service,
-        store,
-        None,
+async fn cancel_user_turn(
+    service: &TalosService,
+    store: &DatabaseSessionStore,
+    journal: &talos_store::execution::WorkerExecutionStore,
+) {
+    let identity = AgentTurnRef::new("alice", format!("cancelled-{}", uuid::Uuid::new_v4()));
+    let input = crate::turn::completed_agent_user_input(
+        &identity.turn_id,
+        &format!("input-{}", identity.turn_id),
         crate::test_support::test_user_input("Ordinary User work"),
+        chrono::Utc::now().timestamp(),
     )
-    .await;
-    store
-        .commit_terminal_settlement(talos_store::session::CommitTerminalSettlementParams {
-            event: CanonicalAgentEvent {
-                identity,
-                sequence: commit.events.last().unwrap().sequence + 1,
-                occurred_at: chrono::Utc::now().timestamp(),
-                payload: CanonicalAgentEventPayload::TurnFailed(talos_agent_api::AgentTurnFailed {
-                    error: TalosError::new(ErrorCode::Cancelled, "User cancelled the Turn")
-                        .to_api_error(),
-                    retryable: false,
-                }),
-            },
-            expected_event_seq: commit.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+    .unwrap();
+    let mut events =
+        crate::test_support::canonical_user_admission(identity.clone(), input, 1, true);
+    events.push(CanonicalAgentEvent {
+        identity,
+        sequence: events.last().unwrap().sequence + 1,
+        occurred_at: chrono::Utc::now().timestamp(),
+        payload: CanonicalAgentEventPayload::TurnFailed(talos_agent_api::AgentTurnFailed {
+            error: TalosError::new(ErrorCode::Cancelled, "User cancelled the Turn").to_api_error(),
+            retryable: false,
+        }),
+    });
+    crate::test_worker::seed_worker_events(service.sessions.as_ref(), store, journal, events, None)
+        .await;
+    service
+        .turns
+        .reconcile_worker_events("alice")
         .await
         .unwrap();
 }
@@ -62,8 +68,8 @@ async fn direct_creation_after_old_cancel_starts_only_its_due_work() {
             },
         },
     ] {
-        let (service, store) = fixture().await;
-        cancel_user_turn(&service, &store).await;
+        let (service, store, journal) = fixture_with_worker().await;
+        cancel_user_turn(&service, &store, journal.as_ref()).await;
         let result = create(&service, action).await;
         assert!(store
             .get_agent_active_turn("alice")
@@ -99,9 +105,15 @@ async fn direct_creation_after_old_cancel_starts_only_its_due_work() {
 
 #[tokio::test]
 async fn deferred_creation_does_not_resume_user_queue_or_override_a_new_cancel() {
-    let (service, store) = test_application(
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::Accepted,
+        }),
+        Arc::new(TestAgentCoordinator {
+            cancel_mode: TestCancelMode::Cancelled,
+            cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
+            compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         configured_test_config(),
     )
@@ -117,7 +129,7 @@ async fn deferred_creation_does_not_resume_user_queue_or_override_a_new_cancel()
         )
         .await
         .unwrap();
-    cancel_user_turn(&service, &store).await;
+    cancel_user_turn(&service, &store, journal.as_ref()).await;
     let result = create(
         &service,
         AutomationAction::Loop {
@@ -163,7 +175,7 @@ async fn deferred_creation_does_not_resume_user_queue_or_override_a_new_cancel()
     tokio::time::timeout(std::time::Duration::from_secs(2), skills.entered.notified())
         .await
         .unwrap();
-    cancel_user_turn(&service, &store).await;
+    cancel_user_turn(&service, &store, journal.as_ref()).await;
     skills.release.notify_one();
     let error = dispatch.await.unwrap().unwrap_err();
     assert!(error.is_code(ErrorCode::Conflict));

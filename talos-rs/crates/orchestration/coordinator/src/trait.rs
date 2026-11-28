@@ -58,17 +58,29 @@ pub trait AgentCoordinator: Send + Sync {
     }
 
     /// Forward causal state without interpreting history, transport or persistence.
+    async fn read_execution_payload(
+        &self,
+        params: agent_protocol::AgentExecutionPayloadParams,
+    ) -> TalosResult<agent_protocol::AgentExecutionPayloadResult> {
+        self.session_harness(&params.session)
+            .await?
+            .read_execution_payload(params)
+            .await
+    }
+    async fn read_session_events(
+        &self,
+        _params: agent_protocol::AgentSessionEventsParams,
+    ) -> TalosResult<agent_protocol::AgentSessionEventsResult> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Worker execution replay is unavailable.",
+        ))
+    }
     async fn read_session_execution_state(
         &self,
         _session: AgentSessionContext,
     ) -> TalosResult<Option<agent_protocol::SessionExecutionState>> {
         Ok(None)
-    }
-    async fn commit_session_execution_state(
-        &self,
-        _params: agent_protocol::CommitSessionExecutionStateParams,
-    ) -> TalosResult<()> {
-        Ok(())
     }
 
     /// Forward one fresh or continuation Turn admission to its bound Harness.
@@ -89,6 +101,18 @@ pub trait AgentCoordinator: Send + Sync {
         params: AgentSessionContext,
         expected_history_cursor: talos_types::SessionHistoryCursor,
     ) -> TalosResult<()>;
+
+    /// Permanently retire a deleted Session at its execution owner.
+    async fn retire_session(
+        &self,
+        session: AgentSessionContext,
+        expected: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.session_harness(&session)
+            .await?
+            .retire_session(session, expected)
+            .await
+    }
 
     /// Release Provider-owned live Session resources.
     async fn close_session(

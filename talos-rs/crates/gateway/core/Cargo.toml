@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 base64 = { workspace = true }
 talos-agent-api = { workspace = true }
-talos-service = { workspace = true }
+talos-service = { workspace = true, features = ["product"] }
 talos-auth = { path = "../../infra/auth" }
 talos-config = { path = "../../infra/config" }
 talos-error = { path = "../../infra/error" }
@@ -19,6 +19,7 @@ tracing = "0.1"
 async-trait = "0.1"
 
 [dev-dependencies]
+talos-service = { workspace = true, features = ["product", "control-plane"] }
 mockall = "0.12"
 opendal = { workspace = true, features = ["services-memory"] }
 talos-agent = { path = "../../orchestration/agent" }

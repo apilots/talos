@@ -87,6 +87,7 @@ impl AgentNodeClient {
         match response.result.ok_or_else(malformed)? {
             pb::get_deployments_response::Result::Deployments(value) => {
                 let params = node_pb::decode_register(Some(pb::RegisterParams {
+                    product_owner: agent_pb::NodeProductOwner::Server as i32,
                     system_info: None,
                     deployments: value.deployments,
                 }))?;

@@ -16,9 +16,9 @@ class AuxiliaryModelTest(unittest.TestCase):
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), fixture.Fixture)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
-        title_source = (fixture.ROOT / 'talos-rs/crates/orchestration/service/src/session/title.rs').read_text()
-        memory_source = (fixture.ROOT / 'talos-rs/crates/orchestration/service/src/user_workspace_memory/reflection.rs').read_text()
-        # Use the actual product prompts so fixture contract drift fails this transport test.
+        title_source = (fixture.ROOT / 'talos-rs/crates/app/talos-worker/src/session_title.rs').read_text()
+        memory_source = (fixture.ROOT / 'talos-rs/crates/app/talos-worker/src/memory_reflection.rs').read_text()
+        # Use the actual Worker prompts so fixture contract drift fails this transport test.
         cls.title_prompt = re.search(r'const TITLE_PROMPT: &str = "(.*?)";', title_source).group(1)
         cls.memory_prompt = re.search(r'const REFLECTION_PROMPT: &str = r#"(.*?)"#;', memory_source, re.S).group(1)
 

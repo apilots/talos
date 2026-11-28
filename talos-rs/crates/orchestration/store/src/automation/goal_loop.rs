@@ -17,7 +17,7 @@ use talos_types::{
 mod admission;
 mod records;
 use admission::bind;
-pub(crate) use admission::bind_admission_origin;
+pub(crate) use admission::bind_replayed_admission_origin;
 use records::{goal_from_row, loop_from_row, write_goal, write_loop};
 
 #[derive(Clone)]

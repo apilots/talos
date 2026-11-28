@@ -202,7 +202,7 @@ async fn test_get_llm_allows_auth_disabled_actor() {
     let response = get_llm_handler(
         State(state),
         None,
-        axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
+        super::super::product_scope::ProductQuery(talos_types::WorkspaceInfoRequest::default()),
     )
     .await
     .expect("auth disabled actor should access llm config");

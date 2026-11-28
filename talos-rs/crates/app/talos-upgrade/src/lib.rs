@@ -14,6 +14,7 @@ mod execution_metrics;
 mod history_repair_0_1_8;
 mod preparation;
 mod runner;
+#[cfg(feature = "sync")]
 mod sync_replicas;
 mod workspace_layout;
 
@@ -103,6 +104,7 @@ async fn run_startup_upgrades_for_version(
         workspace_layout::upgrade_task(),
         history_repair_0_1_8::upgrade_task(),
         execution_metrics::upgrade_task(),
+        #[cfg(feature = "sync")]
         sync_replicas::upgrade_task(params.storage.clone()),
     ];
     let paths = params.config.talos_paths();
@@ -138,6 +140,7 @@ async fn run_startup_upgrades_for_version(
     )?
     .run()
     .await?;
+    #[cfg(feature = "sync")]
     talos_sync::TalosSync::require_upgraded_replicas(params.storage.as_ref()).await?;
     tracing::info!(report = ?product, "product upgrade task phase completed");
     let workspace_task_deferred = product

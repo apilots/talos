@@ -59,6 +59,7 @@ fn chat_maps_reasoning_effort_to_openrouter_object() {
         (ReasoningEffort::Medium, "medium"),
         (ReasoningEffort::High, "high"),
         (ReasoningEffort::XHigh, "xhigh"),
+        (ReasoningEffort::Max, "max"),
     ] {
         let request = OpenRouterProvider::build_chat_request(reasoning_request(effort), false)
             .expect("chat request should build");

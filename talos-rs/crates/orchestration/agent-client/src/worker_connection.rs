@@ -35,7 +35,6 @@ struct Pending {
 
 struct Invocation {
     id: u64,
-    caller: Option<pb::CoordinatorCallContext>,
     timeout_ms: u64,
     cancel: CancellationToken,
     failed: watch::Receiver<Option<TalosError>>,
@@ -107,7 +106,7 @@ impl AgentNodeClient {
             Box::pin(input),
             writer,
             stop,
-            Dispatcher::Worker(adapter),
+            Dispatcher(adapter),
             stream_heartbeat,
         )
         .await
@@ -162,109 +161,19 @@ impl AgentNodeClient {
     }
 }
 
-pub(crate) enum Dispatcher {
-    Worker(AgentHarnessRpcAdapter),
-    Relay {
-        connection: Arc<super::AgentEnvironmentClient>,
-        auth: NodeAuth,
-        peer_id: String,
-        coordinator_id: String,
-    },
-    Resources {
-        handler: Arc<dyn super::AgentResourceRpcHandler>,
-        auth: NodeAuth,
-        invocation: std::sync::Weak<super::AgentExecutionConnection>,
-    },
-}
+pub(crate) struct Dispatcher(AgentHarnessRpcAdapter);
 impl Dispatcher {
     fn authorize(&self, supplied: &NodeAuth) -> TalosResult<()> {
-        match self {
-            Self::Worker(adapter) => adapter.validate_connection_auth(supplied),
-            Self::Relay { auth, .. } | Self::Resources { auth, .. }
-                if auth.node_id == supplied.node_id
-                    && token_matches(&auth.token, &supplied.token) =>
-            {
-                Ok(())
-            }
-            Self::Relay { .. } | Self::Resources { .. } => Err(TalosError::new(
-                ErrorCode::Unauthenticated,
-                "Coordinator credential does not match this connection",
-            )),
-        }
+        self.0.validate_connection_auth(supplied)
     }
     async fn dispatch(
         &self,
         requests: super::transport_stream::RpcStream<Call>,
-        timeout_ms: u64,
-        call_id: u64,
-        caller: Option<pb::CoordinatorCallContext>,
     ) -> Result<super::transport_stream::RpcStream<pb::worker_rpc_result::Response>, tonic::Status>
     {
-        match self {
-            Self::Worker(adapter) => Ok(super::transport_stream::RpcStream::new(
-                adapter.dispatch_connect(requests.stream).await?,
-            )),
-            Self::Relay {
-                connection,
-                peer_id,
-                coordinator_id,
-                ..
-            } => {
-                let mut requests = requests.stream;
-                let first = requests
-                    .next()
-                    .await
-                    .transpose()?
-                    .ok_or_else(|| error_pb::encode_status(&invalid_frame()))?;
-                let caller =
-                    agent_protocol::connection_pb::execution_scope(&first).map(|mut scope| {
-                        scope.coordinator_id = coordinator_id.clone();
-                        scope.connection_id = peer_id.clone();
-                        scope.rpc_call_id = call_id;
-                        scope
-                    });
-                connection
-                    .forward(
-                        Box::pin(tokio_stream::once(Ok(first)).chain(requests)),
-                        timeout_ms,
-                        caller,
-                    )
-                    .await
-            }
-            Self::Resources {
-                handler,
-                invocation,
-                ..
-            } => {
-                let caller = caller.ok_or_else(|| error_pb::encode_status(&invalid_frame()))?;
-                let mut requests = requests.stream;
-                let first = requests
-                    .next()
-                    .await
-                    .transpose()?
-                    .ok_or_else(|| error_pb::encode_status(&invalid_frame()))?;
-                if agent_protocol::connection_pb::is_management_peer_call(&first) {
-                    if !handler.serves_files()
-                        || caller.session.is_some()
-                        || caller.turn_id.is_some()
-                        || caller.project_id.is_some()
-                        || caller.rpc_call_id != 0
-                    {
-                        return Err(error_pb::encode_status(&invalid_frame()));
-                    }
-                } else {
-                    invocation
-                        .upgrade()
-                        .ok_or_else(|| error_pb::encode_status(&closed()))?
-                        .validate_resource_caller(&caller)
-                        .map_err(|error| error_pb::encode_status(&error))?;
-                }
-                let requests = Box::pin(tokio_stream::once(Ok(first)).chain(requests));
-                Ok(super::transport_stream::RpcStream::new(
-                    handler.dispatch(caller, requests).await?,
-                ))
-            }
-        }
+        Ok(super::transport_stream::RpcStream::new(
+            self.0.dispatch_connect(requests.stream).await?,
+        ))
     }
 }
 
@@ -327,9 +236,8 @@ pub(crate) async fn serve_calls(
                             let dispatcher = dispatcher.clone();
                             let id = frame.call_id;
                             let timeout = frame.timeout_ms;
-                            let caller = frame.caller.clone();
                             tasks.spawn(async move {
-                                let result = dispatch(dispatcher, receiver, out, Invocation { id, caller, timeout_ms: timeout, cancel, failed, window: response_window }).await;
+                                let result = dispatch(dispatcher, receiver, out, Invocation { id, timeout_ms: timeout, cancel, failed, window: response_window }).await;
                                 (id, result)
                             });
                         }
@@ -378,7 +286,6 @@ async fn dispatch(
 ) -> TalosResult<()> {
     let Invocation {
         id,
-        caller,
         timeout_ms,
         cancel,
         mut failed,
@@ -398,7 +305,7 @@ async fn dispatch(
         _ = deadline => Err(TalosError::new(ErrorCode::Timeout, "Agent invocation timed out")),
         _ = failed.changed() => Err(failed.borrow().clone().unwrap_or_else(closed)),
         result = async {
-            let mut replies = dispatcher.dispatch(super::transport_stream::RpcStream::new(ReceiverStream::new(requests)), timeout_ms, id, caller).await.map_err(crate::decode_rpc_status)?;
+            let mut replies = dispatcher.dispatch(super::transport_stream::RpcStream::new(ReceiverStream::new(requests))).await.map_err(crate::decode_rpc_status)?;
             while let Some(reply) = replies.message().await.map_err(crate::decode_rpc_status)? {
                 window.reserve().await?;
                 // Reserve one terminal slot, so an overload failure never overtakes prior frames.
@@ -453,12 +360,4 @@ fn send_failure(
 }
 fn invalid_frame() -> TalosError {
     TalosError::new(ErrorCode::InvalidRequest, "Agent Connect frame is invalid")
-}
-
-fn token_matches(expected: &str, supplied: &str) -> bool {
-    use sha2::{Digest, Sha256};
-    use subtle::ConstantTimeEq;
-    let expected: [u8; 32] = Sha256::digest(expected.as_bytes()).into();
-    let supplied: [u8; 32] = Sha256::digest(supplied.as_bytes()).into();
-    bool::from(expected.ct_eq(&supplied))
 }

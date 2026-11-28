@@ -25,6 +25,7 @@ import {
   updateSessionPermissionMode,
 } from "../api";
 import { sessionDetailKey, type SessionDetail } from "@/shared/api/product-queries";
+import { sessionRouteComputer } from "@/shared/api/session-route";
 import { useAppStore } from "@/shared/store/app-store";
 import { connectionScope } from "@/shared/store/connection-scope";
 import { useSelectedComputerId, useEnvironmentKey, useProductScope } from "@/features/computers";
@@ -37,10 +38,10 @@ export const chatKeys = {
   sessions: (connectionKey: string) => [...chatKeys.all, connectionKey, "sessions"] as const,
   projects: (connectionKey: string) => [...chatKeys.all, connectionKey, "projects"] as const,
   session: sessionDetailKey,
-  activeTurn: (connectionKey: string, sessionId: string) =>
-    [...chatKeys.all, connectionKey, "active-turn", sessionId] as const,
-  sessionHistory: (connectionKey: string, sessionId: string) =>
-    [...chatKeys.all, connectionKey, "session-history", sessionId] as const,
+  activeTurn: (connectionKey: string, sessionId: string, computerId = sessionRouteComputer(sessionId)) =>
+    [...chatKeys.all, connectionKey, "active-turn", sessionId, computerId] as const,
+  sessionHistory: (connectionKey: string, sessionId: string, computerId = sessionRouteComputer(sessionId)) =>
+    [...chatKeys.all, connectionKey, "session-history", sessionId, computerId] as const,
 };
 
 export function useConnectionKey() {
@@ -106,9 +107,10 @@ export function useProjectsView(nodeId?: string) {
 
 export function useSessionQuery(sessionId: string, enabled = true) {
   const connectionKey = useConnectionKey();
+  const computerId = sessionRouteComputer(sessionId);
   return useQuery({
-    queryKey: chatKeys.session(connectionKey, sessionId),
-    queryFn: () => getSession(sessionId),
+    queryKey: chatKeys.session(connectionKey, sessionId, computerId),
+    queryFn: () => getSession(sessionId, computerId),
     select: detail => detail.session,
     enabled: Boolean(sessionId) && enabled,
   });
@@ -116,9 +118,10 @@ export function useSessionQuery(sessionId: string, enabled = true) {
 
 export function useActiveTurnQuery(sessionId: string, enabled = true) {
   const connectionKey = useConnectionKey();
+  const computerId = sessionRouteComputer(sessionId);
   return useQuery({
-    queryKey: chatKeys.activeTurn(connectionKey, sessionId),
-    queryFn: () => getActiveTurn(sessionId),
+    queryKey: chatKeys.activeTurn(connectionKey, sessionId, computerId),
+    queryFn: () => getActiveTurn(sessionId, computerId),
     enabled: Boolean(sessionId) && enabled,
     // Discover queue/remote starts while the idle Session has no event subscription.
     refetchInterval: 4_000,
@@ -127,9 +130,10 @@ export function useActiveTurnQuery(sessionId: string, enabled = true) {
 
 export function useSessionHistoryQuery(sessionId: string, enabled = true) {
   const connectionKey = useConnectionKey();
+  const computerId = sessionRouteComputer(sessionId);
   return useQuery({
-    queryKey: chatKeys.sessionHistory(connectionKey, sessionId),
-    queryFn: () => getSessionHistory(sessionId),
+    queryKey: chatKeys.sessionHistory(connectionKey, sessionId, computerId),
+    queryFn: () => getSessionHistory(sessionId, computerId),
     enabled: Boolean(sessionId) && enabled,
     retry: false,
   });

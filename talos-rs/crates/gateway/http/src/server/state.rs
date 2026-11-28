@@ -13,6 +13,7 @@ use super::lifecycle::ServerLifecycle;
 
 #[derive(Clone)]
 pub(super) struct HttpApiState {
+    pub(super) product_router: Option<Arc<dyn super::product_routing::ProductRequestRouter>>,
     pub(super) app: Arc<TalosService>,
     pub(super) gateway: Arc<dyn Gateway>,
     #[cfg(test)]
@@ -34,6 +35,7 @@ impl HttpApiState {
     ) -> Self {
         let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(app.clone()));
         Self {
+            product_router: None,
             app: app.clone(),
             gateway,
             #[cfg(test)]

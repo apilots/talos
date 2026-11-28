@@ -1024,3 +1024,34 @@ fn packaged_template_preserves_an_enabled_talo_runtime() {
         Some(&runtime)
     );
 }
+
+#[test]
+fn managed_profiles_preserve_valid_operator_owned_deepseek_aliases() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    for profile in ["talos.yaml", "talos-prod.yaml", "talos-dev.yaml"] {
+        for alias in ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp"] {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = TalosPaths::from_home(dir.path().join("home"));
+            let template_path = repo_root.join("conf").join(profile);
+            let mut saved = read_yaml_file(&template_path).unwrap();
+            saved["llm"]["deepseek"]["models"][0]["id"] = YamlValue::String(alias.to_owned());
+            saved["llm"]["model"] = YamlValue::String(alias.to_owned());
+            saved["agent"]["inner_model"]["id"] = YamlValue::String(alias.to_owned());
+            validate_config_value(&saved, &RuntimeEnv::default()).unwrap();
+            let expected_llm = saved["llm"].clone();
+            let expected_inner = saved["agent"]["inner_model"].clone();
+            remove_path_for_test(&mut saved, &["sync", "trusted_ca_file"]);
+            write_existing(&paths, &saved);
+
+            let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
+            assert!(report.changed);
+            let actual = read_yaml_file(&paths.config_file).unwrap();
+            assert_eq!(actual["llm"], expected_llm, "{profile}: {alias}");
+            assert_eq!(
+                actual["agent"]["inner_model"], expected_inner,
+                "{profile}: {alias}"
+            );
+            validate_config_value(&actual, &RuntimeEnv::default()).unwrap();
+        }
+    }
+}

@@ -161,6 +161,7 @@ impl DesktopRelay {
     }
 
     /// Network adapters must pass their verified lease owner and node identity.
+    #[cfg(any(feature = "server", test))]
     pub(crate) async fn worker(
         &self,
         owner: &str,

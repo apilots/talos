@@ -77,8 +77,6 @@ async fn fixture(reply: pb::ExecuteAutomationResponse) -> Fixture {
     .await
     .unwrap();
     client.caller = Some(pb::CoordinatorCallContext {
-        connection_id: "connection".into(),
-        rpc_call_id: 31,
         coordinator_id: "coordinator".into(),
         session: Some(pb::SessionContext {
             session_id: "session".into(),

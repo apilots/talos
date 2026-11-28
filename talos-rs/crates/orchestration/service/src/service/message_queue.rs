@@ -8,22 +8,10 @@ impl TalosService {
         request: MessageQueueAddRequest,
     ) -> ServiceResult<MessageQueue> {
         let session = self.access.load_session(actor, &request.session_id).await?;
-        if let Some(reply) = self
-            .forward_active_command(
-                actor,
-                &session,
-                agent_protocol::ActiveSessionCommand::AddMessage(request.clone()),
-            )
-            .await?
-        {
-            let agent_protocol::ActiveSessionReply::Queue(reply) = reply else {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "Current coordinator returned an invalid command result.",
-                ));
-            };
-            return Ok(reply);
-        }
+        self.sessions
+            .ensure_execution_supported(&session.id)
+            .await?;
+
         TurnService::validate_message_queue_input(&request.input)?;
         let automation = self.turns.installed_automation();
         let guard = if let Some(a) = automation.as_ref() {
@@ -66,23 +54,8 @@ impl TalosService {
         actor: &Actor,
         request: MessageQueueListRequest,
     ) -> ServiceResult<MessageQueue> {
-        let session = self.access.load_session(actor, &request.session_id).await?;
-        if let Some(reply) = self
-            .forward_active_command(
-                actor,
-                &session,
-                agent_protocol::ActiveSessionCommand::ListMessages(request.clone()),
-            )
-            .await?
-        {
-            let agent_protocol::ActiveSessionReply::Queue(reply) = reply else {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "Current coordinator returned an invalid command result.",
-                ));
-            };
-            return Ok(reply);
-        }
+        let _session = self.access.load_session(actor, &request.session_id).await?;
+
         self.message_queue.list(&request.session_id)
     }
 
@@ -93,22 +66,10 @@ impl TalosService {
         request: MessageQueueUpdateRequest,
     ) -> ServiceResult<MessageQueue> {
         let session = self.access.load_session(actor, &request.session_id).await?;
-        if let Some(reply) = self
-            .forward_active_command(
-                actor,
-                &session,
-                agent_protocol::ActiveSessionCommand::UpdateMessage(request.clone()),
-            )
-            .await?
-        {
-            let agent_protocol::ActiveSessionReply::Queue(reply) = reply else {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "Current coordinator returned an invalid command result.",
-                ));
-            };
-            return Ok(reply);
-        }
+        self.sessions
+            .ensure_execution_supported(&session.id)
+            .await?;
+
         TurnService::validate_message_queue_input(&request.input)?;
         let automation = self.turns.installed_automation();
         let _guard = if let Some(a) = automation.as_ref() {
@@ -135,22 +96,10 @@ impl TalosService {
         request: MessageQueueDeleteRequest,
     ) -> ServiceResult<MessageQueue> {
         let session = self.access.load_session(actor, &request.session_id).await?;
-        if let Some(reply) = self
-            .forward_active_command(
-                actor,
-                &session,
-                agent_protocol::ActiveSessionCommand::DeleteMessage(request.clone()),
-            )
-            .await?
-        {
-            let agent_protocol::ActiveSessionReply::Queue(reply) = reply else {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "Current coordinator returned an invalid command result.",
-                ));
-            };
-            return Ok(reply);
-        }
+        self.sessions
+            .ensure_execution_supported(&session.id)
+            .await?;
+
         self.message_queue
             .delete(&request.session_id, &request.message_id)
     }
@@ -162,22 +111,10 @@ impl TalosService {
         request: MessageQueueReorderRequest,
     ) -> ServiceResult<MessageQueue> {
         let session = self.access.load_session(actor, &request.session_id).await?;
-        if let Some(reply) = self
-            .forward_active_command(
-                actor,
-                &session,
-                agent_protocol::ActiveSessionCommand::ReorderMessages(request.clone()),
-            )
-            .await?
-        {
-            let agent_protocol::ActiveSessionReply::Queue(reply) = reply else {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "Current coordinator returned an invalid command result.",
-                ));
-            };
-            return Ok(reply);
-        }
+        self.sessions
+            .ensure_execution_supported(&session.id)
+            .await?;
+
         self.message_queue
             .reorder(&request.session_id, &request.message_ids)
     }
@@ -189,22 +126,10 @@ impl TalosService {
         request: MessageQueueStartRequest,
     ) -> ServiceResult<StartTurnResponse> {
         let session = self.access.load_session(actor, &request.session_id).await?;
-        if let Some(reply) = self
-            .forward_active_command(
-                actor,
-                &session,
-                agent_protocol::ActiveSessionCommand::StartMessage(request.clone()),
-            )
-            .await?
-        {
-            let agent_protocol::ActiveSessionReply::Started(reply) = reply else {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "Current coordinator returned an invalid command result.",
-                ));
-            };
-            return Ok(reply);
-        }
+        self.sessions
+            .ensure_execution_supported(&session.id)
+            .await?;
+
         let queue = self.message_queue.list(&request.session_id)?;
         let selected = match request.message_id.as_deref() {
             Some(id) => queue.messages.iter().find(|m| m.id == id),

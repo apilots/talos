@@ -34,6 +34,7 @@ pub(crate) fn map_timeline_active_turn(record: AgentActiveTurnRecord) -> Timelin
         identity: record.identity,
         initial_message_id: record.initial_message_id,
         state: record.state,
+        cancellation_requested: record.cancellation_requested,
         last_event_id: TimelineEventId::from_seq(record.last_event_seq).to_string(),
         updated_at: record.updated_at,
     }

@@ -89,6 +89,68 @@ pub(super) async fn append(
     Ok(result)
 }
 
+/// The existing receipt is the idempotency key; no separate notice registry is needed.
+pub(super) async fn complete_worker_settlement(
+    store: &DatabaseSessionStore,
+    cursor: &agent_protocol::AgentSessionEventCursor,
+    notice: TimelineSystemNotice,
+) -> TalosResult<Option<TimelineEventRecord>> {
+    if cursor.session_id != notice.identity.session_id {
+        return Err(TalosError::new(
+            ErrorCode::InvalidRequest,
+            "The notice belongs to another Session.",
+        ));
+    }
+    let mut transaction = store.begin_session_transaction(&cursor.session_id).await?;
+    let receipt = transaction.query(
+        "SELECT e.turn_id FROM worker_event_projection p
+         JOIN visible_agent_events e ON e.event_seq=p.product_event_seq
+         JOIN sessions s ON s.session_key=p.session_id AND s.history_generation=p.history_generation
+         WHERE p.session_id=? AND p.history_generation=? AND p.worker_offset=? AND p.settlement_json <> 'null'",
+        &[&cursor.session_id, &cursor.generation.to_string(), &cursor.offset.to_string()],
+    ).await?;
+    let receipt = receipt.first().ok_or_else(|| {
+        TalosError::new(
+            ErrorCode::ResourceNotFound,
+            "The settlement receipt is unavailable.",
+        )
+    })?;
+    if receipt.get_string("turn_id").as_deref() != Some(&notice.identity.turn_id) {
+        return Err(TalosError::new(
+            ErrorCode::InvalidRequest,
+            "The notice belongs to another Turn.",
+        ));
+    }
+    let now = chrono::Utc::now().timestamp().to_string();
+    let claimed = transaction.query(
+        "UPDATE worker_event_projection SET settlement_applied_at=?1
+         WHERE session_id=?2 AND history_generation=?3 AND worker_offset=?4
+           AND settlement_json <> 'null' AND settlement_applied_at IS NULL
+           AND history_generation=(SELECT history_generation FROM sessions WHERE session_key=?2)
+           AND EXISTS (SELECT 1 FROM visible_agent_events e WHERE e.event_seq=product_event_seq AND e.session_id=?2 AND e.turn_id=?5)
+         RETURNING product_event_seq",
+        &[&now, &cursor.session_id, &cursor.generation.to_string(), &cursor.offset.to_string(), &notice.identity.turn_id],
+    ).await?;
+    if claimed.is_empty() {
+        transaction.commit().await?;
+        return Ok(None);
+    }
+    let raw = serde_json::to_string(&notice.notice).map_err(|error| {
+        TalosError::internal_with_source("Could not encode the settlement notice.", error)
+    })?;
+    let rows = transaction.query(
+        "INSERT INTO agent_events(session_id,turn_id,sequence,occurred_at,persisted_at,payload_json,history_generation)
+         VALUES(?,?,NULL,?,?,?,?) RETURNING event_seq,session_id,turn_id,sequence,occurred_at,persisted_at,payload_json",
+        &[&notice.identity.session_id, &notice.identity.turn_id, &notice.occurred_at.to_string(), &now, &raw, &cursor.generation.to_string()],
+    ).await?;
+    let record = rows
+        .first()
+        .ok_or_else(|| TalosError::internal("The settlement notice was not committed."))
+        .and_then(parse)?;
+    transaction.commit().await?;
+    Ok(Some(record))
+}
+
 pub(crate) fn parse(row: &Row) -> TalosResult<TimelineEventRecord> {
     if row.get_i64("sequence").is_some() {
         let record = parse_event_record(row)?;

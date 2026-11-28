@@ -21,10 +21,10 @@ use talos_types::{
     ProjectListRequest, ProjectPatchRequest, ProjectReadRequest, RecoverTimelineRequest,
     RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
     SessionCompactRequest, SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest,
-    SessionListRequest, SessionPatchRequest, SkillsListRequest, SkillsReadRequest,
-    SkillsRefreshRequest, SkillsResolveRequest, SkillsSuggestRequest, StartTurnRequest,
-    SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest,
-    WorkspaceDocWriteRequest, WorkspaceInfoRequest,
+    SessionListRequest, SessionPatchRequest, SessionRebuildViewRequest, SkillsListRequest,
+    SkillsReadRequest, SkillsRefreshRequest, SkillsResolveRequest, SkillsSuggestRequest,
+    StartTurnRequest, SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest,
+    WorkspaceDocReadRequest, WorkspaceDocWriteRequest, WorkspaceInfoRequest,
 };
 
 #[path = "client_method.rs"]
@@ -126,6 +126,8 @@ pub enum ClientRequestParams {
     SessionCompact(SessionCompactRequest),
     #[serde(rename = "session/clear")]
     SessionClear(SessionClearRequest),
+    #[serde(rename = "session/rebuildView")]
+    SessionRebuildView(SessionRebuildViewRequest),
     #[serde(rename = "session/active_turn")]
     SessionActiveTurn(SessionActiveTurnRequest),
     #[serde(rename = "session/history")]
@@ -292,6 +294,7 @@ pub struct FileUploadParams {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientRequest {
+    pub computer_id: Option<String>,
     pub method: ClientMethod,
     pub params: ClientRequestParams,
 }
@@ -415,6 +418,9 @@ impl ClientRequest {
                 ClientRequestParams::SessionCompact(decode(params_value)?)
             }
             ClientMethod::SessionClear => ClientRequestParams::SessionClear(decode(params_value)?),
+            ClientMethod::SessionRebuildView => {
+                ClientRequestParams::SessionRebuildView(decode(params_value)?)
+            }
             ClientMethod::SessionActiveTurn => {
                 ClientRequestParams::SessionActiveTurn(decode(params_value)?)
             }
@@ -586,6 +592,7 @@ impl ClientRequest {
             ClientMethod::MemoryGet => ClientRequestParams::MemoryGet(decode(params_value)?),
         };
         Ok(Self {
+            computer_id: None,
             method: method_kind,
             params,
         })
@@ -634,6 +641,15 @@ pub struct ServerInfo {
     pub version: String,
     pub auth_enabled: bool,
     pub cloud_auth_url: Option<String>,
+    pub capabilities: ServerCapabilities,
+}
+
+/// Optional modules assembled by this product host, independent of account settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerCapabilities {
+    pub sync: bool,
+    pub relay: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -657,3 +673,134 @@ pub enum ActorCredential {
 #[cfg(test)]
 #[path = "requests_tests.rs"]
 mod tests;
+
+impl ClientRequestParams {
+    /// Preserve the single typed method contract across product transports.
+    pub fn method(&self) -> ClientMethod {
+        match self {
+            Self::AutomationRead(..) => ClientMethod::AutomationRead,
+            Self::AutomationExecute(..) => ClientMethod::AutomationExecute,
+            Self::AutomationList(..) => ClientMethod::AutomationList,
+            Self::AutomationCommandCatalog(..) => ClientMethod::AutomationCommandCatalog,
+            Self::AutomationResolveCommand(..) => ClientMethod::AutomationResolveCommand,
+            Self::BuiltinJobList(..) => ClientMethod::BuiltinJobList,
+            Self::BuiltinJobControl(..) => ClientMethod::BuiltinJobControl,
+            Self::Initialize(..) => ClientMethod::Initialize,
+            Self::DesktopStreamOpen(..) => ClientMethod::DesktopStreamOpen,
+            Self::DesktopStreamSend(..) => ClientMethod::DesktopStreamSend,
+            Self::DesktopStreamClose(..) => ClientMethod::DesktopStreamClose,
+            Self::DesktopWorkerIdentity(..) => ClientMethod::DesktopWorkerIdentity,
+            Self::DesktopWorkerEnroll(..) => ClientMethod::DesktopWorkerEnroll,
+            Self::SyncStatus(..) => ClientMethod::SyncStatus,
+            Self::SyncMetrics(..) => ClientMethod::SyncMetrics,
+            Self::SyncEnable(..) => ClientMethod::SyncEnable,
+            Self::SyncDisable(..) => ClientMethod::SyncDisable,
+            Self::ComputerList(..) => ClientMethod::ComputerList,
+            Self::ComputerRead(..) => ClientMethod::ComputerRead,
+            Self::ComputerCreate(..) => ClientMethod::ComputerCreate,
+            Self::ComputerRename(..) => ClientMethod::ComputerRename,
+            Self::ComputerDelete(..) => ClientMethod::ComputerDelete,
+            Self::ComputerSetStatus(..) => ClientMethod::ComputerSetStatus,
+            Self::ComputerRotateCredential(..) => ClientMethod::ComputerRotateCredential,
+            Self::ComputerReadManagedWorker(..) => ClientMethod::ComputerReadManagedWorker,
+            Self::ComputerCreateManagedWorker(..) => ClientMethod::ComputerCreateManagedWorker,
+            Self::ComputerStartManagedWorker(..) => ClientMethod::ComputerStartManagedWorker,
+            Self::ComputerStopManagedWorker(..) => ClientMethod::ComputerStopManagedWorker,
+            Self::ComputerResetManagedWorker(..) => ClientMethod::ComputerResetManagedWorker,
+            Self::ComputerDeleteManagedWorker(..) => ClientMethod::ComputerDeleteManagedWorker,
+            Self::ProfileRead(..) => ClientMethod::ProfileRead,
+            Self::TrajectoryCapabilities(..) => ClientMethod::TrajectoryCapabilities,
+            Self::TrajectoryReadTurn(..) => ClientMethod::TrajectoryReadTurn,
+            Self::TrajectoryReadRequest(..) => ClientMethod::TrajectoryReadRequest,
+            Self::TrajectoryReadTool(..) => ClientMethod::TrajectoryReadTool,
+            Self::TrajectoryReadPayload(..) => ClientMethod::TrajectoryReadPayload,
+            Self::SessionList(..) => ClientMethod::SessionList,
+            Self::SessionGet(..) => ClientMethod::SessionGet,
+            Self::SessionPatch(..) => ClientMethod::SessionPatch,
+            Self::SessionDelete(..) => ClientMethod::SessionDelete,
+            Self::SessionClose(..) => ClientMethod::SessionClose,
+            Self::SessionCompact(..) => ClientMethod::SessionCompact,
+            Self::SessionClear(..) => ClientMethod::SessionClear,
+            Self::SessionRebuildView(..) => ClientMethod::SessionRebuildView,
+            Self::SessionActiveTurn(..) => ClientMethod::SessionActiveTurn,
+            Self::SessionHistory(..) => ClientMethod::SessionHistory,
+            Self::TimelineRecover(..) => ClientMethod::TimelineRecover,
+            Self::ProjectCreate(..) => ClientMethod::ProjectCreate,
+            Self::ProjectList(..) => ClientMethod::ProjectList,
+            Self::ProjectRead(..) => ClientMethod::ProjectRead,
+            Self::ProjectPatch(..) => ClientMethod::ProjectPatch,
+            Self::ProjectDelete(..) => ClientMethod::ProjectDelete,
+            Self::FsDirectoryRead(..) => ClientMethod::FsDirectoryRead,
+            Self::FsDirectoryCreate(..) => ClientMethod::FsDirectoryCreate,
+            Self::TurnStart(..) => ClientMethod::TurnStart,
+            Self::TurnInterrupt(..) => ClientMethod::TurnInterrupt,
+            Self::TurnInput(..) => ClientMethod::TurnInput,
+            Self::TurnRetry(..) => ClientMethod::TurnRetry,
+            Self::MessageQueueAdd(..) => ClientMethod::MessageQueueAdd,
+            Self::MessageQueueList(..) => ClientMethod::MessageQueueList,
+            Self::MessageQueueUpdate(..) => ClientMethod::MessageQueueUpdate,
+            Self::MessageQueueDelete(..) => ClientMethod::MessageQueueDelete,
+            Self::MessageQueueReorder(..) => ClientMethod::MessageQueueReorder,
+            Self::MessageQueueStart(..) => ClientMethod::MessageQueueStart,
+            Self::EventSubscribe(..) => ClientMethod::EventSubscribe,
+            Self::EventUnsubscribe(..) => ClientMethod::EventUnsubscribe,
+            Self::ModelList(..) => ClientMethod::ModelList,
+            Self::ConfigGet(..) => ClientMethod::ConfigGet,
+            Self::ConfigUpdate(..) => ClientMethod::ConfigUpdate,
+            Self::ConfigDelete(..) => ClientMethod::ConfigDelete,
+            Self::ConfigReload(..) => ClientMethod::ConfigReload,
+            Self::FileUpload(..) => ClientMethod::FileUpload,
+            Self::FileList(..) => ClientMethod::FileList,
+            Self::FileRead(..) => ClientMethod::FileRead,
+            Self::FileContent(..) => ClientMethod::FileContent,
+            Self::FilePreviewPrepare(..) => ClientMethod::FilePreviewPrepare,
+            Self::FilePreviewRead(..) => ClientMethod::FilePreviewRead,
+            Self::FilePreviewClose(..) => ClientMethod::FilePreviewClose,
+            Self::FileUpdate(..) => ClientMethod::FileUpdate,
+            Self::FileDelete(..) => ClientMethod::FileDelete,
+            Self::MemoryFileList(..) => ClientMethod::MemoryFileList,
+            Self::MemoryFileRead(..) => ClientMethod::MemoryFileRead,
+            Self::MemoryFileWrite(..) => ClientMethod::MemoryFileWrite,
+            Self::WorkspaceInfo(..) => ClientMethod::WorkspaceInfo,
+            Self::WorkspaceDocList(..) => ClientMethod::WorkspaceDocList,
+            Self::WorkspaceDocRead(..) => ClientMethod::WorkspaceDocRead,
+            Self::WorkspaceDocWrite(..) => ClientMethod::WorkspaceDocWrite,
+            Self::SkillsList(..) => ClientMethod::SkillsList,
+            Self::SkillsRefresh(..) => ClientMethod::SkillsRefresh,
+            Self::SkillsSuggest(..) => ClientMethod::SkillsSuggest,
+            Self::SkillsRead(..) => ClientMethod::SkillsRead,
+            Self::SkillsResolve(..) => ClientMethod::SkillsResolve,
+            Self::PluginSourceList(..) => ClientMethod::PluginSourceList,
+            Self::PluginSourceAdd(..) => ClientMethod::PluginSourceAdd,
+            Self::PluginSourceRefresh(..) => ClientMethod::PluginSourceRefresh,
+            Self::PluginSourceRemove(..) => ClientMethod::PluginSourceRemove,
+            Self::PluginSearch(..) => ClientMethod::PluginSearch,
+            Self::Browser(..) => ClientMethod::Browser,
+            Self::DesktopOpen(..) => ClientMethod::DesktopOpen,
+            Self::McpServerList(..) => ClientMethod::McpServerList,
+            Self::McpCredentialsUpdate(..) => ClientMethod::McpCredentialsUpdate,
+            Self::McpAuthenticationStart(..) => ClientMethod::McpAuthenticationStart,
+            Self::McpAuthenticationRead(..) => ClientMethod::McpAuthenticationRead,
+            Self::McpServerImport(..) => ClientMethod::McpServerImport,
+            Self::PluginList(..) => ClientMethod::PluginList,
+            Self::PluginRead(..) => ClientMethod::PluginRead,
+            Self::PluginInstall(..) => ClientMethod::PluginInstall,
+            Self::PluginUpdate(..) => ClientMethod::PluginUpdate,
+            Self::PluginUninstall(..) => ClientMethod::PluginUninstall,
+            Self::PluginEnable(..) => ClientMethod::PluginEnable,
+            Self::PluginDisable(..) => ClientMethod::PluginDisable,
+            Self::AuthLogout(..) => ClientMethod::AuthLogout,
+            Self::AuthLoginStart(..) => ClientMethod::AuthLoginStart,
+            Self::AuthLoginStatus(..) => ClientMethod::AuthLoginStatus,
+            Self::AuthLoginCancel(..) => ClientMethod::AuthLoginCancel,
+            Self::AuthSessionRead(..) => ClientMethod::AuthSessionRead,
+            Self::AuthSessionClear(..) => ClientMethod::AuthSessionClear,
+            Self::UserCurrent(..) => ClientMethod::UserCurrent,
+            Self::MemorySearch(..) => ClientMethod::MemorySearch,
+            Self::MemoryGet(..) => ClientMethod::MemoryGet,
+        }
+    }
+}
+
+#[path = "request_routing.rs"]
+mod routing;

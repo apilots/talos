@@ -160,7 +160,8 @@ def verify_workspace_exit(page, panel, prefix):
 
 def run(cluster):
     cluster.start_control_plane()
-    data(public(cluster, '/v1/computers', 'POST', {'displayName': 'Workspace test Computer', 'credentialExpiresAt': 2_000_000_000}))
+    computer = data(public(cluster, '/v1/computers', 'POST', {'displayName': 'Workspace test Computer', 'credentialExpiresAt': 2_000_000_000}))
+    cluster.register_offline_native(computer)
     port = free_port()
     cluster.start_process('web', ['pnpm', '--dir', str(ROOT / 'talos-app'), '--filter', 'talos-web', 'dev', '--host', '127.0.0.1', '--port', str(port), '--strictPort'], dict(os.environ, VITE_API_PROXY_TARGET=cluster.url))
     url = f'http://127.0.0.1:{port}'
@@ -253,7 +254,9 @@ def run(cluster):
             # Upload and open Markdown through the actual product and File owner.
             with page.expect_response(lambda response: response.url.endswith('/v1/files') and response.request.method == 'POST') as uploaded:
                 page.locator('input[type=file]').set_input_files({'name': 'workspace-review.md', 'mimeType': 'text/markdown', 'buffer': b'# Workspace acceptance\n\nPrivate **Markdown** rendered by the product.\n'})
-            file_id = uploaded.value.json()['data']['file']['fileId']
+            upload_result = uploaded.value.json()
+            require(uploaded.value.ok and 'data' in upload_result, f'Markdown upload failed: {upload_result}')
+            file_id = upload_result['data']['file']['fileId']
             metadata = public(cluster, '/v1/files/' + file_id, user='bob')
             require(metadata.get('error', {}).get('code') == 'resourceNotFound', 'Non-owner read private Markdown metadata')
             denied = context.request.get(cluster.url + '/v1/files/' + file_id + '/content', headers={'Authorization': 'Bearer ' + cluster.users['bob']['access_token']})
@@ -272,7 +275,9 @@ def run(cluster):
             # Correlate the actual read, independent of preparation response order.
             prepared = next((response for response in prepared_responses if data(response.json())['previewId'] == content_request.value.post_data_json['previewId']), None)
             require(prepared is not None, 'Product read a different preview grant')
-            require(prepared.request.post_data_json == {'source': {'kind': 'file', 'fileId': file_id}}, 'Product prepared a different Markdown source')
+            # A fresh Web account selects its sole registered Computer.
+            expect(page.locator(f'aside button[data-computer-id="{computer["node"]["nodeId"]}"]')).to_have_attribute('aria-pressed', 'true')
+            require(prepared.request.post_data_json == {'source': {'kind': 'file', 'fileId': file_id, 'nodeId': computer['node']['nodeId']}}, 'Product prepared a different Markdown source')
             for request in (prepared.request, content_request.value):
                 require(request.headers.get('authorization') == 'Bearer ' + cluster.users['alice']['access_token'], 'Product Markdown preview request omitted owner authentication')
             (REPORT / 'workspace-preview-auth.json').write_text(json.dumps({'preparedGrants': [data(response.json())['previewId'] for response in prepared_responses], 'readGrant': content_request.value.post_data_json['previewId'], 'source': prepared.request.post_data_json['source'], 'ownerAuthenticated': True}, indent=2) + '\n')

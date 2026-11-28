@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use reqwest::{header, Client};
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::messages as messages_protocol, validate_inline_attachments, Attachment,
     AttachmentKind, AttachmentUsage, ChatRequest, ChatResponse, ChatStream, LlmProvider,
@@ -154,30 +154,59 @@ impl AnthropicProvider {
         request: ChatRequest,
         stream: Option<bool>,
     ) -> TalosResult<messages_protocol::MessagesRequest> {
-        let thinking =
+        let adaptive = request
+            .request_parameters
+            .get("thinking")
+            .and_then(|value| value.get("type"))
+            .and_then(serde_json::Value::as_str)
+            == Some("adaptive");
+        let thinking = if adaptive {
+            None
+        } else {
             request
                 .reasoning_effort
-                .map(|effort| messages_protocol::MessagesThinkingConfig {
-                    r#type: "enabled".to_string(),
-                    budget_tokens: Some(Self::reasoning_budget_tokens(effort)),
-                });
+                .map(|effort| {
+                    Self::reasoning_budget_tokens(effort).map(|budget| {
+                        messages_protocol::MessagesThinkingConfig {
+                            r#type: "enabled".to_string(),
+                            budget_tokens: Some(budget),
+                        }
+                    })
+                })
+                .transpose()?
+        };
+        let output_config = if adaptive {
+            request
+                .reasoning_effort
+                .map(|effort| messages_protocol::MessagesOutputConfig {
+                    effort: talos_llm_provider::protocols::chat::reasoning_effort(effort),
+                })
+        } else {
+            None
+        };
         messages_protocol::request(
             request,
             stream,
             messages_protocol::MessagesRequestOptions {
                 thinking,
-                ..Default::default()
+                output_config,
             },
         )
     }
 
-    fn reasoning_budget_tokens(effort: ReasoningEffort) -> u32 {
-        match effort {
+    fn reasoning_budget_tokens(effort: ReasoningEffort) -> TalosResult<u32> {
+        Ok(match effort {
             ReasoningEffort::Light => 1024,
             ReasoningEffort::Medium => 2048,
             ReasoningEffort::High => 4096,
             ReasoningEffort::XHigh => 8192,
-        }
+            ReasoningEffort::Max => {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "Maximum reasoning effort requires an adaptive-thinking model.",
+                ));
+            }
+        })
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {

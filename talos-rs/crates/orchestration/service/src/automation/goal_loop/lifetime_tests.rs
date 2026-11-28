@@ -1,6 +1,7 @@
 //! Goal natural duration and indefinite Loop lifecycle use the original state owner.
 use super::*;
 use crate::automation::goal_loop::AutomationCaller;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 
 async fn model_request(
     service: &TalosService,
@@ -361,12 +362,15 @@ async fn unrelated_user_failure_preserves_the_active_goal() {
         }),
     };
     store
-        .commit_terminal_settlement(talos_store::session::CommitTerminalSettlementParams {
-            event: event.clone(),
-            expected_event_seq: commit.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![event.clone()]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     let session = store.get_session_record("alice").await.unwrap().unwrap();
     service

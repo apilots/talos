@@ -34,6 +34,7 @@ where
         .processed_until_event_seq(session_id)
         .await?;
     let context_config = SessionPromptContextConfig {
+        source_message_limit: None,
         compact_cursor: (memory_processed_until_event_seq > 0).then_some(
             talos_prompt::CompactPromptCursor {
                 covers_until_seq: memory_processed_until_event_seq,
@@ -49,17 +50,22 @@ where
         summary_recent_count: 0,
         summary_max_chars: 0,
     };
-    let mut context = session_prompt_context_source.load(context_config).await?;
     let transcript_max_chars = kernel_config
         .compaction
         .recent_messages_max_chars
         .clamp(1, DREAM_MEMORY_TRANSCRIPT_MAX_CHARS);
     let message_max_chars = transcript_max_chars.saturating_sub(64).div_ceil(2).max(1);
-    for message in &mut context.recent_messages {
-        if message.text.chars().count() > message_max_chars {
-            message.text = message.text.chars().take(message_max_chars).collect();
-        }
-    }
+    let context = super::memory_context::load_memory_context(
+        session_prompt_context_source,
+        context_config,
+        Some(super::memory_context::MemoryContextBudget {
+            tokens: transcript_max_chars.div_ceil(4),
+            message_max_chars: Some(message_max_chars),
+            tool_results_keep: 0,
+            tool_exchanges_keep: 0,
+        }),
+    )
+    .await?;
     let (units, _, _) =
         trim_transcript_units_to_budget(&context, transcript_max_chars.div_ceil(4), 0, 0);
     let transcript = render_transcript(&units);

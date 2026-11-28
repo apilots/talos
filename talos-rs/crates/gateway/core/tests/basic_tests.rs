@@ -5,16 +5,17 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use talos_agent::{
-    AgentAdmission, AgentAdmissionPermit, AgentContext, AgentEventPipeline, AgentInputParams,
-    AgentInterruptParams, AgentProgressEventReceiver, AgentRunExecution, AgentRunParams,
-    AgentRunSettlement, AgentRunSettlementReceiver, AgentSessionContext,
+    AgentAdmission, AgentAdmissionPermit, AgentContext, AgentEventPipeline, AgentFuture,
+    AgentHarness, AgentInputParams, AgentInterruptParams, AgentProgressEventReceiver,
+    AgentRunExecution, AgentRunParams, AgentRunSettlement, AgentRunSettlementReceiver,
+    AgentSessionContext,
 };
 use talos_agent_api::{
     AgentEventPayload, AgentInterruptOutcome, AgentRunMetrics, AgentTurnCompleted, AgentTurnStarted,
 };
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserRole, UserService};
 use talos_config::{InMemoryLlmConfigStore, ProviderModelConfig};
-use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
+use talos_coordinator::{AgentCoordinator, CoordinatorImpl};
 use talos_error::TalosResult;
 use talos_gateway::{Gateway, ServiceGateway};
 use talos_service::TimelineEventService;
@@ -34,7 +35,9 @@ use talos_types::{
     SessionPatchRequest, StartTurnRequest, TalosConfig, TurnCommandStatus,
 };
 
-struct RecordingHandler;
+struct RecordingHandler {
+    _journal_home: tempfile::TempDir,
+}
 struct TestAuthService;
 
 fn test_config_reload_hook(config: TalosConfig) -> ConfigReloadHook {
@@ -60,115 +63,136 @@ fn test_config_reload_hook(config: TalosConfig) -> ConfigReloadHook {
     })
 }
 
-#[async_trait]
-impl AgentCoordinator for RecordingHandler {
-    async fn worker_environment(
-        &self,
-        _node_id: &str,
-        _user_id: &str,
-    ) -> TalosResult<Arc<dyn talos_coordinator::WorkerEnvironment>> {
-        let config = test_config();
-        let service = talos_service::ConfigService::new(
-            Arc::new(InMemoryLlmConfigStore::new(config.llm.clone())),
-            Arc::new(tokio::sync::RwLock::new(())),
-            test_config_reload_hook(config.clone()),
-        );
-        Ok(Arc::new(
-            talos_service::WorkerEnvironmentService::new(
-                Arc::new(std::sync::RwLock::new(config)),
-                Some(std::env::temp_dir()),
-            )
-            .with_config_service(service),
-        ))
-    }
-
-    async fn resolve_agent(&self, _params: AgentSelectionParams) -> TalosResult<String> {
-        Ok("default".to_string())
-    }
-
-    async fn ensure_agent(&self, _agent_id: &str) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn select_execution_node(
-        &self,
-        _agent_id: &str,
-        _user_id: &str,
-        preferred_node_id: Option<&str>,
-    ) -> TalosResult<String> {
-        Ok(preferred_node_id.unwrap_or("embedded").to_string())
-    }
-
-    async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
-        let identity = params.context.identity();
-        let (pipeline, _sink, progress_rx) = AgentEventPipeline::fresh(identity);
-        let mut admission_events = vec![
-            pipeline
-                .record(AgentEventPayload::TurnStarted(AgentTurnStarted {}))
-                .await?,
-        ];
-        admission_events.extend(pipeline.record_user_message(params.input).await?);
-        let terminal = pipeline
-            .record(AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                stop_reason: talos_agent_api::AgentStopReason::EndTurn,
-            }))
-            .await?;
-        let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
-        Ok(AgentRunExecution {
-            admission: AgentAdmission {
-                events: admission_events,
-                permit: AgentAdmissionPermit::new(async move {
-                    settlement_tx
-                        .send(Ok(AgentRunSettlement::Finished {
-                            result: Ok(()),
-                            event: terminal,
-                            metrics: AgentRunMetrics::default(),
-                        }))
-                        .map_err(|_| {
-                            talos_error::TalosError::new(
-                                talos_error::ErrorCode::InternalError,
-                                "test receiver",
-                            )
-                        })?;
-                    Ok(())
-                }),
-            },
-            events: AgentProgressEventReceiver::new(progress_rx),
-            settlement: AgentRunSettlementReceiver::new(settlement_rx),
+impl AgentHarness for RecordingHandler {
+    fn start(&self, params: AgentRunParams) -> AgentFuture<'_, TalosResult<AgentRunExecution>> {
+        Box::pin(async move {
+            let identity = params.context.identity();
+            let (pipeline, _sink, progress_rx) = AgentEventPipeline::fresh(identity);
+            let mut admission_events = vec![
+                pipeline
+                    .record(AgentEventPayload::TurnStarted(AgentTurnStarted {}))
+                    .await?,
+            ];
+            admission_events.extend(pipeline.record_user_message(params.input).await?);
+            let terminal = pipeline
+                .record(AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: talos_agent_api::AgentStopReason::EndTurn,
+                }))
+                .await?;
+            let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
+            Ok(AgentRunExecution {
+                admission: AgentAdmission {
+                    events: admission_events,
+                    permit: AgentAdmissionPermit::new(async move {
+                        settlement_tx
+                            .send(Ok(AgentRunSettlement::Finished {
+                                result: Ok(()),
+                                event: terminal,
+                                metrics: AgentRunMetrics::default(),
+                            }))
+                            .map_err(|_| {
+                                talos_error::TalosError::new(
+                                    talos_error::ErrorCode::InternalError,
+                                    "test receiver",
+                                )
+                            })?;
+                        Ok(())
+                    }),
+                },
+                events: AgentProgressEventReceiver::new(progress_rx),
+                settlement: AgentRunSettlementReceiver::new(settlement_rx),
+            })
         })
     }
-
-    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentAdmission> {
-        unreachable!("gateway test does not submit live input")
+    fn submit_input(
+        &self,
+        _params: AgentInputParams,
+    ) -> AgentFuture<'_, TalosResult<AgentAdmission>> {
+        Box::pin(async { unreachable!("gateway test does not submit live input") })
     }
-
-    async fn interrupt(&self, _params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
-        Ok(AgentInterruptOutcome::Cancelled)
+    fn interrupt(
+        &self,
+        _params: AgentInterruptParams,
+    ) -> AgentFuture<'_, TalosResult<AgentInterruptOutcome>> {
+        Box::pin(async { Ok(AgentInterruptOutcome::Cancelled) })
     }
-
-    async fn compact_session(&self, _params: AgentContext) -> TalosResult<AgentRunExecution> {
-        unreachable!("gateway test does not compact Sessions")
+    fn compact_session(
+        &self,
+        _params: AgentContext,
+    ) -> AgentFuture<'_, TalosResult<AgentRunExecution>> {
+        Box::pin(async { unreachable!("gateway test does not compact Sessions") })
     }
-
-    async fn clear_session(
+    fn clear_session(
         &self,
         _params: AgentSessionContext,
-        _expected_history_cursor: talos_types::SessionHistoryCursor,
-    ) -> TalosResult<()> {
-        Ok(())
+        _expected: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, TalosResult<()>> {
+        Box::pin(async { Ok(()) })
     }
-
-    async fn close_session(
+    fn close_session(
         &self,
         _params: AgentSessionContext,
-        _expected_history_cursor: talos_types::SessionHistoryCursor,
-    ) -> TalosResult<()> {
-        Ok(())
+        _expected: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, TalosResult<()>> {
+        Box::pin(async { Ok(()) })
     }
+    fn shutdown(&self, _timeout: Duration) -> AgentFuture<'_, TalosResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
+}
 
-    async fn shutdown(&self, _timeout: Duration) -> TalosResult<()> {
-        Ok(())
-    }
+async fn test_worker_coordinator(
+    config: &TalosConfig,
+    storage: &SqliteStorage,
+    store: Arc<DatabaseSessionStore>,
+    agent_id: &str,
+    harness: Arc<dyn AgentHarness>,
+    journal: Arc<talos_store::execution::WorkerExecutionStore>,
+) -> Arc<CoordinatorImpl> {
+    let nodes = Arc::new(talos_store::node::DatabaseAgentNodeStore::new(storage));
+    talos_service::AgentNodeService::new(nodes.clone())
+        .register_embedded(true)
+        .await
+        .unwrap();
+    let router = talos_router::RouterImpl::new();
+    talos_router::Router::add_binding(
+        &router,
+        talos_router::Binding {
+            id: "test-default".into(),
+            agent_id: agent_id.into(),
+            rule: talos_router::MatchRule::Default,
+            priority: 0,
+        },
+    )
+    .await
+    .unwrap();
+    let coordinator = Arc::new(CoordinatorImpl::new(Arc::new(router), store, nodes));
+    let settings = talos_service::ConfigService::new(
+        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone())),
+        Arc::new(tokio::sync::RwLock::new(())),
+        test_config_reload_hook(config.clone()),
+    );
+    coordinator
+        .register_environment(
+            "embedded".into(),
+            Arc::new(
+                talos_service::WorkerEnvironmentService::new(
+                    Arc::new(std::sync::RwLock::new(config.clone())),
+                    Some(std::env::temp_dir()),
+                )
+                .with_config_service(settings),
+            ),
+        )
+        .await;
+    coordinator
+        .register_agent(
+            "embedded".into(),
+            agent_id.into(),
+            Arc::new(talos_agent::LocalExecutionHarness::new(harness, journal)),
+        )
+        .await
+        .unwrap();
+    coordinator
 }
 
 #[async_trait]
@@ -211,8 +235,25 @@ impl UserService for TestAuthService {
 async fn test_gateway() -> ServiceGateway {
     let config = test_config();
     let (storage, store) = test_session_storage().await;
-    let handler = Arc::new(RecordingHandler);
-    test_gateway_with_coordinator(config, storage, store, handler).await
+    let directory = tempfile::tempdir().unwrap();
+    let journal = Arc::new(
+        talos_store::execution::WorkerExecutionStore::open(&directory.path().join("worker.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let harness = Arc::new(RecordingHandler {
+        _journal_home: directory,
+    });
+    let coordinator = test_worker_coordinator(
+        &config,
+        &storage,
+        store.clone(),
+        "default",
+        harness,
+        journal,
+    )
+    .await;
+    test_gateway_with_coordinator(config, storage, store, coordinator).await
 }
 
 async fn test_session_storage() -> (Arc<SqliteStorage>, Arc<DatabaseSessionStore>) {
@@ -440,6 +481,7 @@ async fn gateway_patch_session_rejects_missing_session_id() {
                 session_id: String::new(),
                 conf: None,
                 current_directory: None,
+                pinned: None,
             },
         )
         .await;

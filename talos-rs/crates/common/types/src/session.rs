@@ -269,6 +269,8 @@ pub struct SessionInfo {
     #[serde(default)]
     #[ts(type = "string | null")]
     pub current_directory: Option<PathBuf>,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
@@ -316,6 +318,13 @@ pub struct SessionClearRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
+pub struct SessionRebuildViewRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionActiveTurnRequest {
     pub session_id: String,
 }
@@ -339,6 +348,9 @@ pub struct SessionPatchRequest {
     pub conf: Option<SessionConf>,
     #[serde(default)]
     pub current_directory: Option<OptionalCurrentDirectoryPatch>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub pinned: Option<bool>,
 }
 
 impl SessionPatchRequest {
@@ -346,6 +358,7 @@ impl SessionPatchRequest {
         SessionPatch {
             conf: self.conf,
             current_directory: self.current_directory,
+            pinned: self.pinned,
         }
     }
 }
@@ -381,6 +394,13 @@ pub struct SessionClearResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
+pub struct SessionRebuildViewResponse {
+    pub session: SessionInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionCompactResponse {
     pub session: SessionInfo,
 }
@@ -391,12 +411,18 @@ pub struct SessionPatch {
     pub conf: Option<SessionConf>,
     #[serde(default)]
     pub current_directory: Option<OptionalCurrentDirectoryPatch>,
+    #[serde(default)]
+    pub pinned: Option<bool>,
 }
 
 impl SessionPatch {
     pub fn model_selection(&self) -> crate::TalosResult<Option<ModelSelection>> {
         let conf = self.conf.as_ref().cloned().unwrap_or_default();
         SessionConfigOverridePolicy::extract_model_selection(&conf)
+    }
+
+    pub fn is_pin_only(&self) -> bool {
+        self.pinned.is_some() && self.conf.is_none() && self.current_directory.is_none()
     }
 }
 

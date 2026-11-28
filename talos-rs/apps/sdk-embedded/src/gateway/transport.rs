@@ -2,6 +2,19 @@
 use super::*;
 
 impl EmbeddedServerClient {
+    pub(super) fn select_optional_computer(
+        &mut self,
+        node_id: &mut Option<String>,
+    ) -> TalosResult<()> {
+        if let Some(target) = node_id.as_deref() {
+            self.select_computer(target)?;
+            if self.remote.is_none() {
+                *node_id = Some("embedded".into());
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn gateway(&self) -> &dyn talos_gateway::Gateway {
         self.runtime.gateway.as_ref()
     }
@@ -17,7 +30,7 @@ impl EmbeddedServerClient {
             .await?;
         if let CloudLoginStatusResponse::Authenticated { access_token, .. } = &response {
             self.actor = authenticated_actor_from_access_token(&self.runtime, access_token).await?;
-            self.runtime.service.sync_status(&self.actor).await?;
+            self.runtime.resume_account_host(&self.actor);
         }
         Ok(response)
     }
@@ -66,6 +79,9 @@ impl EmbeddedServerClient {
     }
 
     pub(super) async fn shutdown_embedded_runtime(&mut self) -> TalosResult<()> {
+        if let Some(remote) = self.remote.take() {
+            talos_sdk::GatewayClient::shutdown(&mut *remote.lock().await).await?;
+        }
         self.shutdown_result
             .get_or_init(|| async {
                 let subscriptions = self

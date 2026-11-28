@@ -28,9 +28,9 @@ impl TurnService {
         request: SubmitTurnInputRequest,
     ) -> TalosResult<SubmitTurnInputResponse> {
         let service = self.clone();
-        super::await_admission(
-            async move { service.submit_turn_input_owned(session, request).await },
-        )
+        super::await_admission(self.execution.track_admission()?, async move {
+            service.submit_turn_input_owned(session, request).await
+        })
         .await
     }
 
@@ -51,6 +51,12 @@ impl TurnService {
             ));
         }
         validate_client_request_id(request.client_request_id.as_deref())?;
+        let scope = self
+            .execution
+            .sessions
+            .build_agent_session_context(&session)
+            .await?;
+        self.execution.project_worker(&scope).await?;
 
         match request.input.clone() {
             SubmitTurnInput::Message { input } => {
@@ -76,11 +82,15 @@ impl TurnService {
                         &request.identity.turn_id,
                         &message_id,
                         input,
-                        chrono::Utc::now().timestamp(),
+                        command.as_ref().map_or_else(
+                            || chrono::Utc::now().timestamp(),
+                            |command| command.created_at / 1_000,
+                        ),
                     )?;
                     self.execution
                         .admit_running_input(
                             AgentInputParams {
+                                command: None,
                                 agent_id: session.agent_id.clone(),
                                 identity: request.identity.clone(),
                                 input: message,
@@ -92,7 +102,9 @@ impl TurnService {
                 }
                 .await;
                 if let Err(error) = result {
-                    self.release_command(command).await;
+                    if !agent_protocol::AgentAdmissionUnconfirmed::contains(&error) {
+                        self.release_command(command).await;
+                    }
                     return Err(error);
                 }
                 Ok(SubmitTurnInputResponse {
@@ -126,7 +138,9 @@ impl TurnService {
                     )
                     .await
                 {
-                    self.release_command(command).await;
+                    if !agent_protocol::AgentAdmissionUnconfirmed::contains(&error) {
+                        self.release_command(command).await;
+                    }
                     return Err(error);
                 }
                 Ok(SubmitTurnInputResponse {
@@ -164,7 +178,9 @@ impl TurnService {
                     )
                     .await;
                 if let Err(error) = result {
-                    self.release_command(command).await;
+                    if !agent_protocol::AgentAdmissionUnconfirmed::contains(&error) {
+                        self.release_command(command).await;
+                    }
                     return Err(error);
                 }
                 Ok(SubmitTurnInputResponse {
@@ -190,25 +206,38 @@ impl TurnService {
             });
         };
         let now = chrono::Utc::now().timestamp_millis();
-        let reservation = self
-            .execution
-            .execution_store
-            .reserve_command(CommandReservation {
-                session_id: request.identity.session_id.clone(),
-                command,
-                idempotency_key: idempotency_key.clone(),
-                request_hash: turn_input_hash(request)?,
-                request_id: idempotency_key.clone(),
-                turn_id: request.identity.turn_id.clone(),
-                message_id: proposed_message_id,
-                lease_id: format!("lease_{}", uuid::Uuid::new_v4().simple()),
-                now,
-                lease_expires_at: now.saturating_add(TURN_SUBMISSION_LEASE_MS),
-                record_expires_at: Some(now.saturating_add(
-                    (self.base_config.agent.command_idempotency_ttl_hours as i64) * 60 * 60 * 1000,
-                )),
-            })
-            .await?;
+        let params = CommandReservation {
+            session_id: request.identity.session_id.clone(),
+            command,
+            idempotency_key: idempotency_key.clone(),
+            request_hash: turn_input_hash(request)?,
+            request_id: idempotency_key.clone(),
+            turn_id: request.identity.turn_id.clone(),
+            message_id: proposed_message_id,
+            lease_id: format!("lease_{}", uuid::Uuid::new_v4().simple()),
+            now,
+            lease_expires_at: now.saturating_add(TURN_SUBMISSION_LEASE_MS),
+            record_expires_at: Some(now.saturating_add(
+                (self.base_config.agent.command_idempotency_ttl_hours as i64) * 60 * 60 * 1000,
+            )),
+        };
+        let mut reservation = self.execution.reserve_command(params.clone()).await?;
+        if matches!(reservation, IdempotencyReservation::InProgress) {
+            if let Some(session) = self
+                .execution
+                .sessions
+                .load_record(&request.identity.session_id)
+                .await?
+            {
+                let scope = self
+                    .execution
+                    .sessions
+                    .build_agent_session_context(&session)
+                    .await?;
+                self.execution.project_worker(&scope).await?;
+                reservation = self.execution.reserve_command(params).await?;
+            }
+        }
         match reservation {
             IdempotencyReservation::Reserved(lease) => Ok(TurnInputReservation::Ready {
                 request_id: lease.request_id.clone(),
@@ -226,11 +255,24 @@ impl TurnService {
     }
 
     async fn require_running_turn(&self, identity: &AgentTurnRef) -> TalosResult<()> {
+        if let Some(record) = self
+            .execution
+            .sessions
+            .load_record(&identity.session_id)
+            .await?
+        {
+            let scope = self
+                .execution
+                .sessions
+                .build_agent_session_context(&record)
+                .await?;
+            self.execution.project_worker(&scope).await?;
+        }
         let active = self.canonical_active_turn(&identity.session_id).await?;
         if matches!(
             active,
             Some(ref active)
-                if active.identity == *identity && active.state == ActiveTurnState::Running
+                if active.identity == *identity && active.state == ActiveTurnState::Running && !active.cancellation_requested
         ) {
             return Ok(());
         }

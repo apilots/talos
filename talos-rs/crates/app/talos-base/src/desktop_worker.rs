@@ -12,7 +12,7 @@ const CREDENTIAL_LIFETIME_SECONDS: i64 = 365 * 24 * 60 * 60;
 
 /// Borrow the existing host resources; enrollment never creates another Worker.
 pub(crate) struct WorkerEnrollment<'a> {
-    pub sync_host: &'a crate::application_sync::ApplicationSyncHost,
+    pub host: &'a crate::application_host::ApplicationHost,
     pub config: &'a talos_config::Config,
     pub store: &'a talos_config::YamlConfigStore,
     pub account: &'a talos_service::AccountService,
@@ -42,7 +42,7 @@ impl DesktopApplication {
         request_actor: Option<&talos_service::Actor>,
     ) -> TalosResult<DesktopWorkerIdentityResponse> {
         let identity = WorkerEnrollment {
-            sync_host: &self.sync_host,
+            host: &self.host,
             config: &self.config,
             store: &self.store,
             account: &self.account,
@@ -55,8 +55,11 @@ impl DesktopApplication {
         }
         .enroll(recover_node_id, None, request_actor)
         .await?;
+        #[cfg(feature = "relay-client")]
+        self.host.refresh_product_relay().await?;
+        #[cfg(feature = "sync")]
         if let Some(actor) = request_actor {
-            self.sync_host.refresh_enrolled_capture(actor).await?;
+            self.host.refresh_enrolled_capture(actor).await?;
         }
         Ok(identity)
     }
@@ -125,7 +128,7 @@ impl WorkerEnrollment<'_> {
             Ok(config) => config,
             Err(error) => {
                 // A rejected competing central claim cannot stop its current owner's Worker.
-                if self.config.agent_node.control_plane.is_none() {
+                if self.host.product_owner == talos_types::NodeProductOwner::Computer {
                     if let Some(worker) = active.take() {
                         if let Err(cleanup) = worker.shutdown().await {
                             talos_logging::report_error(&cleanup);
@@ -168,6 +171,7 @@ impl WorkerEnrollment<'_> {
                         .runner
                         .as_ref()
                         .expect("prepared identity"),
+                    self.host.product_owner,
                     Some(std::sync::Arc::new(move |error| {
                         talos_logging::report_error(&error);
                         failures.send_replace(Some(error.to_api_error()));
@@ -274,10 +278,8 @@ impl WorkerEnrollment<'_> {
                     "Only the previous owner may reconnect this Computer.",
                 ));
             }
-            let _retirement = self.sync_host.registration_retirement.lock().await;
-            self.sync_host
-                .retire_removed_local_registration(&actor)
-                .await?;
+            let _retirement = self.host.registration_retirement.lock().await;
+            self.host.retire_removed_local_registration(&actor).await?;
             self.store.retire_removed_registration(&actor.user_id)?;
         }
         let mut config = self.config.reload()?;
@@ -289,7 +291,7 @@ impl WorkerEnrollment<'_> {
         }
         let endpoint = config.cloud.agent_base_url.clone();
         let mut existing = self.store.load_agent_node()?.runner;
-        let central = config.agent_node.control_plane.is_some();
+        let central = self.host.product_owner == talos_types::NodeProductOwner::Server;
         let direct_endpoint = central.then(|| endpoint.clone());
         let mut transport_changed = false;
         let directory_started = std::time::Instant::now();
@@ -303,7 +305,7 @@ impl WorkerEnrollment<'_> {
             let mut node = match client.get_node(token, node_id).await {
                 Ok(node) => node,
                 Err(error) if error.is_code(ErrorCode::ResourceExpired) => {
-                    self.sync_host
+                    self.host
                         .observe_registration_removal(&actor, node_id)
                         .await?;
                     return Err(error);
@@ -435,7 +437,7 @@ impl WorkerEnrollment<'_> {
             self.store.save_node_identity(&runner, token.trim())?;
         }
         if !central {
-            self.sync_host
+            self.host
                 .cache_confirmed_computer(
                     &talos_service::Actor::regular(&actor.user_id)
                         .with_role(actor.role)

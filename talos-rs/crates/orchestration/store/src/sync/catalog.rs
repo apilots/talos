@@ -16,7 +16,7 @@ pub(super) async fn scan(
         .query(
             r#"WITH resources(kind, id) AS (
         SELECT 'project', project_id FROM projects WHERE user_id = ?2
-        UNION ALL SELECT 'session', session_key FROM sessions WHERE user_id = ?2
+        UNION ALL SELECT 'session', session_key FROM sessions WHERE user_id = ?2 AND execution_architecture <> 'legacy_read_only'
         UNION ALL SELECT 'file', file_id FROM files WHERE owner_user_id = ?2 AND status = 'ready'
     )
     SELECT r.kind, r.id FROM resources r

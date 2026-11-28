@@ -10,7 +10,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'computer_workspace'))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'workspace_resources'))
 from deletion_auth_fixture import ContractAuthCluster
-from fixture import data, http, free_port, require
+from fixture import data, http, free_port, require, wait_for
 
 
 class ModelReply(BaseHTTPRequestHandler):
@@ -91,7 +91,9 @@ class PreviewCluster(ContractAuthCluster):
         ack = data(response)
         events = self.events('alice', session, ack['turnId'], timeout=60)
         require(events[-1]['payload']['type'] == 'turnCompleted', 'Controlled resource Turn failed: ' + repr(events[-1]['payload']))
-        data(http(self.url + '/v1/sessions/' + session, token=self.users['alice']['access_token']))
+        wait_for(lambda: data(http(self.url + '/v1/sessions/' + session,
+            token=self.users['alice']['access_token']))['session']['title'] == text.splitlines()[0],
+            'Generated preview Session title')
         return session
 
     def start_preview_worker(self, name="preview", transport="direct"):

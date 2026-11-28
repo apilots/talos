@@ -32,7 +32,6 @@ pub(crate) enum RequestMode {
 
 struct Pending {
     sequence: u64,
-    scope: Option<pb::CoordinatorCallContext>,
     sender: mpsc::Sender<Reply>,
     cancel: CancellationToken,
     error: Arc<Mutex<Option<TalosError>>>,
@@ -214,7 +213,7 @@ impl AgentExecutionConnection {
     where
         S: Stream<Item = Call> + Send + 'static,
     {
-        self.invoke_results(requests.map(Ok), timeout_ms, mode, None)
+        self.invoke_results(requests.map(Ok), timeout_ms, mode)
             .await
     }
 
@@ -223,7 +222,6 @@ impl AgentExecutionConnection {
         requests: S,
         timeout_ms: u64,
         mode: RequestMode,
-        caller: Option<pb::CoordinatorCallContext>,
     ) -> Result<RpcStream<Reply>, Status>
     where
         S: Stream<Item = Result<Call, Status>> + Send + 'static,
@@ -251,7 +249,6 @@ impl AgentExecutionConnection {
             .await
             .transpose()?
             .ok_or_else(|| error_pb::encode_status(&closed()))?;
-        let scope = agent_protocol::connection_pb::execution_scope(&first);
         let requests_closed = matches!(mode, RequestMode::Unary | RequestMode::ControlUnary);
         let id;
         let cancel = CancellationToken::new();
@@ -279,7 +276,6 @@ impl AgentExecutionConnection {
             self.writer
                 .control(pb::ControlToNodeFrame {
                     body: Some(pb::control_to_node_frame::Body::Call(pb::WorkerRpcCall {
-                        caller: caller.clone(),
                         call_id: id,
                         sequence: 1,
                         requests_closed,
@@ -293,7 +289,6 @@ impl AgentExecutionConnection {
                 id,
                 Pending {
                     sequence: 1,
-                    scope,
                     sender,
                     cancel: cancel.clone(),
                     error: error.clone(),
@@ -358,7 +353,6 @@ impl AgentExecutionConnection {
                     let requests_closed = request.is_none();
                     let frame = pb::ControlToNodeFrame {
                         body: Some(pb::control_to_node_frame::Body::Call(pb::WorkerRpcCall {
-                            caller: None,
                             call_id: id,
                             sequence,
                             requests_closed,
@@ -494,9 +488,3 @@ fn fail(pending: Pending, error: TalosError) {
     *pending.error.lock().expect("Agent call lock poisoned") = Some(error);
     pending.cancel.cancel();
 }
-
-#[path = "connection_relay.rs"]
-mod relay;
-
-#[path = "resource_connection.rs"]
-mod resources;

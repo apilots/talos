@@ -12,7 +12,7 @@ pub(super) struct PreviewGrant {
     actor: Actor,
     descriptor: FilePreviewDescriptor,
     source: PreviewBinding,
-    document: Option<crate::file::preview::PreparedDocument>,
+    worker: Option<PreviewWorker>,
 }
 
 enum PreviewBinding {
@@ -22,20 +22,29 @@ enum PreviewBinding {
     Session {
         session_id: String,
         worktree_binding: Option<SessionWorktreeBinding>,
-        environment: Arc<dyn WorkerEnvironment>,
-        context: WorkerEnvironmentContext,
-        handle: String,
     },
 }
 
+struct PreviewWorker {
+    environment: Arc<dyn WorkerEnvironment>,
+    context: WorkerEnvironmentContext,
+    handle: String,
+}
+
 impl TalosService {
+    /// The product composition reuses the isolated preview origin for personal relay URLs.
+    pub fn file_preview_origin(&self) -> Option<&str> {
+        self.file_preview_base_url.as_deref()
+    }
+
     pub async fn prepare_file_preview(
         &self,
         actor: &Actor,
         request: FilePreviewPrepareRequest,
     ) -> TalosResult<FilePreviewDescriptor> {
-        let (source, entry_path, metadata) = match request.source {
-            FilePreviewSource::File { file_id } => {
+        let mut _admission = None;
+        let (source, entry_path, metadata, worker) = match request.source {
+            FilePreviewSource::File { file_id, node_id } => {
                 let file = self
                     .files
                     .read(
@@ -51,17 +60,59 @@ impl TalosService {
                     mime_type: file.mime_type,
                     size_bytes: file.size_bytes,
                 };
+                let conversion = if crate::file::preview::needs_document(&metadata)
+                    && metadata.size_bytes <= self.files.limits().max_upload_bytes
+                {
+                    let (admission, environment) = self
+                        .active_worker_environment(actor, node_id.as_deref())
+                        .await?;
+                    _admission = admission;
+                    let context = crate::access::worker_environment_context(actor);
+                    let result = environment
+                        .preview_resource(
+                            context.clone(),
+                            WorkerPreviewRequest::OpenFile {
+                                metadata: metadata.clone(),
+                                expires_at: chrono::Utc::now().timestamp()
+                                    + PREVIEW_LIFETIME_SECONDS,
+                                max_bytes: self.files.limits().max_upload_bytes,
+                            },
+                        )
+                        .await?;
+                    let WorkerPreviewResponse::Opened { handle, .. } = result else {
+                        return Err(unexpected_result());
+                    };
+                    let worker = PreviewWorker {
+                        environment,
+                        context,
+                        handle,
+                    };
+                    if let Err(error) = self
+                        .write_preview_file(actor, &file_id, &metadata, &worker)
+                        .await
+                    {
+                        if let Err(cleanup) = close_worker_preview(&worker).await {
+                            talos_logging::report_error(&cleanup);
+                        }
+                        return Err(error);
+                    }
+                    Some(worker)
+                } else {
+                    None
+                };
                 (
                     PreviewBinding::File { file_id },
                     metadata.name.clone(),
                     metadata,
+                    conversion,
                 )
             }
             FilePreviewSource::SessionPath { session_id, path } => {
                 let session = self.access.load_session(actor, &session_id).await?;
-                let (_admission, environment) = self
+                let (admission, environment) = self
                     .active_worker_environment(actor, Some(&session.execution_node_id))
                     .await?;
+                _admission = admission;
                 let saved = self.sessions.build_agent_session_context(&session).await?;
                 let context = WorkerEnvironmentContext {
                     user_id: saved.workspace.user_id,
@@ -89,20 +140,20 @@ impl TalosService {
                     metadata,
                 } = resource
                 else {
-                    return Err(TalosError::internal(
-                        "Worker returned an unexpected preview result.",
-                    ));
+                    return Err(unexpected_result());
                 };
                 (
                     PreviewBinding::Session {
                         session_id,
                         worktree_binding: session.worktree_binding,
-                        environment,
-                        context,
-                        handle,
                     },
                     resource_path,
                     metadata,
+                    Some(PreviewWorker {
+                        environment,
+                        context,
+                        handle,
+                    }),
                 )
             }
         };
@@ -143,50 +194,38 @@ impl TalosService {
             actor: actor.clone(),
             descriptor: descriptor.clone(),
             source,
-            document: None,
+            worker,
         };
         if crate::file::preview::needs_document(&descriptor.metadata) {
             let limit = self.files.limits().max_upload_bytes;
             let document = if descriptor.metadata.size_bytes > limit {
-                (
-                    FilePreviewDocument::Unavailable {
-                        reason: FilePreviewDocumentUnavailable::TooLarge,
-                    },
-                    None,
-                )
+                FilePreviewDocument::Unavailable {
+                    reason: FilePreviewDocumentUnavailable::TooLarge,
+                }
             } else {
-                let bytes = self.preview_source_bytes(&grant, actor, limit).await;
-                match bytes {
-                    Ok(bytes) => {
-                        crate::file::preview::prepare(&descriptor.metadata, bytes, limit).await
-                    }
-                    Err(error) => {
-                        if let PreviewBinding::Session {
-                            environment,
-                            context,
-                            handle,
-                            ..
-                        } = &grant.source
-                        {
-                            if let Err(error) = environment
-                                .preview_resource(
-                                    context.clone(),
-                                    WorkerPreviewRequest::Close {
-                                        handle: handle.clone(),
-                                    },
-                                )
-                                .await
-                            {
-                                talos_logging::report_error(&error);
-                            }
+                let worker = grant.worker.as_ref().ok_or_else(unexpected_result)?;
+                match worker
+                    .environment
+                    .preview_resource(
+                        worker.context.clone(),
+                        WorkerPreviewRequest::PrepareDocument {
+                            handle: worker.handle.clone(),
+                            max_bytes: limit,
+                        },
+                    )
+                    .await
+                {
+                    Ok(WorkerPreviewResponse::Document(document)) => document,
+                    result => {
+                        if let Err(cleanup) = close_worker_preview(worker).await {
+                            talos_logging::report_error(&cleanup);
                         }
-                        return Err(error);
+                        return Err(result.err().unwrap_or_else(unexpected_result));
                     }
                 }
             };
-            descriptor.document = Some(document.0);
+            descriptor.document = Some(document);
             grant.descriptor = descriptor.clone();
-            grant.document = document.1;
         }
         let mut previews = self
             .file_previews
@@ -244,79 +283,76 @@ impl TalosService {
                 "Preview reads are limited to one MiB per request.",
             ));
         }
-        if let Some(document) = grant
-            .document
-            .as_ref()
-            .filter(|document| document.handles(&request.resource_path))
-        {
-            match &grant.source {
-                PreviewBinding::File { file_id } => {
-                    self.files
-                        .read(
-                            actor,
-                            FileReadRequest {
-                                file_id: file_id.clone(),
-                            },
-                        )
-                        .await?;
+        if let Some(FilePreviewDocument::Pdf { resource_path }) = &grant.descriptor.document {
+            if resource_path == &request.resource_path {
+                match &grant.source {
+                    PreviewBinding::File { file_id } => {
+                        self.files
+                            .read(
+                                actor,
+                                FileReadRequest {
+                                    file_id: file_id.clone(),
+                                },
+                            )
+                            .await?;
+                    }
+                    PreviewBinding::Session {
+                        session_id,
+                        worktree_binding,
+                        ..
+                    } => {
+                        self.check_session_preview(actor, session_id, worktree_binding.as_ref())
+                            .await?;
+                    }
                 }
-                PreviewBinding::Session {
-                    session_id,
-                    worktree_binding,
-                    ..
-                } => {
-                    self.check_session_preview(actor, session_id, worktree_binding.as_ref())
-                        .await?;
-                }
+                let worker = grant.worker.as_ref().ok_or_else(unexpected_result)?;
+                return read_worker_preview(worker, request).await;
             }
-            return Ok(document.read(request.offset, request.limit));
         }
         self.read_preview_source(grant, actor, request).await
     }
 
-    async fn preview_source_bytes(
+    async fn write_preview_file(
         &self,
-        grant: &PreviewGrant,
         actor: &Actor,
-        limit: u64,
-    ) -> TalosResult<bytes::Bytes> {
-        let mut request = FilePreviewReadRequest {
-            preview_id: grant.descriptor.preview_id.clone(),
-            resource_path: grant.descriptor.entry_path.clone(),
-            offset: 0,
-            limit: 0,
-        };
-        let metadata = self
-            .read_preview_source(grant, actor, request.clone())
-            .await?
-            .metadata;
-        if metadata.size_bytes > limit {
-            return Err(TalosError::new(
-                ErrorCode::AttachmentLimitExceeded,
-                "The document exceeds the preview byte limit.",
-            ));
-        }
-        let mut bytes = Vec::new();
-        while request.offset < metadata.size_bytes {
-            request.limit = (metadata.size_bytes - request.offset)
-                .min(u64::from(FILE_PREVIEW_MAX_READ_BYTES)) as u32;
+        file_id: &str,
+        metadata: &FilePreviewMetadata,
+        worker: &PreviewWorker,
+    ) -> TalosResult<()> {
+        let mut offset = 0;
+        while offset < metadata.size_bytes {
+            let end = offset
+                .saturating_add(u64::from(FILE_PREVIEW_MAX_READ_BYTES))
+                .min(metadata.size_bytes);
             let part = self
-                .read_preview_source(grant, actor, request.clone())
+                .files
+                .read_preview_range(actor, file_id, offset..end)
                 .await?;
-            let chunk = part.data;
-            if part.metadata.size_bytes != metadata.size_bytes
-                || chunk.is_empty()
-                || chunk.len() as u64 > metadata.size_bytes - request.offset
+            if part.file.size_bytes != metadata.size_bytes
+                || part.bytes.len() as u64 != end - offset
             {
                 return Err(TalosError::new(
                     ErrorCode::Conflict,
                     "The file changed while preparing its preview.",
                 ));
             }
-            request.offset += chunk.len() as u64;
-            bytes.extend_from_slice(&chunk);
+            let result = worker
+                .environment
+                .preview_resource(
+                    worker.context.clone(),
+                    WorkerPreviewRequest::Write {
+                        handle: worker.handle.clone(),
+                        offset,
+                        data: part.bytes,
+                    },
+                )
+                .await?;
+            if !matches!(result, WorkerPreviewResponse::Written) {
+                return Err(unexpected_result());
+            }
+            offset = end;
         }
-        Ok(bytes.into())
+        Ok(())
     }
 
     async fn check_session_preview(
@@ -361,29 +397,11 @@ impl TalosService {
             PreviewBinding::Session {
                 session_id,
                 worktree_binding,
-                environment,
-                context,
-                handle,
             } => {
                 self.check_session_preview(actor, session_id, worktree_binding.as_ref())
                     .await?;
-                let content = environment
-                    .preview_resource(
-                        context.clone(),
-                        WorkerPreviewRequest::Read {
-                            handle: handle.clone(),
-                            path: request.resource_path.into(),
-                            offset: request.offset,
-                            limit: request.limit,
-                        },
-                    )
-                    .await?;
-                match content {
-                    WorkerPreviewResponse::Content(content) => Ok(content),
-                    _ => Err(TalosError::internal(
-                        "Worker returned an unexpected preview result.",
-                    )),
-                }
+                let worker = grant.worker.as_ref().ok_or_else(unexpected_result)?;
+                read_worker_preview(worker, request).await
             }
         }
     }
@@ -406,23 +424,8 @@ impl TalosService {
             }
             previews.remove(&request.preview_id)
         };
-        if let Some(grant) = &removed {
-            if let PreviewBinding::Session {
-                environment,
-                context,
-                handle,
-                ..
-            } = &grant.source
-            {
-                environment
-                    .preview_resource(
-                        context.clone(),
-                        WorkerPreviewRequest::Close {
-                            handle: handle.clone(),
-                        },
-                    )
-                    .await?;
-            }
+        if let Some(worker) = removed.as_ref().and_then(|grant| grant.worker.as_ref()) {
+            close_worker_preview(worker).await?;
         }
         Ok(FilePreviewCloseResponse {
             closed: removed.is_some(),
@@ -453,4 +456,44 @@ fn preview_not_found() -> TalosError {
 }
 fn preview_state_error() -> TalosError {
     TalosError::internal("File preview state is unavailable.")
+}
+
+fn unexpected_result() -> TalosError {
+    TalosError::internal("Worker returned an unexpected preview result.")
+}
+async fn close_worker_preview(worker: &PreviewWorker) -> TalosResult<()> {
+    match worker
+        .environment
+        .preview_resource(
+            worker.context.clone(),
+            WorkerPreviewRequest::Close {
+                handle: worker.handle.clone(),
+            },
+        )
+        .await?
+    {
+        WorkerPreviewResponse::Closed => Ok(()),
+        _ => Err(unexpected_result()),
+    }
+}
+async fn read_worker_preview(
+    worker: &PreviewWorker,
+    request: FilePreviewReadRequest,
+) -> TalosResult<FilePreviewBytes> {
+    match worker
+        .environment
+        .preview_resource(
+            worker.context.clone(),
+            WorkerPreviewRequest::Read {
+                handle: worker.handle.clone(),
+                path: request.resource_path.into(),
+                offset: request.offset,
+                limit: request.limit,
+            },
+        )
+        .await?
+    {
+        WorkerPreviewResponse::Content(content) => Ok(content),
+        _ => Err(unexpected_result()),
+    }
 }

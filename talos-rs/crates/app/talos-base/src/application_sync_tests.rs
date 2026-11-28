@@ -171,14 +171,20 @@ async fn worker_state(
     .unwrap()
 }
 async fn close(runtime: TalosApplicationRuntime) {
-    runtime.shutdown_sync().await.unwrap();
+    runtime.shutdown_host().await.unwrap();
     if let Some(worker) = runtime.worker_registration.lock().await.take() {
         worker.shutdown().await.unwrap();
     }
-    runtime.worker_rpc.shutdown().await.unwrap();
+    runtime
+        .worker_rpc
+        .as_ref()
+        .unwrap()
+        .shutdown()
+        .await
+        .unwrap();
     runtime.resource_stop.cancel();
     runtime.automation.shutdown().await.unwrap();
-    runtime.worker.shutdown().await.unwrap();
+    runtime.worker.as_ref().unwrap().shutdown().await.unwrap();
 }
 
 #[path = "application_sync_scenarios_tests.rs"]

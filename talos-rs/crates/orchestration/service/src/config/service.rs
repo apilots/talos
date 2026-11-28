@@ -34,10 +34,7 @@ impl ConfigService {
         match request.path {
             ConfigPath::Llm => self.config_store.load_llm_read().map(Into::into),
             ConfigPath::WebSearch => self.config_store.load_web_search_read().map(Into::into),
-            ConfigPath::SessionMessageSendPolicy => self
-                .config_store
-                .load_session_message_send_policy()
-                .map(|policy| ConfigResponse::SessionMessageSendPolicy { policy }),
+            ConfigPath::SessionMessageSendPolicy => Err(product_configuration_request()),
         }
     }
 
@@ -69,10 +66,7 @@ impl ConfigService {
                 prepared.publish();
                 self.config_store.load_web_search_read().map(Into::into)
             }
-            ConfigValue::SessionMessageSendPolicy(policy) => {
-                self.config_store.save_session_message_send_policy(policy)?;
-                Ok(ConfigResponse::SessionMessageSendPolicy { policy })
-            }
+            ConfigValue::SessionMessageSendPolicy(_) => Err(product_configuration_request()),
         }
     }
 
@@ -113,6 +107,13 @@ impl ConfigService {
             )),
         }
     }
+}
+
+fn product_configuration_request() -> TalosError {
+    TalosError::new(
+        talos_error::ErrorCode::InvalidRequest,
+        "Session sending policy must be managed through the product configuration API",
+    )
 }
 
 fn validate_web_search_config(web_search: &WebSearchToolConfig) -> TalosResult<()> {

@@ -1,4 +1,5 @@
 //! Same-origin viewer endpoint. Browser credentials appear only in the first message.
+use super::product_scope::ProductJson;
 use super::{
     access::shared_actor,
     errors::{api_success, ApiError},
@@ -11,7 +12,6 @@ use axum::{
     },
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    Json,
 };
 use std::{sync::Arc, time::Duration};
 use talos_auth::RequestIdentity;
@@ -28,7 +28,7 @@ struct Ticket {
 pub(super) async fn open(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
-    Json(request): Json<talos_types::DesktopOpenRequest>,
+    ProductJson(request): ProductJson<talos_types::DesktopOpenRequest>,
 ) -> Result<Response, ApiError> {
     let grant = state
         .gateway

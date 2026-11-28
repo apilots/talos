@@ -61,6 +61,9 @@ class Fixture(BaseHTTPRequestHandler):
                 else:
                     case, answer, effect = prompt.get("user_message"), prompt.get("assistant_response"), "title"
                 if case in CHECKPOINT_CASES:
+                    if effect == "title":
+                        # Terminal delivery must not let CLI shutdown cancel product effects.
+                        time.sleep(0.2)
                     self.server.checkpoint_effects.append((case, effect, answer))
                     content = '{"operation":"noop"}' if effect == "memory" else "Checkpoint effects verified"
             self.reply({"model": MODEL,
@@ -84,7 +87,7 @@ class Fixture(BaseHTTPRequestHandler):
             chunks = self.delegate_chunks(call, history[user_index:])
         elif case in CHECKPOINT_CASES:
             if case == "checkpoint-unreadable":
-                # Keep the event decodable, but make its snapshot fail the replay invariant.
+                # Corrupt only the product view, leaving canonical Worker history intact.
                 with sqlite3.connect(self.server.database) as db:
                     changed = db.execute(
                         """UPDATE agent_events SET payload_json=json_set(payload_json, '$.data.status', 'inProgress')
@@ -142,6 +145,7 @@ def exercise(root, work, report):
         server.workspace = workspace
         server.database = home / "data/talos.db"
         server.checkpoint_effects = []
+        server.checkpoint_details = {}
         server.holder_started = threading.Event()
         server.release_holder = threading.Event()
         prepare(root / "conf/talos-dev.yaml", config, server.server_port, work / "plan.tsv")
@@ -171,6 +175,20 @@ def exercise(root, work, report):
                 (report / f"{evidence_name}.stdout.txt").write_text(result.stdout)
                 (report / f"{evidence_name}.stderr.txt").write_text(result.stderr)
                 assert result.returncode == expected, (case, result.returncode, result.stderr)
+                if case in CHECKPOINT_CASES:
+                    with sqlite3.connect(server.database) as db:
+                        title = db.execute("SELECT title FROM sessions WHERE session_key=?", (session,)).fetchone()
+                        notices = [json.loads(row[0]) for row in db.execute(
+                            "SELECT payload_json FROM agent_events WHERE session_id=? AND sequence IS NULL", (session,))]
+                        user_status = db.execute(
+                            """SELECT json_extract(payload_json,'$.data.status') FROM agent_events
+                               WHERE session_id=? AND json_extract(payload_json,'$.type')='messageCompleted'
+                                 AND json_extract(payload_json,'$.data.role')='user'""", (session,)).fetchone()
+                    server.checkpoint_details[case] = {"title": title, "notices": notices}
+                    if case == "checkpoint-unreadable":
+                        server.checkpoint_details[case]["userStatus"] = user_status[0]
+                    (report / f"{case}.product.json").write_text(json.dumps(server.checkpoint_details[case]))
+
                 lines = result.stderr.splitlines()
                 records = [line[len(METRICS_PREFIX):] for line in lines
                            if line.startswith(METRICS_PREFIX)]
@@ -238,20 +256,27 @@ def exercise(root, work, report):
             assert sorted(server.checkpoint_effects) == [
                 ("checkpoint-effects", "memory", "PROTOCOL_OK:call_checkpoint-effects"),
                 ("checkpoint-effects", "title", "PROTOCOL_OK:call_checkpoint-effects"),
-            ], server.checkpoint_effects
+                ("checkpoint-unreadable", "memory", "PROTOCOL_OK:call_checkpoint-unreadable"),
+                ("checkpoint-unreadable", "title", "PROTOCOL_OK:call_checkpoint-unreadable"),
+            ], (server.checkpoint_effects, server.checkpoint_details)
             with sqlite3.connect(server.database) as db:
-                title = db.execute("SELECT title FROM sessions WHERE session_key=?",
-                                   (readable_session,)).fetchone()
+                titles = dict(db.execute("SELECT session_key,title FROM sessions WHERE session_key IN (?,?)",
+                                         (readable_session, server.unreadable_session)))
                 events = db.execute(
                     """SELECT json_extract(payload_json,'$.content.data.code'),
                               json_extract(payload_json,'$.type') FROM agent_events
                        WHERE session_id=? AND (
-                           (sequence IS NULL AND json_extract(payload_json,'$.content.data.code')='conflict')
+                           sequence IS NULL
                            OR json_extract(payload_json,'$.type')='turnCompleted')
                        ORDER BY event_seq""", (server.unreadable_session,)).fetchall()
-            assert title == ("Checkpoint effects verified",), title
-            assert events == [("conflict", None), (None, "turnCompleted")], events
-            print("CASE checkpoint_completion_effects PASS title and memory received restored text, unreadable history still committed")
+            assert titles == {session: "Checkpoint effects verified"
+                              for session in (readable_session, server.unreadable_session)}, titles
+            assert server.checkpoint_details["checkpoint-unreadable"]["userStatus"] == "inProgress", server.checkpoint_details
+            # Product-view corruption cannot suppress Worker-owned title/Memory
+            # or rewrite the committed outcome; neither workload needs a product replay.
+            assert events == [(None, "turnCompleted")], events
+            assert all(not details["notices"] for details in server.checkpoint_details.values()), server.checkpoint_details
+            print("CASE checkpoint_completion_effects PASS Worker title and memory ignore corrupted product history")
             assert config.read_bytes() == original
             # Seed an unowned due Loop in the isolated database. The unrelated
             # exec stays alive across scan ticks while the fixture holds its model.
@@ -270,7 +295,7 @@ def exercise(root, work, report):
             holder = subprocess.Popen(
                 [*command, "hold-for-owner-crash"], env=environment, cwd=workspace,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            marker_path = (home / "data/worker/session-heads"
+            marker_path = (home / "data/worker/execution-admission"
                            / f"{hashlib.sha256(crash_session.encode()).hexdigest()}.json")
             try:
                 assert server.holder_started.wait(timeout=20), "owner never reached the fixture model"
@@ -292,8 +317,9 @@ def exercise(root, work, report):
                     env=environment, cwd=workspace, capture_output=True, text=True, timeout=15)
                 (report / "running-turn-plugin.stdout.txt").write_text(install.stdout)
                 (report / "running-turn-plugin.stderr.txt").write_text(install.stderr)
-                assert install.returncode == 0, install.stderr
-                assert json.loads(install.stdout)["install"]["enabled"]
+                # A separate local entry cannot create another Plugin runtime
+                # while the foreground Worker owns this namespace.
+                assert install.returncode == 4, install.stderr
                 time.sleep(2)
                 assert holder.poll() is None, "owner exited before two scan ticks"
                 with sqlite3.connect(database) as db:
@@ -308,6 +334,13 @@ def exercise(root, work, report):
                 (report / "killed-owner.stdout.txt").write_text(holder_stdout)
                 (report / "killed-owner.stderr.txt").write_text(holder_stderr)
             assert holder.returncode == -9, holder_stderr
+            install = subprocess.run(
+                [environment["TALOS_E2E_CLI_BIN"], "plugin", "mcp", "add", "--file", str(plugin)],
+                env=environment, cwd=workspace, capture_output=True, text=True, timeout=15)
+            (report / "released-owner-plugin.stdout.txt").write_text(install.stdout)
+            (report / "released-owner-plugin.stderr.txt").write_text(install.stderr)
+            assert install.returncode == 0, install.stderr
+            assert json.loads(install.stdout)["install"]["enabled"]
             run("recovered", 0, crash_session)
             run("recovered-again", 0, crash_session)
             recovered_marker = json.loads(marker_path.read_text())
@@ -319,8 +352,10 @@ def exercise(root, work, report):
                          AND json_extract(payload_json,'$.type')='turnFailed'""",
                     (crash_session, marker["active"]["turnId"])).fetchall()
             assert len(failures) == 1
-            assert json.loads(failures[0][0])["data"]["error"]["message"] == "owner process exited"
-            print("CASE exec_unattended PASS waiting=3 failure=1 completion=0 usage=stderr permission=session-and-child held=4 request_id=replayed sigkill=recovered unrelated_loop=untouched plugin=installed_while_running")
+            recovered_failure = json.loads(failures[0][0])["data"]
+            assert recovered_failure["error"]["code"] == "cancelled", recovered_failure
+            assert recovered_failure["retryable"] is True, recovered_failure
+            print("CASE exec_unattended PASS waiting=3 failure=1 completion=0 usage=stderr permission=session-and-child held=4 request_id=replayed sigkill=recovered unrelated_loop=untouched plugin=owner_guarded_then_installed")
         finally:
             server.shutdown()
             server_thread.join()

@@ -28,7 +28,7 @@ try:
     computers = data(http(cluster.url + '/v1/computers'))['data']
     require(len(computers) == 1 and computers[0]['nodeId'] == 'embedded' and computers[0]['available'], 'Unregistered embedded Worker unavailable')
     models = data(http(cluster.url + '/v1/models'))['models']
-    wanted = os.environ.get('TALOS_E2E_PREFERRED_MODELS', 'deepseek-v4-flash').split(',')
+    wanted = os.environ.get('TALOS_E2E_PREFERRED_MODELS', 'deepseek-flash').split(',')
     model = next((m for identifier in wanted for m in models if m['id'] == identifier), models[0])
     session = str(uuid.uuid4())
     marker = 'LOCAL_NO_CLOUD_' + uuid.uuid4().hex

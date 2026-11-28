@@ -71,6 +71,24 @@ pub(crate) fn session_ownership(mode: &TerminalMode) -> talos_base::SessionOwner
     talos_base::SessionOwnershipPolicy { kind, hold }
 }
 
+/// Product management commands coexist with the foreground executor without its namespace.
+pub(crate) fn product_only(command: &Commands) -> bool {
+    match command {
+        Commands::Session(_) | Commands::Models(_) | Commands::Status => true,
+        Commands::Goal(command) => !matches!(
+            command.command,
+            Some(types::GoalCommands::Start { .. } | types::GoalCommands::Resume)
+        ),
+        Commands::Loop(command) => {
+            !matches!(command.command, Some(types::LoopCommands::Start { .. }))
+        }
+        Commands::Automation(command) => {
+            matches!(command.command, types::AutomationCommands::List { .. })
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn parse_terminal_mode() -> TerminalMode {
     let cli = Cli::parse();
     match cli.command {

@@ -20,9 +20,6 @@ dependencies = [
  "reqwest 0.12.28",
  "reqwest-websocket",
  "rustls",
- "serde_json",
- "sha2 0.10.9",
- "subtle",
  "talos-agent",
  "talos-agent-api",
  "talos-browser",
@@ -62,7 +59,6 @@ dependencies = [
  "talos-agent-api",
  "talos-config",
  "talos-error",
- "talos-llm-provider",
  "talos-memory",
  "talos-types",
  "tokio",
@@ -2911,8 +2907,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e184d09547b80eb7e20d141ba2fb1fbac843ca53f4cf1b31210adc4c1adc6e16"
 dependencies = [
  "defmt",
- "jiff-core",
- "jiff-static",
+ "jiff-core 0.1.0",
+ "jiff-static 0.2.34",
  "jiff-tzdb-platform",
  "js-sys",
  "log",
@@ -2921,6 +2917,20 @@ dependencies = [
  "serde_core",
  "wasm-bindgen",
  "windows-link",
+]
+
+[[package]]
+name = "jiff"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "107f2e89536b6818514025f6787b0d94d819e54fe3b40365275fc753de485b3f"
+dependencies = [
+ "jiff-core 1.0.2",
+ "jiff-static 1.0.3",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
 ]
 
 [[package]]
@@ -2933,15 +2943,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "jiff-core"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d44c923edf2bf456a982253f1a9ee1f6e89e421dffd0065d9b9a581da0def58f"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "jiff-static"
 version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "323da076b7a6faf914dc677cb05a4b907742ff7375c8322c9e7f5061e5e0e9de"
 dependencies = [
- "jiff-core",
+ "jiff-core 0.1.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "jiff-static"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4996f71e569e3a3e32b925c28ef8f0027dc30bb1d594b33eeda409eea185f5c8"
+dependencies = [
+ "jiff-core 1.0.2",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.8",
 ]
 
 [[package]]
@@ -3993,7 +4024,7 @@ dependencies = [
  "futures",
  "http 1.4.0",
  "http-body 1.0.1",
- "jiff",
+ "jiff 0.2.34",
  "log",
  "md-5 0.11.0",
  "mea",
@@ -4966,7 +4997,7 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "http 1.4.0",
- "jiff",
+ "jiff 0.2.34",
  "log",
  "percent-encoding",
  "sha1 0.11.0",
@@ -5153,30 +5184,35 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.2.0"
+version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42b6914fac0be956fe704a38239c3f44a9f841d1b06a5713d2f638065593f5b5"
+checksum = "fc4fa9a7558c480e1817c0f02e9a73782001ac1f47fb9d26cc073915963282ea"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
  "bytes",
- "chrono",
  "futures",
  "http 1.4.0",
  "indexmap 2.13.0",
+ "jiff 1.0.3",
+ "libc",
  "oauth2",
  "pastey",
+ "percent-encoding",
  "pin-project-lite",
  "reqwest 0.13.4",
  "schemars 1.2.1",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "sse-stream",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "unicode-general-category",
+ "unicode-normalization",
  "url",
  "uuid",
 ]
@@ -5463,7 +5499,6 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
- "chrono",
  "dyn-clone",
  "ref-cast",
  "schemars_derive 1.2.1",
@@ -6380,9 +6415,11 @@ dependencies = [
  "libc",
  "prost",
  "rcgen",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sqlx",
  "subtle",
  "talos-agent-api",
  "talos-config",
@@ -6391,6 +6428,7 @@ dependencies = [
  "talos-logging",
  "talos-memory",
  "talos-run-control",
+ "talos-store",
  "talos-types",
  "tempfile",
  "tokio",
@@ -6440,6 +6478,7 @@ dependencies = [
 name = "talos-agent-provider-kernel"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
+ "agent-protocol",
  "async-trait",
  "chrono",
  "serde",
@@ -6455,6 +6494,7 @@ dependencies = [
  "talos-memory",
  "talos-prompt",
  "talos-skills",
+ "talos-store",
  "talos-tools",
  "talos-types",
  "tempfile",
@@ -6466,6 +6506,8 @@ dependencies = [
 name = "talos-app-protocol"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
+ "agent-protocol",
+ "base64 0.22.1",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -6580,7 +6622,6 @@ dependencies = [
  "sha2 0.10.9",
  "talos-agent",
  "talos-agent-api",
- "talos-agent-provider-kernel",
  "talos-app-protocol",
  "talos-app-server",
  "talos-auth",
@@ -6588,6 +6629,7 @@ dependencies = [
  "talos-browser",
  "talos-channel",
  "talos-config",
+ "talos-control-plane",
  "talos-coordinator",
  "talos-error",
  "talos-fs",
@@ -6598,7 +6640,9 @@ dependencies = [
  "talos-mcp",
  "talos-memory",
  "talos-plugin",
+ "talos-relay-server",
  "talos-router",
+ "talos-sdk",
  "talos-service",
  "talos-storage",
  "talos-store",
@@ -6615,7 +6659,10 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
+ "tower 0.4.13",
  "tracing",
+ "tungstenite 0.27.0",
+ "url",
  "uuid",
 ]
 
@@ -6708,6 +6755,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "talos-control-plane"
+version = "0.1.19-SNAPSHOT"
+dependencies = [
+ "agent-protocol",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "getrandom 0.2.17",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
+ "subtle",
+ "talos-auth",
+ "talos-config",
+ "talos-error",
+ "talos-logging",
+ "talos-storage",
+ "talos-store",
+ "talos-types",
+ "talos-worker-runtime",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "talos-coordinator"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
@@ -6788,6 +6863,7 @@ dependencies = [
  "agent-protocol",
  "async-trait",
  "axum 0.7.9",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "futures-util",
@@ -7060,6 +7136,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "talos-relay-server"
+version = "0.1.19-SNAPSHOT"
+dependencies = [
+ "agent-protocol",
+ "axum 0.7.9",
+ "futures-util",
+ "serde_json",
+ "talos-app-protocol",
+ "talos-auth",
+ "talos-control-plane",
+ "talos-error",
+ "talos-logging",
+ "talos-storage",
+ "talos-store",
+ "talos-types",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
+ "tokio-util",
+ "tower 0.4.13",
+ "uuid",
+]
+
+[[package]]
 name = "talos-router"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
@@ -7093,16 +7193,21 @@ name = "talos-sdk"
 version = "0.1.19-SNAPSHOT"
 dependencies = [
  "async-trait",
+ "axum 0.7.9",
  "base64 0.22.1",
  "bytes",
+ "futures-util",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "talos-agent-api",
  "talos-app-protocol",
  "talos-auth",
  "talos-error",
+ "talos-logging",
  "talos-types",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -7144,7 +7249,6 @@ dependencies = [
  "csv",
  "flate2",
  "futures-util",
- "getrandom 0.2.17",
  "http 1.4.0",
  "infer",
  "mime_guess",
@@ -7155,17 +7259,16 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
- "subtle",
  "talos-agent",
  "talos-agent-api",
  "talos-auth",
  "talos-browser",
  "talos-config",
+ "talos-control-plane",
  "talos-coordinator",
  "talos-error",
  "talos-fs",
  "talos-knowledge-format",
- "talos-llm-provider",
  "talos-logging",
  "talos-mcp",
  "talos-memory",
@@ -7226,6 +7329,7 @@ dependencies = [
  "sqlx",
  "talos-agent-api",
  "talos-auth",
+ "talos-config",
  "talos-error",
  "talos-fs",
  "talos-memory",
@@ -7479,13 +7583,16 @@ dependencies = [
  "agent-pb",
  "agent-protocol",
  "async-trait",
+ "serde",
  "serde_json",
  "talos-agent",
  "talos-agent-api",
+ "talos-agent-kernel",
  "talos-agent-provider-kernel",
  "talos-browser",
  "talos-config",
  "talos-error",
+ "talos-fs",
  "talos-guard-task",
  "talos-llm-anthropic",
  "talos-llm-bailian",
@@ -8316,6 +8423,12 @@ name = "unicode-bidi"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
+
+[[package]]
+name = "unicode-general-category"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
 
 [[package]]
 name = "unicode-ident"

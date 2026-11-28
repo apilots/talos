@@ -1,0 +1,125 @@
+use super::*;
+use talos_types::{DeleteComputerRequest, DeleteComputerResponse};
+
+impl AgentNodeService {
+    /// Attach the idle-revocation operation to the current live publication.
+    pub async fn set_registration_deletion_hook(
+        &self,
+        auth: &NodeAuth,
+        hook: crate::AgentNodeDeletionHook,
+    ) -> TalosResult<()> {
+        self.authenticate_lease(auth).await?;
+        let mut current = self.current.lock().await;
+        let registration = current.get_mut(&auth.node_id).ok_or_else(unauthenticated)?;
+        if registration.token_hash != hash_token(&auth.token) {
+            return Err(unauthenticated());
+        }
+        registration.prepare_deletion = Some(hook);
+        Ok(())
+    }
+
+    /// Owner-only, retryable deletion. The node lifecycle guard prevents renewal
+    /// and reinstallation while Worker admission is revoked and the Store commits.
+    pub async fn delete_computer(
+        &self,
+        actor: &Actor,
+        request: DeleteComputerRequest,
+    ) -> TalosResult<DeleteComputerResponse> {
+        let service = self.clone();
+        let actor = actor.clone();
+        tokio::spawn(async move { service.delete_owned_registration(&actor, request).await })
+            .await
+            .map_err(|error| {
+                TalosError::internal_with_source("Computer deletion task failed", error)
+            })?
+    }
+
+    async fn delete_owned_registration(
+        &self,
+        actor: &Actor,
+        request: DeleteComputerRequest,
+    ) -> TalosResult<DeleteComputerResponse> {
+        ensure_management_actor(actor)?;
+        self.ensure_managed_node_access(actor, &request.node_id)
+            .await?;
+        let _lifecycle = self.lock_lifecycle(&request.node_id).await;
+        let deleted_owner = self.store.deletion_owner(&request.node_id).await?;
+        if deleted_owner.as_deref() != Some(&actor.user_id) {
+            let node = self
+                .store
+                .get(&request.node_id)
+                .await?
+                .ok_or_else(not_found)?;
+            if node.mode != NodeMode::Remote
+                || node.owner_user_id.as_deref() != Some(&actor.user_id)
+            {
+                return Err(not_found());
+            }
+            self.reject_managed_node_mutation(&request.node_id).await?;
+            let prepare = self
+                .current
+                .lock()
+                .await
+                .get(&request.node_id)
+                .filter(|registration| node.lease_token_hash == Some(registration.token_hash))
+                .and_then(|registration| registration.prepare_deletion.clone());
+            if let Some(prepare) = &prepare {
+                if let Err(error) = prepare(agent_protocol::RegistrationAdmission::Block).await {
+                    // An expired, unreachable publication cannot admit remote work.
+                    // Offline removal therefore does not require its source to reconnect.
+                    let expired = node.lease_expires_at.is_none_or(|expires| expires <= now());
+                    let unavailable = matches!(
+                        error.error_code(),
+                        ErrorCode::Unauthenticated
+                            | ErrorCode::ResourceExpired
+                            | ErrorCode::ServiceUnavailable
+                            | ErrorCode::Timeout
+                    );
+                    if !(expired && unavailable) {
+                        if let Err(cleanup) =
+                            prepare(agent_protocol::RegistrationAdmission::Unblock).await
+                        {
+                            talos_logging::report_error(&cleanup);
+                        }
+                        return Err(if unavailable {
+                            TalosError::localized(
+                                talos_error::ErrorLocalization::ComputerDeletionUnverified,
+                            )
+                            .with_source(error)
+                        } else {
+                            error
+                        });
+                    }
+                }
+            } else if node.lease_expires_at.is_some_and(|expires| expires > now()) {
+                return Err(TalosError::localized(
+                    talos_error::ErrorLocalization::ComputerDeletionUnverified,
+                ));
+            }
+            if let Err(error) = self
+                .store
+                .delete_owned(
+                    &request.node_id,
+                    &actor.user_id,
+                    node.lease_token_hash,
+                    now(),
+                )
+                .await
+            {
+                if let Some(prepare) = prepare {
+                    if let Err(cleanup) =
+                        prepare(agent_protocol::RegistrationAdmission::Unblock).await
+                    {
+                        talos_logging::report_error(&cleanup);
+                    }
+                }
+                return Err(error);
+            }
+        }
+        let previous = self.current.lock().await.remove(&request.node_id);
+        revoke_registration(previous).await;
+        Ok(DeleteComputerResponse {
+            node_id: request.node_id,
+        })
+    }
+}

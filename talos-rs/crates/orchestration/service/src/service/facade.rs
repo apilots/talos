@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::InnerModelClient;
 use talos_agent_api::{SubmitTurnInputRequest, SubmitTurnInputResponse};
 use talos_auth::{AuthService, UserService};
 use talos_coordinator::AgentCoordinator;
@@ -12,11 +11,10 @@ use talos_types::{
     AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, ListSubagentsRequest,
     MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
     MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest,
-    OptionalCurrentDirectoryPatch, RecoverTimelineRequest,
-    RetryTurnRequest as SharedRetryTurnRequest, SendMessageResult, SendSubagentMessageRequest,
-    SessionConfigOverridePolicy, SessionInfo, SessionListRequest, SessionPatch,
-    SpawnSubagentRequest, StartTurnRequest, StartTurnResponse, SubagentSnapshot,
-    SubagentSpawnResult, SubscribeTimelineRequest, TalosConfig, WaitSubagentRequest,
+    OptionalCurrentDirectoryPatch, RetryTurnRequest as SharedRetryTurnRequest, SendMessageResult,
+    SendSubagentMessageRequest, SessionConfigOverridePolicy, SessionInfo, SessionListRequest,
+    SessionPatch, SpawnSubagentRequest, StartTurnRequest, StartTurnResponse, SubagentSnapshot,
+    SubagentSpawnResult, TalosConfig, WaitSubagentRequest,
 };
 
 use super::types::ServiceResult;
@@ -25,12 +23,10 @@ use crate::file::FileService;
 use crate::project::ProjectService;
 use crate::session::SessionService;
 use crate::subagent::SubagentService;
-use crate::timeline::TimelineEventId;
 use crate::turn::{StartTurnReservation, TurnRetryParams, TurnService};
 use crate::{
     AccountService, Actor, ProfileService, SessionHistoryService, SessionMessageQueueService,
-    TimelineEventService, TimelineSubscribeCommand, TimelineSubscription,
-    TimelineSubscriptionService,
+    TimelineEventService, TimelineSubscriptionService,
 };
 
 #[path = "../automation/goal_loop/facade.rs"]
@@ -38,12 +34,10 @@ mod automation_api;
 #[path = "../automation/native_jobs_facade.rs"]
 mod native_jobs_api;
 
-#[path = "sync_management.rs"]
-mod sync_management;
-pub use sync_management::ManagementSync;
+#[path = "management_host.rs"]
+mod management_host;
+pub use management_host::ManagementHost;
 
-#[path = "active_commands.rs"]
-mod active_commands;
 #[path = "config.rs"]
 mod config;
 #[path = "desktop.rs"]
@@ -54,6 +48,9 @@ mod environment;
 mod interrupt;
 #[path = "mcp_oauth.rs"]
 mod mcp_oauth;
+pub use mcp_oauth::McpPersonalCallback;
+#[path = "maintenance.rs"]
+mod maintenance;
 #[path = "message_queue.rs"]
 mod message_queue;
 #[path = "plugins.rs"]
@@ -65,26 +62,30 @@ mod session_deletion;
 
 #[path = "file_preview.rs"]
 mod file_preview;
+#[path = "timeline_access.rs"]
+mod timeline_access;
 #[path = "trajectory.rs"]
 mod trajectory;
 
 #[derive(Clone)]
 pub struct TalosService {
+    product_config_store: Arc<dyn talos_config::ConfigStore>,
     file_preview_base_url: Option<String>,
     file_previews:
         Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<file_preview::PreviewGrant>>>>,
     desktop_ingress: Arc<std::sync::RwLock<Option<Arc<dyn crate::DesktopIngress>>>>,
     desktop_routes:
         Arc<std::sync::Mutex<std::collections::HashMap<[u8; 32], desktop::ViewerRoute>>>,
-    sync_management: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn ManagementSync>>>>,
+    management_host: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn ManagementHost>>>>,
     oauth_relay_origin: String,
+    product_owner: talos_types::NodeProductOwner,
     oauth_routes:
         Arc<std::sync::Mutex<std::collections::HashMap<[u8; 32], Arc<mcp_oauth::McpRelayRoute>>>>,
     oauth_capacity: Arc<tokio::sync::Semaphore>,
     access: ResourceAccessService,
     sessions: Arc<SessionService>,
     pub account: AccountService,
-    pub nodes: crate::AgentNodeService,
+    pub nodes: crate::ProductNodeAccess,
     pub profile: ProfileService,
     turns: TurnService,
     pub events: TimelineSubscriptionService,
@@ -92,24 +93,21 @@ pub struct TalosService {
     message_queue: SessionMessageQueueService,
     subagents: SubagentService,
     pub files: Arc<FileService>,
-    execution_gate: Arc<crate::turn::NodeAdmissionGates>,
-    active_commands: Arc<std::sync::RwLock<Option<Arc<dyn agent_protocol::ActiveSessionCommands>>>>,
+    execution_gate: Arc<agent_protocol::NodeAdmissionGates>,
     native_jobs: Arc<std::sync::OnceLock<Arc<crate::automation::native_jobs::NativeJobService>>>,
 }
 
 impl TalosService {
-    /// Host composition after authenticating an account. Sync owns transport;
-    /// original Services retain admission, persistence and notification policy.
-    pub fn install_sync_handle(&self, account_id: String, handle: Arc<talos_sync::SyncHandle>) {
-        self.sessions.install_sync_handle(account_id, handle);
+    /// Stop product admission and detach independent remote observations without
+    /// cancelling their Worker execution. Local delivery remains joined by drain.
+    pub fn begin_execution_drain(&self) {
+        self.turns.begin_execution_drain();
     }
 
-    pub fn remove_sync_handle(&self, account_id: &str) {
-        self.sessions.remove_sync_handle(account_id);
-    }
-
-    pub async fn retry_shared_session_heads(&self, account_id: &str) -> ServiceResult<()> {
-        self.sessions.retry_shared_history_cursors(account_id).await
+    /// The host stops product admissions and scheduling first, keeping the source
+    /// Harness and model resources available until product delivery finishes.
+    pub async fn drain_execution_delivery(&self) {
+        self.turns.drain_execution_delivery().await;
     }
 
     pub fn set_coordinator_id(&self, peer_id: String) {
@@ -125,7 +123,7 @@ impl TalosService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         coordinator: Arc<dyn AgentCoordinator>,
-        nodes: crate::AgentNodeService,
+        nodes: impl Into<crate::ProductNodeAccess>,
         session_store: Arc<dyn SessionStore>,
         agent_execution_store: Arc<dyn AgentExecutionStore>,
         project_store: Arc<dyn ProjectStore>,
@@ -154,7 +152,7 @@ impl TalosService {
     #[allow(clippy::too_many_arguments)]
     fn assemble(
         coordinator: Arc<dyn AgentCoordinator>,
-        nodes: crate::AgentNodeService,
+        nodes: impl Into<crate::ProductNodeAccess>,
         session_store: Arc<dyn SessionStore>,
         agent_execution_store: Arc<dyn AgentExecutionStore>,
         project_store: Arc<dyn ProjectStore>,
@@ -165,6 +163,7 @@ impl TalosService {
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
     ) -> Self {
+        let nodes = nodes.into();
         let restrict_embedded = base_config.talos.worker.runtime.is_some();
         let sessions = SessionService::new(
             session_store.clone(),
@@ -205,12 +204,16 @@ impl TalosService {
         );
 
         Self {
+            product_config_store: Arc::new(talos_config::YamlConfigStore::with_env_path(
+                base_config.source_path(),
+                base_config.talos_paths().env_file,
+            )),
             file_preview_base_url: base_config.storage.files.preview_base_url.clone(),
             file_previews: Default::default(),
-            sync_management: Default::default(),
-            active_commands: Default::default(),
+            management_host: Default::default(),
             native_jobs: Default::default(),
             oauth_relay_origin: base_config.cloud.agent_base_url.clone(),
+            product_owner: talos_types::NodeProductOwner::Server,
             oauth_routes: Arc::default(),
             oauth_capacity: Arc::new(tokio::sync::Semaphore::new(32)),
             desktop_ingress: Default::default(),
@@ -245,15 +248,11 @@ impl TalosService {
         }
     }
 
-    /// Installs the control-plane model used by the existing reflection policy.
-    #[must_use]
-    pub fn with_user_workspace_memory_reflection(
-        mut self,
-        inner_model: Arc<InnerModelClient>,
-    ) -> Self {
-        self.turns = self
-            .turns
-            .with_user_workspace_memory_reflection(inner_model);
+    /// Product assembly fixes execution ownership and browser callback policy.
+    pub fn with_product_owner(mut self, owner: talos_types::NodeProductOwner) -> Self {
+        self.product_owner = owner;
+        self.access.set_product_owner(owner);
+        self.sessions.set_product_owner(owner);
         self
     }
 
@@ -264,6 +263,12 @@ impl TalosService {
         patch: SessionPatch,
     ) -> ServiceResult<SessionInfo> {
         let session = self.access.load_session(actor, session_id).await?;
+        if patch.is_pin_only() {
+            let updated = self.access.patch_session(session, patch).await?;
+            return self
+                .session_for_client(actor, self.sessions.session_info(&updated).await?)
+                .await;
+        }
         let _ownership = self.turns.pin_session(session_id)?;
         let _execution_guard = self
             .execution_gate
@@ -352,7 +357,14 @@ impl TalosService {
         let command_request = request.clone();
         let conversation_node = self
             .nodes
-            .managed_conversation_node(actor, &request)
+            .managed_conversation_node(
+                actor,
+                crate::agent_node::ManagedConversationBinding {
+                    session_id: &request.session_id,
+                    project_id: request.project_id.as_deref(),
+                    node_id: request.node_id.as_deref(),
+                },
+            )
             .await?;
         let managed_conversation = conversation_node.is_some();
         if let Some(node) = conversation_node.or(request.node_id.take()) {
@@ -453,7 +465,10 @@ impl TalosService {
             .turns
             .submit_start_turn(session, request, prepared)
             .await;
-        if let (Some(session), Err(_)) = (rollback_session, &result) {
+        if let (Some(session), Err(error)) = (rollback_session, &result) {
+            if agent_protocol::AgentAdmissionUnconfirmed::contains(error) {
+                return result;
+            }
             if let Err(error) = self.sessions.delete_session(session).await {
                 tracing::error!(
                     session_id = %session_id,
@@ -470,7 +485,7 @@ impl TalosService {
         session: SessionRecord,
         patch: SessionPatch,
     ) -> ServiceResult<SessionRecord> {
-        if patch.conf.is_none() && patch.current_directory.is_none() {
+        if patch.conf.is_none() && patch.current_directory.is_none() && patch.pinned.is_none() {
             return Ok(session);
         }
         if self.turns.session_owner().is_some() {
@@ -653,6 +668,7 @@ impl TalosService {
             .write_owned()
             .await;
         self.ensure_session_write_allowed(session_id).await?;
+        self.turns.prepare_session_destruction(&session).await?;
         self.access.clear_session(session).await
     }
 
@@ -683,24 +699,6 @@ impl TalosService {
         Ok(())
     }
 
-    /// Run one process-local maintenance operation only while the Session has no Turn owner.
-    ///
-    /// The reservation blocks new Turn admission for this Session for the operation duration.
-    /// It does not persist maintenance state or expose the execution gate to callers.
-    pub async fn run_idle_session_maintenance<T, F, Fut>(
-        &self,
-        session_id: &str,
-        operation: F,
-    ) -> ServiceResult<Option<T>>
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = ServiceResult<T>>,
-    {
-        self.turns
-            .run_when_session_idle(session_id, operation)
-            .await
-    }
-
     pub async fn submit_turn_input(
         &self,
         actor: &Actor,
@@ -711,120 +709,15 @@ impl TalosService {
             .access
             .load_session(actor, &identity.session_id)
             .await?;
-        if let Some(reply) = self
-            .forward_active_command(
-                actor,
-                &session,
-                agent_protocol::ActiveSessionCommand::Input(request.clone()),
-            )
-            .await?
-        {
-            let agent_protocol::ActiveSessionReply::Input(reply) = reply else {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "Current coordinator returned an invalid command result.",
-                ));
-            };
-            return Ok(reply);
-        }
+
         self.turns.submit_turn_input(session, request).await
     }
-
-    pub async fn subscribe_timeline(
-        &self,
-        actor: &Actor,
-        request: SubscribeTimelineRequest,
-    ) -> ServiceResult<talos_types::SubscribeTimelineResponse> {
-        let subscription = self.open_timeline_subscription(actor, request).await?;
-        Ok(subscription.response())
-    }
-
-    pub async fn open_timeline_subscription(
-        &self,
-        actor: &Actor,
-        request: SubscribeTimelineRequest,
-    ) -> ServiceResult<TimelineSubscription> {
-        let session = self.access.load_session(actor, &request.session_id).await?;
-        self.turns.claim_session_open(&request.session_id)?;
-        if let Some(active) = self
-            .turns
-            .canonical_active_turn(&request.session_id)
-            .await?
-        {
-            if !self.turns.is_turn_execution_active(&active.identity) {
-                self.turns.recover_active_turn(session, active).await?;
-            }
-        }
-        if let Err(error) = self.reconcile_session_goal(&request.session_id).await {
-            // An offline Worker must not turn a readable Timeline into a failure
-            // or imply that the Goal has paused or completed.
-            talos_logging::report_error(&error);
-        }
-        let after_event_id = parse_timeline_event_id(request.since_event_id)?;
-        let command = TimelineSubscribeCommand {
-            session_id: request.session_id,
-            turn_id: request.turn_id.clone(),
-            after_event_id,
-            replay_limit: request.replay_limit.unwrap_or(1).max(1),
-            close_when_idle: request.close_when_idle.unwrap_or(false),
-            close_on_terminal: request.close_on_terminal.unwrap_or(false),
-        };
-        let subscription = if request.turn_id.is_none() {
-            self.events
-                .subscribe_with_changes(
-                    command,
-                    self.message_queue.subscribe_changed(),
-                    self.turns
-                        .installed_automation()
-                        .map(|automation| automation.subscribe_changed()),
-                )
-                .await?
-        } else {
-            self.events.subscribe(command).await?
-        };
-        Ok(subscription)
-    }
-
-    pub async fn recover_timeline(
-        &self,
-        actor: &Actor,
-        request: RecoverTimelineRequest,
-    ) -> ServiceResult<talos_agent_api::RecoverTimelineResponse> {
-        let session = self.access.load_session(actor, &request.session_id).await?;
-        self.turns.claim_session_open(&request.session_id)?;
-        if let Some(active) = self
-            .turns
-            .canonical_active_turn(&request.session_id)
-            .await?
-        {
-            if !self.turns.is_turn_execution_active(&active.identity) {
-                self.turns.recover_active_turn(session, active).await?;
-            }
-        }
-        if let Err(error) = self.reconcile_session_goal(&request.session_id).await {
-            talos_logging::report_error(&error);
-        }
-        let after_event_id = parse_timeline_event_id(request.after_event_id)?;
-        self.events
-            .recover_timeline(
-                &request.session_id,
-                after_event_id.as_ref(),
-                request.replay_limit.unwrap_or(1).max(1),
-            )
-            .await
-    }
-}
-
-fn parse_timeline_event_id(value: Option<String>) -> ServiceResult<Option<TimelineEventId>> {
-    value
-        .map(|raw| {
-            let event_id = TimelineEventId::from(raw);
-            event_id.event_seq()?;
-            Ok(event_id)
-        })
-        .transpose()
 }
 
 #[cfg(test)]
 #[path = "service_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "product_config_tests.rs"]
+mod product_config_tests;

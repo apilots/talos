@@ -184,9 +184,55 @@ impl TalosService {
         actor: &Actor,
         request: TrajectoryReadPayloadRequest,
     ) -> TalosResult<TrajectoryReadPayloadResponse> {
-        self.access
+        let session = self
+            .access
             .load_session(actor, &request.identity.session_id)
             .await?;
+        match self.sessions.ensure_execution_supported(&session.id).await {
+            Ok(()) => {
+                let start = offset(
+                    request.cursor.as_deref(),
+                    &request.identity,
+                    Some(&request.payload_id),
+                )?;
+                let scope = self.sessions.build_agent_session_context(&session).await?;
+                let chunk = self
+                    .sessions
+                    .read_execution_payload(agent_protocol::AgentExecutionPayloadParams {
+                        session: scope,
+                        identity: request.identity.clone(),
+                        payload_id: request.payload_id.clone(),
+                        offset: start as u64,
+                        limit: request
+                            .limit_bytes
+                            .unwrap_or(256 * 1024)
+                            .clamp(4, 256 * 1024) as usize,
+                    })
+                    .await?;
+                let next_cursor = chunk
+                    .next_offset
+                    .map(|offset| {
+                        usize::try_from(offset)
+                            .map_err(|_| invalid_cursor())
+                            .and_then(|offset| {
+                                encode_cursor(&Cursor {
+                                    identity: request.identity.clone(),
+                                    offset,
+                                    payload_id: Some(request.payload_id.clone()),
+                                })
+                            })
+                    })
+                    .transpose()?;
+                return Ok(TrajectoryReadPayloadResponse {
+                    payload_id: request.payload_id,
+                    encoding: TrajectoryPayloadEncoding::Utf8Json,
+                    data: chunk.data,
+                    next_cursor,
+                });
+            }
+            Err(error) if error.is_code(ErrorCode::InvalidRequest) => {}
+            Err(error) => return Err(error),
+        }
         let body = self
             .history
             .read_execution_payload(&request.identity, &request.payload_id)

@@ -41,6 +41,10 @@ struct RecordingSessionStore {
 
 #[async_trait]
 impl SessionStore for RecordingSessionStore {
+    async fn ensure_worker_execution_session(&self, _session_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn get_history_cursor(
         &self,
         _session_id: &str,
@@ -161,13 +165,23 @@ impl SessionStore for RecordingSessionStore {
             SessionRecordPatch::Settings {
                 conf,
                 current_directory,
+                pinned,
             } => {
                 stored.conf = conf;
                 stored.current_directory = current_directory;
+                if let Some(pinned) = pinned {
+                    stored.pinned = pinned;
+                }
+                stored.last_activity = params.last_activity;
             }
-            SessionRecordPatch::Worktree(binding) => stored.worktree_binding = Some(binding),
+            SessionRecordPatch::Pinned(pinned) => {
+                stored.pinned = pinned;
+            }
+            SessionRecordPatch::Worktree(binding) => {
+                stored.worktree_binding = Some(binding);
+                stored.last_activity = params.last_activity;
+            }
         }
-        stored.last_activity = params.last_activity;
         Ok(Some(stored.clone()))
     }
 
@@ -335,6 +349,7 @@ async fn agent_context_is_built_once_from_session_authorities() {
     let identity = AgentTurnRef::new(session.id.clone(), "turn-1");
     let model_selection = session.conf.model_selection.clone().unwrap();
     let expected = AgentContext {
+        tree_identity: talos_types::SessionTreeIdentity::Primary,
         history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),

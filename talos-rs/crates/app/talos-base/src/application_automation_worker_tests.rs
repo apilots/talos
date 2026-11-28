@@ -68,10 +68,17 @@ async fn automation_worker_business_websocket_interrupt() {
     run(AgentNodeTransport::Outbound, Finish::Interrupt).await;
 }
 
+#[tokio::test]
+#[ignore = "requires controlled automation model; run 24_automation/01_session_automation"]
+async fn automation_worker_business_outbound_survives_owner_shutdown() {
+    run(AgentNodeTransport::Outbound, Finish::OwnerShutdown).await;
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Finish {
     Complete,
     Interrupt,
+    OwnerShutdown,
 }
 
 async fn run(transport: AgentNodeTransport, finish: Finish) {
@@ -90,6 +97,16 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
     };
     let mut owner_config = config(&home.path().join("owner"));
     owner_config.agent_node.control_plane = Some(control_config.clone());
+    owner_config.agent_node.embedded_worker = false;
+    owner_config.agent.agents = vec![talos_config::AgentDefinitionConfig {
+        id: "default".into(),
+        name: "Routing identity".into(),
+        enabled: false,
+        description: None,
+        provider: None,
+    }];
+    owner_config.agent.inner_model = None;
+    owner_config.llm = Default::default();
     owner_config.cloud.agent_base_url = format!("https://{ingress}");
     owner_config.cloud.agent_trusted_ca_file = Some(cert.clone());
     persist(&owner_config);
@@ -99,23 +116,22 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
     )
     .await
     .unwrap();
+    assert!(runtime.worker.is_none());
     let server = NodeRpcServer::new(
         &control_config,
-        runtime.node_service.clone(),
+        runtime.node_service.clone().expect("Server authority"),
         Arc::new(TestAuth),
         runtime.coordinator.clone(),
         NodeResourceServices {
             session_data: NodeSessionDataRpc::new(
-                runtime.node_service.clone(),
+                runtime.node_service.clone().expect("Server authority"),
                 runtime.session_store.clone(),
-                runtime.session_history_reader.clone(),
                 runtime.attachment_reader.clone(),
-                runtime.memory_progress_store.clone(),
             ),
             agent_control: runtime.agent_control.clone(),
             automation_control: runtime.automation_control.clone(),
             tool_images: NodeToolImageRpc::new(
-                runtime.node_service.clone(),
+                runtime.node_service.clone().expect("Server authority"),
                 runtime.tool_image_store.clone(),
                 1024 * 1024,
             ),
@@ -144,6 +160,8 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
     let actor = Actor::regular("user-1").with_access_token("user-1");
     let node = runtime
         .node_service
+        .as_ref()
+        .expect("Server authority")
         .create_node(
             &actor,
             agent_protocol::CreateNodeRequest {
@@ -175,6 +193,10 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
         trusted_ca_file: Some(cert.clone()),
     });
     persist(&worker_config);
+    let execution_path = worker_config
+        .talos_paths()
+        .data_dir
+        .join("worker/execution.sqlite");
     let worker = talos_worker::RegisteredWorker::start(worker_config)
         .await
         .unwrap();
@@ -270,6 +292,94 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
         .unwrap();
     assert_eq!(record.execution_node_id, node_id);
     assert_eq!(record.user_id, actor.user_id);
+    if matches!(finish, Finish::OwnerShutdown) {
+        use talos_storage::Storage;
+        use talos_store::session::AgentExecutionStore;
+        tokio::time::timeout(Duration::from_secs(5), runtime.shutdown())
+            .await
+            .expect("management shutdown must detach an independent Worker observation")
+            .unwrap();
+        let cursor = runtime
+            .host
+            .stores
+            .sessions
+            .worker_event_cursor(&session)
+            .await
+            .unwrap();
+        let source = talos_storage::SqliteStorage::new_with_max_connections(
+            &format!("sqlite://{}?mode=ro", execution_path.display()),
+            1,
+        )
+        .await
+        .unwrap();
+        let source_turn = source
+            .query(
+                "SELECT active_turn_id FROM sessions WHERE session_id=?",
+                &[&session],
+            )
+            .await
+            .unwrap()
+            .first()
+            .unwrap()
+            .get_string("active_turn_id");
+        assert_eq!(
+            source_turn.as_deref(),
+            Some(active.active_turn.identity.turn_id.as_str())
+        );
+        let terminal = "SELECT event_json FROM agent_events WHERE session_id=? AND turn_id=? AND json_extract(settlement_json,'$.type')='finished'";
+        assert!(source
+            .query(terminal, &[&session, &active.active_turn.identity.turn_id])
+            .await
+            .unwrap()
+            .is_empty());
+        std::fs::write(
+            fixture_directory().join(format!("{case}.release-work-1")),
+            "released",
+        )
+        .unwrap();
+        let finished = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                if let Some(raw) = source
+                    .query(terminal, &[&session, &active.active_turn.identity.turn_id])
+                    .await
+                    .unwrap()
+                    .first()
+                    .and_then(|row| row.get_string("event_json"))
+                {
+                    break serde_json::from_str::<talos_agent_api::AgentEvent>(&raw).unwrap();
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("independent Worker must finish its admitted Turn after management shutdown");
+        assert_eq!(finished.identity, active.active_turn.identity);
+        assert!(matches!(
+            finished.payload,
+            talos_agent_api::AgentEventPayload::TurnCompleted(_)
+        ));
+        assert_eq!(
+            runtime
+                .host
+                .stores
+                .sessions
+                .worker_event_cursor(&session)
+                .await
+                .unwrap(),
+            cursor
+        );
+        std::fs::write(
+            fixture_directory().join(format!("remote-{transport:?}-{finish:?}-business.json")),
+            serde_json::to_vec_pretty(&finished).unwrap(),
+        )
+        .unwrap();
+        source.pool().close().await;
+        worker.shutdown().await.unwrap();
+        stop.cancel();
+        serving.await.unwrap().unwrap();
+        runtime.shutdown_host().await.unwrap();
+        return;
+    }
     if matches!(finish, Finish::Interrupt) {
         runtime
             .gateway
@@ -346,6 +456,6 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
     worker.shutdown().await.unwrap();
     stop.cancel();
     serving.await.unwrap().unwrap();
-    runtime.shutdown_sync().await.unwrap();
+    runtime.shutdown_host().await.unwrap();
     runtime.shutdown().await.unwrap();
 }

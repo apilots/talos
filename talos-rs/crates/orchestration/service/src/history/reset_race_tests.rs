@@ -45,6 +45,7 @@ async fn reset_fixture() -> (
             project_id: None,
             worktree_binding: None,
             current_directory: None,
+            pinned: false,
         })
         .await
         .unwrap();
@@ -80,87 +81,6 @@ async fn concurrent_reset_restarts_a_cursorless_history_page() {
             next_cursor: None,
             last_stable_event_id: None,
         }
-    );
-}
-
-#[tokio::test]
-async fn concurrent_reset_restarts_the_internal_latest_history_window() {
-    let (_home, store, history, storage) = reset_fixture().await;
-    let pause = storage.pause_terminal_reads(1);
-    let reader = tokio::spawn(async move {
-        talos_agent::SessionHistoryReader::read(
-            &history,
-            SessionHistoryReadParams {
-                session_id: "session-1".into(),
-                window: SessionHistoryWindow::Latest,
-                limit: 10,
-            },
-        )
-        .await
-    });
-    barrier(&pause).await;
-    store.clear_session_history("session-1", 100).await.unwrap();
-    pause.proceed.notify_one();
-    assert!(reader.await.unwrap().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn concurrent_reset_restarts_the_internal_zero_history_boundary() {
-    let (_home, store, history, storage) = reset_fixture().await;
-    let pause = storage.pause_terminal_reads(1);
-    let reader = tokio::spawn(async move {
-        talos_agent::SessionHistoryReader::read(
-            &history,
-            SessionHistoryReadParams {
-                session_id: "session-1".into(),
-                window: SessionHistoryWindow::OldestAfter {
-                    completed_event_seq: 0,
-                },
-                limit: 10,
-            },
-        )
-        .await
-    });
-    barrier(&pause).await;
-    store.clear_session_history("session-1", 100).await.unwrap();
-    pause.proceed.notify_one();
-    assert!(reader.await.unwrap().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn concurrent_reset_invalidates_the_internal_nonzero_history_boundary() {
-    let (_home, store, history, storage) = reset_fixture().await;
-    let completed_event_seq = store
-        .get_latest_agent_event_seq("session-1")
-        .await
-        .unwrap()
-        .unwrap();
-    commit_completed_turn(
-        store.as_ref(),
-        AgentTurnRef::new("session-1", "turn-2"),
-        "2",
-    )
-    .await;
-    let pause = storage.pause_terminal_reads(1);
-    let reader = tokio::spawn(async move {
-        talos_agent::SessionHistoryReader::read(
-            &history,
-            SessionHistoryReadParams {
-                session_id: "session-1".into(),
-                window: SessionHistoryWindow::OldestAfter {
-                    completed_event_seq,
-                },
-                limit: 10,
-            },
-        )
-        .await
-    });
-    barrier(&pause).await;
-    store.clear_session_history("session-1", 100).await.unwrap();
-    pause.proceed.notify_one();
-    assert_eq!(
-        reader.await.unwrap().unwrap_err().error_code(),
-        talos_error::ErrorCode::InvalidRequest
     );
 }
 

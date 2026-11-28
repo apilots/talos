@@ -10,10 +10,10 @@ use talos_service::{
 use talos_storage::Storage;
 use talos_types::{BuiltinJobAction, BuiltinJobId, BuiltinJobInfo, BuiltinJobOutcome};
 
-use crate::application_sync::ApplicationSyncHost;
+use crate::application_host::ApplicationHost;
 
 pub(crate) struct ApplicationNativeJobHost {
-    pub sync_host: Weak<ApplicationSyncHost>,
+    pub host: Weak<ApplicationHost>,
     pub storage: Arc<dyn Storage>,
     pub automation: Automation,
     pub execution_instance_id: String,
@@ -26,20 +26,32 @@ impl NativeJobHost for ApplicationNativeJobHost {
         requested_computer: &'a str,
     ) -> NativeJobFuture<'a, ResolvedNativeJobs> {
         Box::pin(async move {
-            let host = self.sync_host.upgrade().ok_or_else(|| {
+            let host = self.host.upgrade().ok_or_else(|| {
                 TalosError::new(
                     ErrorCode::ServiceUnavailable,
                     "Native job host is unavailable",
                 )
             })?;
-            if !actor.auth_disabled && !host.owns_local_computer(actor).await? {
-                return Err(scope_denied());
-            }
-            let computer_id = host
-                .local_computer_for_client(actor)
-                .await?
-                .ok_or_else(scope_denied)?;
-            if computer_id != requested_computer || actor.user_id.is_empty() {
+            let computer_id = if host.worker.is_none() {
+                // A management-only Server has no execution Computer to enroll.
+                // Its existing jobs remain owned by authenticated administrators.
+                if actor.auth_disabled || actor.role != talos_auth::UserRole::Admin {
+                    return Err(scope_denied());
+                }
+                self.execution_instance_id.clone()
+            } else {
+                if !actor.auth_disabled && !host.owns_local_computer(actor).await? {
+                    return Err(scope_denied());
+                }
+                host.local_computer_for_client(actor)
+                    .await?
+                    .ok_or_else(scope_denied)?
+            };
+            // Local adapters normalize the current Computer to the embedded alias.
+            // Resolve it only after checking ownership, and retain the public identity.
+            if (requested_computer != "embedded" && computer_id != requested_computer)
+                || actor.user_id.is_empty()
+            {
                 return Err(scope_denied());
             }
             // The verified owner manages the execution host's existing jobs.

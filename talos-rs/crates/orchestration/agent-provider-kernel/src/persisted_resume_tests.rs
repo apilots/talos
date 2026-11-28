@@ -1,7 +1,7 @@
 use super::*;
 use crate::continuation::KernelProviderContinuation;
 use std::sync::atomic::AtomicBool;
-use talos_agent::{AgentEventPipeline, AgentEventReducer, AgentRunCheckpoint};
+use talos_agent::{AgentEventPipeline, AgentEventReducer, AgentHarness, AgentRunCheckpoint};
 use talos_agent_api::{AgentPendingInput, AgentToolCall, AgentToolCallArguments, AgentTurnStarted};
 use talos_agent_kernel::{KernelTranscriptUserActionRequestPayload, UserInput};
 use talos_config::ModelInputKind;
@@ -44,18 +44,18 @@ async fn exercise_resume(attachment_available: bool) {
         .register(Arc::new(talos_tools::AskUserQuestionTool));
     let provider = KernelAgentProvider::new(params).unwrap();
 
-    let (checkpoint, reference) = persist_first_question(root, &identity, store.as_ref()).await;
+    let journal = Arc::new(
+        talos_store::execution::WorkerExecutionStore::open(&root.join("execution.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let checkpoint = persist_first_question(root, &context, store.as_ref(), journal.as_ref()).await;
     let mut reducer = AgentEventReducer::from_checkpoint(identity, checkpoint.clone()).unwrap();
-    let (events, waiting) = resume(&provider, &context, checkpoint, reference, 2).await;
+    let (events, waiting) = resume(&provider, &context, journal.clone(), "action-1", 2).await;
     for event in events {
         reducer.apply(event).unwrap();
     }
-    let AgentRunSettlement::WaitingForInput {
-        event,
-        continuation,
-        ..
-    } = waiting
-    else {
+    let AgentRunSettlement::WaitingForInput { event, .. } = waiting else {
         panic!("the second question must remain available even when its deferred attachment is missing");
     };
     let AgentEventPayload::WaitingForInput(AgentPendingInput::UserAction { action }) =
@@ -65,11 +65,11 @@ async fn exercise_resume(attachment_available: bool) {
     };
     assert_eq!(action.call_id, "call-2");
     assert!(model.requests.as_ref().unwrap().lock().unwrap().is_empty());
+    let next_action_id = action.action_id.clone();
     reducer.apply(event).unwrap();
 
     reader.0.store(attachment_available, Ordering::Relaxed);
-    let (events, finished) =
-        resume(&provider, &context, reducer.checkpoint(), continuation, 3).await;
+    let (events, finished) = resume(&provider, &context, journal.clone(), &next_action_id, 3).await;
     let AgentRunSettlement::Finished { result, .. } = finished else {
         panic!("the second answer must finish this execution");
     };
@@ -131,28 +131,32 @@ async fn exercise_resume(attachment_available: bool) {
 async fn resume(
     provider: &KernelAgentProvider,
     context: &AgentContext,
-    checkpoint: AgentRunCheckpoint,
-    continuation: talos_agent_api::AgentContinuationRef,
+    journal: Arc<talos_store::execution::WorkerExecutionStore>,
+    action_id: &str,
     message_number: u32,
 ) -> (Vec<talos_agent_api::AgentEvent>, AgentRunSettlement) {
-    let action = KernelProviderContinuation::decode(&continuation).unwrap();
     let mut answer = user_message();
     answer.message_id = format!("answer-{message_number}");
     answer.blocks[0].block_id = format!("answer-block-{message_number}");
     answer.blocks[0].content =
         AgentMessageBlockContent::UserContent(AgentUserContent::UserActionResponse {
-            action_id: action.action_id,
+            action_id: action_id.into(),
             response: UserActionResponse::Question(QuestionAnswer::SelectedOption {
                 option_id: "review".into(),
             }),
         });
-    let harness = create_agent_harness("agent-1".into(), provider.clone());
+    let harness = talos_agent::LocalExecutionHarness::new(
+        create_agent_harness("agent-1".into(), provider.clone(), journal.clone()),
+        journal,
+    );
     let mut execution = harness
         .start(AgentRunParams {
+            subagent_limit: None,
+            command: None,
+            automation_origin: None,
             context: context.clone(),
             input: answer,
-            checkpoint: Some(checkpoint),
-            continuation: Some(continuation),
+            intent: talos_agent::AgentRunIntent::RespondUserAction,
         })
         .await
         .unwrap();
@@ -172,12 +176,32 @@ async fn resume(
 
 async fn persist_first_question(
     root: &Path,
-    identity: &AgentTurnRef,
+    context: &AgentContext,
     store: &FileKernelSessionArtifactStore,
-) -> (AgentRunCheckpoint, talos_agent_api::AgentContinuationRef) {
-    let (pipeline, sink, _events) = AgentEventPipeline::fresh(identity.clone());
-    pipeline
+    journal: &talos_store::execution::WorkerExecutionStore,
+) -> AgentRunCheckpoint {
+    let identity = context.identity();
+    let (pipeline, sink, mut events) = AgentEventPipeline::fresh(identity.clone());
+    let started = pipeline
         .record(AgentEventPayload::TurnStarted(AgentTurnStarted {}))
+        .await
+        .unwrap();
+    let input = user_message();
+    let mut admission = vec![started];
+    admission.extend(pipeline.record_user_message(input.clone()).await.unwrap());
+    let initial_checkpoint = pipeline.checkpoint().await;
+    let command = agent_protocol::AgentExecutionCommand::Run {
+        params: Box::new(AgentRunParams {
+            subagent_limit: None,
+            command: None,
+            automation_origin: None,
+            context: context.clone(),
+            input,
+            intent: talos_agent::AgentRunIntent::Start,
+        }),
+    };
+    journal
+        .admit(&context.session, &command, admission, &initial_checkpoint)
         .await
         .unwrap();
     let message = sink.start_message(AgentMessageRole::Agent).await.unwrap();
@@ -219,7 +243,7 @@ async fn persist_first_question(
     }
     let block_id = blocks[0].block_id().to_string();
     let action_id = "action-1";
-    pipeline
+    let waiting = pipeline
         .record(AgentEventPayload::WaitingForInput(
             AgentPendingInput::UserAction {
                 action: talos_types::PendingUserAction {
@@ -285,7 +309,33 @@ async fn persist_first_question(
     )
     .encode()
     .unwrap();
-    (pipeline.checkpoint().await, reference)
+    let checkpoint = pipeline.checkpoint().await;
+    let mut progress = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        progress.push(event);
+    }
+    journal
+        .record_waiting_continuation(
+            &context.session,
+            &waiting.identity,
+            waiting.sequence,
+            &reference,
+        )
+        .await
+        .unwrap();
+    progress.push(waiting);
+    journal
+        .append(
+            &context.session,
+            progress,
+            &checkpoint,
+            Some(agent_protocol::AgentExecutionSettlement::WaitingForInput {
+                metrics: checkpoint.metrics.clone(),
+            }),
+        )
+        .await
+        .unwrap();
+    checkpoint
 }
 
 struct TestFileReader(AtomicBool);

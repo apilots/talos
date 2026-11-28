@@ -29,6 +29,10 @@ impl MockSessionStore {
 
 #[async_trait]
 impl SessionStore for MockSessionStore {
+    async fn ensure_worker_execution_session(&self, _session_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn set_generated_title(
         &self,
         _identity: &talos_agent_api::AgentTurnRef,
@@ -68,6 +72,7 @@ impl SessionStore for MockSessionStore {
             project_id: None,
             worktree_binding: None,
             current_directory: None,
+            pinned: false,
         }))
     }
 
@@ -116,13 +121,23 @@ impl SessionStore for MockSessionStore {
             SessionRecordPatch::Settings {
                 conf,
                 current_directory,
+                pinned,
             } => {
                 record.conf = conf;
                 record.current_directory = current_directory;
+                if let Some(pinned) = pinned {
+                    record.pinned = pinned;
+                }
+                record.last_activity = params.last_activity;
             }
-            SessionRecordPatch::Worktree(binding) => record.worktree_binding = Some(binding),
+            SessionRecordPatch::Pinned(pinned) => {
+                record.pinned = pinned;
+            }
+            SessionRecordPatch::Worktree(binding) => {
+                record.worktree_binding = Some(binding);
+                record.last_activity = params.last_activity;
+            }
         }
-        record.last_activity = params.last_activity;
         Ok(Some(record))
     }
 

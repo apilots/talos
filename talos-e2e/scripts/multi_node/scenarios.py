@@ -2,6 +2,8 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import sqlite3
+import yaml
 import os
 import subprocess
 import signal
@@ -47,7 +49,7 @@ def registration(cluster):
     node = cluster.nodes['alice-a']
     renamed = cluster.manage('alice', 'UpdateNode', {
         'node_id': node['node_id'], 'display_name': 'Renamed laptop',
-        'endpoint': f'https://127.0.0.1:{node["port"]}', 'status': 'NODE_STATUS_ENABLED'})['node']
+        'status': 'NODE_STATUS_ENABLED'})['node']
     require(not renamed.get('available'), 'Rename scenario missed the pre-heartbeat window')
     require(renamed['node_id'] == before['node_id'], 'Rename changed node identity')
     cluster.healthy_all()
@@ -65,7 +67,6 @@ def registration(cluster):
     passed('server_restart_reregistration')
 
     node = cluster.nodes['alice-a']
-    endpoint = f'https://127.0.0.1:{node["port"]}'
     marker = uuid.uuid4().hex
     started_file, forbidden_file = f'started-{marker}.txt', f'forbidden-{marker}.txt'
     session, response = cluster.start_turn('alice',
@@ -74,7 +75,7 @@ def registration(cluster):
     wait_for(lambda: list(node['home'].rglob(started_file)), 'running tool before node disable', 45)
     side_effect_deadline = time.monotonic() + 27
     disabled = cluster.manage('alice', 'UpdateNode', {'node_id': cluster.nodes['alice-a']['node_id'], 'display_name': 'alice-a',
-                                                     'endpoint': endpoint, 'status': 'NODE_STATUS_DISABLED'})
+                                                     'status': 'NODE_STATUS_DISABLED'})
     require('node' in disabled and not disabled['node'].get('available'), 'Disable did not withdraw node')
     # The Worker must stop on the control-plane rejection itself. Killing it
     # here would conceal the missing lease-observer notification.
@@ -87,7 +88,7 @@ def registration(cluster):
     rotated = cluster.manage('alice', 'RotateCredential', {'node_id': cluster.nodes['alice-a']['node_id'], 'expires_at': int(time.time()) + 3600})
     require('credential' in rotated, 'RotateCredential failed')
     enabled = cluster.manage('alice', 'UpdateNode', {'node_id': cluster.nodes['alice-a']['node_id'], 'display_name': 'alice-a',
-                                                    'endpoint': endpoint, 'status': 'NODE_STATUS_ENABLED'})
+                                                    'status': 'NODE_STATUS_ENABLED'})
     require('node' in enabled, 'Enable failed')
     denied(cluster.rpc('AgentNodeControl', 'Register', {
         'auth': {'node_id': cluster.nodes['alice-a']['node_id'], 'token': old_token}, 'params': {}}), 'UNAUTHENTICATED')
@@ -223,7 +224,7 @@ def workspace(cluster):
     require(not tool_results, 'Model called a tool despite the scenario instruction; automatic reflection not isolated')
     user_id = cluster.users['alice']['user']['user_id']
     server_workspace = cluster.server_home / 'workspace-talos' / user_id
-    node_workspace = cluster.nodes['alice-a']['home'] / 'workspace-talos' / user_id
+    node_workspace = cluster.nodes['alice-a']['home'] / 'worker-workspaces' / user_id
     artifacts = [json.loads(line) for path in (node_workspace / 'sessions' / session).glob('*.jsonl')
                  for line in path.read_text().splitlines() if line.strip()]
     require(any(record.get('kind') == 'transcript' for record in artifacts), f'Worker transcript missing for {session}')
@@ -234,12 +235,38 @@ def workspace(cluster):
     require(any(marker in path.read_text() for path in memories), 'Automatic reflection did not persist MEMORY.md on Worker')
     _, answer, _ = cluster.turn('alice', 'What is my required report identifier? Reply only with the identifier.')
     require(marker in answer, 'New remote Session cannot read Worker Memory')
-    wait_for(lambda: cluster.query('SELECT memory_processed_until_event_seq FROM sessions WHERE session_key=?', (session,))[0][0] > 0,
-             'scheduled Dream Memory commits on bound Worker', 60)
+    wait_for(lambda: cluster.query('SELECT covered_until_source_seq FROM session_dream_cursors WHERE session_id=? AND covered_until_source_seq>0', (session,)),
+             'scheduled Dream Memory commits on bound Worker and product consumes its result', 90)
     dream_files = [path for path in node_workspace.rglob('*.md') if path.name != 'MEMORY.md']
     require(any(marker in path.read_text() for path in dream_files), 'Dream Memory content was not persisted on Worker')
     usage = cluster.query('SELECT DISTINCT usage_kind FROM profile_turn_usage WHERE session_id=?', (session,))
     require({('memory',), ('dream',)} <= set(usage), f'Memory model usage not accounted on control plane: {usage}')
+    worker_config = yaml.safe_load((cluster.nodes['alice-a']['home'] / 'conf/talos.yaml').read_text())
+    selected = worker_config['agent'].get('inner_model') or {
+        'provider': worker_config['llm']['provider'], 'id': worker_config['llm']['model']}
+    recorded = cluster.query(
+        "SELECT model_provider,model_id,last_request_id,total_tokens FROM profile_turn_usage WHERE session_id=? AND usage_kind='dream'",
+        (session,))
+    require(recorded and all(row[:2] == (selected['provider'], selected['id']) for row in recorded),
+            f'Dream usage did not retain the target Worker model: {recorded}')
+    with sqlite3.connect(f"file:{cluster.nodes['alice-a']['home']}/data/worker/execution.sqlite?mode=ro", uri=True) as source:
+        source_calls = {json.loads(row[0])['modelUsage']['requestId'] for row in source.execute(
+            'SELECT formation_json FROM dream_formations WHERE session_id=?', (session,))}
+    require(all(row[2] in source_calls for row in recorded), 'Product Dream accounting lost the Worker call identity')
+    require(not (cluster.server_home / 'data/worker').exists(),
+            'Pure control-plane Server instantiated a local Worker execution namespace')
+    require(cluster.query('SELECT workspace_id FROM sessions WHERE session_key=?', (session,)) == [('remote-team',)],
+            'Session lost the Worker-only Workspace identity')
+    title_usage = cluster.query(
+        "SELECT model_provider,model_id,last_request_id FROM profile_turn_usage WHERE session_id=? AND usage_kind='title'",
+        (session,))
+    require(title_usage and all(row[:2] == (selected['provider'], selected['id']) for row in title_usage),
+            'Title generation did not use the target Worker model')
+    with sqlite3.connect(f"file:{cluster.nodes['alice-a']['home']}/data/worker/execution.sqlite?mode=ro", uri=True) as source:
+        title_calls = {json.loads(row[0])['modelUsage']['requestId'] for row in source.execute(
+            'SELECT result_json FROM session_title_results WHERE session_id=?', (session,))}
+    require(all(row[2] in title_calls for row in title_usage), 'Product title accounting lost the Worker call identity')
+    passed('auxiliary_models_and_workspace_stay_on_target_worker_without_embedded_server_worker')
     unexpected = [str(path.relative_to(server_workspace)) for path in server_workspace.rglob('*') if path.is_file()]
     require(not unexpected, f'Maintenance created remote Workspace files on control plane: {unexpected}')
     passed('scheduled_dream_memory_on_worker_with_control_plane_usage')
@@ -254,6 +281,7 @@ def workspace(cluster):
     require((node_workspace / 'memory' / f'{node_date}.md').is_file(), 'Dream Memory did not use Worker-local date')
     require(not (node_workspace / 'memory' / f'{control_date}.md').exists(), 'Dream Memory used control-plane date')
     passed('worker_policy_and_date_are_independent_of_control_plane_timezone')
+    return session
 
 
 def rpc_boundaries(cluster):
@@ -315,7 +343,7 @@ def lease_expiry(cluster):
 def parity(cluster):
     token = cluster.users['alice']['access_token']
     models = data(http(cluster.url + '/v1/models?nodeId=' + cluster.nodes['alice-a']['node_id'], token=token))['models']
-    image_model = os.environ.get('TALOS_E2E_IMAGE_MODEL', 'deepseek-v4-flash-vision-exp')
+    image_model = os.environ.get('TALOS_E2E_IMAGE_MODEL', 'deepseek-flash')
     cluster.model = next(model for model in models if model['id'] == image_model)
     marker = 'attached_' + uuid.uuid4().hex
     attachment = ROOT / 'talos-e2e/fixtures/multi-node-parity-blue.png'

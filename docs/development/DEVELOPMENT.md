@@ -114,7 +114,9 @@ Rust PR/main quality tasks, pre-push and release source checks run scoped
 Clippy type-checks test/example targets and workspace default Clippy lints are
 errors, together with `dbg!` and `todo!`. Fix diagnostics in their owning source
 or generator. Do not enable all features or restriction lints without checking
-supported combinations. Cargo-machete rejects unused manifest dependencies;
+supported combinations. `just deps-check` also validates isolated normal/build product dependency graphs; personal entries must exclude Server authority, managed runtime and Server Relay. The runtime quality gate checks the standalone Worker binary separately without test targets, so product dev-dependency feature unification cannot conceal missing node capabilities. Build distributable products in separate Cargo invocations because workspace feature unification can include Server code in otherwise personal artifacts. The Base CI gate checks personal and Server feature combinations and runs both actual test suites without a default-feature test archive.
+
+Cargo-machete rejects unused manifest dependencies;
 generated protobuf/gRPC runtime dependencies have explicit package metadata.
 `just install-tools` installs the pinned dependency checker, and CI installs it
 with Clippy and the pinned Rust toolchain.
@@ -291,9 +293,26 @@ The built-in OpenAI provider uses Responses. In a hand-managed config, omit
 `llm.openai.protocol` or set it to `responses`. A custom provider can select
 the protocol supported by its endpoint.
 
-The four default OpenAI models are GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra,
-and GPT-6 Luna. The profiles use standard short-context rates and 30-minute
+The default OpenAI catalog includes GPT-6.2 Astra/Sol, GPT-6.1 Sol/Terra,
+and GPT-6 Astra/Sol/Luna. The profiles use standard short-context rates and 30-minute
 cache-write rates.
+
+Reasoning effort includes an explicit `max` value. A model must list it in
+`reasoning_efforts` before clients can select it; unspecified lists preserve the
+previous four levels. Current OpenAI GPT-6 models and DeepSeek Flash/Pro expose
+`max`. Claude adaptive models send the selected level in `output_config.effort`,
+keeping `xhigh` and `max` distinct. Explicit `thinking: {type: adaptive}`
+remains in force when the selection is None/Off; those profiles use the provider
+default effort rather than disabling thinking. Qwen4 exposes `light`, `high`, and `xhigh`;
+its documented `max` compatibility alias is not advertised as another level.
+Ollama Qwen3.8 uses provider-default thinking until local model metadata confirms
+its accepted effort names. Bundled DeepSeek catalogs list `deepseek-flash`
+(V4.1 Flash) and `deepseek-v4-pro` (V4 Pro), with Flash selected for both the
+main and inner model. Managed upgrades preserve operator-owned saved catalogs
+and selections, including the legacy Flash aliases still accepted upstream;
+they do not forcibly migrate or prune those entries. OpenRouter free routes
+may change availability independently of the bundled catalog; check the provider
+model list before selecting a legacy route.
 
 When reasoning is off, the official OpenAI connection sends `none` for
 `gpt-6-luna` and `gpt-6.1-terra`. GPT-6.2 Astra and Sol require reasoning.
