@@ -20,6 +20,9 @@ use tokio::time::Duration;
 #[path = "application_shutdown_tests.rs"]
 mod shutdown_tests;
 
+#[path = "desktop_cloud_grant_tests.rs"]
+mod cloud_grant_tests;
+
 static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn test_migrations_dir() -> PathBuf {

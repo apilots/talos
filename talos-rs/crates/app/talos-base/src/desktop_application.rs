@@ -184,8 +184,23 @@ impl AppServerApplication for DesktopApplication {
             .map_err(project_error)?
         {
             let cloud = self.cloud().await.map_err(project_error)?;
+            let body = cloud.send(actor, call).await.map_err(project_error)?;
+            let body = if matches!(request.params, ClientRequestParams::DesktopOpen(_)) {
+                let mut grant: talos_types::DesktopViewGrant = serde_json::from_value(body)
+                    .map_err(|error| {
+                        project_error(TalosError::internal_with_source(
+                            "The Computer Server returned an invalid desktop grant.",
+                            error,
+                        ))
+                    })?;
+                // Keep redemption at its issuer; no remote ticket belongs to this host.
+                grant.ticket.insert_str(0, SERVER_TICKET);
+                value(grant).map_err(project_error)?
+            } else {
+                body
+            };
             return Ok(ApplicationResponse {
-                body: cloud.send(actor, call).await.map_err(project_error)?,
+                body,
                 started_turn: None,
             });
         }
