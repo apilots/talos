@@ -16,7 +16,8 @@
       ],
       "checks": [
         "docker",
-        "worker_image"
+        "worker_image",
+        "caddy"
       ],
       "binaries": [
         "server",

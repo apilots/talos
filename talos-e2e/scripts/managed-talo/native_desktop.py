@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 import uuid
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from playwright.sync_api import Error, expect, sync_playwright
 
@@ -51,14 +51,14 @@ def sign_in(page):
     button.wait_for(state='hidden', timeout=38000)
 
 
-def verify_web_history(playwright, base, session, prompt, report):
+def verify_web_history(playwright, base, session, node, prompt, report):
     browser = playwright.chromium.launch(executable_path=os.environ.get('TALOS_E2E_CHROME_BIN') or
         '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless=True)
     page = browser.new_page(locale='en-US')
     try:
         page.goto(base)
         sign_in(page)
-        page.goto(base + '/sessions/' + session)
+        page.goto(base + '/sessions/' + session + '?' + urlencode({'computerId': node}))
         expect(page.get_by_text(prompt, exact=True)).to_be_visible(timeout=30000)
         expect(page.get_by_text('TALO_CHAT_OK', exact=True)).to_be_visible()
         page.screenshot(path=report / 'web-native-chat-history.png')
@@ -113,8 +113,9 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
             sys.path[:0] = [str(ROOT / 'talos-e2e/scripts/browser-worker'), str(ROOT / 'talos-e2e/scripts')]
             from managed_talo import ASSISTANT, data, http, managed_resource, wait
             if stage == 'loop':
-                session = data(http(base + ASSISTANT))['instance']['conversationSessionId']
-                page.goto(page.url.split('#')[0] + '#/sessions/' + session)
+                instance = data(http(base + ASSISTANT))['instance']
+                session = instance['conversationSessionId']
+                page.goto(page.url.split('#')[0] + '#/sessions/' + session + '?computerId=' + instance['nodeId'])
                 page.get_by_role('tab', name='Conversation').wait_for()
                 expect(page.get_by_text('Goal completion declared; settle this Turn normally', exact=True)).to_be_visible(timeout=30000)
             else:
@@ -161,7 +162,7 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 page.get_by_role('link', name='Worker report').click()
                 expect(workspace.get_by_text('Report from the Talo Worker', exact=True)).to_be_visible(timeout=15000)
                 workspace.get_by_role('button', name='Close talo-preview.txt', exact=True).click()
-                page.evaluate("id => { location.hash = '/sessions/' + encodeURIComponent(id) }", session_id)
+                page.evaluate("([id, node]) => { location.hash = '/sessions/' + encodeURIComponent(id) + '?computerId=' + encodeURIComponent(node) }", [session_id, talo_node])
                 page.get_by_role('tab', name='Conversation').wait_for()
                 page.reload()
                 reply.wait_for(timeout=30000)
@@ -183,7 +184,7 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                 console.get_by_role('button', name=document.name, exact=True).click()
                 expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text('Word preview first page', timeout=20000)
                 page.screenshot(path=report / 'electron-talo-console-files.png')
-                verify_web_history(playwright, base, session_id, prompt, report)
+                verify_web_history(playwright, base, session_id, talo_node, prompt, report)
                 page.get_by_role('link', name='New chat', exact=True).click()
                 expect(page.get_by_role('heading', name='Start with one clear prompt', exact=True)).to_be_visible()
                 assert page.evaluate(selection) == personal_selection
@@ -198,7 +199,7 @@ def capture(playwright, process, endpoint, base, node_id, report, stage):
                     'modelSelection': sent.value.post_data_json.get('modelSelection'),
                     'clientRequestId': str(uuid.uuid4()),
                 }))
-                page.evaluate("id => { location.hash = '/sessions/' + encodeURIComponent(id) }", additional_session)
+                page.evaluate("([id, node]) => { location.hash = '/sessions/' + encodeURIComponent(id) + '?computerId=' + encodeURIComponent(node) }", [additional_session, talo_node])
                 page.get_by_text('TALO_CHAT_OK', exact=True).wait_for(timeout=30000)
                 saved = data(http(base + '/v1/sessions/' + additional_session))['session']
                 assert saved['sessionKind'] == 'talo' and saved['nodeId'] == talo_node
