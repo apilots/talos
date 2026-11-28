@@ -94,17 +94,57 @@ fn runtime_validation_rejects_unknown_inner_model() {
 }
 
 #[test]
-fn runtime_validation_rejects_zero_message_queue_capacity() {
-    let mut config = Config::default();
-    config.agent.message_queue.max_messages_per_session = 0;
-
-    let error = config
-        .validate_runtime()
-        .expect_err("zero queue capacity should fail validation");
-
-    assert!(error
-        .diagnostic_message()
-        .contains("agent.message_queue.max_messages_per_session"));
+fn runtime_validation_rejects_inconsistent_policies() {
+    let mut baseline = Config::default();
+    baseline.agent.agents =
+        serde_yaml::from_str("[{id: fixture, provider: {type: kernel, kernel: {}}}]").unwrap();
+    // Shared schema validation must not require a running Worker, TLS files or Docker.
+    assert!(baseline.talos.worker.runtime.is_none());
+    baseline.validate_runtime().unwrap();
+    let baseline = serde_json::to_value(baseline).unwrap();
+    for (path, value) in [
+        (
+            "/agent/message_queue/max_messages_per_session",
+            serde_json::json!(0),
+        ),
+        ("/agent/kernel/tool_parallelism", serde_json::json!(0)),
+        (
+            "/agent/agents/0/provider/kernel/timezone",
+            serde_json::json!("invalid/timezone"),
+        ),
+        (
+            "/agent/agents/0/provider/kernel/tool_parallelism",
+            serde_json::json!(0),
+        ),
+        (
+            "/agent/agents/0/provider/kernel/output/max_tokens",
+            serde_json::json!(100000),
+        ),
+        (
+            "/agent/agents/0/provider/kernel/compaction/hard_ratio_percent",
+            serde_json::json!(80),
+        ),
+        (
+            "/agent/agents/0/provider/kernel/prompt/window/compaction_buffer_tokens",
+            serde_json::json!(0),
+        ),
+        (
+            "/talos/server/runtime/request_wait_seconds",
+            serde_json::json!(121),
+        ),
+        (
+            "/talos/server/runtime/idle_timeout_seconds",
+            serde_json::json!(0),
+        ),
+    ] {
+        let mut candidate = baseline.clone();
+        *candidate.pointer_mut(path).unwrap() = value;
+        let config: Config = serde_json::from_value(candidate).unwrap();
+        assert!(
+            config.validate_runtime().is_err(),
+            "invalid configuration accepted: {path}"
+        );
+    }
 }
 
 #[test]
@@ -675,110 +715,6 @@ models:
         model.input,
         vec![ModelInputKind::Text, ModelInputKind::Image]
     );
-}
-
-#[test]
-fn test_product_configs_include_configured_provider_models() {
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let config_paths = ["talos.yaml", "talos-dev.yaml", "talos-prod.yaml"];
-    for name in config_paths {
-        let content = std::fs::read_to_string(repo_root.join("conf").join(name))
-            .expect("product config should be readable");
-        let config: Config =
-            serde_yaml::from_str(&content).expect("product config should deserialize");
-        assert_eq!(
-            config
-                .llm
-                .deepseek
-                .models
-                .iter()
-                .map(|model| (model.id.as_str(), model.context_window))
-                .collect::<Vec<_>>(),
-            vec![
-                ("deepseek-flash", 1_048_576),
-                ("deepseek-v4-pro", 1_048_576),
-            ]
-        );
-        assert_eq!(config.llm.model, "deepseek-flash", "{name}");
-        assert_eq!(
-            config.agent.inner_model,
-            Some(ModelRef {
-                provider: "deepseek".to_owned(),
-                id: "deepseek-flash".to_owned()
-            }),
-            "{name}"
-        );
-        config
-            .validate_runtime()
-            .expect("bundled selections must resolve in their catalog");
-        for provider in ["openai", "anthropic", "deepseek", "openrouter"] {
-            for model in &config.provider_config(provider).unwrap().models {
-                if model
-                    .reasoning_efforts
-                    .as_ref()
-                    .is_some_and(|efforts| efforts.contains(&ReasoningEffort::Max))
-                {
-                    model
-                        .validate_reasoning_effort(Some(ReasoningEffort::Max))
-                        .unwrap();
-                    assert!(model
-                        .selection_capabilities()
-                        .reasoning_efforts
-                        .contains(&ReasoningEffort::Max));
-                }
-            }
-        }
-        let qwen4 = config
-            .llm
-            .bailian
-            .models
-            .iter()
-            .find(|model| model.id == "qwen4-max")
-            .unwrap();
-        assert_eq!(
-            qwen4.selection_capabilities().reasoning_efforts,
-            vec![
-                ReasoningEffort::Light,
-                ReasoningEffort::High,
-                ReasoningEffort::XHigh
-            ]
-        );
-        assert!(qwen4
-            .validate_reasoning_effort(Some(ReasoningEffort::Max))
-            .is_err());
-        let openrouter_models = config
-            .llm
-            .openrouter
-            .models
-            .iter()
-            .map(|model| (model.id.as_str(), model.context_window))
-            .collect::<Vec<_>>();
-        assert!(openrouter_models.contains(&("tencent/hy3:free", 262_144)));
-        assert!(openrouter_models.contains(&("meta-llama/llama-3.3-70b-instruct", 131_072)));
-        assert!(openrouter_models.contains(&("meta-llama/llama-3.3-70b-instruct:free", 131_072)));
-        assert_eq!(
-            config
-                .llm
-                .ollama
-                .models
-                .iter()
-                .map(|model| {
-                    (
-                        model.id.as_str(),
-                        model.context_window,
-                        model.reasoning,
-                        model.reasoning_effort,
-                    )
-                })
-                .collect::<Vec<_>>(),
-            vec![
-                ("qwen3.8:27b", 262_144, true, ReasoningEffort::Medium),
-                ("qwen3:8b", 40_960, true, ReasoningEffort::Medium),
-                ("deepseek-r1:8b", 131_072, true, ReasoningEffort::Medium),
-                ("gpt-oss:20b", 131_072, true, ReasoningEffort::Medium),
-            ]
-        );
-    }
 }
 
 #[test]

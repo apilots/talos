@@ -184,7 +184,7 @@ pub(crate) fn upgrade_default_config_from_template(
             .push("agent_node.control_plane.trusted_node_ca_file".into());
     }
     let validation_template = build_validation_template(&template, &candidate, &runtime_env);
-    let normalized = normalize_value(
+    let mut normalized = normalize_value(
         &template,
         &candidate,
         &validation_template,
@@ -205,6 +205,7 @@ pub(crate) fn upgrade_default_config_from_template(
         ));
     }
 
+    materialize_defaults(&mut normalized, &mut normalize_report)?;
     validate_config_value(&normalized, &runtime_env).map_err(|err| {
         err.context(format!(
             "validate normalized config {}",
@@ -258,6 +259,74 @@ fn read_yaml_file(path: &Path) -> TalosResult<YamlValue> {
         TalosError::internal_with_source("Parse config yaml; technical details were withheld.", err)
             .context(diagnostic)
     })
+}
+
+// Serialize the unresolved typed value, never the environment-expanded runtime
+// config. Only absent fields are copied: user lists, enum variants, null policies
+// and secret placeholders remain authoritative, including inside dynamic maps.
+fn materialize_defaults(value: &mut YamlValue, report: &mut NormalizeReport) -> TalosResult<()> {
+    let config: Config = serde_yaml::from_value(value.clone()).map_err(|error| {
+        TalosError::internal_with_source(
+            "Inspect configuration defaults; technical details were withheld.",
+            error,
+        )
+    })?;
+    let mut defaults = serde_yaml::to_value(config).map_err(|error| {
+        TalosError::internal_with_source(
+            "Serialize configuration defaults; technical details were withheld.",
+            error,
+        )
+    })?;
+    for (section, field) in [("logging", "file"), ("storage", "connection_string")] {
+        if let Some(fields) = defaults[section].as_mapping_mut() {
+            fields.remove(YamlValue::String(field.into()));
+        }
+    }
+    if let Some(kernel) = defaults["agent"]["kernel"].as_mapping_mut() {
+        kernel.remove(YamlValue::String("timezone".into()));
+    }
+    fill_missing_defaults(value, &defaults, "", report);
+    Ok(())
+}
+
+fn fill_missing_defaults(
+    value: &mut YamlValue,
+    defaults: &YamlValue,
+    path: &str,
+    report: &mut NormalizeReport,
+) {
+    match (value, defaults) {
+        (YamlValue::Mapping(saved), YamlValue::Mapping(fields)) => {
+            for (key, default) in fields {
+                let Some(name) = key.as_str() else { continue };
+                let next = if path.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{path}.{name}")
+                };
+                if let Some(value) = saved.get_mut(key) {
+                    fill_missing_defaults(value, default, &next, report);
+                } else {
+                    saved.insert(key.clone(), default.clone());
+                    report.added_paths.push(next);
+                }
+            }
+        }
+        (YamlValue::Sequence(saved), YamlValue::Sequence(items)) => {
+            // Typed deserialization can append the required official MCP source;
+            // the template's shipped model/account catalogs are never merged in.
+            for (index, default) in items.iter().enumerate() {
+                let next = format!("{path}[{index}]");
+                if let Some(value) = saved.get_mut(index) {
+                    fill_missing_defaults(value, default, &next, report);
+                } else {
+                    saved.push(default.clone());
+                    report.added_paths.push(next);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn build_validation_template(
