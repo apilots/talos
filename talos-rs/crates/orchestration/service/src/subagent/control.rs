@@ -280,9 +280,18 @@ impl SubagentService {
                     format!("caller session {}", caller.session_id),
                 )
             })?;
+        if record.agent_id != caller.agent_id {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "caller agent '{}' does not own session '{}'",
+                    caller.agent_id, caller.session_id
+                ),
+            ));
+        }
         let active = self
             .turns
-            .canonical_active_turn(&caller.session_id)
+            .refresh_active_turn(&record)
             .await?
             .ok_or_else(|| {
                 TalosError::new(
@@ -299,15 +308,6 @@ impl SubagentService {
                 format!(
                     "turn '{}' is not the active running turn for caller session '{}'",
                     caller.turn_id, caller.session_id
-                ),
-            ));
-        }
-        if record.agent_id != caller.agent_id {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                format!(
-                    "caller agent '{}' does not own session '{}'",
-                    caller.agent_id, caller.session_id
                 ),
             ));
         }

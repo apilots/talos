@@ -13,6 +13,21 @@ impl TurnService {
             .await
     }
 
+    /// Observe committed Worker facts before making a current Turn decision.
+    /// This only refreshes the projection; it never recovers or dispatches work.
+    pub(crate) async fn refresh_active_turn(
+        &self,
+        session: &talos_store::session::SessionRecord,
+    ) -> TalosResult<Option<talos_store::session::AgentActiveTurnRecord>> {
+        let scope = self
+            .execution
+            .sessions
+            .build_agent_session_context(session)
+            .await?;
+        self.execution.project_worker(&scope).await?;
+        self.canonical_active_turn(&session.id).await
+    }
+
     pub(crate) async fn interrupt_canonical_turn(
         &self,
         session: &talos_store::session::SessionRecord,
