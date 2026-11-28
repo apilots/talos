@@ -39,7 +39,8 @@ async fn view_rebuild_authorizes_before_contacting_an_unavailable_worker() {
         before
     );
     assert!(service
-        .run_idle_session_maintenance("rebuild-target", || async { Ok(()) })
+        .turns
+        .run_when_session_idle("rebuild-target", || async { Ok(()) })
         .await
         .unwrap()
         .is_some());
@@ -73,7 +74,8 @@ async fn view_rebuild_preserves_empty_session_configuration_and_releases_mainten
         before
     );
     assert!(service
-        .run_idle_session_maintenance("rebuild-empty", || async { Ok(()) })
+        .turns
+        .run_when_session_idle("rebuild-empty", || async { Ok(()) })
         .await
         .unwrap()
         .is_some());

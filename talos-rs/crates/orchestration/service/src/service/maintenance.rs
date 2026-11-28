@@ -28,24 +28,6 @@ impl TalosService {
         self.get_session(actor, session_id).await
     }
 
-    /// Run one process-local maintenance operation only while the Session has no Turn owner.
-    ///
-    /// The reservation blocks new Turn admission for this Session for the operation duration.
-    /// It does not persist maintenance state or expose the execution gate to callers.
-    pub async fn run_idle_session_maintenance<T, F, Fut>(
-        &self,
-        session_id: &str,
-        operation: F,
-    ) -> ServiceResult<Option<T>>
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = ServiceResult<T>>,
-    {
-        self.turns
-            .run_when_session_idle(session_id, operation)
-            .await
-    }
-
     /// Qualify idle maintenance before waking a managed Worker and retain activity
     /// through execution and product settlement. Dispatch honors manual-stop intent.
     /// Resolve the saved Workspace and namespace through that Worker before the

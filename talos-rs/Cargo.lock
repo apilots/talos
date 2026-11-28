@@ -7269,7 +7269,6 @@ dependencies = [
  "talos-error",
  "talos-fs",
  "talos-knowledge-format",
- "talos-llm-provider",
  "talos-logging",
  "talos-mcp",
  "talos-memory",
