@@ -29,8 +29,9 @@ pub struct TalosServerRuntime {
     worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
 }
 
-// Includes execution/product drains (120s), MCP cleanup (130s), and gateway shutdown.
-const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
+// Allow cooperative Worker source/Browser preparation to finish before the
+// execution/product drains, MCP cleanup, and gateway shutdown complete.
+const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(900);
 
 pub async fn run_server() -> TalosResult<()> {
     let _log_guard = startup::prepare_startup(None)?;
@@ -189,6 +190,7 @@ impl TalosServerRuntime {
         signal_task.abort();
         quiesce_task.abort();
 
+        let background_result = host.worker.shutdown_background_tasks().await;
         let shutdown_result = application_automation::shutdown_server(
             &coordinator,
             &automation,
@@ -198,6 +200,7 @@ impl TalosServerRuntime {
         )
         .await;
         let result = application_automation::combine(result, registration);
+        let result = application_automation::combine(result, background_result);
         let result = application_automation::combine(result, browser.shutdown().await);
         let result = application_automation::combine(result, host.shutdown().await);
         let result = application_automation::combine(result, shutdown_result);

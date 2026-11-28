@@ -57,6 +57,7 @@ impl TalosApplicationRuntime {
         // Cursor recovery still needs the registered Harness until delivery finishes.
         let delivery_result =
             drain_product_delivery(&self.service, BACKGROUND_TASK_DRAIN_TIMEOUT).await;
+        let background_result = self.worker.shutdown_background_tasks().await;
         let drain_result = self
             .coordinator
             .shutdown(BACKGROUND_TASK_DRAIN_TIMEOUT)
@@ -70,6 +71,7 @@ impl TalosApplicationRuntime {
             }
         };
         let result = combine(result, delivery_result);
+        let result = combine(result, background_result);
         let result = combine(result, registration_result);
         let result = combine(result, self.worker.browser().shutdown().await);
         let result = combine(result, self.worker.plugin_manager().shutdown_mcp().await);

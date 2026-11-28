@@ -21,5 +21,8 @@ async fn stdio_delivery_drain_then_runtime_shutdown_closes_the_worker_once() {
         .await
         .expect("stdio cleanup must not shut down an already removed Harness");
     runtime.shutdown_host().await.unwrap();
+    runtime.auth_service.shutdown().await;
+    drop(drain);
+    drop(runtime);
     fs::remove_dir_all(workspace).unwrap();
 }

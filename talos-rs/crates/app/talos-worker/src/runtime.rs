@@ -445,8 +445,7 @@ impl TalosWorker {
     pub async fn shutdown(&self) -> TalosResult<()> {
         self.stop_execution_host().await?;
         let mut result = self
-            .background_tasks
-            .shutdown()
+            .shutdown_background_tasks()
             .await
             .inspect_err(talos_logging::report_error);
         for (_, harness) in &self.harnesses {
@@ -464,6 +463,12 @@ impl TalosWorker {
         result
             .and(browser)
             .and(self.plugin_manager.shutdown_mcp().await)
+    }
+
+    /// Stop and join node-local maintenance without closing Harnesses owned by a coordinator.
+    /// Embedded hosts must call this before releasing Plugin resources or the data directory.
+    pub async fn shutdown_background_tasks(&self) -> TalosResult<()> {
+        self.background_tasks.shutdown().await
     }
 }
 
@@ -501,6 +506,20 @@ fn sandbox_runtime_paths(config: &Config) -> SandboxRuntimePaths {
 struct OfficialBrowserBootstrap(PluginManagerService);
 impl talos_guard_task::GuardTask for OfficialBrowserBootstrap {
     async fn run(&self, context: talos_guard_task::GuardTaskContext) -> TalosResult<()> {
-        tokio::select! { _=context.cancelled()=>Ok(()), result=self.0.bootstrap_official_browser()=>result }
+        if context.is_cancelled() {
+            return Ok(());
+        }
+        // Source refresh owns blocking filesystem operations. Dropping its future
+        // on cancellation would detach those writes from the shutdown join.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let bootstrap = self.0.bootstrap_official_browser(&stop);
+        tokio::pin!(bootstrap);
+        tokio::select! {
+            result = &mut bootstrap => result,
+            _ = context.cancelled() => {
+                stop.cancel();
+                bootstrap.await
+            }
+        }
     }
 }
