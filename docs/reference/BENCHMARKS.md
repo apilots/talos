@@ -196,17 +196,18 @@ revision link, or paste its source in deployments that expose an inline editor.
 The entry point exports `CustomAgent` and uses Harbor's supplied model connection.
 It supports OpenAI Chat Completions and Responses, including explicit endpoint,
 credential-variable and model overrides. Supported reasoning efforts are `low`,
-`medium`, `high` and `xhigh`; `low` maps to Talos's `light` domain value.
+`medium`, `high`, `xhigh` and `max`; `low` maps to Talos's `light` domain value.
+The Arena entry defaults to `max` and sends a 131,072-token output limit through
+the selected protocol's request parameters.
 
-The adapter pins Talos release `v0.1.18`, its product SHA-256 values and the Bench
+The adapter pins Talos release `v0.1.19`, its product SHA-256 values and the Bench
 runtime files from the corresponding source commit. It downloads and verifies the native Linux
 product inside the task during setup. Small runtime files and configuration are
 uploaded through Harbor's environment interface.
 The task environment must be compatible with that release's native Linux binary.
-The currently pinned v0.1.18 Linux product requires glibc 2.38 and cannot run on
-Debian 12's glibc 2.36. Pin a published compatible release and its checksums before
-using this adapter for Debian 12 tasks; the release build baseline is documented
-in the [release workflow](../development/RELEASE.md). The adapter records
+The pinned Linux product supports Debian 12's glibc 2.36 baseline; its native and
+container acceptance matrix is documented in the
+[release workflow](../development/RELEASE.md). The adapter records
 installation output and release provenance in the agent logs.
 No build is performed during a trial. Existing Bench code executes the CLI,
 parses usage and exports the recorded transcript to ATIF.
@@ -219,9 +220,9 @@ participation rules and has its own public evaluation link.
 
 The secretless PR harness runs `python talos-bench/runtime/arena_smoke.py` with
 Harbor 0.25.0 and Docker. It exercises the actual fixed release, installation,
-model connection, `low` effort, a Bash tool call, usage and ATIF through Harbor's
+model connection, default `max` effort, the output limit, a Bash tool call, usage
+and ATIF through Harbor's
 Docker environment. No Rust build or paid model is used. Evidence defaults to a
 new directory under `output/arena/hosted-smoke/`; an explicit `--output` must name
-a new directory. The fixed v0.1.18 smoke uses Ubuntu 24.04 because of that
-release's libc requirement. Portable release acceptance separately exercises the
+a new directory. The fixed-release smoke uses Debian 12. Portable release acceptance separately exercises the
 same new package in the minimum and newer Linux runtime environments.

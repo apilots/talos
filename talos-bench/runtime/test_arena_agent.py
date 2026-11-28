@@ -13,7 +13,7 @@ from unittest.mock import patch
 from harbor.models.model_api_format import ModelApiFormat
 from harbor.utils.trajectory_validator import TrajectoryValidator
 
-from arena_agent import CustomAgent, download, installation_command, talos_connection
+from arena_agent import VERSION, CustomAgent, download, installation_command, talos_connection
 
 
 def connection(api_format=ModelApiFormat.OPENAI_RESPONSES):
@@ -22,20 +22,29 @@ def connection(api_format=ModelApiFormat.OPENAI_RESPONSES):
 
 
 class ConnectionTests(unittest.TestCase):
-    def test_model_endpoint_protocol_and_effort_reach_talos_configuration(self):
-        llm, credential = talos_connection(connection(), "high")
-        self.assertEqual(llm["model"], "example/model")
-        self.assertEqual(llm["custom_providers"]["arena"]["base_url"], "http://localhost:4011/v1")
-        self.assertEqual(llm["custom_providers"]["arena"]["protocol"], "responses")
-        self.assertEqual(llm["custom_providers"]["arena"]["models"][0]["reasoning_effort"], "high")
-        self.assertEqual(credential, 'TALOS_LLM_OPENAI_API_KEY="stub-\\$key"')
+    def test_official_effort_and_output_limit_reach_both_protocols(self):
+        for api_format, protocol, limit in (
+            (ModelApiFormat.OPENAI_RESPONSES, "responses", "max_output_tokens"),
+            (ModelApiFormat.OPENAI_CHAT_COMPLETIONS, "chat", "max_tokens"),
+        ):
+            with self.subTest(protocol=protocol):
+                llm, credential = talos_connection(connection(api_format), "max")
+                self.assertEqual(llm["model"], "example/model")
+                provider = llm["custom_providers"]["arena"]
+                self.assertEqual(provider["base_url"], "http://localhost:4011/v1")
+                self.assertEqual(provider["protocol"], protocol)
+                model = provider["models"][0]
+                self.assertEqual(model["reasoning_effort"], "max")
+                self.assertEqual(model["reasoning_efforts"], ["max"])
+                self.assertEqual(model["request_parameters"], {limit: 131072})
+                self.assertEqual(credential, 'TALOS_LLM_OPENAI_API_KEY="stub-\\$key"')
 
     def test_low_effort_maps_to_talos_light(self):
         llm, _ = talos_connection(connection(), "low")
         self.assertEqual(llm["custom_providers"]["arena"]["models"][0]["reasoning_effort"], "light")
 
     def test_unrepresentable_efforts_are_rejected(self):
-        for effort in ("none", "minimal", "max"):
+        for effort in ("none", "minimal"):
             with self.subTest(effort=effort), self.assertRaises(ValueError):
                 talos_connection(connection(), effort)
 
@@ -54,10 +63,11 @@ class ConnectionTests(unittest.TestCase):
                                 base_url="https://gateway.example/v1",
                                 model_api_key_name="ARENA_KEY",
                                 model_api_format="openai_responses",
-                                extra_env={"ARENA_KEY": "supplied-stub"}, reasoning_effort="high")
+                                extra_env={"ARENA_KEY": "supplied-stub"})
             llm, credential = talos_connection(agent.model_connection, agent.effort)
             self.assertEqual(llm["custom_providers"]["arena"]["base_url"], "https://gateway.example/v1")
             self.assertIn("supplied-stub", credential)
+            self.assertEqual(llm["custom_providers"]["arena"]["models"][0]["reasoning_effort"], "max")
 
 
 class ArtifactTests(unittest.TestCase):
@@ -76,8 +86,8 @@ class InstallationTests(unittest.TestCase):
     def test_pinned_archive_installs_and_corruption_is_rejected(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            archive = root / "Talos-TUI-0.1.18-linux-amd64.tar.gz"
-            data = b"#!/bin/sh\necho 'talos 0.1.18'\n"
+            archive = root / f"Talos-TUI-{VERSION}-linux-amd64.tar.gz"
+            data = f"#!/bin/sh\necho 'talos {VERSION}'\n".encode()
             with tarfile.open(archive, "w:gz") as package:
                 member = tarfile.TarInfo("bin/talos")
                 member.size, member.mode = len(data), 0o755
@@ -87,7 +97,7 @@ class InstallationTests(unittest.TestCase):
                     "arena_agent.PRODUCTS", {"x86_64": ("amd64", checksum)}):
                 result = subprocess.run(installation_command("x86_64", str(root / "installed")),
                                         shell=True, capture_output=True, text=True)
-                self.assertEqual((result.returncode, result.stdout.strip()), (0, "talos 0.1.18"))
+                self.assertEqual((result.returncode, result.stdout.strip()), (0, f"talos {VERSION}"))
                 archive.write_bytes(b"corrupt archive")
                 result = subprocess.run(installation_command("x86_64", str(root / "rejected")),
                                         shell=True, capture_output=True, text=True)
@@ -103,7 +113,7 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
             remote = root / "remote"
             remote.mkdir()
             (remote / "talos-run.json").write_text(json.dumps({
-                "exit_code": 7, "model": "openai:test", "version": "0.1.18"}))
+                "exit_code": 7, "model": "openai:test", "version": VERSION}))
             (remote / "talos-trajectory.json").write_text(json.dumps({
                 "identity": {"sessionId": "session", "turnId": "turn"}}))
             (remote / "talos-transcript.json").write_text(json.dumps([
