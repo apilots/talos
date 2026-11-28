@@ -219,6 +219,9 @@ fn persist_desktop_config(config: &Config) {
 #[path = "desktop_ownership_tests.rs"]
 mod ownership;
 
+#[path = "desktop_native_job_identity_tests.rs"]
+mod job_identity;
+
 #[tokio::test]
 async fn desktop_worker_identity_returns_local_system_info_without_server_or_enrollment() {
     use talos_app_server::AppServerApplication;

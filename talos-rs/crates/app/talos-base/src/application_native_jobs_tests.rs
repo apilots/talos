@@ -21,6 +21,9 @@ const OWNER: &str = "native-job-owner";
 const FOREIGN: &str = "another-owner";
 const CRON: &str = "0 0 0 1 1 *";
 
+#[path = "application_native_job_identity_tests.rs"]
+mod identity_tests;
+
 fn migrations() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite")
 }

@@ -39,7 +39,11 @@ impl NativeJobHost for ApplicationNativeJobHost {
                 .local_computer_for_client(actor)
                 .await?
                 .ok_or_else(scope_denied)?;
-            if computer_id != requested_computer || actor.user_id.is_empty() {
+            // Local adapters normalize the current Computer to the embedded alias.
+            // Resolve it only after checking ownership, and retain the public identity.
+            if (requested_computer != "embedded" && computer_id != requested_computer)
+                || actor.user_id.is_empty()
+            {
                 return Err(scope_denied());
             }
             // The verified owner manages the execution host's existing jobs.
