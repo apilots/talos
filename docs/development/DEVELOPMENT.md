@@ -293,9 +293,26 @@ The built-in OpenAI provider uses Responses. In a hand-managed config, omit
 `llm.openai.protocol` or set it to `responses`. A custom provider can select
 the protocol supported by its endpoint.
 
-The four default OpenAI models are GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra,
-and GPT-6 Luna. The profiles use standard short-context rates and 30-minute
+The default OpenAI catalog includes GPT-6.2 Astra/Sol, GPT-6.1 Sol/Terra,
+and GPT-6 Astra/Sol/Luna. The profiles use standard short-context rates and 30-minute
 cache-write rates.
+
+Reasoning effort includes an explicit `max` value. A model must list it in
+`reasoning_efforts` before clients can select it; unspecified lists preserve the
+previous four levels. Current OpenAI GPT-6 models and DeepSeek Flash/Pro expose
+`max`. Claude adaptive models send the selected level in `output_config.effort`,
+keeping `xhigh` and `max` distinct. Explicit `thinking: {type: adaptive}`
+remains in force when the selection is None/Off; those profiles use the provider
+default effort rather than disabling thinking. Qwen4 exposes `light`, `high`, and `xhigh`;
+its documented `max` compatibility alias is not advertised as another level.
+Ollama Qwen3.8 uses provider-default thinking until local model metadata confirms
+its accepted effort names. Bundled DeepSeek catalogs list `deepseek-flash`
+(V4.1 Flash) and `deepseek-v4-pro` (V4 Pro), with Flash selected for both the
+main and inner model. Managed upgrades preserve operator-owned saved catalogs
+and selections, including the legacy Flash aliases still accepted upstream;
+they do not forcibly migrate or prune those entries. OpenRouter free routes
+may change availability independently of the bundled catalog; check the provider
+model list before selecting a legacy route.
 
 When reasoning is off, the official OpenAI connection sends `none` for
 `gpt-6-luna` and `gpt-6.1-terra`. GPT-6.2 Astra and Sol require reasoning.

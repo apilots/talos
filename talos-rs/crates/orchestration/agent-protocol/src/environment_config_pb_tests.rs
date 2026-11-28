@@ -67,7 +67,7 @@ fn reasoning_effort_declarations_preserve_absent_empty_and_explicit_over_rpc() {
     for efforts in [
         serde_json::Value::Null,
         serde_json::json!([]),
-        serde_json::json!(["light", "medium", "xhigh"]),
+        serde_json::json!(["light", "medium", "xhigh", "max"]),
     ] {
         let llm: LlmConfig = serde_json::from_value(serde_json::json!({
             "provider":"custom-service", "model":"opaque", "custom_providers": {

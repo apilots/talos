@@ -106,3 +106,12 @@ async fn chat_uses_ollama_v1_endpoint_and_identity() {
     );
     assert_eq!(response.content, "ok");
 }
+
+#[test]
+fn maximum_effort_is_not_silently_reduced_to_high() {
+    let mut request = ChatRequest::new_user("hello", "gpt-oss:20b");
+    request.reasoning_effort = Some(ReasoningEffort::Max);
+    assert!(OllamaProvider::build_request(request, false)
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::InvalidRequest));
+}

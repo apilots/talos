@@ -36,8 +36,8 @@ struct BrowserMcp {
     socket: Option<std::path::PathBuf>,
 }
 impl ServerHandler for BrowserMcp {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
             Implementation::new("talos-browser", env!("CARGO_PKG_VERSION")),
         )
     }

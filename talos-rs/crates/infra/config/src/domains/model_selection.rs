@@ -59,6 +59,18 @@ impl ProviderModelConfig {
                 "Configured thinking toggles must declare the same default",
             ));
         }
+        if self.reasoning
+            && self.reasoning_effort == ReasoningEffort::Max
+            && self
+                .reasoning_efforts
+                .as_ref()
+                .is_none_or(|efforts| !efforts.contains(&ReasoningEffort::Max))
+        {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Maximum default effort must be explicitly declared by the model.",
+            ));
+        }
         if let Some(efforts) = &self.reasoning_efforts {
             if self.reasoning && !efforts.is_empty() && !efforts.contains(&self.reasoning_effort) {
                 return Err(TalosError::new(
@@ -93,6 +105,7 @@ impl ProviderModelConfig {
             ReasoningEffort::Medium,
             ReasoningEffort::High,
             ReasoningEffort::XHigh,
+            ReasoningEffort::Max,
         ]
         .into_iter()
         .filter(|effort| {
@@ -100,7 +113,9 @@ impl ProviderModelConfig {
                 && self
                     .reasoning_efforts
                     .as_ref()
-                    .is_none_or(|allowed| allowed.contains(effort))
+                    .map_or(*effort != ReasoningEffort::Max, |allowed| {
+                        allowed.contains(effort)
+                    })
         })
         .collect::<Vec<_>>();
         let reasoning = if !self.reasoning {

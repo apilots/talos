@@ -18,3 +18,8 @@ def settled(cluster, host, session, turn):
         return False
     require(result['status'] == 'completed', f'Turn failed: {result.get("error", result["status"])}')
     return history
+
+
+def comparable_history(turns):
+    """Compare execution facts without each coordinator's local Timeline cursor."""
+    return [{key: value for key, value in turn.items() if key != 'completedEventSeq'} for turn in turns]

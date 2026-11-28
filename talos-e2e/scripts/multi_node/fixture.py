@@ -227,7 +227,7 @@ class Cluster:
             self.nodes['alice-a'], self.nodes['alice-b'] = self.nodes['alice-b'], self.nodes['alice-a']
         self.healthy_all()
         models = data(http(self.url + '/v1/models?nodeId=' + self.nodes['alice-a']['node_id'], token=self.users['alice']['access_token']))['models']
-        preferred = os.environ.get('TALOS_E2E_PREFERRED_MODELS', 'deepseek-v4-flash').split(',')
+        preferred = os.environ.get('TALOS_E2E_PREFERRED_MODELS', 'deepseek-flash').split(',')
         self.model = next((model for identifier in preferred for model in models if model['id'] == identifier), models[0])
 
     def start_server(self):

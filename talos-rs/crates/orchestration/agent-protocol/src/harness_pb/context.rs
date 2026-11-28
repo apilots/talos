@@ -340,6 +340,7 @@ fn encode_reasoning(value: ReasoningEffort) -> i32 {
         ReasoningEffort::Medium => pb::ReasoningEffort::Medium as i32,
         ReasoningEffort::High => pb::ReasoningEffort::High as i32,
         ReasoningEffort::XHigh => pb::ReasoningEffort::Xhigh as i32,
+        ReasoningEffort::Max => pb::ReasoningEffort::Max as i32,
     }
 }
 
@@ -349,6 +350,7 @@ fn decode_reasoning(value: i32) -> TalosResult<ReasoningEffort> {
         Ok(pb::ReasoningEffort::Medium) => Ok(ReasoningEffort::Medium),
         Ok(pb::ReasoningEffort::High) => Ok(ReasoningEffort::High),
         Ok(pb::ReasoningEffort::Xhigh) => Ok(ReasoningEffort::XHigh),
+        Ok(pb::ReasoningEffort::Max) => Ok(ReasoningEffort::Max),
         _ => Err(invalid()),
     }
 }

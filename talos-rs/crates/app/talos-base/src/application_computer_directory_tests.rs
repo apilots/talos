@@ -6,6 +6,7 @@ async fn directory_reads_remain_local_while_control_plane_observations_are_block
     fixture.block_directory.store(true, Ordering::SeqCst);
     let actor = actor();
     #[cfg(feature = "sync")]
+    #[cfg(feature = "sync")]
     fixture
         .runtime
         .sync
@@ -91,6 +92,7 @@ async fn confirmed_rename_survives_an_older_inflight_directory_pull_with_sync_di
     let mut fixture = Fixture::start().await;
     let actor = actor();
     #[cfg(feature = "sync")]
+    #[cfg(feature = "sync")]
     fixture
         .runtime
         .sync
@@ -174,6 +176,7 @@ async fn confirmed_rename_survives_an_older_inflight_directory_pull_with_sync_di
 async fn only_complete_owner_validated_pages_replace_the_cached_directory() {
     let fixture = Fixture::start().await;
     let actor = actor();
+    #[cfg(feature = "sync")]
     #[cfg(feature = "sync")]
     fixture
         .runtime
@@ -285,6 +288,7 @@ async fn server_directory_pagination_ignores_legacy_local_rows_and_sync_markers(
 async fn create_and_delete_confirmations_update_cache_during_directory_outage_and_old_pull() {
     let mut fixture = Fixture::start().await;
     let actor = actor();
+    #[cfg(feature = "sync")]
     #[cfg(feature = "sync")]
     fixture
         .runtime
@@ -524,6 +528,7 @@ enum RenameResolution {
 async fn rejects_late_rename(resolution: RenameResolution) {
     let mut fixture = Fixture::start().await;
     let actor = actor();
+    #[cfg(feature = "sync")]
     #[cfg(feature = "sync")]
     fixture
         .runtime
@@ -941,5 +946,72 @@ async fn managed_worker_from_control_plane_directory_never_enters_personal_compu
         .data
         .iter()
         .all(|node| node.managed_worker_phase.is_none()));
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn directory_refresh_retires_own_deleted_registration_without_ui_polling() {
+    let fixture = Fixture::start().await;
+    let actor = actor();
+    let store = talos_config::YamlConfigStore::new(fixture.runtime.config.source_path());
+    store
+        .save_node_identity(
+            &talos_config::AgentNodeRunnerConfig {
+                transport: Some(talos_config::AgentNodeTransport::Outbound),
+                node_id: "slow".into(),
+                control_plane_endpoint: fixture.runtime.config.cloud.agent_base_url.clone(),
+                credential_file: fixture
+                    .runtime
+                    .config
+                    .talos_paths()
+                    .conf_dir
+                    .join("node.credential"),
+                trusted_ca_file: fixture.runtime.config.cloud.agent_trusted_ca_file.clone(),
+            },
+            "controlled-worker-credential",
+        )
+        .unwrap();
+    *fixture.runtime.host.local_owner.write().unwrap() = Some(actor.user_id.clone());
+    #[cfg(feature = "sync")]
+    fixture
+        .runtime
+        .sync
+        .set_enabled(&actor.user_id, false)
+        .await
+        .unwrap();
+    fixture
+        .runtime
+        .host
+        .refresh_computer_directory(&actor)
+        .await
+        .unwrap();
+    assert_eq!(store.removed_registration_owner().unwrap(), None);
+    fixture
+        .directory
+        .write()
+        .unwrap()
+        .retain(|node| node.node_id != "slow");
+    fixture
+        .runtime
+        .host
+        .refresh_computer_directory(&actor)
+        .await
+        .unwrap();
+    assert_eq!(
+        store.removed_registration_owner().unwrap().as_deref(),
+        Some(actor.user_id.as_str())
+    );
+    assert!(fixture
+        .runtime
+        .host
+        .stores
+        .sessions
+        .local_registration_retired(&actor.user_id, "slow")
+        .await
+        .unwrap());
+    assert_eq!(
+        fixture.runtime.host.local_computer_id().await.unwrap(),
+        "embedded"
+    );
     fixture.finish().await;
 }

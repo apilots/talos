@@ -77,13 +77,19 @@ impl BailianProvider {
         headers
     }
 
-    fn reasoning_budget_tokens(effort: ReasoningEffort) -> u32 {
-        match effort {
+    fn reasoning_budget_tokens(effort: ReasoningEffort) -> TalosResult<u32> {
+        Ok(match effort {
             ReasoningEffort::Light => 1024,
             ReasoningEffort::Medium => 2048,
             ReasoningEffort::High => 4096,
             ReasoningEffort::XHigh => 8192,
-        }
+            ReasoningEffort::Max => {
+                return Err(TalosError::new(
+                    ErrorCode::InvalidRequest,
+                    "Maximum reasoning effort requires a model with named effort support.",
+                ));
+            }
+        })
     }
 
     pub(crate) fn build_request(
@@ -93,7 +99,8 @@ impl BailianProvider {
         let model = request.model.as_str();
         let named_effort = matches!(
             model,
-            "qwen4-max-preview"
+            "qwen4-max"
+                | "qwen4-max-preview"
                 | "qwen3.8-max"
                 | "qwen3.8-max-0902"
                 | "qwen3.8-flash"
@@ -123,7 +130,9 @@ impl BailianProvider {
             options.reasoning_effort = match request.reasoning_effort {
                 Some(ReasoningEffort::Light) => Some("low".to_owned()),
                 Some(ReasoningEffort::Medium) => Some("medium".to_owned()),
+                Some(ReasoningEffort::High) if model == "qwen4-max" => Some("high".to_owned()),
                 Some(ReasoningEffort::High | ReasoningEffort::XHigh) => Some("xhigh".to_owned()),
+                Some(ReasoningEffort::Max) => Some("max".to_owned()),
                 None => can_disable_thinking.then(|| "none".to_owned()),
             };
         } else if !named_effort || configured_budget {
@@ -132,8 +141,10 @@ impl BailianProvider {
                 .map(|_| true)
                 .or_else(|| can_disable_thinking.then_some(false));
             if !configured_budget {
-                options.thinking_budget =
-                    request.reasoning_effort.map(Self::reasoning_budget_tokens);
+                options.thinking_budget = request
+                    .reasoning_effort
+                    .map(Self::reasoning_budget_tokens)
+                    .transpose()?;
             }
         }
 
@@ -141,7 +152,11 @@ impl BailianProvider {
             && (parameters.contains_key("max_completion_tokens")
                 || matches!(
                     model,
-                    "qwen4-max-preview" | "qwen3.8-max" | "qwen3.8-max-0902" | "qwen3.8-flash"
+                    "qwen4-max"
+                        | "qwen4-max-preview"
+                        | "qwen3.8-max"
+                        | "qwen3.8-max-0902"
+                        | "qwen3.8-flash"
                 ));
         let mut encoded = chat_protocol::request(request, stream, options)?;
         if use_completion_limit {

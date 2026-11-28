@@ -149,7 +149,7 @@ okf-validator = "=0.2.4"
 reqwest = { version = "0.12", features = ["json"] }
 firecrawl = "2.11"
 tavily = "2.1"
-rmcp = { version = "3.2.0", default-features = false }
+rmcp = { version = "3.12.0", default-features = false }
 talos-cloud-sdk = "=0.1.3"
 
 # Internal crates

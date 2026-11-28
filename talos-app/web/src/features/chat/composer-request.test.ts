@@ -27,7 +27,7 @@ it.each(["askForApproval", "approveForMe", "fullAccess"] as const)("restores the
   expect(restoreComposerRequest(JSON.stringify(request))).toEqual(request);
 });
 
-it.each(["light", "medium", "high", "xhigh"] as const)("restores the %s reasoning effort", (effort) => {
+it.each(["light", "medium", "high", "xhigh", "max"] as const)("restores the %s reasoning effort", (effort) => {
   const request = createInitialTurnRequest("session-1", "Continue");
   request.modelSelection = { modelRef: { provider: "fixture", id: "model" }, reasoningEffort: effort };
   expect(restoreComposerRequest(JSON.stringify(request))).toEqual(request);

@@ -21,7 +21,7 @@ HOME、Workspace、端口和日志。用户 Alice 拥有两个节点，Bob 拥�
 子任务自动迁移。PB 描述直接由 `agent-pb/proto` 编译，测试不维护另一套协议。
 SQLite 只读检查持久化结果。每个场景失败即失败，后续独立场景仍由 group runner 执行。
 
-`06_parity` 使用支持图片的真实模型，默认 `deepseek-v4-flash-vision-exp`，可通过
+`06_parity` 使用支持图片的真实模型，默认 `deepseek-flash`，可通过
 `TALOS_E2E_IMAGE_MODEL` 指定已配置且可访问的视觉模型。默认文本模型继续用于其他场景。
 
 内嵌执行前，通过产品公开的登录后 Sync status 引导注册管理宿主，并验证其电脑归属。

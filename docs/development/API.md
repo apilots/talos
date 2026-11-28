@@ -20,6 +20,16 @@ Use when changing public DTOs, wire contracts, or integration behavior. Apply th
 - Mark experimental APIs explicitly; field-level experiments must be inspectable by schema/runtime checks.
 - New list methods default to cursor pagination: request `cursor` and `limit`, response `data` and `next_cursor`.
 
+## Model reasoning effort
+
+`ReasoningEffort` preserves `light`, `medium`, `high`, and `xhigh`, and adds a
+separate `max` value. Models must explicitly include `max` in `reasoning_efforts`
+before it is selectable; omitted declarations retain the previous four levels.
+The protobuf values remain 1 through 4 with `max` assigned 5. Configuration,
+selection persistence, transports, generated SDKs and provider requests preserve
+the selected value. Upgrade clients and Workers together before selecting Max.
+Provider aliases do not imply an independently advertised product level.
+
 ## Compatibility review
 
 - When public objects or behavior change, inspect affected app-server, JSON-RPC, HTTP, SDK, CLI, configuration, session recovery, raw events, frontend/TUI events, and plugin integrations. Widen the review for shared-layer changes; experimental APIs with external callers still require compatibility review.

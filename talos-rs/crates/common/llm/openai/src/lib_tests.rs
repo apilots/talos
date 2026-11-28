@@ -284,6 +284,7 @@ fn test_responses_request_maps_reasoning_effort() {
         (ReasoningEffort::Medium, "medium"),
         (ReasoningEffort::High, "high"),
         (ReasoningEffort::XHigh, "xhigh"),
+        (ReasoningEffort::Max, "max"),
     ] {
         let request = ChatRequest::builder()
             .model("gpt-5")

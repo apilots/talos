@@ -10,7 +10,7 @@ import type {
   TalosToolProgressKind,
 } from "./protocol";
 
-export type ReasoningLevel = "none" | "light" | "medium" | "high" | "extra_high";
+export type ReasoningLevel = "none" | "light" | "medium" | "high" | "extra_high" | "max";
 export type SessionUiStatus = "running" | "done" | "error";
 
 export interface ProjectView {

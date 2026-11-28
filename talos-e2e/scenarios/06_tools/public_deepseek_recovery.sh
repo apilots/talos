@@ -47,7 +47,7 @@ for index, prompt in enumerate(prompts, 1):
         "nodeId": "embedded",
         "currentDirectory": str(workspace),
         "userPermissionMode": "fullAccess",
-        "modelSelection": {"modelRef": {"provider": "deepseek", "id": "deepseek-v4-flash"}},
+        "modelSelection": {"modelRef": {"provider": "deepseek", "id": "deepseek-flash"}},
         "input": {"content": [{"type": "text", "text": prompt}]},
     }
     (Path(os.environ["SCENARIO_REPORT_DIR"]) / f"public-deepseek-{index}-request.json").write_text(json.dumps(payload))
@@ -116,7 +116,7 @@ for step in (1, 2):
     trace = json.load(urllib.request.urlopen(request, timeout=30))
     (report / f"public-deepseek-{step}-trace.json").write_text(json.dumps(trace))
     requests = [x["request"] for x in trace["data"]["data"] if x["type"] == "modelRequest"]
-    assert requests and all(r["connectionId"] == "deepseek" and r["modelId"] == "deepseek-v4-flash" for r in requests)
+    assert requests and all(r["connectionId"] == "deepseek" and r["modelId"] == "deepseek-flash" for r in requests)
     assert all(c["observedState"] == "completed" for r in requests for c in r["callRecords"])
     if step == 1:
         ordinals = {r["modelRequestId"]: r["ordinal"] for r in requests}
@@ -130,6 +130,6 @@ for step in (1, 2):
             for failed in failed_reads for recovered in successful_bash
         )
     checks.append({"step": step, "tool_names": [c["name"] for c in calls], "tool_errors": sum(results[c["call_id"]]["is_error"] for c in calls), "metrics": response["metrics"]})
-(report / "public-deepseek-summary.json").write_text(json.dumps({"endpoint": "https://api.deepseek.com", "model": "deepseek-v4-flash", "sessionId": sys.argv[1], "checks": checks, "file_effect_verified": True}, indent=2))
+(report / "public-deepseek-summary.json").write_text(json.dumps({"endpoint": "https://api.deepseek.com", "model": "deepseek-flash", "sessionId": sys.argv[1], "checks": checks, "file_effect_verified": True}, indent=2))
 print("CASE public_deepseek_recovery PASS real_public_model=true tool_failure_recovered=true same_session_followup=true file_effect=true")
 PY

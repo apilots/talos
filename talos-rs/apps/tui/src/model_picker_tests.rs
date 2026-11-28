@@ -152,6 +152,7 @@ fn declared_effort_list_filters_picker_independently_of_thinking_switch() {
         ReasoningEffort::Light,
         ReasoningEffort::Medium,
         ReasoningEffort::XHigh,
+        ReasoningEffort::Max,
     ]);
     model.selection_capabilities = model.model.selection_capabilities();
     let selection = ModelSelection::from_model(
@@ -172,7 +173,8 @@ fn declared_effort_list_filters_picker_independently_of_thinking_switch() {
             None,
             Some(ReasoningEffort::Light),
             Some(ReasoningEffort::Medium),
-            Some(ReasoningEffort::XHigh)
+            Some(ReasoningEffort::XHigh),
+            Some(ReasoningEffort::Max)
         ]
     );
 }
