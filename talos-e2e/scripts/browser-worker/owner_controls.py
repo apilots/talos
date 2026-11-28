@@ -334,9 +334,11 @@ def main():
                    ('desktop/open', '/v1/desktop/open', open_request(computer, snapshot))]
         for method, path, request in blocked:
             codes = {'permissionDenied', 'resourceNotFound'} if method == 'desktop/open' else {'permissionDenied'}
-            denied(qa.exchange(method, request), codes)
+            # Scoped Desktop requests hide foreign Computers before Job dispatch.
+            ipc_codes = codes if method == 'desktop/open' else {'resourceNotFound'}
+            denied(qa.exchange(method, request), ipc_codes)
             status, response = http_response(web + path, request, QA_TOKEN)
-            assert status in (403, 404)
+            assert status in ({403, 404} if method == 'desktop/open' else {403})
             denied(response, codes)
         denied(qa.exchange('browser/operate', read), {'permissionDenied', 'resourceNotFound'})
         status, response = http_response(web + '/v1/builtin-job/control',
