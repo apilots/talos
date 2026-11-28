@@ -171,6 +171,38 @@ impl LocalExecutionHarness {
         })
     }
 
+    async fn admitted_run(&self, params: &AgentRunParams) -> AgentResult<Option<Vec<AgentEvent>>> {
+        let session = params.context.session.clone();
+        if self.store.is_retired(&session.session_id).await? {
+            return Err(TalosError::new(
+                ErrorCode::SessionNotFound,
+                "Worker Session was permanently deleted.",
+            ));
+        }
+        let state = self.store.execution_state(&session).await?;
+        let generation = state
+            .as_ref()
+            .map_or(0, |state| state.history_cursor.history_generation);
+        if params
+            .context
+            .history_cursor
+            .as_ref()
+            .map_or(0, |cursor| cursor.history_generation)
+            != generation
+        {
+            return Err(TalosError::new(
+                ErrorCode::EventCursorExpired,
+                "Worker command targets a cleared Session generation.",
+            ));
+        }
+        let command = AgentExecutionCommand::Run {
+            params: Box::new(params.clone()),
+        };
+        self.store
+            .admission(&session, &params.context.identity(), &command)
+            .await
+    }
+
     async fn replay(
         &self,
         session: AgentSessionContext,
@@ -319,41 +351,26 @@ impl AgentHarness for LocalExecutionHarness {
     ) -> AgentFuture<'_, AgentResult<AgentSessionEventsResult>> {
         Box::pin(async move { self.store.read_events(params).await })
     }
+    fn replay_admitted_run(
+        &self,
+        params: AgentRunParams,
+    ) -> AgentFuture<'_, AgentResult<Option<AgentRunExecution>>> {
+        Box::pin(async move {
+            match self.admitted_run(&params).await? {
+                Some(events) => self.replay(params.context.session, events).await.map(Some),
+                None => Ok(None),
+            }
+        })
+    }
     fn start(&self, mut params: AgentRunParams) -> AgentFuture<'_, AgentResult<AgentRunExecution>> {
         Box::pin(async move {
+            if let Some(replay) = self.replay_admitted_run(params.clone()).await? {
+                return Ok(replay);
+            }
             let session = params.context.session.clone();
-            if self.store.is_retired(&session.session_id).await? {
-                return Err(TalosError::new(
-                    ErrorCode::SessionNotFound,
-                    "Worker Session was permanently deleted.",
-                ));
-            }
-            let state = self.store.execution_state(&session).await?;
-            let generation = state
-                .as_ref()
-                .map_or(0, |state| state.history_cursor.history_generation);
-            if params
-                .context
-                .history_cursor
-                .as_ref()
-                .map_or(0, |cursor| cursor.history_generation)
-                != generation
-            {
-                return Err(TalosError::new(
-                    ErrorCode::EventCursorExpired,
-                    "Worker command targets a cleared Session generation.",
-                ));
-            }
             let command = AgentExecutionCommand::Run {
                 params: Box::new(params.clone()),
             };
-            if let Some(events) = self
-                .store
-                .admission(&session, &params.context.identity(), &command)
-                .await?
-            {
-                return self.replay(session, events).await;
-            }
             params.context.history_cursor = self
                 .store
                 .execution_state(&session)

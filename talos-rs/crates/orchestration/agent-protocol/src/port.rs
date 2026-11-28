@@ -63,6 +63,22 @@ pub trait AgentHarness: Send + Sync {
     ) -> AgentFuture<'_, AgentResult<Option<crate::SessionExecutionState>>> {
         Box::pin(async { Ok(None) })
     }
+    /// Execution-owner-only lookup of an exact committed start request.
+    /// Returns None for a new command and never reserves or starts Provider work.
+    /// Carriers must not use start as a replay probe. Unsupported owners fail explicitly;
+    /// this local journal hook is not an additional network operation.
+    fn replay_admitted_run(
+        &self,
+        _params: AgentRunParams,
+    ) -> AgentFuture<'_, AgentResult<Option<AgentRunExecution>>> {
+        Box::pin(async {
+            Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Worker admission replay is unavailable.",
+            ))
+        })
+    }
+
     /// Admit one fresh or continued logical Turn.
     fn start(&self, params: AgentRunParams) -> AgentFuture<'_, AgentResult<AgentRunExecution>>;
 

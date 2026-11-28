@@ -279,6 +279,7 @@ Server 提供授权入口和选路，模型凭证沿实际节点的配置/凭证
 - 本机资源直接调用所属对象，网络资源携带已验证的 invocation scope；复用相同执行状态提交、事件顺序、中断和一次终态提交。
 - 保留 RPC 适配器已有 preflight Status 与操作 Failure 的错误边界。原始 AgentHarness 默认实现不得绕过保护。
 - 已准入调用的重连与补读复用已有 invocation 和稳定事件身份，禁止因重建传输流重复准入。
+- 同一 Turn 的新 continuation 与旧命令重放必须区分：只有执行 owner 按代数和完整命令确认已有准入，才允许纯重放；不能用 start 探测重放。纯查询不创建 Provider、Browser 或资源生命周期，也不新增网络协议或索引。WorkerHarness 沿原上下文标准化转发到既有本地 journal；新 continuation 查无原命令后重新经过原准入、Session 锁、资源绑定及租约监督，载荷冲突直接报错。
 
 ## 宿主生命周期
 

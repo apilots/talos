@@ -61,6 +61,16 @@ impl AgentHarness for WorkerHarness {
         self.execution.read_session_events(params)
     }
 
+    fn replay_admitted_run(
+        &self,
+        mut params: AgentRunParams,
+    ) -> AgentFuture<'_, AgentResult<Option<AgentRunExecution>>> {
+        Box::pin(async move {
+            self.resolve_context(&mut params.context)?;
+            self.execution.replay_admitted_run(params).await
+        })
+    }
+
     fn start(&self, params: AgentRunParams) -> AgentFuture<'_, AgentResult<AgentRunExecution>> {
         Box::pin(async move {
             let guard = self.execution_gate.clone().read_owned().await;

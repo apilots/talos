@@ -30,6 +30,20 @@ async fn server(
     CancellationToken,
     tokio::task::JoinHandle<()>,
 ) {
+    server_with_binder(harness, None).await
+}
+
+async fn server_with_binder(
+    harness: Arc<dyn AgentHarness>,
+    binder: Option<crate::AgentInvocationResourceBinder>,
+) -> (
+    RemoteAgentClient,
+    AgentHarnessRpcAdapter,
+    Vec<u8>,
+    String,
+    CancellationToken,
+    tokio::task::JoinHandle<()>,
+) {
     let home = tempfile::tempdir().unwrap();
     let journal = Arc::new(
         talos_store::execution::WorkerExecutionStore::open(&home.path().join("worker.sqlite"))
@@ -53,6 +67,10 @@ async fn server(
         )),
         vec![(TEST_AGENT_ID.into(), harness)],
     );
+    let adapter = match binder {
+        Some(binder) => adapter.with_resource_binder(binder),
+        None => adapter,
+    };
     adapter
         .install_registration(
             Registration {
@@ -827,6 +845,18 @@ async fn library_client(
     AgentHarnessRpcAdapter,
     Arc<dyn AgentHarness>,
 ) {
+    library_client_with_binder(mode, None).await
+}
+
+async fn library_client_with_binder(
+    mode: FakeMode,
+    binder: Option<crate::AgentInvocationResourceBinder>,
+) -> (
+    tempfile::TempDir,
+    FakeProvider,
+    AgentHarnessRpcAdapter,
+    Arc<dyn AgentHarness>,
+) {
     let home = tempfile::tempdir().unwrap();
     let provider = FakeProvider::new(mode);
     let journal = Arc::new(
@@ -847,6 +877,10 @@ async fn library_client(
         )),
         vec![(TEST_AGENT_ID.into(), durable)],
     );
+    let adapter = match binder {
+        Some(binder) => adapter.with_resource_binder(binder),
+        None => adapter,
+    };
     let auth = NodeAuth {
         node_id: "embedded".into(),
         token: "private-process-credential".into(),
@@ -1195,3 +1229,6 @@ async fn rpc_shutdown_keeps_lookup_status_distinct_from_operation_failure() {
         .expect_err("successful shutdown removes the exact Harness instance");
     assert!(agent_protocol::error_pb::decode_status(removed).is_code(ErrorCode::ResourceNotFound));
 }
+
+#[path = "rpc_replay_tests.rs"]
+mod replay;

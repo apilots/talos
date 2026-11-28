@@ -418,9 +418,9 @@ impl AgentHarnessRpcAdapter {
         {
             return Ok(None);
         }
-        // Only the journal can accept this as an exact original command replay.
-        // An unrelated command still fails the underlying Harness reservation.
-        harness.start(params.clone()).await.map(Some)
+        // Query the journal without admitting work: a new continuation shares
+        // the Turn identity but must reacquire the original protected resources.
+        harness.replay_admitted_run(params.clone()).await
     }
 
     pub(super) async fn admit_start(
