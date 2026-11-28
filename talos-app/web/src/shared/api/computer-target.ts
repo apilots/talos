@@ -117,7 +117,9 @@ export function deferProductClient(local: TalosWebClient, resolve: () => Promise
     get: (_, key) => {
       const next = [...path, key];
       const value = member(local, next);
-      if (path[0] === "desktop" && key === "connect") return value;
+      // Prepared preview descriptors already carry presentation identity.
+      if ((path[0] === "desktop" && key === "connect") ||
+        (path[0] === "files" && path[1] === "preview" && (key === "resourceUrl" || key === "resolvePath"))) return value;
       return typeof value === "function"
         ? async (...args: unknown[]) => {
             const client = await resolve();

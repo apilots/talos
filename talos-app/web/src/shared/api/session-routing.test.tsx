@@ -153,3 +153,16 @@ it("preserves a cloud Worker's actual UUID in detail, list and Project responses
   expect((await listSessions("cloud-worker-uuid"))[0].nodeId).toBe("cloud-worker-uuid");
   expect((await listProjects("cloud-worker-uuid"))[0].nodeId).toBe("cloud-worker-uuid");
 });
+
+it("keeps prepared preview URL and path helpers synchronous without resolving a Computer", () => {
+  const { http, invoke } = account(true);
+  const preview = getTalosClient().files.preview;
+  const descriptor = { previewId: "prepared", entryPath: "docs/report.md", resourceBaseUrl: null,
+    document: null, metadata: { name: "report.md", mimeType: "text/markdown", sizeBytes: 12 }, expiresAt: 123 };
+  expect(preview.resourceUrl(descriptor)).toBe("talos-preview://prepared/docs/report.md");
+  expect(preview.resolvePath(descriptor.entryPath, "images/chart one.png")).toBe("docs/images/chart one.png");
+  expect(preview.resourceUrl(descriptor, "docs/images/chart one.png")).toBe("talos-preview://prepared/docs/images/chart%20one.png");
+  expect(preview.resolvePath(descriptor.entryPath, "https://example.test/image.png")).toBeUndefined();
+  expect(http).not.toHaveBeenCalled();
+  expect(invoke).not.toHaveBeenCalled();
+});
