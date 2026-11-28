@@ -4,6 +4,7 @@ use axum::{routing::post, Json, Router};
 use serde_json::{json, Value};
 use std::path::Path;
 use talos_config::{AgentNodeTransport, Config, TalosPaths};
+use talos_coordinator::AgentCoordinator;
 
 const TOKEN: &str = "regular-user";
 const ADMIN_TOKEN: &str = "first-admin";
