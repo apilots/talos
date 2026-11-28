@@ -244,7 +244,8 @@ def profile(browser, origin, steps):
         expect(tail).not_to_have_text('SNAPSHOT_READY', timeout=30000)
         began = time.monotonic()
         page.get_by_role('button', name=re.compile('^Short JSON session')).click()
-        page.wait_for_url('**/sessions/' + SHORT)
+        page.wait_for_url(lambda url: urlparse(url).path == '/sessions/' + SHORT
+                          and parse_qs(urlparse(url).query).get('computerId') == ['embedded'])
         switch_ms = (time.monotonic() - began) * 1000
         assert switch_ms < 1500, switch_ms
         page.get_by_role('button', name=re.compile('^Long JSON session')).click()

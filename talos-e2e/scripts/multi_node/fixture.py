@@ -235,6 +235,18 @@ class Cluster:
         wait_for(lambda: http(self.url + '/health'), 'Server startup')
         grpc.channel_ready_future(self.channel).result(timeout=20)
 
+    def register_offline_native(self, record):
+        """Publish durable Native ownership through real control APIs, then go offline."""
+        node = record['node']['nodeId']
+        registered = self.rpc('AgentNodeControl', 'Register', {
+            'auth': {'node_id': node, 'token': record['credential']['token']},
+            'params': {'deployments': [{'agent_id': 'default'}],
+                       'product_owner': 'NODE_PRODUCT_OWNER_SERVER'}})
+        require('registered' in registered, f'Native registration failed: {registered}')
+        stopped = self.rpc('AgentNodeControl', 'Unregister', {
+            'auth': {'node_id': node, 'token': registered['registered']['lease_token']}, 'params': {}})
+        require('completed' in stopped, f'Native unregister failed: {stopped}')
+
     def start_worker(self, name):
         node = self.nodes[name]
         node['process'] = self.start_process(name, [os.environ.get('TALOS_E2E_WORKER_BIN', str(ROOT / 'talos-rs/target/debug/talos-worker'))], node['env'])

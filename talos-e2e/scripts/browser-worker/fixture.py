@@ -307,8 +307,11 @@ def browser_task(url,node,attachment,label,verify_cookie=False):
                     break
     (REPORT / (label+'-events.json')).write_text(json.dumps(events))
     require(events and events[-1]['payload']['type'] == 'turnCompleted', 'Turn did not complete: ' + str(events[-1]['payload'] if events else 'no events'))
-    # Title generation must commit before the successful terminal fact reaches clients.
-    completed = data(http(url + '/v1/sessions/' + session))['session']
+    # Worker termination and derived product metadata have separate owners.
+    def generated_title():
+        current = data(http(url + '/v1/sessions/' + session))['session']
+        return current if current['title'] == SESSION_TITLE else None
+    completed = wait(generated_title, 'Generated product Session title')
     listed = data(http(url + '/v1/sessions'))['sessions']
     require(completed['title'] == SESSION_TITLE, 'Completed Session detail has an invalid generated title')
     require(any(item['id'] == session and item['title'] == SESSION_TITLE for item in listed),
