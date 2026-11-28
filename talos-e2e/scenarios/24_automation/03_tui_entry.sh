@@ -16,6 +16,9 @@ cleanup() {
     tui_capture "${TUI_SESSION_NAME}" >"${SCENARIO_REPORT_DIR}/terminal.txt"
   fi
   tui_stop "${TUI_SESSION_NAME}"
+  if [[ -n "${TALOS_HOME:-}" && -f "${TALOS_HOME}/logs/talos.log" ]]; then
+    cp "${TALOS_HOME}/logs/talos.log" "${SCENARIO_REPORT_DIR}/talos.log"
+  fi
   if [[ -n "${fixture_pid}" ]]; then
     terminate_pid "${fixture_pid}" TERM
     wait "${fixture_pid}" 2>/dev/null || true

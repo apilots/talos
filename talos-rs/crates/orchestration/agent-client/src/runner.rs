@@ -27,6 +27,7 @@ enum NodeOperation {
 /// fabricates Harness capabilities. A caller must stop execution admission
 /// when this runner ends with an expired or rejected lease.
 pub struct AgentNodeRunner {
+    product_owner: talos_types::NodeProductOwner,
     client: AgentNodeClient,
     node_id: String,
     credential: String,
@@ -55,6 +56,7 @@ impl AgentNodeRunner {
         deployments: Vec<Deployment>,
     ) -> Self {
         Self {
+            product_owner: talos_types::NodeProductOwner::Server,
             client,
             node_id,
             credential,
@@ -63,6 +65,11 @@ impl AgentNodeRunner {
             lease_observer: None,
             execution_adapter: None,
         }
+    }
+
+    pub fn with_product_owner(mut self, owner: talos_types::NodeProductOwner) -> Self {
+        self.product_owner = owner;
+        self
     }
 
     pub fn with_system_info(mut self, info: talos_types::NodeSystemInfo) -> Self {
@@ -149,10 +156,8 @@ impl AgentNodeRunner {
                             if !is_transient(&error) { return Err(error); }
                             self.report_failure(NodeOperation::ExecutionConnection, connection_started, &error);
                         }
-                        self.publish_lease(None)?;
-                        if let Some(adapter) = &self.execution_adapter {
-                            adapter.drain_disconnected().await?;
-                        }
+                        // Keep admission and already committed work alive while
+                        // reconnecting this carrier under the same valid lease.
                         tokio::select! { _ = shutdown.cancelled() => return Ok(Some(lease.auth)), _ = sleep(RETRY_INTERVAL) => {} }
                         if Instant::now() >= lease.deadline {
                             continue 'registered;
@@ -315,6 +320,7 @@ impl AgentNodeRunner {
                         token: self.credential.clone(),
                     },
                     params: RegisterParams {
+                        product_owner: self.product_owner,
                         system_info: self.system_info.clone(),
                         deployments: self.deployments.clone(),
                     },

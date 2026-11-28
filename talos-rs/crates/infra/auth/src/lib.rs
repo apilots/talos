@@ -1,3 +1,5 @@
+mod actor;
+pub use actor::{Actor, ProductRequestOrigin};
 mod cloud;
 mod context;
 mod service;
@@ -108,3 +110,20 @@ pub struct AuthResponse {
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+/// Authorize Cloud-managed product access without composing a control-plane runtime.
+pub fn ensure_managed_worker_access(actor: &Actor) -> talos_error::TalosResult<()> {
+    if !actor.can_use_managed_worker() {
+        return Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::PermissionDenied,
+            "Talo requires a Cloud administrator or a Max account.",
+        ));
+    }
+    if actor.auth_disabled || actor.user_id.trim().is_empty() {
+        return Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::Unauthenticated,
+            "Agent node authentication failed",
+        ));
+    }
+    Ok(())
+}

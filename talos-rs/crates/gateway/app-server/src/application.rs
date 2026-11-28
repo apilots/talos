@@ -87,6 +87,25 @@ pub trait AppServerApplication: Send + Sync + 'static {
         params: SubscribeTimelineRequest,
     ) -> ApplicationResult<TimelineSubscription>;
 
+    /// Preserve explicit product scope for Session-only subscription requests.
+    async fn subscribe_scoped_timeline_events(
+        &self,
+        actor: &Actor,
+        params: SubscribeTimelineRequest,
+        computer_id: Option<String>,
+    ) -> ApplicationResult<TimelineSubscription> {
+        if computer_id
+            .as_deref()
+            .is_some_and(|target| target != "embedded")
+        {
+            return Err(talos_error_to_api_error(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Remote product subscriptions are not assembled in this host.",
+            )));
+        }
+        self.subscribe_timeline_events(actor, params).await
+    }
+
     async fn cancel_active_turn(
         &self,
         actor: &Actor,

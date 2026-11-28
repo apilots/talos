@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 function desktopAccount() {
-  const invoke = vi.fn();
+  const invoke = vi.fn<(method:string,...args:unknown[])=>Promise<unknown>>().mockResolvedValue({ status: "success", data: { nodeId: "local-computer" } });
   Object.defineProperty(window, "talos", { configurable: true, value: { invoke } });
   const connection = {
     ...useAppStore.getInitialState().connection, userId: "alice", accountType: "Max" as const,
@@ -29,18 +29,14 @@ function desktopAccount() {
   return { http, invoke, scope };
 }
 
-it.each(["offline", "removed"])("reads retained projects over IPC when the Computer directory is %s", async (state) => {
+it.each(["offline", "removed"])("keeps remote project failure authoritative when its Server is %s", async state => {
   const { http, invoke } = desktopAccount();
-  if (state === "offline") http.mockRejectedValueOnce(new TypeError("Server unreachable"));
-  else http.mockResolvedValueOnce(Response.json({ status: "error", error: {
+  if (state === "offline") http.mockRejectedValue(new TypeError("Server unreachable"));
+  else http.mockResolvedValue(Response.json({ status: "error", error: {
     code: AppProtocol.ErrorCode.ResourceNotFound, message: "Computer not found.", localization: null,
   } }, { status: 404 }));
-  invoke.mockResolvedValueOnce({ status: "success", data: {
-    projects: [{ project_id: "retained-project", nodeId: "retained-node", directory: "/workspace/project" }],
-  } });
-
-  await expect(listProjects("retained-node")).resolves.toMatchObject([{ id: "retained-project", nodeId: "retained-node" }]);
-  expect(invoke).toHaveBeenCalledExactlyOnceWith("project/list", { nodeId: "retained-node" }, expect.anything());
+  await expect(listProjects("retained-node")).rejects.toBeDefined();
+  expect(invoke.mock.calls.map(([method]) => method)).toEqual(["desktop/workerIdentity"]);
 });
 
 it("keeps a directory not-found authoritative for Computer details even when Desktop can answer", async () => {
@@ -48,14 +44,14 @@ it("keeps a directory not-found authoritative for Computer details even when Des
   http.mockResolvedValueOnce(Response.json({ status: "error", error: {
     code: AppProtocol.ErrorCode.ResourceNotFound, message: "Computer not found.", localization: null,
   } }, { status: 404 }));
-  invoke.mockResolvedValue({ status: "success", data: { nodeId: "removed-node", displayName: "Cached Computer" } });
+
 
   const readComputer = async () => {
     const client = await getTalosClient({ nodeId: "removed-node", readOnly: true });
     return client.computers.read({ nodeId: "removed-node" });
   };
   await expect(readComputer()).rejects.toMatchObject({ code: AppProtocol.ErrorCode.ResourceNotFound });
-  expect(invoke).not.toHaveBeenCalled();
+  expect(invoke.mock.calls.map(([method]) => method)).toEqual(["desktop/workerIdentity"]);
 });
 
 it("does not fall back to local project metadata after a directory permission failure", async () => {
@@ -65,7 +61,7 @@ it("does not fall back to local project metadata after a directory permission fa
   } }, { status: 403 }));
 
   await expect(listProjects("restricted-node")).rejects.toMatchObject({ code: AppProtocol.ErrorCode.PermissionDenied });
-  expect(invoke).not.toHaveBeenCalled();
+  expect(invoke.mock.calls.map(([method]) => method)).toEqual(["desktop/workerIdentity"]);
 });
 
 it("keeps managed project metadata on its Server and sends the requested Computer ID", async () => {

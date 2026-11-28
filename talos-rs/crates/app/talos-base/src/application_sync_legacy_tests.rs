@@ -26,7 +26,7 @@ pub(super) async fn restart_with_v1(
         .verify_access_token(TOKEN)
         .await
         .unwrap();
-    runtime.service.resume_account_sync(actor);
+    runtime.service.resume_account_host(actor);
     (runtime, expected)
 }
 pub(super) async fn restart_seeded(runtime: TalosApplicationRuntime) -> TalosApplicationRuntime {
@@ -47,8 +47,8 @@ pub(super) async fn restart_seeded(runtime: TalosApplicationRuntime) -> TalosApp
         .await
         .unwrap();
     let rows = runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .storage
         .query(
             "SELECT replica_schema_version FROM sync_documents WHERE resource_id=?",
@@ -84,7 +84,7 @@ pub(super) async fn seed(
             }
         })
         .collect();
-    let adapter = runtime.sync_host.install_capture(binding.clone()).unwrap();
+    let adapter = runtime.host.install_capture(binding.clone()).unwrap();
     let batch = talos_sync::SyncImportBatch {
         scope: binding.scope.clone(),
         resource: talos_sync::SyncResourceKey::Session {
@@ -95,8 +95,8 @@ pub(super) async fn seed(
     };
     adapter.prepare_import(&batch).await.unwrap();
     let mut tx = runtime
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .storage
         .begin_transaction()
         .await
@@ -117,8 +117,8 @@ pub(super) async fn verify(
         "released SDK history recovered from surviving B while original sources remain offline",
         async || {
             reader
-                .sync_host
-                .sync_stores
+                .host
+                .stores
                 .sessions
                 .list_timeline_events_after(SESSION, 0, 100)
                 .await
@@ -139,8 +139,8 @@ pub(super) async fn verify(
     assert_eq!(history.data.len(), 4);
     assert!(history.last_stable_event_id.is_some());
     survivor
-        .sync_host
-        .sync_stores
+        .host
+        .stores
         .sessions
         .append_timeline_notice(talos_agent_api::TimelineSystemNotice {
             identity: talos_types::AgentTurnRef::new(SESSION, "turn-4"),
@@ -158,8 +158,8 @@ pub(super) async fn verify(
         "incremental notice followed the upgraded released baseline",
         async || {
             reader
-                .sync_host
-                .sync_stores
+                .host
+                .stores
                 .sessions
                 .list_timeline_events_after(SESSION, 0, 100)
                 .await

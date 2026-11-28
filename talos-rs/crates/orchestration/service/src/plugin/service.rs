@@ -82,8 +82,15 @@ impl PluginManagerService {
         Ok(())
     }
 
-    /// Bounded startup repair uses the same source refresh and Plugin install owners.
-    pub async fn bootstrap_official_browser(&self) -> TalosResult<()> {
+    /// Startup repair observes cancellation between source, install and environment stages.
+    /// Callers must await completion after cancellation so blocking writes remain joined.
+    pub async fn bootstrap_official_browser(
+        &self,
+        stop: &tokio_util::sync::CancellationToken,
+    ) -> TalosResult<()> {
+        if stop.is_cancelled() {
+            return Ok(());
+        }
         if self.manager.installed_browser_requirements()?.is_none() {
             let manager = self.manager.clone();
             tokio::task::spawn_blocking(move || {
@@ -98,9 +105,15 @@ impl PluginManagerService {
             }).await.map_err(|error| {
                 talos_error::TalosError::internal_with_source("Official MCP discovery could not finish.", error)
             })??;
+            if stop.is_cancelled() {
+                return Ok(());
+            }
             if let Some(request) = self.manager.default_browser_install_request()? {
                 self.install(request).await?;
             }
+        }
+        if stop.is_cancelled() {
+            return Ok(());
         }
         if let (Some(browser), Some((installation, lock))) = (
             &self.browser,

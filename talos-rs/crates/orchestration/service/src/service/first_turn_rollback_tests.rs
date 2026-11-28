@@ -87,33 +87,23 @@ async fn first_turn_idempotency_conflict_does_not_leave_session_record() {
 async fn first_turn_active_turn_conflict_does_not_leave_session_record() {
     let (service, store) = test_application(
         Arc::new(TestAgentExecution {
-            mode: TestAgentExecutionMode::Accepted,
+            mode: TestAgentExecutionMode::StartActiveTurn,
         }),
         configured_test_config(),
     )
     .await;
-    store
-        .commit_maintenance_admission(CanonicalAgentEvent {
-            identity: talos_agent_api::AgentTurnRef::new(
-                "session-active-conflict",
-                "turn-existing",
-            ),
-            sequence: 1,
-            occurred_at: 1,
-            payload: CanonicalAgentEventPayload::TurnStarted(AgentTurnStarted {}),
-        })
-        .await
-        .expect("active Turn admission should succeed");
-
-    let result = service
+    let error = service
         .start_turn(
             &Actor::regular("member-user"),
             request_source(),
             start_turn_request("session-active-conflict", "hello"),
             None,
         )
-        .await;
-
-    assert!(result.is_err());
+        .await
+        .expect_err("the Worker admission port must reject an active Turn");
+    assert_eq!(
+        error.error_code(),
+        talos_error::ErrorCode::ActiveTurnRunning
+    );
     assert_session_creation_rolled_back(&service, &store, "session-active-conflict", None).await;
 }

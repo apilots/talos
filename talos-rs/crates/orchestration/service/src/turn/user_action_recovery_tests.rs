@@ -1,197 +1,125 @@
 use super::*;
+use crate::test_support::commit_test_running_turn;
+use talos_agent_api::{ActiveTurnState, AgentTurnRef};
 
 #[tokio::test]
-async fn claimed_user_action_is_rebuilt_from_canonical_facts_after_restart() {
-    let agent_execution = Arc::new(RecordingAgentExecution::default());
-    let (service, _event_service, store, _message_queue) =
-        test_service(agent_execution.clone()).await;
-    create_test_session_record(store.clone()).await;
-    let claim = claim_pending_action(store.as_ref()).await;
-
-    service
-        .recover_active_turn(test_session(), claim.active_turn)
-        .await
-        .expect("claimed response should resume from canonical facts");
-    wait_for_canonical_terminal(store.as_ref()).await;
-
-    let request = agent_execution
-        .stream_request
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("recovered continuation request should be captured");
-    assert_eq!(
-        (
-            request.context.turn_id,
-            request.input.message_id,
-            request.checkpoint.is_some(),
-            request.continuation.is_some(),
-        ),
-        (
-            "turn-original".to_string(),
-            "msg_action_action-1".to_string(),
-            true,
-            true,
-        )
-    );
-}
-
-#[tokio::test]
-async fn claimed_continuation_with_progress_settles_without_reexecuting_provider() {
+async fn waiting_continuation_survives_manager_restart_without_reissuing_input() {
     let execution = Arc::new(RecordingAgentExecution::default());
     let (service, _, store, _) = test_service(execution.clone()).await;
     create_test_session_record(store.clone()).await;
-    let claim = claim_pending_action(store.as_ref()).await;
-    let identity = claim.active_turn.identity.clone();
-    let progress = store
-        .commit_progress_event(
-            CanonicalAgentEvent {
-                identity: identity.clone(),
-                sequence: claim.events.last().unwrap().sequence + 1,
-                occurred_at: 6,
-                payload: CanonicalAgentEventPayload::MetricsUpdated(AgentRunMetrics::default()),
-            },
-            claim.active_turn.last_event_seq,
-        )
-        .await
-        .unwrap();
-
+    seed_worker_fixture(
+        &service,
+        store.as_ref(),
+        execution.as_ref(),
+        pending_dynamic_action_events(Some("tool-original")),
+    )
+    .await;
+    let active = store.get_agent_active_turn("s1").await.unwrap().unwrap();
     service
-        .recover_active_turn(test_session(), progress.active_turn)
+        .recover_active_turn(test_session(), active)
         .await
         .unwrap();
-    let terminal = store
+    assert!(execution.stream_requests.lock().unwrap().is_empty());
+    assert_eq!(
+        store
+            .get_agent_active_turn("s1")
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        ActiveTurnState::WaitingForInput
+    );
+}
+
+#[tokio::test]
+async fn manager_restart_observes_running_worker_without_interrupting_or_resubmitting() {
+    let execution = Arc::new(RecordingAgentExecution::default());
+    *execution.hold_running_turn.lock().unwrap() = true;
+    let (mut service, events, store, queue) = test_service(execution.clone()).await;
+    create_test_session_record(store.clone()).await;
+    queue.add("s1", test_user_input("running")).unwrap();
+    service.try_dispatch_next("s1").await.unwrap().unwrap();
+    service.reconcile_worker_events("s1").await.unwrap();
+    let active = store.get_agent_active_turn("s1").await.unwrap().unwrap();
+    service.execution = AgentExecutionDriver::new(
+        service.execution.coordinator.clone(),
+        store.clone(),
+        events.clone(),
+        service.execution.sessions.clone(),
+    );
+    service
+        .recover_active_turn(test_session(), active.clone())
+        .await
+        .unwrap();
+    assert_eq!(execution.stream_requests.lock().unwrap().len(), 1);
+    assert_eq!(
+        store
+            .get_agent_active_turn("s1")
+            .await
+            .unwrap()
+            .unwrap()
+            .identity,
+        active.identity
+    );
+}
+
+#[tokio::test]
+async fn product_history_without_worker_facts_cannot_manufacture_a_terminal() {
+    let execution = Arc::new(RecordingAgentExecution::default());
+    let (service, _, store, _) = test_service(execution.clone()).await;
+    create_test_session_record(store.clone()).await;
+    let identity = AgentTurnRef::new("s1", "unconfirmed");
+    let input = completed_agent_user_input(
+        &identity.turn_id,
+        "message-unconfirmed",
+        test_user_input("run"),
+        1,
+    )
+    .unwrap();
+    let admitted = commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
+    let failure = service
+        .recover_active_turn(test_session(), admitted.active_turn.unwrap())
+        .await
+        .unwrap_err();
+    // The Worker rejects a product cursor that has no matching execution facts.
+    assert_eq!(failure.error_code(), talos_error::ErrorCode::InvalidCursor);
+    assert!(store
         .get_latest_agent_terminal_event("s1")
         .await
         .unwrap()
-        .unwrap();
-    let active = store.get_agent_active_turn("s1").await.unwrap();
-    assert_eq!(
-        (
-            execution.stream_requests.lock().unwrap().len(),
-            terminal.identity,
-            match terminal.payload {
-                CanonicalAgentEventPayload::TurnFailed(failure) => Some(failure.error.code),
-                _ => None,
-            },
-            active
-        ),
-        (
-            0,
-            identity,
-            Some(talos_error::ErrorCode::ServiceUnavailable),
-            None
-        ),
-    );
-}
-
-async fn claim_pending_action(
-    store: &DatabaseSessionStore,
-) -> talos_store::session::AgentEventCommit {
-    insert_pending_dynamic_action(store, Some("tool-original")).await;
-    let identity = talos_agent_api::AgentTurnRef::new("s1", "turn-original");
-    let waiting = store
-        .get_agent_active_turn("s1")
-        .await
-        .unwrap()
-        .expect("waiting canonical Turn should exist");
-    let events = store.list_agent_turn_events(&identity, 64).await.unwrap();
-    let message = completed_user_action_message(
-        &identity.turn_id,
-        "msg_action_action-1",
-        "action-1",
-        UserActionResponse::DynamicToolResult(DynamicToolResult {
-            output: "recovered".to_string(),
-            success: true,
-        }),
-        5,
-    )
-    .unwrap();
-    let admission = canonical_user_admission(
-        identity.clone(),
-        message,
-        events.last().unwrap().sequence.saturating_add(1),
-        false,
-    );
-    store
-        .claim_continuation(talos_store::session::ClaimContinuationParams {
-            events: admission,
-            action_id: "action-1".to_string(),
-            claim_id: "msg_action_action-1".to_string(),
-            expected_event_seq: waiting.last_event_seq,
-            command: None,
-        })
-        .await
-        .expect("durable response claim should commit before restart")
+        .is_none());
+    assert!(execution.stream_requests.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn running_turn_without_a_claimed_continuation_fails_after_restart() {
-    let agent_execution = Arc::new(RecordingAgentExecution::default());
-    let (service, _event_service, store, message_queue) =
-        test_service(agent_execution.clone()).await;
+async fn released_product_owner_lock_does_not_terminate_a_running_worker() {
+    let execution = Arc::new(RecordingAgentExecution::default());
+    *execution.hold_running_turn.lock().unwrap() = true;
+    let (mut service, events, store, queue) = test_service(execution.clone()).await;
     create_test_session_record(store.clone()).await;
-    let identity = talos_agent_api::AgentTurnRef::new("s1", "turn-orphaned");
-    let input = completed_agent_user_input(
-        &identity.turn_id,
-        "message-orphaned",
-        test_user_input("run"),
-        1,
-    )
-    .unwrap();
-    let admission = commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
-    message_queue
-        .add("s1", test_user_input("queued after recovery"))
-        .unwrap();
-
-    service
-        .recover_active_turn(test_session(), admission.active_turn)
-        .await
-        .expect("orphaned durable Turn should settle during restart recovery");
-
-    wait_for_stream_requests(agent_execution.as_ref(), 1).await;
-    let events = store.list_agent_turn_events(&identity, 32).await.unwrap();
-    assert!(matches!(
-        events.last().map(|event| &event.payload),
-        Some(CanonicalAgentEventPayload::TurnFailed(failed))
-            if failed.error.code == talos_error::ErrorCode::ServiceUnavailable
-    ));
-}
-
-#[tokio::test]
-async fn reopening_after_the_owner_lock_is_released_fails_the_running_turn() {
-    let agent_execution = Arc::new(RecordingAgentExecution::default());
-    let (service, _event_service, store, _message_queue) =
-        test_service(agent_execution.clone()).await;
-    create_test_session_record(store.clone()).await;
-    let identity = talos_agent_api::AgentTurnRef::new("s1", "turn-orphaned");
-    let input = completed_agent_user_input(
-        &identity.turn_id,
-        "message-orphaned",
-        test_user_input("run"),
-        1,
-    )
-    .unwrap();
-    let admission = commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
-    let locks = tempfile::tempdir().unwrap();
-    let owner = talos_agent::SessionOwner::new(
-        locks.path(),
+    queue.add("s1", test_user_input("running")).unwrap();
+    service.try_dispatch_next("s1").await.unwrap().unwrap();
+    service.reconcile_worker_events("s1").await.unwrap();
+    let active = store.get_agent_active_turn("s1").await.unwrap().unwrap();
+    service.execution = AgentExecutionDriver::new(
+        service.execution.coordinator.clone(),
+        store.clone(),
+        events.clone(),
+        service.execution.sessions.clone(),
+    );
+    let directory = tempfile::tempdir().unwrap();
+    service.set_session_owner(talos_agent::SessionOwner::new(
+        directory.path(),
         talos_error::SessionOwnerKind::Tui,
         talos_agent::SessionHold::Attached,
-    );
-    owner.claim_open("s1").unwrap();
-    service.set_session_owner(owner);
-
-    service
-        .recover_active_turn(test_session(), admission.active_turn)
-        .await
-        .expect("a free lock means the previous owner has exited");
-
-    let events = store.list_agent_turn_events(&identity, 32).await.unwrap();
-    assert!(matches!(
-        events.last().map(|event| &event.payload),
-        Some(CanonicalAgentEventPayload::TurnFailed(failed))
-            if failed.error.message == "owner process exited"
     ));
-    assert!(store.get_agent_active_turn("s1").await.unwrap().is_none());
+    service
+        .recover_active_turn(test_session(), active)
+        .await
+        .unwrap();
+    assert!(store
+        .get_latest_agent_terminal_event("s1")
+        .await
+        .unwrap()
+        .is_none());
 }

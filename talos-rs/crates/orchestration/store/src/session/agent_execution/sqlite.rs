@@ -1,13 +1,11 @@
 use async_trait::async_trait;
-use talos_agent_api::{AgentContinuationRef, AgentEvent, AgentTurnRef};
+use talos_agent_api::AgentTurnRef;
 use talos_error::TalosResult;
 
-use super::record::{load_continuation_binding, parse_active_turn, parse_event_record};
+use super::record::{parse_active_turn, parse_event_record};
 use super::{
-    admission, continuation, settlement, AgentActiveTurnRecord, AgentCancellationAdmission,
-    AgentContinuationBindingRecord, AgentEventCommit, AgentEventRecord, AgentExecutionStore,
-    ClaimContinuationParams, CommandLease, CommandReservation, CommitInitialAdmissionParams,
-    CommitRunningInputAdmissionParams, CommitTerminalSettlementParams, IdempotencyReservation,
+    AgentActiveTurnRecord, AgentCancellationAdmission, AgentEventRecord, AgentExecutionStore,
+    CommandLease, CommandReservation, IdempotencyReservation,
 };
 use crate::session::DatabaseSessionStore;
 
@@ -15,6 +13,48 @@ const MAX_EVENT_READ_LIMIT: usize = 10_000;
 
 #[async_trait]
 impl AgentExecutionStore for DatabaseSessionStore {
+    async fn get_agent_event_by_sequence(
+        &self,
+        identity: &AgentTurnRef,
+        sequence: u64,
+    ) -> TalosResult<Option<AgentEventRecord>> {
+        self.storage.query("SELECT event_seq,session_id,turn_id,sequence,occurred_at,persisted_at,payload_json FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=?", &[&identity.session_id,&identity.turn_id,&sequence.to_string()]).await?.first().map(parse_event_record).transpose()
+    }
+
+    async fn worker_event_cursor(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<agent_protocol::AgentSessionEventCursor>> {
+        super::super::worker_projection::cursor(self, session_id).await
+    }
+    async fn project_worker_events(
+        &self,
+        params: super::super::WorkerProjectionParams,
+    ) -> TalosResult<super::super::WorkerProjectionCommit> {
+        super::super::worker_projection::project(self, params).await
+    }
+    async fn pending_worker_settlements(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Vec<super::super::WorkerSettlementRecord>> {
+        super::super::worker_projection::pending(self, session_id).await
+    }
+    async fn complete_worker_settlement(
+        &self,
+        cursor: &agent_protocol::AgentSessionEventCursor,
+    ) -> TalosResult<()> {
+        self.storage.execute("UPDATE worker_event_projection SET settlement_applied_at=? WHERE session_id=? AND history_generation=? AND worker_offset=? AND settlement_json <> 'null'", &[&chrono::Utc::now().timestamp().to_string(), &cursor.session_id, &cursor.generation.to_string(), &cursor.offset.to_string()]).await?;
+        Ok(())
+    }
+
+    async fn complete_worker_settlement_with_notice(
+        &self,
+        cursor: &agent_protocol::AgentSessionEventCursor,
+        notice: talos_agent_api::TimelineSystemNotice,
+    ) -> TalosResult<Option<super::TimelineEventRecord>> {
+        super::notice::complete_worker_settlement(self, cursor, notice).await
+    }
+
     async fn history_generation(&self, session_id: &str) -> TalosResult<Option<u64>> {
         let rows = self
             .storage
@@ -47,13 +87,6 @@ impl AgentExecutionStore for DatabaseSessionStore {
         true
     }
 
-    async fn append_history_supplement(
-        &self,
-        supplement: talos_agent_api::trajectory::SessionHistorySupplement,
-    ) -> TalosResult<()> {
-        super::supplement::append(self, supplement).await
-    }
-
     async fn read_terminal_history_supplement(
         &self,
         identity: &AgentTurnRef,
@@ -69,6 +102,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
         super::supplement::read_payload(self, identity, payload_id).await
     }
 
+    #[cfg(feature = "sync")]
     async fn get_shared_active_turn(
         &self,
         session_id: &str,
@@ -100,27 +134,30 @@ impl AgentExecutionStore for DatabaseSessionStore {
             .await?;
         let key =
             crate::sync::session::key_at(&adapter, &mut *tx, session_id, last.event_seq).await?;
-        let (state, updated_at) =
-            match metadata.filter(|meta| Some(&meta.last_event) == key.as_ref()) {
-                Some(meta) => (meta.state, meta.updated_at),
-                None => (
-                    if matches!(
-                        last.payload,
-                        talos_agent_api::AgentEventPayload::WaitingForInput(_)
-                    ) {
-                        talos_agent_api::ActiveTurnState::WaitingForInput
-                    } else {
-                        talos_agent_api::ActiveTurnState::Running
-                    },
-                    last.persisted_at,
-                ),
-            };
+        let (state, updated_at) = match metadata.filter(|meta| {
+            Some(&meta.last_event) == key.as_ref()
+                && meta.state != talos_agent_api::ActiveTurnState::Cancelling
+        }) {
+            Some(meta) => (meta.state, meta.updated_at),
+            None => (
+                if matches!(
+                    last.payload,
+                    talos_agent_api::AgentEventPayload::WaitingForInput(_)
+                ) {
+                    talos_agent_api::ActiveTurnState::WaitingForInput
+                } else {
+                    talos_agent_api::ActiveTurnState::Running
+                },
+                last.persisted_at,
+            ),
+        };
         let initial_message = tx.query("SELECT json_extract(payload_json, '$.data.messageId') AS message_id FROM visible_agent_events WHERE session_id = ? AND turn_id = ? AND json_extract(payload_json, '$.type') = 'messageCompleted' AND json_extract(payload_json, '$.data.role') = 'user' ORDER BY sequence LIMIT 1", &[session_id, &last.identity.turn_id]).await?.first().and_then(|r| r.get_string("message_id"));
         tx.commit().await?;
         Ok(Some(talos_agent_api::TimelineActiveTurn {
             automation_input: None,
             identity: last.identity,
             initial_message_id: initial_message,
+            cancellation_requested: false,
             state,
             last_event_id: talos_types::TimelineEventId::from_seq(last.event_seq).to_string(),
             updated_at,
@@ -192,43 +229,6 @@ impl AgentExecutionStore for DatabaseSessionStore {
         super::idempotency::release(self, lease).await
     }
 
-    async fn commit_initial_admission(
-        &self,
-        params: CommitInitialAdmissionParams,
-    ) -> TalosResult<AgentEventCommit> {
-        admission::commit_initial(self, params).await
-    }
-
-    async fn commit_progress_event(
-        &self,
-        event: AgentEvent,
-        expected_event_seq: i64,
-    ) -> TalosResult<AgentEventCommit> {
-        admission::commit_progress(self, event, expected_event_seq).await
-    }
-
-    async fn commit_maintenance_admission(
-        &self,
-        event: AgentEvent,
-    ) -> TalosResult<AgentEventCommit> {
-        admission::commit_maintenance(self, event).await
-    }
-
-    async fn commit_progress_events(
-        &self,
-        events: Vec<AgentEvent>,
-        expected_event_seq: i64,
-    ) -> TalosResult<AgentEventCommit> {
-        admission::commit_progress_batch(self, events, expected_event_seq).await
-    }
-
-    async fn commit_running_input_admission(
-        &self,
-        params: CommitRunningInputAdmissionParams,
-    ) -> TalosResult<AgentEventCommit> {
-        admission::commit_running_input(self, params).await
-    }
-
     async fn begin_cancellation(
         &self,
         identity: &AgentTurnRef,
@@ -241,29 +241,6 @@ impl AgentExecutionStore for DatabaseSessionStore {
         admission: AgentCancellationAdmission,
     ) -> TalosResult<AgentActiveTurnRecord> {
         super::cancellation::restore(self, admission).await
-    }
-
-    async fn commit_waiting_settlement(
-        &self,
-        event: AgentEvent,
-        continuation: AgentContinuationRef,
-        expected_event_seq: i64,
-    ) -> TalosResult<AgentEventCommit> {
-        settlement::commit_waiting(self, event, continuation, expected_event_seq).await
-    }
-
-    async fn claim_continuation(
-        &self,
-        params: ClaimContinuationParams,
-    ) -> TalosResult<AgentEventCommit> {
-        continuation::claim(self, params).await
-    }
-
-    async fn commit_terminal_settlement(
-        &self,
-        params: CommitTerminalSettlementParams,
-    ) -> TalosResult<AgentEventRecord> {
-        settlement::commit_terminal(self, params).await
     }
 
     async fn list_agent_turn_events(
@@ -481,29 +458,15 @@ impl AgentExecutionStore for DatabaseSessionStore {
             .query(
                 r#"
                 SELECT active.session_id, active.turn_id, active.initial_message_id,
-                       active.state, active.last_event_seq,
-                       binding.action_id AS current_action_id, active.updated_at
+                       active.state, active.cancellation_request_id, active.last_event_seq,
+                       event.payload_json AS active_payload_json, active.updated_at
                 FROM agent_active_turns AS active
-                LEFT JOIN agent_continuation_bindings AS binding
-                  ON binding.session_id = active.session_id
-                 AND binding.turn_id = active.turn_id
-                 AND active.state = 'waiting_for_input'
-                 AND binding.status = 'waiting'
+                LEFT JOIN visible_agent_events AS event ON event.event_seq = active.last_event_seq
                 WHERE active.session_id = ?
                 "#,
                 &[session_id],
             )
             .await?;
         rows.first().map(parse_active_turn).transpose()
-    }
-
-    async fn get_agent_continuation_binding(
-        &self,
-        identity: &AgentTurnRef,
-    ) -> TalosResult<Option<AgentContinuationBindingRecord>> {
-        let mut transaction = self.storage.begin_read_transaction().await?;
-        let binding = load_continuation_binding(transaction.as_mut(), identity).await?;
-        transaction.rollback().await?;
-        Ok(binding)
     }
 }

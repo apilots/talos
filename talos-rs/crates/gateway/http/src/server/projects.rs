@@ -1,6 +1,7 @@
+use super::product_scope::{ProductJson, ProductQuery};
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::response::Json;
 
 use talos_auth::RequestIdentity;
@@ -15,7 +16,7 @@ use super::errors::{api_success, ApiError, JsonResponse};
 use super::state::HttpApiState;
 
 pub(super) async fn list_projects_handler(
-    Query(request): Query<ProjectListRequest>,
+    ProductQuery(request): ProductQuery<ProjectListRequest>,
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
 ) -> Result<JsonResponse<ProjectListResponse>, ApiError> {
@@ -43,7 +44,7 @@ pub(super) async fn get_project_handler(
 pub(super) async fn create_project_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Json(request): Json<ProjectCreateRequest>,
+    ProductJson(request): ProductJson<ProjectCreateRequest>,
 ) -> Result<JsonResponse<ProjectCreateResponse>, ApiError> {
     let response = state
         .gateway

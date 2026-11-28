@@ -41,7 +41,7 @@ async fn export_project(
 
 async fn reconciles_automatic_enrollment(transport: DocumentTransport) {
     let fixture = Fixture::start().await;
-    let host = &fixture.runtime.sync_host;
+    let host = &fixture.runtime.host;
     let actor = talos_service::Actor::regular("account").with_access_token("credential");
     let params = SyncBindParams {
         scope: SyncScope {
@@ -81,7 +81,7 @@ async fn reconciles_automatic_enrollment(transport: DocumentTransport) {
             .unwrap();
     }
     let project = host
-        .sync_stores
+        .stores
         .projects
         .create_project_for_owner(
             "Created before registration",
@@ -129,14 +129,9 @@ async fn reconciles_automatic_enrollment(transport: DocumentTransport) {
         }]
     );
     if matches!(transport, DocumentTransport::Disabled) {
-        assert!(!host
-            .sync_stores
-            .handles
-            .lock()
-            .await
-            .contains_key("account"));
+        assert!(!host.stores.handles.lock().await.contains_key("account"));
     } else {
-        let current = host.sync_stores.handles.lock().await["account"].clone();
+        let current = host.stores.handles.lock().await["account"].clone();
         if let Some(original) = original {
             assert!(!Arc::ptr_eq(&original, &current));
         }
@@ -160,7 +155,7 @@ async fn reconciles_automatic_enrollment(transport: DocumentTransport) {
             serde_json::json!("Created before registration")
         );
         fixture.runtime.sync.acknowledge(&baseline).await.unwrap();
-        host.sync_stores
+        host.stores
             .projects
             .patch_project(
                 &project.project_id,
@@ -178,7 +173,7 @@ async fn reconciles_automatic_enrollment(transport: DocumentTransport) {
         );
         assert!(Arc::ptr_eq(
             &current,
-            &host.sync_stores.handles.lock().await["account"]
+            &host.stores.handles.lock().await["account"]
         ));
     }
     fixture.finish().await;

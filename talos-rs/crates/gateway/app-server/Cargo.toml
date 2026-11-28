@@ -17,7 +17,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 talos-agent-api = { workspace = true }
 talos-app-protocol = { workspace = true }
-talos-service = { workspace = true }
+talos-service = { workspace = true, features = ["product"] }
 talos-auth = { workspace = true }
 talos-error = { workspace = true }
 talos-gateway = { path = "../core" }
@@ -26,6 +26,7 @@ tokio = { workspace = true, features = ["io-std", "io-util"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
+talos-service = { workspace = true, features = ["product", "control-plane"] }
 tempfile = "3"
 tokio = { workspace = true }
 

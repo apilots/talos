@@ -1,6 +1,6 @@
 //! Account maintenance is owned by the host, never awaited by snapshot queries.
-use super::application_sync::ApplicationSyncHost;
-use super::application_sync_management::RefreshPhase;
+use super::application_host::ApplicationHost;
+use super::application_management_host::RefreshPhase;
 use std::collections::HashMap;
 use talos_error::{ErrorCode, TalosError};
 use talos_service::Actor;
@@ -17,7 +17,7 @@ pub(crate) struct RefreshTasks {
 /// Serial lifecycle mutations keep resume calls from replacing a cancelled task
 /// until its future and the mutation have both finished.
 pub(crate) struct RefreshPause<'a> {
-    host: &'a ApplicationSyncHost,
+    host: &'a ApplicationHost,
     account_id: String,
 }
 
@@ -58,16 +58,15 @@ enum RefreshWake {
     AccountOrComputerChanged,
     TemporaryFailureRetry,
     WorkerStateChanged,
-    WorkerConnectionEnded,
 }
 
 impl Drop for RefreshLifetime {
     fn drop(&mut self) {
-        tracing::info!(account_id = %self.0, "Sync account maintenance stopped");
+        tracing::info!(account_id = %self.0, "Account host maintenance stopped");
     }
 }
 
-impl ApplicationSyncHost {
+impl ApplicationHost {
     /// Startup/login resumes one account supervisor. Later authentication updates
     /// credentials without replacing its Sync handle; queries never call this.
     pub(crate) fn schedule_refresh(&self, actor: &Actor) {
@@ -90,6 +89,7 @@ impl ApplicationSyncHost {
 
     /// Mutation completion can restore maintenance only while the account remains active.
     /// Unlike authentication restoration, it must never clear a suspension for a newer token.
+    #[cfg(any(feature = "sync", test))]
     pub(crate) fn schedule_active_refresh(&self, actor: &Actor) {
         let mut background = self.background.lock().expect("Sync refresh tasks lock");
         if background.suspended.contains_key(&actor.user_id) {
@@ -122,7 +122,7 @@ impl ApplicationSyncHost {
         let account_id = actor.user_id.clone();
         let (actor, updates) = tokio::sync::watch::channel(actor.clone());
         let failures = self.worker_failures.subscribe();
-        tracing::info!(%account_id, "Sync account maintenance started");
+        tracing::info!(%account_id, "Account host maintenance started");
         let lifetime = RefreshLifetime(account_id.clone());
         let task = tokio::spawn(maintain_account(host, updates, failures, lifetime));
         background
@@ -131,6 +131,7 @@ impl ApplicationSyncHost {
     }
 
     /// Durable Computer imports wake registration reconciliation, never a read API.
+    #[cfg(any(feature = "sync", all(test, feature = "server")))]
     pub(crate) fn notify_refresh(&self, account_id: &str) {
         if let Some(refresh) = self
             .background
@@ -164,6 +165,7 @@ impl ApplicationSyncHost {
         pause
     }
 
+    #[cfg(feature = "sync")]
     pub(crate) fn refreshes_closed(&self) -> bool {
         self.background
             .lock()
@@ -212,7 +214,7 @@ impl ApplicationSyncHost {
 }
 
 async fn maintain_account(
-    host: std::sync::Weak<ApplicationSyncHost>,
+    host: std::sync::Weak<ApplicationHost>,
     mut updates: tokio::sync::watch::Receiver<Actor>,
     mut failures: tokio::sync::watch::Receiver<Option<talos_error::ApiError>>,
     _lifetime: RefreshLifetime,
@@ -220,6 +222,7 @@ async fn maintain_account(
     let _directory = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(
         super::application_computer_directory::maintain(host.clone(), updates.clone()),
     ));
+    #[cfg(feature = "sync")]
     let _hub_recovery = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(
         super::application_sync_hub_recovery::maintain_hub_identity(host.clone(), updates.clone()),
     ));
@@ -235,29 +238,16 @@ async fn maintain_account(
             async {
                 owner.refresh_account(&actor, &mut phase).await?;
                 phase = RefreshPhase::ObserveWorker;
-                let local = talos_config::YamlConfigStore::new(owner.config.source_path())
-                    .load_agent_node()?
-                    .runner;
-                Ok::<_, talos_error::TalosError>(match local {
-                    Some(local) => owner
-                        .sync_stores
-                        .connections
-                        .lock()
-                        .await
-                        .get(&local.node_id)
-                        .filter(|(account, _)| account == &actor.user_id)
-                        .and_then(|(_, connection)| connection.upgrade()),
-                    None => None,
-                })
+                Ok::<_, talos_error::TalosError>(())
             }
             .await
         };
         let failed = result.is_err();
         let retryable = result.as_ref().is_err_and(refresh_retryable);
         let retry_after_seconds = retryable.then_some(5_u64);
-        let connection = match result {
+        match result {
             Err(error) => {
-                let span = tracing::warn_span!("sync_account_initialization_failed", account_id = %actor.user_id, ?phase, ?wake_reason, elapsed_ms = started.elapsed().as_millis() as u64, retry_after_seconds);
+                let span = tracing::warn_span!("account_host_initialization_failed", account_id = %actor.user_id, ?phase, ?wake_reason, elapsed_ms = started.elapsed().as_millis() as u64, retry_after_seconds);
                 let _entered = span.enter();
                 talos_logging::report_error(&error);
                 owner
@@ -265,20 +255,16 @@ async fn maintain_account(
                     .write()
                     .expect("sync failures lock")
                     .insert(actor.user_id.clone(), error.to_api_error());
-                None
             }
-            Ok(connection) => {
+            Ok(()) => {
                 owner
                     .failures
                     .write()
                     .expect("sync failures lock")
                     .remove(&actor.user_id);
-                tracing::info!(account_id = %actor.user_id, ?wake_reason, elapsed_ms = started.elapsed().as_millis() as u64, "Sync account initialized; waiting for lifecycle changes");
-                connection
+                tracing::info!(account_id = %actor.user_id, ?wake_reason, elapsed_ms = started.elapsed().as_millis() as u64, "Account host initialized; waiting for lifecycle changes");
             }
         };
-        // The Hub runner owns H reconnect. Only this host's separate G connection
-        // needs a lifecycle wake when its stream ends.
         drop(owner);
         if failed {
             wake_reason = tokio::select! {
@@ -314,12 +300,7 @@ async fn maintain_account(
                 if changed.is_err() { break }
                 RefreshWake::WorkerStateChanged
             },
-            _ = async {
-                match &connection {
-                    Some(connection) => connection.ended().await,
-                    None => std::future::pending().await,
-                }
-            } => RefreshWake::WorkerConnectionEnded,
+
         };
     }
 }

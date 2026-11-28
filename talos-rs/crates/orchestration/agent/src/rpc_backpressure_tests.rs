@@ -111,6 +111,16 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
                 events: AgentProgressEventReceiver::new(receiver),
                 settlement: AgentRunSettlementReceiver::new(settlement),
             },
+            AgentSessionContext {
+                agent_id: "agent".into(),
+                session_id: "session".into(),
+                workspace: adapter
+                    .config
+                    .read()
+                    .unwrap()
+                    .resolve_workspace("default", "owner")
+                    .unwrap(),
+            },
             talos_types::AgentCaller {
                 session_id: identity.session_id.clone(),
                 turn_id: identity.turn_id.clone(),
@@ -196,7 +206,7 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
 }
 
 #[tokio::test]
-async fn disconnected_cleanup_uses_only_exact_harness_confirmation() {
+async fn disconnected_execution_continues_until_authorization_revocation() {
     assert_disconnected_cleanup(false).await;
     assert_disconnected_cleanup(true).await;
 }
@@ -262,6 +272,16 @@ async fn assert_disconnected_cleanup(finished: bool) {
             events: AgentProgressEventReceiver::new(receiver),
             settlement: AgentRunSettlementReceiver::new(settlement),
         },
+        agent_protocol::AgentSessionContext {
+            agent_id: "agent".into(),
+            session_id: "session".into(),
+            workspace: adapter
+                .config
+                .read()
+                .unwrap()
+                .resolve_workspace("default", "owner")
+                .unwrap(),
+        },
         talos_types::AgentCaller {
             session_id: "session".into(),
             turn_id: "turn".into(),
@@ -312,6 +332,9 @@ async fn assert_disconnected_cleanup(finished: bool) {
             .unwrap();
     }
     drop(response);
+    tokio::task::yield_now().await;
+    assert!(!stopped.is_cancelled());
+    adapter.clear_registration();
     let cleanup = tokio::time::timeout(Duration::from_secs(2), adapter.drain_disconnected())
         .await
         .unwrap();

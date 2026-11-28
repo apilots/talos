@@ -2,34 +2,31 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use talos_agent::{
-    AgentAdmissionPermit, AgentContext, AgentEventReducer, AgentInputParams, AgentRunExecution,
-    AgentRunFailure, AgentRunParams, AgentRunSettlement,
+    AgentAdmissionPermit, AgentContext, AgentInputParams, AgentRunExecution, AgentRunFailure,
+    AgentRunParams, AgentRunSettlement,
 };
 use talos_agent_api::{
-    AgentEvent, AgentEventPayload, AgentInterruptOutcome, AgentMessage, AgentMessageBlockContent,
-    AgentMessageBlockStatus, AgentMessageStatus, AgentTurnFailed, AgentTurnRef, AgentUserContent,
+    AgentEventPayload, AgentInterruptOutcome, AgentMessage, AgentMessageBlockContent, AgentTurnRef,
+    AgentUserContent,
 };
 use talos_coordinator::AgentCoordinator;
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_store::session::{
-    AgentEventCommit, AgentExecutionStore, ClaimContinuationParams, CommandLease,
-    CommitInitialAdmissionParams, CommitTerminalSettlementParams,
-};
+use talos_store::session::{AgentExecutionStore, CommandLease};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::message_queue::MessageQueueReservation;
 use crate::timeline::TimelineEventService;
-use crate::user_workspace_memory::UserWorkspaceMemoryReflection;
 use crate::SessionMessageQueueService;
 
 mod execution_task;
 mod notice;
 mod timeline_writer;
+mod worker_projection;
 
 #[derive(Clone)]
 struct ActiveTimelineStream {
     identity: AgentTurnRef,
-    agent_id: String,
+    session: agent_protocol::AgentSessionContext,
     input_tx: mpsc::Sender<RunningInputCommit>,
     terminal_commit_tx: watch::Sender<bool>,
 }
@@ -73,8 +70,6 @@ impl Drop for SessionMaintenanceGuard {
 }
 
 struct RunningInputCommit {
-    events: Vec<talos_agent_api::AgentEvent>,
-    command: Option<CommandLease>,
     permit: AgentAdmissionPermit,
     queued_input: Option<QueuedRunningInput>,
     result_tx: oneshot::Sender<TalosResult<()>>,
@@ -91,7 +86,8 @@ impl QueuedRunningInput {
             .reservation
             .take()
             .expect("queued running input reservation is consumed once");
-        self.queue.commit(reservation).map(|_| ())
+        self.queue
+            .acknowledge_admission(reservation.session_id(), reservation.message_id())
     }
 }
 
@@ -117,23 +113,81 @@ impl ExecutionPurpose {
     }
 }
 
-/// Service-owned canonical Agent execution driver.
-///
-/// It commits Agent facts before consuming Harness permits, then publishes the
-/// exact committed records through the product Timeline.
+/// Product execution projection driver. The Worker commits execution facts
+/// before admission returns; this driver materializes them for product policy.
 #[derive(Clone)]
 pub(crate) struct AgentExecutionDriver {
     // Shared only with the sibling turn policy; assembly owns their identity.
     pub(super) coordinator: Arc<dyn AgentCoordinator>,
     pub(super) execution_store: Arc<dyn AgentExecutionStore>,
     event_service: Arc<TimelineEventService>,
-    memory_reflection: Option<Arc<UserWorkspaceMemoryReflection>>,
     pub(super) sessions: Arc<crate::session::SessionService>,
     inner_model: Option<Arc<crate::InnerModelClient>>,
     active: Arc<Mutex<HashMap<String, LiveExecution>>>,
+    delivery_tasks: tokio_util::task::TaskTracker,
+    remote_observation_stop: tokio_util::sync::CancellationToken,
+    message_queue: Option<SessionMessageQueueService>,
 }
 
 impl AgentExecutionDriver {
+    pub(crate) fn begin_delivery_drain(&self) {
+        self.remote_observation_stop.cancel();
+        self.delivery_tasks.close();
+    }
+
+    pub(super) fn delivery_is_stopping(&self) -> bool {
+        self.remote_observation_stop.is_cancelled()
+    }
+
+    fn ensure_accepting(&self) -> TalosResult<()> {
+        if self.delivery_is_stopping() {
+            return Err(TalosError::new(
+                ErrorCode::ServiceUnavailable,
+                "Product execution delivery is stopping.",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn track_admission(
+        &self,
+    ) -> TalosResult<tokio_util::task::task_tracker::TaskTrackerToken> {
+        self.ensure_accepting()?;
+        let admission = self.delivery_tasks.token();
+        self.ensure_accepting()?;
+        Ok(admission)
+    }
+
+    pub(crate) async fn drain_delivery(&self) {
+        self.begin_delivery_drain();
+        self.delivery_tasks.wait().await;
+    }
+
+    pub(super) fn observation_stop(
+        &self,
+        execution_node_id: &str,
+    ) -> tokio_util::sync::CancellationToken {
+        if execution_node_id == "embedded" {
+            tokio_util::sync::CancellationToken::new()
+        } else {
+            self.remote_observation_stop.clone()
+        }
+    }
+
+    pub(crate) fn spawn_delivery(
+        &self,
+        future: impl std::future::Future<Output = ()> + Send + 'static,
+    ) {
+        self.delivery_tasks.spawn(future);
+    }
+
+    pub(crate) fn has_live_execution(&self, session_id: &str) -> bool {
+        self.active
+            .lock()
+            .expect("execution lock")
+            .contains_key(session_id)
+    }
+
     pub(super) async fn publish_active_turn(&self, session_id: &str) -> TalosResult<()> {
         self.event_service.publish_active_turn(session_id).await
     }
@@ -147,21 +201,59 @@ impl AgentExecutionDriver {
             coordinator,
             execution_store,
             event_service,
-            memory_reflection: None,
             sessions,
             inner_model: None,
             active: Arc::new(Mutex::new(HashMap::new())),
+            delivery_tasks: tokio_util::task::TaskTracker::new(),
+            remote_observation_stop: tokio_util::sync::CancellationToken::new(),
+            message_queue: None,
         }
     }
 
-    pub(crate) fn with_inner_model(
-        mut self,
-        inner_model: Arc<crate::InnerModelClient>,
-        memory_reflection: Arc<UserWorkspaceMemoryReflection>,
-    ) -> Self {
-        self.memory_reflection = Some(memory_reflection);
+    pub(crate) fn with_message_queue(mut self, queue: SessionMessageQueueService) -> Self {
+        self.message_queue = Some(queue);
+        self
+    }
+
+    pub(crate) fn with_inner_model(mut self, inner_model: Arc<crate::InnerModelClient>) -> Self {
         self.inner_model = Some(inner_model);
         self
+    }
+
+    /// Reconcile an original in-flight identity before returning a duplicate reservation.
+    /// Fresh submissions do not contact a sleeping Worker before the wake policy runs.
+    pub(crate) async fn reserve_command(
+        &self,
+        params: talos_store::session::CommandReservation,
+    ) -> TalosResult<talos_store::session::IdempotencyReservation> {
+        let reservation = self.execution_store.reserve_command(params.clone()).await?;
+        let reconcile = match &reservation {
+            talos_store::session::IdempotencyReservation::InProgress => true,
+            talos_store::session::IdempotencyReservation::Reserved(lease) => lease.reclaimed,
+            talos_store::session::IdempotencyReservation::Completed(_) => false,
+        };
+        if !reconcile {
+            return Ok(reservation);
+        }
+        let record = self
+            .sessions
+            .load_record(&params.session_id)
+            .await?
+            .ok_or_else(|| {
+                TalosError::new(ErrorCode::SessionNotFound, "Session is unavailable.")
+            })?;
+        let scope = self.sessions.build_agent_session_context(&record).await?;
+        self.project_worker(&scope).await?;
+        let current = self.execution_store.reserve_command(params).await?;
+        if matches!(
+            reservation,
+            talos_store::session::IdempotencyReservation::Reserved(_)
+        ) && current == talos_store::session::IdempotencyReservation::InProgress
+        {
+            Ok(reservation)
+        } else {
+            Ok(current)
+        }
     }
 
     pub(crate) async fn start(
@@ -172,21 +264,24 @@ impl AgentExecutionDriver {
         automation_origin: Option<talos_types::AutomationTurnOrigin>,
         subagent_limit: Option<std::num::NonZeroU32>,
     ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
-        self.begin_admission(identity.clone())?;
-        let params = match prepare.await {
+        self.begin_admission(identity.clone()).await?;
+        let mut params = match prepare.await {
             Ok(params) => params,
             Err(error) => {
                 self.remove_live_execution(&identity);
                 return Err(error);
             }
         };
-        if params.checkpoint.is_some() || params.continuation.is_some() {
+        params.subagent_limit = subagent_limit;
+        params.command = command.as_ref().map(command_identity);
+        params.automation_origin = automation_origin.clone();
+        if params.intent != agent_protocol::AgentRunIntent::Start {
             self.remove_live_execution(&identity);
             return Err(TalosError::internal(
-                "fresh Agent execution cannot include continuation state",
+                "fresh Agent execution requires a start intent",
             ));
         }
-        let agent_id = params.context.session.agent_id.clone();
+        let scope = params.context.session.clone();
         let execution = match self.coordinator.start(params).await {
             Ok(execution) => execution,
             Err(error) => {
@@ -194,23 +289,7 @@ impl AgentExecutionDriver {
                 return Err(error);
             }
         };
-        let commit = match self
-            .execution_store
-            .commit_initial_admission(CommitInitialAdmissionParams {
-                events: execution.admission.events.clone(),
-                command,
-                automation_origin,
-                subagent_limit,
-            })
-            .await
-        {
-            Ok(commit) => commit,
-            Err(error) => {
-                self.remove_live_execution(&identity);
-                return Err(error);
-            }
-        };
-        self.launch_execution(execution, commit, agent_id, ExecutionPurpose::Turn)
+        self.ingest_admission(execution, scope, ExecutionPurpose::Turn)
             .await
     }
 
@@ -221,7 +300,7 @@ impl AgentExecutionDriver {
         context: AgentContext,
     ) -> TalosResult<talos_types::talos::TokenUsage> {
         let identity = context.identity();
-        self.begin_admission(identity.clone())?;
+        self.begin_admission(identity.clone()).await?;
         let execution = match self.coordinator.compact_session(context.clone()).await {
             Ok(execution) => execution,
             Err(error) => {
@@ -229,28 +308,16 @@ impl AgentExecutionDriver {
                 return Err(error);
             }
         };
-        let [started] = execution.admission.events.as_slice() else {
+        let [_started] = execution.admission.events.as_slice() else {
             self.remove_live_execution(&identity);
             return Err(TalosError::internal(
                 "Agent compaction admission must contain one TurnStarted event",
             ));
         };
-        let committed = match self
-            .execution_store
-            .commit_maintenance_admission(started.clone())
-            .await
-        {
-            Ok(commit) => commit,
-            Err(error) => {
-                self.remove_live_execution(&identity);
-                return Err(error);
-            }
-        };
         let completion = self
-            .launch_execution(
+            .ingest_admission(
                 execution,
-                committed,
-                context.session.agent_id,
+                context.session.clone(),
                 ExecutionPurpose::Compaction,
             )
             .await?;
@@ -286,7 +353,7 @@ impl AgentExecutionDriver {
     pub(crate) async fn settle_recovered_turn(
         &self,
         identity: AgentTurnRef,
-        expected_event_seq: i64,
+        _expected_event_seq: i64,
         failure: AgentRunFailure,
         cleanup: AgentInterruptOutcome,
     ) -> TalosResult<AgentRunSettlement> {
@@ -296,60 +363,8 @@ impl AgentExecutionDriver {
                 format!("Agent cleanup is unconfirmed for {task_count} task(s)"),
             ));
         }
-        let checkpoint = self
-            .event_service
-            .turn_checkpoint(&identity, expected_event_seq)
-            .await?;
-        let mut reducer = AgentEventReducer::from_checkpoint(identity.clone(), checkpoint)?;
-        let cancelled = failure.error().is_code(ErrorCode::Cancelled);
-        let occurred_at = chrono::Utc::now().timestamp();
-        let recovery_events = reducer.close_open_lifecycle(
-            if cancelled {
-                AgentMessageStatus::Cancelled
-            } else {
-                AgentMessageStatus::Failed
-            },
-            if cancelled {
-                AgentMessageBlockStatus::Cancelled
-            } else {
-                AgentMessageBlockStatus::Failed
-            },
-            occurred_at,
-        )?;
-        let event = AgentEvent {
-            identity,
-            sequence: reducer.next_sequence(),
-            occurred_at,
-            payload: AgentEventPayload::TurnFailed(AgentTurnFailed {
-                error: failure.error().to_api_error(),
-                retryable: failure.is_retryable(),
-            }),
-        };
-        reducer.apply(event.clone())?;
-        let mut current_event_seq = expected_event_seq;
-        for recovery_event in recovery_events {
-            let commit = self
-                .execution_store
-                .commit_progress_event(recovery_event, current_event_seq)
-                .await?;
-            current_event_seq = commit.active_turn.last_event_seq;
-            self.event_service.publish_committed(commit.events);
-        }
-        let record = self
-            .execution_store
-            .commit_terminal_settlement(CommitTerminalSettlementParams {
-                event: event.clone(),
-                expected_event_seq: current_event_seq,
-                completed_turn_metrics: None,
-            })
-            .await?;
-        self.event_service.publish_committed([record]);
-        let checkpoint = reducer.checkpoint();
-        Ok(AgentRunSettlement::Finished {
-            event,
-            metrics: checkpoint.metrics,
-            result: Err(failure.into_error()),
-        })
+        let original = failure.into_error();
+        self.recovered_worker_settlement(&identity, &original).await
     }
 
     pub(crate) fn terminal_commit_waiter(
@@ -427,6 +442,7 @@ impl AgentExecutionDriver {
         command: Option<CommandLease>,
         queued_input: Option<QueuedRunningInput>,
     ) -> TalosResult<()> {
+        self.ensure_accepting()?;
         let identity = params.identity.clone();
         let active = self
             .active
@@ -447,13 +463,13 @@ impl AgentExecutionDriver {
                     "message input targets no active Timeline writer",
                 )
             })?;
+        let mut params = params;
+        params.command = command.as_ref().map(command_identity);
         let admission = self.coordinator.submit_input(params).await?;
         let (result_tx, result_rx) = oneshot::channel();
         active
             .input_tx
             .send(RunningInputCommit {
-                events: admission.events.clone(),
-                command,
                 permit: admission.permit,
                 queued_input,
                 result_tx,
@@ -481,38 +497,22 @@ impl AgentExecutionDriver {
         command: Option<CommandLease>,
     ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
         let identity = context.identity();
-        let (action_id, _response) = user_action_response(&input).ok_or_else(|| {
+        user_action_response(&input).ok_or_else(|| {
             TalosError::new(
                 ErrorCode::InvalidRequest,
                 "waiting Agent continuation requires one UserAction response",
             )
         })?;
-        let binding = self
-            .execution_store
-            .get_agent_continuation_binding(&identity)
-            .await?
-            .ok_or_else(|| {
-                TalosError::new(ErrorCode::Conflict, "Agent continuation binding is missing")
-            })?;
-        let checkpoint = self
-            .event_service
-            .turn_checkpoint(&identity, binding.expected_event_seq)
-            .await?;
-        if action_id != binding.action_id {
-            return Err(TalosError::new(
-                ErrorCode::Conflict,
-                "UserAction response does not match the durable continuation",
-            ));
-        }
-        let message_id = input.message_id.clone();
-        self.begin_admission(identity.clone())?;
+        self.begin_admission(identity.clone()).await?;
         let execution = match self
             .coordinator
             .start(AgentRunParams {
+                subagent_limit: None,
+                command: command.as_ref().map(command_identity),
+                automation_origin: None,
                 context: context.clone(),
                 input,
-                checkpoint: Some(checkpoint.clone()),
-                continuation: Some(binding.provider_ref),
+                intent: agent_protocol::AgentRunIntent::RespondUserAction,
             })
             .await
         {
@@ -522,33 +522,60 @@ impl AgentExecutionDriver {
                 return Err(error);
             }
         };
-        let commit = match self
-            .execution_store
-            .claim_continuation(ClaimContinuationParams {
-                events: execution.admission.events.clone(),
-                action_id: binding.action_id.clone(),
-                claim_id: message_id,
-                expected_event_seq: binding.expected_event_seq,
-                command,
-            })
+        self.ingest_admission(execution, context.session, ExecutionPurpose::Turn)
             .await
-        {
-            Ok(commit) => commit,
-            Err(error) => {
-                self.remove_live_execution(&identity);
-                return Err(error);
-            }
-        };
-        self.launch_execution(
-            execution,
-            commit,
-            context.session.agent_id,
-            ExecutionPurpose::Turn,
-        )
-        .await
     }
 
-    fn begin_admission(&self, identity: AgentTurnRef) -> TalosResult<()> {
+    async fn ingest_admission(
+        &self,
+        execution: AgentRunExecution,
+        session: agent_protocol::AgentSessionContext,
+        purpose: ExecutionPurpose,
+    ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
+        let identity = execution
+            .admission
+            .events
+            .first()
+            .ok_or_else(|| TalosError::internal("Worker admission is empty."))?
+            .identity
+            .clone();
+        let result = async {
+            let execution = commit_worker_admission(execution).await?;
+            if let Err(error) = self.project_worker(&session).await {
+                self.report_warning(&identity, error).await;
+            }
+            self.launch_execution(execution, session, purpose).await
+        }
+        .await;
+        if result.is_err() {
+            self.remove_live_execution(&identity);
+        }
+        result
+    }
+
+    async fn begin_admission(&self, identity: AgentTurnRef) -> TalosResult<()> {
+        self.ensure_accepting()?;
+        let previous = self
+            .active
+            .lock()
+            .expect("active Timeline stream lock")
+            .get(&identity.session_id)
+            .and_then(|execution| match execution {
+                LiveExecution::Running(stream) => Some(stream.identity.clone()),
+                _ => None,
+            });
+        if let Some(previous) = previous {
+            if self
+                .execution_store
+                .get_latest_agent_terminal_event(&identity.session_id)
+                .await?
+                .is_some_and(|event| event.identity == previous)
+            {
+                // A projected Worker terminal proves execution exited even while product
+                // title/usage side effects are still completing on the previous writer.
+                self.remove_live_execution(&previous);
+            }
+        }
         let mut active = self.active.lock().expect("active Timeline stream lock");
         if active.contains_key(&identity.session_id) {
             return Err(TalosError::new(
@@ -633,4 +660,23 @@ fn user_action_response(input: &AgentMessage) -> Option<(&str, &talos_types::Use
         return None;
     };
     Some((action_id, response))
+}
+
+fn command_identity(lease: &CommandLease) -> agent_protocol::AgentCommandIdentity {
+    agent_protocol::AgentCommandIdentity {
+        command: lease.command,
+        idempotency_key: lease.idempotency_key.clone(),
+        request_id: lease.request_id.clone(),
+    }
+}
+
+async fn commit_worker_admission(
+    mut execution: AgentRunExecution,
+) -> TalosResult<AgentRunExecution> {
+    let permit = std::mem::replace(
+        &mut execution.admission.permit,
+        AgentAdmissionPermit::new(async { Ok(()) }),
+    );
+    permit.consume().await?;
+    Ok(execution)
 }

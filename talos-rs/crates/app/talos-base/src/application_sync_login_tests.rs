@@ -11,7 +11,7 @@ pub(super) async fn verify(
         .unwrap();
     // Signed-in accounts follow the installed default; registration and Sync
     // initialize in the background before explicit settings mutations.
-    fresh.service.resume_account_sync(actor);
+    fresh.service.resume_account_host(actor);
     wait_for("first-login background Computer enrollment", async || {
         fresh
             .service
@@ -160,10 +160,10 @@ pub(super) async fn verify(
     );
     wait_for("operator opt-out stops Sync in background", async || {
         fresh.service.sync_status(actor).await.unwrap();
-        fresh.sync_host.sync_stores.handles.lock().await.is_empty()
+        fresh.host.stores.handles.lock().await.is_empty()
     })
     .await;
-    assert!(fresh.sync_host.sync_stores.handles.lock().await.is_empty());
+    assert!(fresh.host.stores.handles.lock().await.is_empty());
 
     fresh
 }

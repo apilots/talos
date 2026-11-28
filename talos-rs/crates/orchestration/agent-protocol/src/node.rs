@@ -24,6 +24,7 @@ pub struct Deployment {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisterParams {
+    pub product_owner: talos_types::NodeProductOwner,
     pub deployments: Vec<Deployment>,
     pub system_info: Option<NodeSystemInfo>,
 }

@@ -1,5 +1,5 @@
 //! Account-owned import/recovery observers. Remote recovery is polled alongside imports.
-use super::application_sync::ApplicationSyncHost;
+use super::application_host::ApplicationHost;
 use std::collections::HashMap;
 use tokio::task::JoinHandle;
 
@@ -43,23 +43,19 @@ impl SyncObservers {
     }
 }
 
-impl ApplicationSyncHost {
+impl ApplicationHost {
     /// Called under the handle registry lock, exactly once per installed handle.
     pub(crate) fn observe_sync(&self, account_id: &str, handle: &talos_sync::SyncHandle) {
         let mut changes = handle.subscribe_changes();
-        let mut status = handle.subscribe();
-        let service = self.service.clone();
         let account_id = account_id.to_owned();
         let observed_account = account_id.clone();
         let events = self.event_service.clone();
-        let sessions = self.sync_stores.sessions.clone();
+        let sessions = self.stores.sessions.clone();
         let host = self.self_weak.clone();
         tracing::info!(%account_id, "Sync import observer started");
         let lifetime = ObserverLifetime(account_id.clone());
         let task = tokio::spawn(async move {
             let _lifetime = lifetime;
-            let mut was_connected = false;
-            let mut recovery: Option<futures_util::future::BoxFuture<'static, ()>> = None;
             loop {
                 tokio::select! {
                     summary = changes.recv() => {
@@ -90,31 +86,11 @@ impl ApplicationSyncHost {
                             talos_sync::SyncResourceKey::Project { .. } | talos_sync::SyncResourceKey::File { .. } => {},
                         }
                     },
-                    changed = status.changed() => {
-                        if changed.is_err() { break; }
-                        let connected = status.borrow_and_update().connection == talos_sync::SyncConnectionState::Connected;
-                        let reconnected = connected && !was_connected;
-                        was_connected = connected;
-                        if reconnected {
-                            let service = service.clone();
-                            let account_id = account_id.clone();
-                            recovery = Some(Box::pin(async move {
-                                if let Err(error) = service.retry_shared_session_heads(&account_id).await { talos_logging::report_error(&error); }
-                            }));
-                        } else if !connected {
-                            recovery = None;
-                        }
-                    },
-                    _ = async {
-                        match recovery.as_mut() {
-                            Some(recovery) => recovery.await,
-                            None => std::future::pending().await,
-                        }
-                    } => { recovery = None; }
+
                 }
             }
         });
-        self.sync_stores
+        self.stores
             .observers
             .lock()
             .expect("Sync observers lock")

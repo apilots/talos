@@ -54,16 +54,8 @@ impl AgentHarnessRpcAdapter {
             Call::SetRegistrationAdmission(value) => {
                 unary!(value, set_registration_admission, Empty)
             }
-            Call::ActiveSessionCommand(_)
-            | Call::ExecuteAutomation(_)
-            | Call::PeerFileRead(_)
-            | Call::PeerFileUpdate(_)
-            | Call::PeerFileDelete(_)
-            | Call::AppendSessionHistorySupplement(_)
-            | Call::ReadSessionHistory(_)
+            Call::ExecuteAutomation(_)
             | Call::ResolveAttachments(_)
-            | Call::ReadMemoryProgress(_)
-            | Call::AdvanceMemoryProgress(_)
             | Call::SpawnSubagent(_)
             | Call::SendSubagentMessage(_)
             | Call::WaitSubagent(_)
@@ -117,12 +109,14 @@ impl AgentHarnessRpcAdapter {
             Call::DeleteConfig(value) => unary!(value, delete_config, DeleteConfig),
             Call::ReloadConfig(value) => unary!(value, reload_config, ReloadConfig),
 
+            Call::ReadExecutionPayload(value) => {
+                unary!(value, read_execution_payload, ExecutionPayload)
+            }
+            Call::ReadSessionEvents(value) => unary!(value, read_session_events, SessionEvents),
             Call::ReadSessionExecutionState(value) => {
                 unary!(value, read_session_execution_state, SessionExecutionState)
             }
-            Call::CommitSessionExecutionState(value) => {
-                unary!(value, commit_session_execution_state, Empty)
-            }
+
             Call::Start(value) => stream!(value, Start, serve_start, Run),
             Call::SubmitInput(value) => stream!(value, SubmitInput, serve_submit_input, Input),
             Call::CompactSession(value) => {
@@ -133,6 +127,7 @@ impl AgentHarnessRpcAdapter {
             }
             Call::Interrupt(value) => unary!(value, interrupt, Interrupt),
             Call::ClearSession(value) => unary!(value, clear_session, Empty),
+            Call::RetireSession(value) => unary!(value, retire_session, Empty),
             Call::CloseSession(value) => unary!(value, close_session, Empty),
             Call::ReadWorkspaceMemory(value) => {
                 unary!(value, read_workspace_memory, WorkspaceMemory)

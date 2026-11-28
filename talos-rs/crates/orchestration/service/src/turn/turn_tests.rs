@@ -1,7 +1,6 @@
 use super::*;
-use crate::test_support::{
-    canonical_user_admission, commit_test_running_turn, run_test_migrations, test_user_input,
-};
+use crate::test_support::{canonical_user_admission, run_test_migrations, test_user_input};
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use crate::{SessionMessageQueueService, TimelineEventService};
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -100,6 +99,7 @@ async fn submit_test_start(
 }
 
 struct RecordingAgentExecution {
+    worker_store: Mutex<Option<Arc<talos_store::execution::WorkerExecutionStore>>>,
     stream_request: Mutex<Option<AgentRunParams>>,
     stream_requests: Mutex<Vec<AgentRunParams>>,
     stream_request_received: Notify,
@@ -108,6 +108,7 @@ struct RecordingAgentExecution {
     input_permit_error: Mutex<Option<talos_error::TalosError>>,
     start_permit_error: Mutex<Option<talos_error::TalosError>>,
     panic_start_permit: AtomicBool,
+    admission_fault: Arc<Mutex<crate::test_worker::AdmissionFault>>,
     progress_event: Mutex<Option<CanonicalAgentEventPayload>>,
     hold_input_permit: Mutex<bool>,
     input_permit_started: Arc<Notify>,
@@ -132,6 +133,7 @@ struct RecordingAgentExecution {
 impl Default for RecordingAgentExecution {
     fn default() -> Self {
         Self {
+            worker_store: Mutex::new(None),
             stream_request: Mutex::new(None),
             stream_requests: Mutex::new(Vec::new()),
             stream_request_received: Notify::new(),
@@ -140,6 +142,7 @@ impl Default for RecordingAgentExecution {
             input_permit_error: Mutex::new(None),
             start_permit_error: Mutex::new(None),
             panic_start_permit: AtomicBool::new(false),
+            admission_fault: Arc::default(),
             progress_event: Mutex::new(None),
             hold_input_permit: Mutex::new(false),
             input_permit_started: Arc::new(Notify::new()),
@@ -288,9 +291,20 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
             self.execution.admission_release.notified().await;
         }
         let identity = request.context.identity();
-        let is_continuation = request.checkpoint.is_some();
-        let start_sequence = request
-            .checkpoint
+        let checkpoint = if request.user_action_response().is_some() {
+            let worker = self
+                .execution
+                .worker_store
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("Worker fixture journal");
+            worker.checkpoint(&identity).await?
+        } else {
+            None
+        };
+        let is_continuation = checkpoint.is_some();
+        let start_sequence = checkpoint
             .as_ref()
             .map_or(1, |checkpoint| checkpoint.last_sequence.saturating_add(1));
         let admission = canonical_user_admission(
@@ -305,7 +319,7 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
             .sequence
             .saturating_add(1);
         let mut progress = Vec::new();
-        if let Some(checkpoint) = request.checkpoint.as_ref() {
+        if let Some(checkpoint) = checkpoint.as_ref() {
             let (original_message, original_block) = checkpoint
                 .messages
                 .iter()
@@ -394,11 +408,21 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                 payload: CanonicalAgentEventPayload::MessageCompleted(completed_result_message),
             });
             next_sequence += 1;
-            let completed_original_block = AgentMessageBlock {
+            let mut completed_original_block = AgentMessageBlock {
                 status: AgentMessageBlockStatus::Completed,
                 completed_at: Some(6),
                 ..original_block
             };
+            if let AgentMessageBlockContent::ToolCall(call) = &mut completed_original_block.content
+            {
+                if let AgentToolCallArguments::Streaming { json_fragment } = &call.arguments {
+                    call.arguments = AgentToolCallArguments::Complete {
+                        value: talos_types::ToolArguments::from(
+                            serde_json::from_str::<serde_json::Value>(json_fragment).unwrap(),
+                        ),
+                    };
+                }
+            }
             progress.push(CanonicalAgentEvent {
                 identity: identity.clone(),
                 sequence: next_sequence,
@@ -716,16 +740,22 @@ async fn test_service_with_storage(
     let message_queue =
         SessionMessageQueueService::new(10).expect("queue service should initialize");
     let coordinator: Arc<dyn AgentCoordinator> = Arc::new(RecordingExecutionCoordinator {
-        execution: agent_execution,
+        execution: agent_execution.clone(),
         delegate: coordinator,
     });
+    let (coordinator, journal) = crate::test_worker::durable_with_store_and_fault(
+        coordinator,
+        agent_execution.admission_fault.clone(),
+    )
+    .await;
+    *agent_execution.worker_store.lock().unwrap() = Some(journal);
     (
         TurnService::new(
             AgentExecutionDriver::new(coordinator, store.clone(), event_service.clone(), sessions),
             profile_store,
             message_queue.clone(),
             config,
-            Arc::new(crate::turn::NodeAdmissionGates::default()),
+            Arc::new(agent_protocol::NodeAdmissionGates::default()),
         ),
         event_service,
         store,
@@ -734,6 +764,15 @@ async fn test_service_with_storage(
 }
 
 async fn insert_pending_dynamic_action(store: &DatabaseSessionStore, item_id: Option<&str>) {
+    store
+        .project_test_events(TestWorkerEvents::new(pending_dynamic_action_events(
+            item_id,
+        )))
+        .await
+        .unwrap();
+}
+
+fn pending_dynamic_action_events(item_id: Option<&str>) -> Vec<CanonicalAgentEvent> {
     let pending_action = PendingUserAction {
         action_id: "action-1".to_string(),
         call_id: "call-1".to_string(),
@@ -743,21 +782,18 @@ async fn insert_pending_dynamic_action(store: &DatabaseSessionStore, item_id: Op
             tool_name: "AskUser".to_string(),
         }),
     };
-    insert_canonical_pending_action(
-        store,
+    canonical_pending_action_events(
         pending_action,
         item_id.unwrap_or("tool-original"),
         "AskUser",
     )
-    .await;
 }
 
-async fn insert_canonical_pending_action(
-    store: &DatabaseSessionStore,
+fn canonical_pending_action_events(
     pending_action: PendingUserAction,
     item_id: &str,
     tool_name: &str,
-) {
+) -> Vec<CanonicalAgentEvent> {
     let identity = talos_agent_api::AgentTurnRef::new("s1", "turn-original");
     let running_message = completed_agent_user_input(
         "turn-original",
@@ -766,7 +802,7 @@ async fn insert_canonical_pending_action(
         1,
     )
     .unwrap();
-    let mut commit = commit_test_running_turn(store, identity.clone(), running_message).await;
+    let mut events = canonical_user_admission(identity.clone(), running_message, 1, true);
     let assistant_message = AgentMessage {
         message_id: "agent-message-original".to_string(),
         turn_id: identity.turn_id.clone(),
@@ -776,20 +812,14 @@ async fn insert_canonical_pending_action(
         created_at: 2,
         completed_at: None,
     };
-    commit = store
-        .commit_progress_event(
-            CanonicalAgentEvent {
-                identity: identity.clone(),
-                sequence: commit.events.last().unwrap().sequence + 1,
-                occurred_at: 2,
-                payload: CanonicalAgentEventPayload::MessageStarted(AgentMessageStarted {
-                    message: assistant_message,
-                }),
-            },
-            commit.active_turn.last_event_seq,
-        )
-        .await
-        .unwrap();
+    events.push(CanonicalAgentEvent {
+        identity: identity.clone(),
+        sequence: events.last().unwrap().sequence + 1,
+        occurred_at: 2,
+        payload: CanonicalAgentEventPayload::MessageStarted(AgentMessageStarted {
+            message: assistant_message,
+        }),
+    });
     let tool_block = AgentMessageBlock {
         block_id: item_id.to_string(),
         status: AgentMessageBlockStatus::Running,
@@ -804,27 +834,18 @@ async fn insert_canonical_pending_action(
         started_at: 3,
         completed_at: None,
     };
-    commit = store
-        .commit_progress_event(
-            CanonicalAgentEvent {
-                identity: identity.clone(),
-                sequence: commit.events.last().unwrap().sequence + 1,
-                occurred_at: 3,
-                payload: CanonicalAgentEventPayload::MessageBlockStarted(
-                    AgentMessageBlockStarted {
-                        message_id: "agent-message-original".to_string(),
-                        block: tool_block,
-                    },
-                ),
-            },
-            commit.active_turn.last_event_seq,
-        )
-        .await
-        .unwrap();
+    events.push(CanonicalAgentEvent {
+        identity: identity.clone(),
+        sequence: events.last().unwrap().sequence + 1,
+        occurred_at: 3,
+        payload: CanonicalAgentEventPayload::MessageBlockStarted(AgentMessageBlockStarted {
+            message_id: "agent-message-original".to_string(),
+            block: tool_block,
+        }),
+    });
     let waiting = CanonicalAgentEvent {
         identity,
-        sequence: commit
-            .events
+        sequence: events
             .last()
             .expect("canonical admission event")
             .sequence
@@ -836,19 +857,11 @@ async fn insert_canonical_pending_action(
             },
         ),
     };
-    store
-        .commit_waiting_settlement(
-            waiting,
-            AgentContinuationRef {
-                opaque_id: "continuation-1".to_string(),
-            },
-            commit.active_turn.last_event_seq,
-        )
-        .await
-        .unwrap();
+    events.push(waiting);
+    events
 }
 
-async fn insert_pending_sandbox_approval(store: &DatabaseSessionStore) {
+fn pending_sandbox_approval_events() -> Vec<CanonicalAgentEvent> {
     let pending_action = PendingUserAction {
         action_id: "action-1".to_string(),
         call_id: "call-1".to_string(),
@@ -869,7 +882,7 @@ async fn insert_pending_sandbox_approval(store: &DatabaseSessionStore) {
             ],
         }),
     };
-    insert_canonical_pending_action(store, pending_action, "tool-original", "Bash").await;
+    canonical_pending_action_events(pending_action, "tool-original", "Bash")
 }
 
 fn test_model_selection() -> ModelSelection {
@@ -964,4 +977,167 @@ async fn wait_for_canonical_terminal(store: &DatabaseSessionStore) {
     })
     .await
     .expect("canonical Turn should settle");
+}
+
+async fn seed_worker_fixture(
+    service: &TurnService,
+    product: &DatabaseSessionStore,
+    execution: &RecordingAgentExecution,
+    events: Vec<CanonicalAgentEvent>,
+) {
+    let journal = execution.worker_store.lock().unwrap().clone().unwrap();
+    crate::test_worker::seed_worker_events(
+        service.execution.sessions.as_ref(),
+        product,
+        journal.as_ref(),
+        events,
+        Some(AgentContinuationRef {
+            opaque_id: "continuation-1".into(),
+        }),
+    )
+    .await;
+}
+
+async fn fail_worker_fixture(execution: &RecordingAgentExecution, code: talos_error::ErrorCode) {
+    let journal = execution.worker_store.lock().unwrap().clone().unwrap();
+    let scope = journal.session_scope("s1").await.unwrap().unwrap();
+    let identity = journal
+        .execution_state(&scope)
+        .await
+        .unwrap()
+        .unwrap()
+        .active_turn
+        .unwrap();
+    let checkpoint = journal.checkpoint(&identity).await.unwrap().unwrap();
+    let mut reducer =
+        talos_agent::AgentEventReducer::from_checkpoint(identity.clone(), checkpoint).unwrap();
+    let mut events = reducer
+        .close_open_lifecycle(
+            AgentMessageStatus::Failed,
+            AgentMessageBlockStatus::Failed,
+            2,
+        )
+        .unwrap();
+    let event = CanonicalAgentEvent {
+        identity,
+        sequence: reducer.next_sequence(),
+        occurred_at: 2,
+        payload: CanonicalAgentEventPayload::TurnFailed(AgentTurnFailed {
+            error: TalosError::new(code, "Worker execution failed.").to_api_error(),
+            retryable: false,
+        }),
+    };
+    reducer.apply(event.clone()).unwrap();
+    events.push(event);
+    journal
+        .append(
+            &scope,
+            events,
+            &reducer.checkpoint(),
+            Some(agent_protocol::AgentExecutionSettlement::Finished {
+                metrics: reducer.checkpoint().metrics.clone(),
+                memory_usage: Vec::new(),
+            }),
+        )
+        .await
+        .unwrap();
+}
+
+async fn complete_held_turn(service: &TurnService, execution: &RecordingAgentExecution) {
+    let journal = execution.worker_store.lock().unwrap().clone().unwrap();
+    let next = execution
+        .stream_requests
+        .lock()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    let checkpoint = journal
+        .checkpoint(&next.context.identity())
+        .await
+        .unwrap()
+        .unwrap();
+    drop(execution.active_progress.lock().unwrap().take());
+    execution
+        .active_settlement
+        .lock()
+        .unwrap()
+        .take()
+        .unwrap()
+        .send(Ok(AgentRunSettlement::Finished {
+            event: CanonicalAgentEvent {
+                identity: next.context.identity(),
+                sequence: checkpoint.last_sequence + 1,
+                occurred_at: chrono::Utc::now().timestamp(),
+                payload: CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
+            },
+            metrics: checkpoint.metrics,
+            result: Ok(()),
+        }))
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), service.drain_execution_delivery())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn delivery_drain_joins_inflight_admission_through_business_completion() {
+    let execution = Arc::new(RecordingAgentExecution::default());
+    execution.hold_admission.store(true, Ordering::SeqCst);
+    let (service, _timeline, store, _queue) = test_service(execution.clone()).await;
+    create_test_session_record(store.clone()).await;
+    let submit = |input: &str| StartTurnRequest {
+        node_id: None,
+        session_id: "s1".into(),
+        input: test_user_input(input),
+        model_selection: None,
+        user_permission_mode: None,
+        project_id: None,
+        current_directory: None,
+        client_request_id: Some(input.replace(' ', "-")),
+    };
+    let request = submit("before shutdown");
+    let admitting = service.clone();
+    let started =
+        tokio::spawn(
+            async move { submit_test_start(&admitting, test_session(), request, None).await },
+        );
+    execution.admission_reached.notified().await;
+    let drain = service.drain_execution_delivery();
+    tokio::pin!(drain);
+    assert!(futures_util::poll!(&mut drain).is_pending());
+    execution.admission_release.notify_one();
+    let accepted = started.await.unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), drain)
+        .await
+        .unwrap();
+    assert!(store.get_agent_active_turn("s1").await.unwrap().is_none());
+    assert!(store
+        .pending_worker_settlements("s1")
+        .await
+        .unwrap()
+        .is_empty());
+    let history = store
+        .list_agent_turn_events(
+            &talos_agent_api::AgentTurnRef::new("s1", &accepted.turn_id),
+            100,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .filter(|event| event.payload.is_terminal())
+            .count(),
+        1
+    );
+    assert!(
+        submit_test_start(&service, test_session(), submit("after shutdown"), None)
+            .await
+            .unwrap_err()
+            .is_code(talos_error::ErrorCode::ServiceUnavailable)
+    );
+    assert_eq!(execution.stream_requests.lock().unwrap().len(), 1);
 }

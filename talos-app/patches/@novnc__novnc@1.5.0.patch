@@ -1,5 +1,5 @@
 diff --git a/lib/display.js b/lib/display.js
-index 8fb819d4ae513e42743efc0edbbb819da33e7679..20cc07f9c759bb2eb398e860dd811ef411c29247 100644
+index 8fb819d4ae513e42743efc0edbbb819da33e7679..e2b66d2cfa85888c3d6aa09107411ad459a825a0 100644
 --- a/lib/display.js
 +++ b/lib/display.js
 @@ -59,5 +59,9 @@ var Display = exports["default"] = /*#__PURE__*/function () {
@@ -12,3 +12,44 @@ index 8fb819d4ae513e42743efc0edbbb819da33e7679..20cc07f9c759bb2eb398e860dd811ef4
      this._drawCtx = this._backbuffer.getContext('2d');
      this._damageBounds = {
        left: 0,
+@@ -145,7 +149,7 @@ var Display = exports["default"] = /*#__PURE__*/function () {
+     }
+   }, {
+     key: "viewportChangeSize",
+-    value: function viewportChangeSize(width, height) {
++    value: function viewportChangeSize(width, height, emptyFramebuffer) {
+       if (!this._clipViewport || typeof width === "undefined" || typeof height === "undefined") {
+         Log.Debug("Setting viewport to full display region");
+         width = this._fbWidth;
+@@ -170,7 +174,11 @@ var Display = exports["default"] = /*#__PURE__*/function () {
+         // The position might need to be updated if we've grown
+         this.viewportChangePos(0, 0);
+-        this._damage(vp.x, vp.y, vp.w, vp.h);
+-        this.flip();
++        // Resizing the target already cleared it. A new framebuffer has no
++        // pixels to copy, so avoid initializing a full blank canvas transfer.
++        if (!emptyFramebuffer) {
++          this._damage(vp.x, vp.y, vp.w, vp.h);
++          this.flip();
++        }
+-
++
+         // Update the visible size of the target canvas
+         this._rescale(this._scale);
+@@ -199,6 +207,7 @@ var Display = exports["default"] = /*#__PURE__*/function () {
+       this._fbWidth = width;
+       this._fbHeight = height;
+       var canvas = this._backbuffer;
++      var emptyFramebuffer = canvas.width === 0 || canvas.height === 0;
+       if (canvas.width !== width || canvas.height !== height) {
+         // We have to save the canvas data since changing the size will clear it
+         var saveImg = null;
+@@ -219,7 +228,7 @@ var Display = exports["default"] = /*#__PURE__*/function () {
+       // Readjust the viewport as it may be incorrectly sized
+       // and positioned
+       var vp = this._viewportLoc;
+-      this.viewportChangeSize(vp.w, vp.h);
++      this.viewportChangeSize(vp.w, vp.h, emptyFramebuffer);
+       this.viewportChangePos(0, 0);
+     }
+   }, {

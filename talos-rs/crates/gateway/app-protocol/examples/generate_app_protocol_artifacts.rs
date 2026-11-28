@@ -23,6 +23,11 @@ fn main() {
     )
     .expect("automation typescript fixture should be written");
     fs::write(
+        ts_path.with_file_name("browser.ts"),
+        talos_app_protocol::schema::generate_browser_typescript(),
+    )
+    .expect("browser typescript fixture should be written");
+    fs::write(
         ts_path.with_file_name("desktop.ts"),
         talos_app_protocol::schema::generate_desktop_typescript(),
     )

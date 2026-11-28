@@ -20,7 +20,35 @@ pub(crate) struct ResourceAccessService {
     sessions: Arc<SessionService>,
     projects: Arc<ProjectService>,
     restrict_embedded: bool,
-    nodes: Option<crate::AgentNodeService>,
+    nodes: Option<crate::ProductNodeAccess>,
+    product_owner: talos_types::NodeProductOwner,
+}
+
+/// Media-only access preserves NodeMedia grants without exposing product operations.
+/// The inner environment never leaves this boundary and cannot create Session state.
+pub(crate) struct DesktopWorkerEnvironment(Arc<dyn agent_protocol::WorkerEnvironment>);
+impl DesktopWorkerEnvironment {
+    pub(crate) async fn snapshot(
+        &self,
+        context: agent_protocol::WorkerEnvironmentContext,
+    ) -> TalosResult<talos_types::BrowserSnapshot> {
+        self.0
+            .browser(
+                context,
+                talos_types::BrowserRequest {
+                    node_id: None,
+                    operation: talos_types::BrowserOperation::Read,
+                },
+            )
+            .await
+    }
+    pub(crate) async fn open(
+        &self,
+        context: agent_protocol::WorkerEnvironmentContext,
+        request: talos_types::WorkerDesktopOpen,
+    ) -> TalosResult<()> {
+        self.0.desktop_open(context, request).await
+    }
 }
 
 /// Request accepted by `TalosService` when a caller needs a session handle.
@@ -40,7 +68,7 @@ impl ResourceAccessService {
         sessions: Arc<SessionService>,
         projects: Arc<ProjectService>,
         restrict_embedded: bool,
-        nodes: Option<crate::AgentNodeService>,
+        nodes: Option<crate::ProductNodeAccess>,
     ) -> Self {
         Self {
             coordinator,
@@ -48,7 +76,45 @@ impl ResourceAccessService {
             projects,
             restrict_embedded,
             nodes,
+            product_owner: talos_types::NodeProductOwner::Server,
         }
+    }
+
+    pub(crate) fn set_product_owner(&mut self, owner: talos_types::NodeProductOwner) {
+        self.product_owner = owner;
+    }
+
+    async fn ensure_product_node_access(&self, actor: &Actor, node_id: &str) -> TalosResult<()> {
+        if node_id == "embedded" {
+            return Ok(());
+        }
+        if self.product_owner == talos_types::NodeProductOwner::Computer {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::PermissionDenied,
+                "Personal products operate only their embedded Worker.",
+            ));
+        }
+        let Some(nodes) = &self.nodes else {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::PermissionDenied,
+                "This product has no registered Worker authority.",
+            ));
+        };
+        if nodes.product_owner(actor, node_id).await? != Some(talos_types::NodeProductOwner::Server)
+        {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::PermissionDenied,
+                "Personal Computer operations require its product API through Relay.",
+            ));
+        }
+        nodes
+            .ensure_execution_product_owner(
+                node_id,
+                &actor.user_id,
+                talos_types::NodeProductOwner::Server,
+            )
+            .await?;
+        Ok(())
     }
 
     pub(crate) async fn ensure_worker_access(
@@ -66,6 +132,7 @@ impl ResourceAccessService {
     }
 
     async fn ensure_managed_node_access(&self, actor: &Actor, node_id: &str) -> TalosResult<()> {
+        self.ensure_product_node_access(actor, node_id).await?;
         if let Some(nodes) = &self.nodes {
             nodes.ensure_managed_node_access(actor, node_id).await?;
         }
@@ -103,7 +170,7 @@ impl ResourceAccessService {
         let workspace = self
             .worker_environment(actor, &execution_node_id)
             .await?
-            .workspace_info(actor.worker_environment_context())
+            .workspace_info(crate::access::worker_environment_context(actor))
             .await?;
         self.sessions
             .create_session(CreateSessionParams {
@@ -142,6 +209,8 @@ impl ResourceAccessService {
             ));
         }
         let query = SessionQuery {
+            worker_execution_only: actor.request_origin
+                == talos_auth::ProductRequestOrigin::RemoteProduct,
             tree_scope: talos_store::session::SessionTreeScope::Primary,
             user_id: Some(actor.user_id.clone()),
             channel_id: None,
@@ -177,8 +246,11 @@ impl ResourceAccessService {
             ));
         }
         self.ensure_session_visibility(actor, &record)?;
+        self.sessions
+            .ensure_product_history_access(actor, session_id)
+            .await?;
         if record.session_kind == talos_types::SessionKind::Talo {
-            actor.ensure_managed_worker_access()?;
+            talos_auth::ensure_managed_worker_access(actor)?;
         }
         Ok(record)
     }
@@ -188,6 +260,9 @@ impl ResourceAccessService {
         session: SessionRecord,
         patch: SessionPatch,
     ) -> TalosResult<SessionRecord> {
+        self.sessions
+            .ensure_execution_supported(&session.id)
+            .await?;
         let session_id = session.id.clone();
         self.sessions
             .patch_session(session, patch)
@@ -202,15 +277,16 @@ impl ResourceAccessService {
 
     pub(crate) async fn clear_session(&self, session: SessionRecord) -> TalosResult<SessionInfo> {
         let session = self.sessions.prepare_execution(&session).await?;
-        let expected_history_cursor = self.sessions.ensure_worker_idle(&session).await?;
+        let mut expected_history_cursor = self.sessions.ensure_worker_idle(&session).await?;
+        expected_history_cursor.history_generation = self
+            .sessions
+            .product_history_generation(&session.id)
+            .await?;
         let context = self.sessions.build_agent_session_context(&session).await?;
         self.coordinator
             .clear_session(context, expected_history_cursor)
             .await?;
         let record = self.sessions.clear_session_history(session).await?;
-        self.sessions.commit_cleared_history(&record).await?;
-        self.sessions
-            .schedule_shared_history_cursor(record.id.clone());
         self.sessions.session_info(&record).await
     }
 
@@ -221,7 +297,6 @@ impl ResourceAccessService {
         self.coordinator
             .close_session(context, expected_history_cursor)
             .await?;
-        self.sessions.schedule_shared_history_cursor(session.id);
         Ok(())
     }
 
@@ -233,10 +308,7 @@ impl ResourceAccessService {
         let expected_history_cursor = self.sessions.ensure_worker_idle(&session).await?;
         let context = self.sessions.build_agent_session_context(&session).await?;
         self.coordinator
-            .clear_session(context.clone(), expected_history_cursor.clone())
-            .await?;
-        self.coordinator
-            .close_session(context, expected_history_cursor)
+            .retire_session(context, expected_history_cursor)
             .await?;
         Ok(session)
     }
@@ -253,9 +325,45 @@ impl ResourceAccessService {
     ) -> TalosResult<ProjectRecord> {
         let project = self.get_project_record(project_id).await?;
         self.ensure_project_visibility(actor, &project)?;
-        self.ensure_managed_node_access(actor, &project.execution_node_id)
-            .await?;
         Ok(project)
+    }
+
+    /// Authorizes the original NodeMedia path independently of product ownership.
+    /// This port supports snapshot validation and one ephemeral stream grant only.
+    pub(crate) async fn desktop_environment(
+        &self,
+        actor: &Actor,
+        node_id: &str,
+    ) -> TalosResult<DesktopWorkerEnvironment> {
+        if node_id == "embedded" {
+            self.ensure_worker_access(actor, node_id).await?;
+        } else {
+            if self.product_owner != talos_types::NodeProductOwner::Server || actor.auth_disabled {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::PermissionDenied,
+                    "Remote desktop admission requires the central Server.",
+                ));
+            }
+            let nodes = self.nodes.as_ref().ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::PermissionDenied,
+                    "NodeMedia authority is unavailable.",
+                )
+            })?;
+            nodes
+                .get_node(
+                    actor,
+                    crate::GetNodeRequest {
+                        node_id: node_id.into(),
+                    },
+                )
+                .await?;
+        }
+        Ok(DesktopWorkerEnvironment(
+            self.coordinator
+                .worker_environment(node_id, &actor.user_id)
+                .await?,
+        ))
     }
 
     pub(crate) async fn worker_environment(
@@ -278,7 +386,10 @@ impl ResourceAccessService {
         let directory = self
             .worker_environment(actor, &node_id)
             .await?
-            .validate_project_directory(actor.worker_environment_context(), request.directory)
+            .validate_project_directory(
+                crate::access::worker_environment_context(actor),
+                request.directory,
+            )
             .await?;
         self.projects
             .create_project(request.name, directory, actor.user_id.clone(), node_id)

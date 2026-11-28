@@ -1,0 +1,37 @@
+[package]
+name = "talos-control-plane"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Authoritative Talos node and managed Worker control plane"
+
+[dependencies]
+agent-protocol.workspace = true
+base64.workspace = true
+chrono.workspace = true
+getrandom = { workspace = true, features = ["std"] }
+sha2.workspace = true
+subtle.workspace = true
+talos-auth.workspace = true
+talos-config.workspace = true
+talos-error.workspace = true
+talos-logging.workspace = true
+talos-store = { workspace = true, default-features = false }
+talos-types.workspace = true
+talos-worker-runtime.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+url = "2"
+
+[dev-dependencies]
+async-trait.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+talos-storage.workspace = true
+tempfile = "3"
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

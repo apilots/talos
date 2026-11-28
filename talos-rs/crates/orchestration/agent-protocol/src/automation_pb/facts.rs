@@ -70,7 +70,7 @@ enum_codec!(
     ]
 );
 
-pub(super) fn encode_origin(value: AutomationTurnOrigin) -> pb::AutomationTurnOrigin {
+pub fn encode_origin(value: AutomationTurnOrigin) -> pb::AutomationTurnOrigin {
     use pb::automation_turn_origin::Origin;
     pb::AutomationTurnOrigin {
         origin: Some(match value {
@@ -94,7 +94,7 @@ pub(super) fn encode_origin(value: AutomationTurnOrigin) -> pb::AutomationTurnOr
     }
 }
 
-pub(super) fn decode_origin(value: pb::AutomationTurnOrigin) -> TalosResult<AutomationTurnOrigin> {
+pub fn decode_origin(value: pb::AutomationTurnOrigin) -> TalosResult<AutomationTurnOrigin> {
     Ok(match value.origin.ok_or_else(invalid)? {
         pb::automation_turn_origin::Origin::Goal(value) => {
             required(&value.goal_id)?;

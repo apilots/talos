@@ -4,6 +4,7 @@ use agent_protocol::{NodeHealth, NodeMode, NodeStatus};
 /// returned from the public node management API.
 #[derive(Clone, PartialEq, Eq)]
 pub struct NodeRecord {
+    pub product_owner: Option<talos_types::NodeProductOwner>,
     pub system_info: Option<talos_types::NodeSystemInfo>,
     pub node_id: String,
     pub owner_user_id: Option<String>,
@@ -46,6 +47,7 @@ pub struct CreateNodeParams {
 }
 
 pub struct RegisterNodeParams {
+    pub product_owner: talos_types::NodeProductOwner,
     pub system_info: Option<talos_types::NodeSystemInfo>,
     pub node_id: String,
     pub expected_credential_hash: [u8; 32],
@@ -119,4 +121,27 @@ pub struct SetNodeStatusParams {
     pub node_id: String,
     pub status: NodeStatus,
     pub now_at: i64,
+}
+
+impl NodeRecord {
+    /// Project public directory metadata without exposing stored credentials.
+    pub fn into_info(self) -> talos_types::NodeInfo {
+        talos_types::NodeInfo {
+            system_info: self.system_info,
+            node_id: self.node_id,
+            display_name: self.display_name,
+            mode: self.mode,
+            endpoint: self.endpoint,
+            status: self.status,
+            health: self.health,
+            lease_expires_at: self.lease_expires_at,
+            last_heartbeat_at: self.last_heartbeat_at,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            owner_user_id: self.owner_user_id,
+            available: self.mode == NodeMode::Embedded && self.status == NodeStatus::Enabled,
+            credential_expires_at: self.credential_expires_at,
+            managed_worker_phase: None,
+        }
+    }
 }

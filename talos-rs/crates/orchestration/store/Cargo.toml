@@ -5,6 +5,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = ["sync"]
+sync = ["dep:talos-sync"]
+
 [dependencies]
 async-trait = { workspace = true }
 chrono = { workspace = true }
@@ -19,13 +23,14 @@ talos-error = { workspace = true }
 talos-fs = { workspace = true }
 talos-memory = { workspace = true }
 talos-storage = { workspace = true }
-talos-sync = { workspace = true }
+talos-sync = { workspace = true, optional = true }
 talos-types = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]
+talos-config.workspace = true
 talos-sync-sdk.workspace = true
 talos-auth.workspace = true
 tempfile = "3.8"

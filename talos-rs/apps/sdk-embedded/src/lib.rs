@@ -70,8 +70,47 @@ use request_context::{
 
 type Subscriptions = HashMap<String, JoinHandle<()>>;
 
+struct EmbeddedRuntime {
+    product: talos_base::TalosProductRuntime,
+    execution: Option<Arc<TalosApplicationRuntime>>,
+}
+impl std::ops::Deref for EmbeddedRuntime {
+    type Target = talos_base::TalosProductRuntime;
+    fn deref(&self) -> &Self::Target {
+        &self.product
+    }
+}
+impl EmbeddedRuntime {
+    fn from_full(runtime: TalosApplicationRuntime) -> Self {
+        let product = talos_base::TalosProductRuntime {
+            config: runtime.config.clone(),
+            service: runtime.service.clone(),
+            event_service: runtime.event_service.clone(),
+            auth_service: runtime.auth_service.clone(),
+            gateway: runtime.gateway.clone(),
+        };
+        Self {
+            product,
+            execution: Some(Arc::new(runtime)),
+        }
+    }
+    fn resume_account_host(&self, actor: &Actor) {
+        if self.execution.is_some() {
+            self.service.resume_account_host(actor);
+        }
+    }
+    async fn shutdown(&self) -> TalosResult<()> {
+        match &self.execution {
+            Some(runtime) => runtime.shutdown().await,
+            None => Ok(()),
+        }
+    }
+}
+
 pub struct EmbeddedServerClient {
-    runtime: Arc<TalosApplicationRuntime>,
+    remote: Option<Arc<tokio::sync::Mutex<talos_sdk::AppServerClient>>>,
+    selected_computer: Option<String>,
+    runtime: Arc<EmbeddedRuntime>,
     actor: Actor,
     subscriptions: Arc<Mutex<Option<Subscriptions>>>,
     shutdown_result: Arc<OnceCell<TalosResult<()>>>,
@@ -81,7 +120,7 @@ impl EmbeddedServerClient {
     pub async fn from_runtime(runtime: TalosApplicationRuntime) -> TalosResult<Self> {
         let auth_enabled = runtime.config.gateway.auth;
         Self::from_runtime_with_actor(
-            runtime,
+            EmbeddedRuntime::from_full(runtime),
             if auth_enabled {
                 Actor::regular("local")
             } else {
@@ -93,8 +132,29 @@ impl EmbeddedServerClient {
         .await
     }
 
+    /// Reuse the existing SDK/Gateway for definition-only management without a Worker host.
+    pub async fn from_product_runtime(
+        runtime: talos_base::TalosProductRuntime,
+    ) -> TalosResult<Self> {
+        let auth_enabled = runtime.config.gateway.auth;
+        Self::from_runtime_with_actor(
+            EmbeddedRuntime {
+                product: runtime,
+                execution: None,
+            },
+            if auth_enabled {
+                Actor::regular("local")
+            } else {
+                Actor::auth_disabled()
+            },
+            auth_enabled,
+            false,
+        )
+        .await
+    }
+
     async fn from_runtime_with_actor(
-        runtime: TalosApplicationRuntime,
+        runtime: EmbeddedRuntime,
         actor: Actor,
         auth_enabled: bool,
         actor_overridden: bool,
@@ -105,9 +165,11 @@ impl EmbeddedServerClient {
             actor
         };
         if !actor.auth_disabled && actor.access_token.is_some() {
-            runtime.service.sync_status(&actor).await?;
+            runtime.resume_account_host(&actor);
         }
         Ok(Self {
+            remote: None,
+            selected_computer: None,
             runtime: Arc::new(runtime),
             actor,
             subscriptions: Arc::new(Mutex::new(Some(HashMap::new()))),
@@ -115,11 +177,66 @@ impl EmbeddedServerClient {
         })
     }
 
+    fn control_plane_client(&self) -> TalosResult<Option<talos_sdk::AppServerClient>> {
+        let Some(token) = self.actor.access_token.clone() else {
+            return Ok(None);
+        };
+        let config = self.runtime.config.reload()?;
+        let ca =
+            talos_service::read_worker_trusted_ca(config.cloud.agent_trusted_ca_file.as_deref())?;
+        talos_sdk::AppServerClient::connect_product_http(
+            &config.cloud.agent_base_url,
+            token,
+            "embedded".into(),
+            ca.as_deref(),
+        )
+        .map(Some)
+    }
+
+    /// Select a remote product through Talos Server without copying its state
+    /// into the local runtime. Embedded or this machine's registration selects local.
+    pub fn select_computer(&mut self, computer_id: &str) -> TalosResult<()> {
+        let config = self.runtime.config.reload()?;
+        let local = computer_id == "embedded"
+            || config
+                .agent_node
+                .runner
+                .as_ref()
+                .is_some_and(|runner| runner.node_id == computer_id);
+        if local {
+            self.remote = None;
+            self.selected_computer = None;
+            return Ok(());
+        }
+        if self.selected_computer.as_deref() == Some(computer_id) {
+            return Ok(());
+        }
+        let token = self.actor.access_token.clone().ok_or_else(|| {
+            talos_error::TalosError::new(
+                talos_error::ErrorCode::Unauthenticated,
+                "Sign in before selecting a remote Computer.",
+            )
+        })?;
+        let ca =
+            talos_service::read_worker_trusted_ca(config.cloud.agent_trusted_ca_file.as_deref())?;
+        let client = talos_sdk::AppServerClient::connect_product_http(
+            &config.cloud.agent_base_url,
+            token,
+            computer_id.into(),
+            ca.as_deref(),
+        )?;
+        self.remote = Some(Arc::new(tokio::sync::Mutex::new(client)));
+        self.selected_computer = Some(computer_id.into());
+        Ok(())
+    }
+
     /// Take an independent request handle with the current authenticated identity.
     /// Authenticate the owner before creating handles. Subscriptions and shutdown
     /// are shared with the owner and all handles for this runtime.
     pub fn request_handle(&self) -> Self {
         Self {
+            remote: self.remote.clone(),
+            selected_computer: self.selected_computer.clone(),
             runtime: self.runtime.clone(),
             actor: self.actor.clone(),
             subscriptions: self.subscriptions.clone(),

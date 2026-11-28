@@ -1,3 +1,4 @@
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use std::sync::Arc;
 use talos_agent_api::{AgentEvent, AgentEventPayload, AgentTurnRef, AgentTurnStarted};
 use talos_storage::SqliteStorage;
@@ -39,10 +40,12 @@ async fn event_generation_keeps_existing_cursor_and_allows_reuse_of_a_retired_tu
     .execute(pool)
     .await
     .unwrap();
+    let usage = serde_json::to_string(&talos_types::SessionUsage::default()).unwrap();
     sqlx::query(
         "INSERT INTO sessions(session_key,user_id,agent_id,workspace_id,source_type,source_provider,environment_json,conf_json,usage_json,created_at,last_activity,history_generation)
-         VALUES ('s','u','agent','workspace','http','http','null','{}','{}',1,1,7)",
+         VALUES ('s','u','agent','workspace','http','http','null','{}',?,1,1,7)",
     )
+    .bind(&usage)
     .execute(pool)
     .await
     .unwrap();
@@ -85,18 +88,21 @@ async fn event_generation_keeps_existing_cursor_and_allows_reuse_of_a_retired_tu
         .unwrap();
     assert!(effects.get_agent_event(15).await.unwrap().is_none());
     let reopened = effects
-        .commit_maintenance_admission(AgentEvent {
-            identity: id.clone(),
-            sequence: 1,
-            occurred_at: 2,
-            payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+        .project_test_events(TestWorkerEvents {
+            purpose: agent_protocol::AgentExecutionPurpose::Compaction,
+            ..TestWorkerEvents::new(vec![AgentEvent {
+                identity: id.clone(),
+                sequence: 1,
+                occurred_at: 2,
+                payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+            }])
         })
         .await
         .unwrap();
     let mut events = effects.list_agent_turn_events(&id, 10).await.unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(events.pop().unwrap().event_seq, 31);
-    assert_eq!(reopened.active_turn.last_event_seq, 31);
+    assert_eq!(reopened.active_turn.as_ref().unwrap().last_event_seq, 31);
     sqlx::query("INSERT INTO session_event_retention(session_id,through_generation,deleted) VALUES ('s',8,1)")
         .execute(pool)
         .await
@@ -115,8 +121,9 @@ async fn event_generation_keeps_existing_cursor_and_allows_reuse_of_a_retired_tu
 
     sqlx::query(
         "INSERT INTO sessions(session_key,user_id,agent_id,workspace_id,source_type,source_provider,environment_json,conf_json,usage_json,created_at,last_activity)
-         VALUES ('s','u','agent','workspace','http','http','null','{}','{}',3,3)",
+         VALUES ('s','u','agent','workspace','http','http','null','{}',?,3,3)",
     )
+    .bind(&usage)
     .execute(pool)
     .await
     .unwrap();
@@ -126,15 +133,18 @@ async fn event_generation_keeps_existing_cursor_and_allows_reuse_of_a_retired_tu
         .unwrap()
         .is_empty());
     let fresh = effects
-        .commit_maintenance_admission(AgentEvent {
-            identity: id,
-            sequence: 1,
-            occurred_at: 3,
-            payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+        .project_test_events(TestWorkerEvents {
+            purpose: agent_protocol::AgentExecutionPurpose::Compaction,
+            ..TestWorkerEvents::new(vec![AgentEvent {
+                identity: id,
+                sequence: 1,
+                occurred_at: 3,
+                payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+            }])
         })
         .await
         .unwrap();
-    let event_seq = fresh.active_turn.last_event_seq;
+    let event_seq = fresh.active_turn.as_ref().unwrap().last_event_seq;
     let generation: i64 =
         sqlx::query_scalar("SELECT history_generation FROM agent_events WHERE event_seq=?")
             .bind(event_seq)

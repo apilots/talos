@@ -1,7 +1,7 @@
+use super::product_scope::{ProductJson, ProductQuery};
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
-use axum::response::Json;
+use axum::extract::{Path, State};
 use serde::Deserialize;
 
 use talos_auth::RequestIdentity;
@@ -46,10 +46,38 @@ pub(super) struct MemorySearchHttpQuery {
     until_at: Option<i64>,
 }
 
+impl super::product_scope::ScopedRequest for MemoryFilesQuery {
+    fn bind(
+        mut self,
+        scope: &super::product_routing::SelectedComputer,
+    ) -> talos_error::TalosResult<Self> {
+        self.node_id = talos_types::WorkspaceInfoRequest {
+            node_id: self.node_id,
+        }
+        .bind(scope)?
+        .node_id;
+        Ok(self)
+    }
+}
+
+impl super::product_scope::ScopedRequest for MemorySearchHttpQuery {
+    fn bind(
+        mut self,
+        scope: &super::product_routing::SelectedComputer,
+    ) -> talos_error::TalosResult<Self> {
+        self.node_id = talos_types::WorkspaceInfoRequest {
+            node_id: self.node_id,
+        }
+        .bind(scope)?
+        .node_id;
+        Ok(self)
+    }
+}
+
 pub(super) async fn list_memory_files_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
-    Query(query): Query<MemoryFilesQuery>,
+    ProductQuery(query): ProductQuery<MemoryFilesQuery>,
 ) -> Result<JsonResponse<MemoryFileListResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let request = MemoryFileListRequest {
@@ -68,7 +96,7 @@ pub(super) async fn list_memory_files_handler(
 }
 
 pub(super) async fn get_memory_file_handler(
-    Query(target): Query<talos_types::WorkspaceInfoRequest>,
+    ProductQuery(target): ProductQuery<talos_types::WorkspaceInfoRequest>,
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(date): Path<String>,
@@ -92,7 +120,7 @@ pub(super) async fn put_memory_file_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(date): Path<String>,
-    Json(request): Json<MemoryFileWriteRequest>,
+    ProductJson(request): ProductJson<MemoryFileWriteRequest>,
 ) -> Result<JsonResponse<MemoryFileWriteResponse>, ApiError> {
     if request.date != date {
         return Err(ApiError::new(talos_error::ErrorCode::InvalidRequest));
@@ -109,7 +137,7 @@ pub(super) async fn put_memory_file_handler(
 pub(super) async fn search_memory_files_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
-    Query(query): Query<MemorySearchHttpQuery>,
+    ProductQuery(query): ProductQuery<MemorySearchHttpQuery>,
 ) -> Result<JsonResponse<MemorySearchResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let request = MemorySearchRequest {
@@ -149,7 +177,7 @@ fn parse_memory_kinds(value: &str) -> Result<Vec<MemoryKind>, ApiError> {
 }
 
 pub(super) async fn get_memory_handler(
-    Query(target): Query<talos_types::WorkspaceInfoRequest>,
+    ProductQuery(target): ProductQuery<talos_types::WorkspaceInfoRequest>,
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(memory_id): Path<String>,

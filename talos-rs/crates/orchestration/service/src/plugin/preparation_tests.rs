@@ -55,6 +55,26 @@ fn actor(id: &str) -> WorkerEnvironmentContext {
 }
 
 #[tokio::test]
+async fn stopped_browser_bootstrap_does_not_discover_or_install_a_source() {
+    let (_directory, service, _) = fixture();
+    let before = service
+        .manager
+        .list_sources(PluginSourceListRequest { node_id: None })
+        .unwrap();
+    let stop = tokio_util::sync::CancellationToken::new();
+    stop.cancel();
+    // This fixture has no official source; a repair attempt would fail discovery.
+    service.bootstrap_official_browser(&stop).await.unwrap();
+    assert_eq!(
+        service
+            .manager
+            .list_sources(PluginSourceListRequest { node_id: None })
+            .unwrap(),
+        before,
+    );
+}
+
+#[tokio::test]
 async fn cancellation_is_actor_bound_and_releases_the_candidate_without_commit() {
     let (_directory, service, request) = fixture();
     let prepared = service

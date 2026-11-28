@@ -1,22 +1,31 @@
 //! Office document preparation behind the common preview capability.
 //! Archives use the original metadata/download path without indexing or extraction.
+#[cfg(feature = "product")]
 use bytes::Bytes;
+#[cfg(feature = "product")]
 use process_wrap::tokio::{CommandWrap, KillOnDrop};
-use std::{path::Path, process::Stdio, time::Duration};
+use std::path::Path;
+#[cfg(feature = "product")]
+use std::{process::Stdio, time::Duration};
+#[cfg(feature = "product")]
 use talos_types::{
     FilePreviewBytes, FilePreviewDocument, FilePreviewDocumentUnavailable as Unavailable,
     FilePreviewMetadata,
 };
 
+#[cfg(feature = "product")]
 const PDF_PATH: &str = "__preview__/document.pdf";
 
+#[cfg(feature = "product")]
 pub(crate) struct PreparedDocument {
     pdf: Bytes,
 }
 
+#[cfg(feature = "product")]
 pub(crate) fn needs_document(metadata: &FilePreviewMetadata) -> bool {
     office(metadata)
 }
+#[cfg(feature = "product")]
 pub(crate) async fn prepare(
     metadata: &FilePreviewMetadata,
     bytes: Bytes,
@@ -32,6 +41,7 @@ pub(crate) async fn prepare(
         Err(reason) => (FilePreviewDocument::Unavailable { reason }, None),
     }
 }
+#[cfg(feature = "product")]
 impl PreparedDocument {
     pub(crate) fn handles(&self, path: &str) -> bool {
         path == PDF_PATH
@@ -53,6 +63,7 @@ impl PreparedDocument {
         }
     }
 }
+#[cfg(feature = "product")]
 fn office(metadata: &FilePreviewMetadata) -> bool {
     metadata
         .mime_type
@@ -102,6 +113,7 @@ pub(crate) fn mime_type(path: &Path, prefix: &[u8]) -> String {
             }
         })
 }
+#[cfg(feature = "product")]
 async fn convert_office(
     metadata: &FilePreviewMetadata,
     bytes: &Bytes,
@@ -170,6 +182,6 @@ async fn convert_office(
     Ok(bytes.into())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "product"))]
 #[path = "preview_tests.rs"]
 mod tests;

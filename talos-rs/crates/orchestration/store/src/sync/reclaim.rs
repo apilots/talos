@@ -8,13 +8,19 @@ const READY_HISTORY: &str = "
     SELECT r.session_id, r.through_generation FROM session_event_retention r
     WHERE r.reclaim=1 AND NOT EXISTS (
         SELECT 1 FROM resource_revisions v
-        JOIN sync_bindings b ON v.owner_user_id IN (b.source_user_id,b.account_id)
-        WHERE v.kind='session' AND v.resource_id=r.session_id
-          AND NOT EXISTS (
-              SELECT 1 FROM sync_resource_capture c
-              WHERE c.hub_id=b.hub_id AND c.account_id=b.account_id
-                AND c.kind=v.kind AND c.resource_id=v.resource_id AND c.revision=v.revision
-          )
+        WHERE v.kind='session' AND v.resource_id=r.session_id AND (
+            NOT EXISTS (SELECT 1 FROM sync_bindings b
+                        WHERE v.owner_user_id IN (b.source_user_id,b.account_id))
+            OR EXISTS (
+                SELECT 1 FROM sync_bindings b
+                WHERE v.owner_user_id IN (b.source_user_id,b.account_id)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM sync_resource_capture c
+                    WHERE c.hub_id=b.hub_id AND c.account_id=b.account_id
+                      AND c.kind=v.kind AND c.resource_id=v.resource_id AND c.revision=v.revision
+                  )
+            )
+        )
     )
     ORDER BY r.session_id LIMIT 1";
 

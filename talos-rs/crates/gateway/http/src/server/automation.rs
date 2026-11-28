@@ -1,4 +1,5 @@
 //! Public automation operations use the original authenticated Gateway.
+use super::product_scope::ProductJson;
 use super::{
     access::shared_actor,
     errors::{api_success, ApiError, JsonResponse},
@@ -73,7 +74,7 @@ pub(super) async fn resolve_automation_command_handler(
 pub(super) async fn list_builtin_jobs_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Extension<RequestIdentity>,
-    Json(request): Json<talos_types::BuiltinJobListRequest>,
+    ProductJson(request): ProductJson<talos_types::BuiltinJobListRequest>,
 ) -> Result<JsonResponse<talos_types::BuiltinJobListResponse>, ApiError> {
     state
         .gateway
@@ -85,7 +86,7 @@ pub(super) async fn list_builtin_jobs_handler(
 pub(super) async fn control_builtin_job_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Extension<RequestIdentity>,
-    Json(request): Json<talos_types::BuiltinJobControlRequest>,
+    ProductJson(request): ProductJson<talos_types::BuiltinJobControlRequest>,
 ) -> Result<JsonResponse<talos_types::BuiltinJobInfo>, ApiError> {
     state
         .gateway

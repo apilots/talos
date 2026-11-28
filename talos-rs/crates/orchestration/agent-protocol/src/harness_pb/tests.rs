@@ -197,19 +197,11 @@ fn waiting_and_failed_settlements_keep_business_result_and_user_action() {
     };
     let waiting = AgentRunSettlement::WaitingForInput {
         event: waiting_event.clone(),
-        continuation: talos_agent_api::AgentContinuationRef {
-            opaque_id: "provider-state".into(),
-        },
         metrics: AgentRunMetrics::default(),
     };
     match decode_settlement(encode_settlement(waiting).unwrap()).unwrap() {
-        AgentRunSettlement::WaitingForInput {
-            event,
-            continuation,
-            ..
-        } => {
+        AgentRunSettlement::WaitingForInput { event, .. } => {
             assert_eq!(event, waiting_event);
-            assert_eq!(continuation.opaque_id, "provider-state");
         }
         _ => panic!("waiting settlement changed variant"),
     }

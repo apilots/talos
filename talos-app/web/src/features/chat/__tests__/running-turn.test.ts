@@ -75,9 +75,9 @@ describe("running Turn state and offset", () => {
     expect(items()).toEqual([expect.objectContaining(expected) as unknown]);
   });
 
-  it("updates cancellation state at an unchanged content offset", () => {
+  it("updates a cancellation request at an unchanged Worker content offset", () => {
     restoreActiveTurn("sess-1", runningTurn());
-    restoreActiveTurn("sess-1", runningTurn({ state: "cancelling" }));
+    restoreActiveTurn("sess-1", runningTurn({ state: "running", cancellationRequested: true }));
     expect(answer()).toBe("base");
     expect(useAppStore.getState().streams["sess-1"]?.connectionState).toBe("cancelling");
   });

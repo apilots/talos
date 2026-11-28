@@ -23,7 +23,7 @@ use harness::Harness;
 pub use agent_protocol::{
     AgentAdmission, AgentAdmissionPermit, AgentCapabilities, AgentContext, AgentFuture,
     AgentHarness, AgentInputParams, AgentInterruptParams, AgentProgressEventReceiver, AgentResult,
-    AgentRunCheckpoint, AgentRunExecution, AgentRunParams, AgentRunSettlement,
+    AgentRunCheckpoint, AgentRunExecution, AgentRunIntent, AgentRunParams, AgentRunSettlement,
     AgentRunSettlementReceiver, AgentSessionContext, AgentUserActionKind, AgentUserContentKind,
 };
 pub use attachment::{AttachmentReader, ResolvedAttachment, TurnFileScope};
@@ -45,10 +45,19 @@ pub use session_owner::{SessionHold, SessionLease, SessionOwner};
 ///
 /// Callers receive only the stable `AgentHarness` contract; the generic host
 /// remains private to this crate and must not leak Provider implementation
-/// details into Coordinator or application assembly.
-pub fn create_agent_harness<P>(agent_id: String, provider: P) -> Arc<dyn AgentHarness>
+/// details into Coordinator or application assembly. The Worker must pass its same
+/// journal to this core and `LocalExecutionHarness`: only that journal supplies
+/// waiting checkpoints and Provider continuation state.
+pub fn create_agent_harness<P>(
+    agent_id: String,
+    provider: P,
+    execution_store: Arc<talos_store::execution::WorkerExecutionStore>,
+) -> Arc<dyn AgentHarness>
 where
     P: AgentProvider,
 {
-    Arc::new(Harness::new(agent_id, provider))
+    Arc::new(Harness::new(agent_id, provider, execution_store))
 }
+
+mod local_execution;
+pub use local_execution::{LocalExecutionHarness, LocalTerminalObserver};

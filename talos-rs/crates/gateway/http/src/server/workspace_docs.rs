@@ -1,6 +1,7 @@
+use super::product_scope::ProductQuery;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::response::Json;
 
 use talos_auth::RequestIdentity;
@@ -16,7 +17,7 @@ use super::errors::{api_success, ApiError, JsonResponse};
 use super::state::HttpApiState;
 
 pub(super) async fn workspace_info_handler(
-    Query(request): Query<talos_types::WorkspaceInfoRequest>,
+    ProductQuery(request): ProductQuery<talos_types::WorkspaceInfoRequest>,
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
 ) -> Result<JsonResponse<talos_types::WorkspaceInfoResponse>, ApiError> {
@@ -30,7 +31,7 @@ pub(super) async fn workspace_info_handler(
 }
 
 pub(super) async fn list_workspace_docs_handler(
-    Query(request): Query<WorkspaceDocListRequest>,
+    ProductQuery(request): ProductQuery<WorkspaceDocListRequest>,
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
 ) -> Result<JsonResponse<WorkspaceDocListResponse>, ApiError> {
@@ -44,7 +45,7 @@ pub(super) async fn list_workspace_docs_handler(
 }
 
 pub(super) async fn get_workspace_doc_handler(
-    Query(target): Query<talos_types::WorkspaceInfoRequest>,
+    ProductQuery(target): ProductQuery<talos_types::WorkspaceInfoRequest>,
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(kind): Path<String>,
@@ -66,7 +67,7 @@ pub(super) async fn get_workspace_doc_handler(
 }
 
 pub(super) async fn put_workspace_doc_handler(
-    Query(target): Query<talos_types::WorkspaceInfoRequest>,
+    ProductQuery(target): ProductQuery<talos_types::WorkspaceInfoRequest>,
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(kind): Path<String>,

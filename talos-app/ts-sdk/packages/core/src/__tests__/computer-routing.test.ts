@@ -6,6 +6,21 @@ import type { ManagedWorkerResponse } from "../generated/app-protocol";
 import { RecordingTransport } from "./app-server.fixture";
 
 describe("Computer routing through both client transports", () => {
+  it("scopes immutable Session calls and streams without changing the base client", async () => {
+    const request = vi.fn<HttpAdapter["request"]>().mockResolvedValue({});
+    const stream = vi.fn<StreamAdapter["stream"]>().mockResolvedValue(undefined);
+    const client = new TalosClient({ request: request as HttpAdapter["request"] }, { stream }, "https://talos.test");
+    const scoped = client.forComputer("computer-b");
+    await scoped.sessions.get({ sessionId: "session" });
+    await scoped.turns.events("session", undefined, () => undefined);
+    await client.sessions.get({ sessionId: "local" });
+    await scoped.forComputer("computer-c").sessions.get({ sessionId: "third" });
+    expect(request.mock.calls[0][1]?.headers).toEqual({ "x-talos-computer": "computer-b" });
+    expect(stream.mock.calls[0][1].headers).toMatchObject({ "x-talos-computer": "computer-b" });
+    expect(request.mock.calls[1][1]?.headers).toBeUndefined();
+    expect(request.mock.calls[2][1]?.headers).toEqual({ "x-talos-computer": "computer-c" });
+  });
+
   it("uses normalized absolute URLs for workspace info and model requests", async () => {
     const info = { workspaceId: "team", rootPrefix: "/srv/team", userWorkspaceDir: "/srv/team/alice" };
     const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue(info);

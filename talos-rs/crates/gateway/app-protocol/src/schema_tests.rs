@@ -14,6 +14,7 @@ fn typescript_fixture_is_current() {
     for (name, expected) in [
         ("app-protocol.ts", generate_typescript()),
         ("automation.ts", generate_automation_typescript()),
+        ("browser.ts", generate_browser_typescript()),
         ("desktop.ts", generate_desktop_typescript()),
         ("worker-runtime.ts", generate_worker_runtime_typescript()),
     ] {

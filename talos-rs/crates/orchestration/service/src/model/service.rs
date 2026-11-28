@@ -8,7 +8,7 @@ impl TalosService {
     ) -> ServiceResult<ModelListResponse> {
         self.worker_environment(actor, request.node_id.as_deref())
             .await?
-            .list_models(actor.worker_environment_context())
+            .list_models(crate::access::worker_environment_context(actor))
             .await
     }
 }

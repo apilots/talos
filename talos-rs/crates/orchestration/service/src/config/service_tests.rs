@@ -84,6 +84,33 @@ fn get_config_reads_web_search_variant() {
 }
 
 #[tokio::test]
+async fn worker_configuration_rejects_product_policy_without_writing_it() {
+    let store = Arc::new(InMemoryLlmConfigStore::new(Default::default()));
+    let service = new_service(store.clone());
+    let error = service
+        .update_config(ConfigUpdateRequest {
+            node_id: Some("different-node".into()),
+            value: ConfigValue::SessionMessageSendPolicy(
+                talos_config::SessionMessageSendPolicy::Steer,
+            ),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
+    assert_eq!(
+        store.load_session_message_send_policy().unwrap(),
+        talos_config::SessionMessageSendPolicy::Queue
+    );
+    let error = service
+        .get_config(ConfigGetRequest {
+            node_id: None,
+            path: ConfigPath::SessionMessageSendPolicy,
+        })
+        .unwrap_err();
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
+}
+
+#[tokio::test]
 async fn update_config_saves_web_search_and_invokes_reload_hook() {
     let calls = Arc::new(AtomicUsize::new(0));
     let calls_for_hook = calls.clone();

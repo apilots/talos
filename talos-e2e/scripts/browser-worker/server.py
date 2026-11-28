@@ -49,6 +49,15 @@ class Page(BaseHTTPRequestHandler):
 
 
 def tui(env):
+    # Each product entry owns its Worker namespace; packaged TUI is a local
+    # product, not a second execution owner of the running cloud Server.
+    tui_home = Path(env['TALOS_HOME']).with_name('tui-home')
+    tui_home.mkdir()
+    config = tui_home / 'acceptance.json'
+    document = json.loads(Path(env['TALOS_CONFIG']).read_text())
+    document['agent_node'] = {}
+    config.write_text(json.dumps(document))
+    env = dict(env, TALOS_HOME=str(tui_home), TALOS_CONFIG=str(config))
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 120, 0, 0))
     process = subprocess.Popen(['talos'], env=env, stdin=slave, stdout=slave, stderr=slave)

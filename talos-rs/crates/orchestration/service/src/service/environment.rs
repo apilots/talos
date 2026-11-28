@@ -12,7 +12,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .list_memory_files(actor.worker_environment_context(), params)
+            .list_memory_files(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn read_memory_file(
@@ -23,7 +23,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .read_memory_file(actor.worker_environment_context(), params)
+            .read_memory_file(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn write_memory_file(
@@ -36,7 +36,7 @@ impl TalosService {
             .active_worker_environment(actor, node_id.as_deref())
             .await?;
         environment
-            .write_memory_file(actor.worker_environment_context(), params)
+            .write_memory_file(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn search_memory(
@@ -47,7 +47,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .search_memory(actor.worker_environment_context(), params)
+            .search_memory(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn get_memory(
@@ -58,7 +58,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .get_memory(actor.worker_environment_context(), params)
+            .get_memory(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn list_skills(
@@ -69,7 +69,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .list_skills(actor.worker_environment_context(), params)
+            .list_skills(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn refresh_skills(
@@ -80,7 +80,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .refresh_skills(actor.worker_environment_context(), params)
+            .refresh_skills(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn suggest_skills(
@@ -91,7 +91,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .suggest_skills(actor.worker_environment_context(), params)
+            .suggest_skills(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn read_skill(
@@ -102,7 +102,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .read_skill(actor.worker_environment_context(), params)
+            .read_skill(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn resolve_skills(
@@ -113,7 +113,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .resolve_skills(actor.worker_environment_context(), params)
+            .resolve_skills(crate::access::worker_environment_context(actor), params)
             .await
     }
 
@@ -125,7 +125,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .list_workspace_docs(actor.worker_environment_context(), params)
+            .list_workspace_docs(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn read_workspace_doc(
@@ -136,7 +136,7 @@ impl TalosService {
         let node_id = params.node_id.take();
         self.worker_environment(actor, node_id.as_deref())
             .await?
-            .read_workspace_doc(actor.worker_environment_context(), params)
+            .read_workspace_doc(crate::access::worker_environment_context(actor), params)
             .await
     }
     pub async fn write_workspace_doc(
@@ -149,7 +149,7 @@ impl TalosService {
             .active_worker_environment(actor, node_id.as_deref())
             .await?;
         environment
-            .write_workspace_doc(actor.worker_environment_context(), params)
+            .write_workspace_doc(crate::access::worker_environment_context(actor), params)
             .await
     }
 }

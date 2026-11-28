@@ -3,13 +3,13 @@ use std::time::Duration;
 
 use reqwest::{Client, Method, Url};
 use serde_json::Value;
-use talos_app_protocol::requests::ClientRequestParams;
+use talos_app_protocol::requests::ClientRequest;
 use talos_config::CloudConfig;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::Actor;
 use talos_types::{ApiResponse, UserCurrentResponse};
 
-use super::application_sync::ApplicationSyncHost;
+use super::application_host::ApplicationHost;
 
 pub(super) const SERVER_TICKET: &str = "server:";
 
@@ -17,33 +17,46 @@ pub(super) struct CloudCall {
     method: Method,
     path: &'static str,
     body: Option<Value>,
+    computer_id: Option<String>,
+    file_transfer: bool,
 }
 
 impl CloudCall {
     pub async fn for_request(
         actor: &Actor,
-        request: &ClientRequestParams,
-        host: &ApplicationSyncHost,
+        request: &ClientRequest,
+        host: &ApplicationHost,
     ) -> TalosResult<Option<Self>> {
-        if actor.auth_disabled {
+        let Some(computer) = request
+            .computer_id
+            .as_deref()
+            .or_else(|| request.params.computer_target())
+        else {
             return Ok(None);
-        }
-        let (computer, path, body) = match request {
-            ClientRequestParams::BuiltinJobList(job) => {
-                (&job.computer_id, "/v1/builtin-job/list", value(job)?)
-            }
-            ClientRequestParams::BuiltinJobControl(job) => {
-                (&job.computer_id, "/v1/builtin-job/control", value(job)?)
-            }
-            _ => return Ok(None),
         };
-        if computer == "embedded" || computer == &host.local_computer_id().await? {
+        if computer == "embedded" || computer == host.local_computer_id().await? {
             return Ok(None);
         }
+        if actor.auth_disabled {
+            return Err(TalosError::new(
+                ErrorCode::Unauthenticated,
+                "Sign in before accessing a remote Computer.",
+            ));
+        }
+        let mut params = request.params.clone();
+        params.bind_computer_target(computer)?;
+        let (path, body) = match &params {
+            talos_app_protocol::requests::ClientRequestParams::DesktopOpen(request) => {
+                ("/v1/desktop/open", value(request)?)
+            }
+            params => ("/v1/app/request", value(params)?),
+        };
         Ok(Some(Self {
             method: Method::POST,
             path,
             body: Some(body),
+            computer_id: Some(computer.into()),
+            file_transfer: request.params.is_file_transfer(),
         }))
     }
 }
@@ -108,6 +121,8 @@ impl DesktopCloud {
                             method: Method::GET,
                             path: "/v1/user",
                             body: None,
+                            computer_id: None,
+                            file_transfer: false,
                         },
                     )
                     .await?;
@@ -131,6 +146,12 @@ impl DesktopCloud {
             .request(call.method.clone(), url)
             .timeout(Duration::from_secs(60))
             .bearer_auth(token);
+        if call.file_transfer {
+            request = request.header("x-talos-file-transfer", "true");
+        }
+        if let Some(computer) = &call.computer_id {
+            request = request.header("x-talos-computer", computer);
+        }
         if let Some(body) = &call.body {
             request = request.json(body);
         }

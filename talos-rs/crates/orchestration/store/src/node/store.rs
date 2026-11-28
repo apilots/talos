@@ -12,7 +12,7 @@ use super::{
     RotateCredentialParams, SetNodeStatusParams, UpdateNodeParams,
 };
 
-const NODE_COLUMNS: &str = "node_id, owner_user_id, display_name, mode, endpoint, status, credential_hash, credential_expires_at, lease_token_hash, lease_expires_at, last_heartbeat_at, health, created_at, updated_at, system_info";
+const NODE_COLUMNS: &str = "node_id, owner_user_id, display_name, mode, endpoint, status, credential_hash, credential_expires_at, lease_token_hash, lease_expires_at, last_heartbeat_at, health, created_at, updated_at, system_info, product_owner";
 
 #[async_trait]
 pub trait AgentNodeStore: Send + Sync {
@@ -451,8 +451,9 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
             })?;
         let mut transaction = self.begin_write().await?;
         let row = sqlx::query(&format!(
-            "UPDATE agent_nodes SET system_info = COALESCE(?, system_info), lease_token_hash = ?, lease_expires_at = ?, last_heartbeat_at = NULL, health = 'unknown', updated_at = ? WHERE node_id = ? AND mode = 'remote' AND status = 'enabled' AND credential_hash = ? AND credential_expires_at > ? RETURNING {NODE_COLUMNS}"
+            "UPDATE agent_nodes SET product_owner = ?, system_info = COALESCE(?, system_info), lease_token_hash = ?, lease_expires_at = ?, last_heartbeat_at = NULL, health = 'unknown', updated_at = ? WHERE node_id = ? AND mode = 'remote' AND status = 'enabled' AND credential_hash = ? AND credential_expires_at > ? AND (product_owner IS NULL OR product_owner = ?) RETURNING {NODE_COLUMNS}"
         ))
+        .bind(product_owner_text(params.product_owner))
         .bind(system_info)
         .bind(params.lease_token_hash.as_slice())
         .bind(params.lease_expires_at)
@@ -460,6 +461,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .bind(&params.node_id)
         .bind(params.expected_credential_hash.as_slice())
         .bind(params.now_at)
+        .bind(product_owner_text(params.product_owner))
         .fetch_all(&mut *transaction)
         .await
         .map_err(|error| database_error("register Agent node", error))?;
@@ -603,6 +605,11 @@ fn record_from_row(row: &SqliteRow) -> TalosResult<NodeRecord> {
         .try_get("system_info")
         .map_err(|error| database_error("decode Worker system report", error))?;
     Ok(NodeRecord {
+        product_owner: row
+            .try_get::<Option<String>, _>("product_owner")
+            .map_err(|error| database_error("decode product ownership", error))?
+            .map(|value| parse_product_owner(&value))
+            .transpose()?,
         system_info: system_info
             .map(|value| serde_json::from_str(&value))
             .transpose()
@@ -741,4 +748,21 @@ fn expired() -> TalosError {
 
 fn is_unique_violation(error: &sqlx::Error) -> bool {
     matches!(error, sqlx::Error::Database(database) if database.is_unique_violation())
+}
+
+fn product_owner_text(owner: talos_types::NodeProductOwner) -> &'static str {
+    match owner {
+        talos_types::NodeProductOwner::Computer => "computer",
+        talos_types::NodeProductOwner::Server => "server",
+    }
+}
+
+fn parse_product_owner(value: &str) -> TalosResult<talos_types::NodeProductOwner> {
+    match value {
+        "computer" => Ok(talos_types::NodeProductOwner::Computer),
+        "server" => Ok(talos_types::NodeProductOwner::Server),
+        _ => Err(TalosError::internal(
+            "Persisted Computer product ownership is invalid",
+        )),
+    }
 }

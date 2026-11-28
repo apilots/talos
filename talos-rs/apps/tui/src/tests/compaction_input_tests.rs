@@ -113,6 +113,7 @@ async fn test_recovery_keeps_running_context_compaction_for_follow_up_delta() {
             identity: AgentTurnRef::new("sess-test", "turn-test"),
             initial_message_id: Some("msg-compact".to_string()),
             state: ActiveTurnState::Running,
+            cancellation_requested: false,
             last_event_id: "ev_1".to_string(),
             updated_at: 1,
         }),

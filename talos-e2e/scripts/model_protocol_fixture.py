@@ -254,8 +254,15 @@ def serve(directory):
                 if (directory / "gateway-url").exists():
                     base = (directory / "gateway-url").read_text()
                     session_id = (directory / "current-session").read_text()
-                    sessions = http(base, "/v1/sessions")["sessions"]
-                    session = next(row for row in sessions if row["id"] == session_id)
+                    # Worker execution can precede its product projection. Keep the
+                    # upstream response pending until visibility, within its 1s deadline.
+                    visible_until = time.monotonic() + 0.5
+                    while True:
+                        sessions = http(base, "/v1/sessions")["sessions"]
+                        session = next(row for row in sessions if row["id"] == session_id)
+                        if session["hasActiveTurn"] is True or time.monotonic() >= visible_until:
+                            break
+                        time.sleep(0.01)
                     assert session["hasActiveTurn"] is True, session
 
                 with lock:

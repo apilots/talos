@@ -373,6 +373,9 @@ impl GatewayClient for AppServerClient {
         &mut self,
         request: SubscribeTimelineRequest,
     ) -> TalosResult<TimelineStreamSubscription> {
+        if self.product_http.is_some() {
+            return self.open_product_timeline(request).await;
+        }
         let session_id = request.session_id.clone();
         let response = self.subscribe_timeline(request).await?;
         let subscription_id = response.subscription_id.clone();
@@ -414,6 +417,24 @@ impl GatewayClient for AppServerClient {
         &mut self,
         request: EventUnsubscribeRequest,
     ) -> TalosResult<EventUnsubscribeResponse> {
+        if let Some(http) = &self.product_http {
+            let task = http
+                .tasks
+                .lock()
+                .expect("Product subscription tasks lock")
+                .remove(&request.subscription_id);
+            let unsubscribed = if let Some(task) = task {
+                task.abort();
+                let _ = task.await;
+                true
+            } else {
+                false
+            };
+            return Ok(EventUnsubscribeResponse {
+                subscription_id: request.subscription_id,
+                unsubscribed,
+            });
+        }
         self.subscription_senders
             .lock()
             .await

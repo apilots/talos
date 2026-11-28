@@ -352,7 +352,7 @@ export function restoreActiveTurn(sessionId: string, snapshot: ActiveTurnSnapsho
     chatState().setStreamMeta(sessionId, {
       lastEventId: snapshot.lastEventId, lastEventSeq: snapshot.lastEventSeq,
       lastSequence: snapshot.lastSequence,
-      connectionState: snapshot.state === "cancelling" ? "cancelling" : "detached",
+      connectionState: snapshot.cancellationRequested || snapshot.state === "cancelling" ? "cancelling" : "detached",
     });
   });
 }
@@ -377,7 +377,7 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TimelineA
     lastEventSeq: stream?.lastEventSeq,
     lastSequence: turnChanged ? undefined : stream?.lastSequence,
     isStreaming: true,
-    connectionState: activeTurn.state === "cancelling" ? "cancelling" : "detached",
+    connectionState: activeTurn.cancellationRequested || activeTurn.state === "cancelling" ? "cancelling" : "detached",
     reconnectAttempt: 0,
     showReconnectControls: false,
   });

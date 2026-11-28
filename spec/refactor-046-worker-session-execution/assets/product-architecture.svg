@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 1050" role="img" aria-labelledby="title desc" lang="zh-CN">
+  <title id="title">Talos 五种产品与模块组装</title>
+  <desc id="desc">TUI 和 Desktop 装配本机产品服务与共享 Worker。Server 装配 API、产品管理、独立控制面以及可选 Relay 和 Sync。Docker/Native 复用同一 Worker 及环境能力。模型配置按目标节点保存。Sync 接入解耦但协议不变。 单向箭头从调用者指向被调用能力，双向箭头表示通信。Store 常驻捕获与可选 Sync 复制分离。每 Worker 自持服务与数据，同一 Worker 的 lib/WSS/gRPC 共享实例、状态与锁。</desc>
+  <style>
+text { font-family:'PingFang SC','Microsoft YaHei',sans-serif; fill:#f0f4f8; font-size:21px; }
+.title { font-size:37px; font-weight:650; }
+.head { font-size:25px; font-weight:600; }
+.sub { font-size:18px; fill:#a8b8c9; }
+.small { font-size:16px; fill:#a8b8c9; }
+.panel { fill:#17212c; stroke:#344355; }
+.blue { fill:#8fc2ff; }
+.green { fill:#74dbbd; }
+.edge { fill:none; stroke:#8fc2ff; stroke-width:2; marker-end:url(#arrow); }
+.personal { fill:none; stroke:#74dbbd; stroke-width:2; marker-start:url(#local); marker-end:url(#local); }
+</style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#8fc2ff" />
+    </marker>
+    <marker id="local" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10Z" fill="#74dbbd" />
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="#10161d" />
+  <text x="40" y="60" class="title">产品按需组装 · 独立控制面 · 共享 Worker</text>
+  <text x="40" y="103" class="sub">TUI · Desktop · TalosServer · Docker Worker · Native Worker</text>
+  <rect x="540" y="130" width="600" height="65" rx="14" fill="#1d2b38" />
+  <text x="840" y="170" text-anchor="middle">M1 · WebUI / Desktop / TUI / 未来移动端</text>
+  <path d="M840 197V231" class="edge" />
+  <rect x="40" y="245" width="370" height="520" rx="20" class="panel" />
+  <text x="65" y="288" class="head green">TUI / Desktop</text>
+  <text x="65" y="319" class="sub">AppServer / Embedded SDK · 桌面 IPC</text>
+  <rect x="65" y="345" width="320" height="120" rx="12" fill="#203b36" />
+  <text x="85" y="378">M2 共享产品运行时 / Store</text>
+  <text x="85" y="412" class="sub">Session · Goal/Loop · Memory</text>
+  <text x="85" y="446" class="sub">Automation · 本机调度</text>
+  <path d="M220 470V535" class="edge" />
+  <text x="240" y="507" class="small">同进程受保护 lib</text>
+  <rect x="65" y="550" width="320" height="130" rx="12" fill="#1d2b38" />
+  <text x="85" y="586">M3 共享执行 + M4 环境</text>
+  <text x="85" y="623" class="sub">本 Worker 历史 · 上下文 · 恢复</text>
+  <text x="85" y="657" class="sub">模型 / Skills / MCP 按节点落盘</text>
+  <text x="65" y="725" class="sub">本机产品库 / 调度 + 可选接入客户端</text>
+  <rect x="540" y="245" width="600" height="520" rx="20" class="panel" />
+  <text x="565" y="288" class="head blue">TalosServer 装配</text>
+  <rect x="565" y="315" width="550" height="115" rx="12" fill="#243c56" />
+  <text x="585" y="349">M5 · talos-control-plane lib</text>
+  <text x="585" y="384" class="sub">注册 · 租约 · 目录 · 发布 / 撤销 · 托管生命周期</text>
+  <text x="585" y="416" class="small">复用 auth、节点 Store、Docker / Kubernetes 资源驱动</text>
+  <path d="M690 454V432" class="edge" />
+  <path d="M980 454V432" class="edge" />
+  <rect x="565" y="470" width="255" height="210" rx="12" fill="#203b36" stroke="#74dbbd" stroke-dasharray="6 5" />
+  <text x="585" y="507" class="green">M6 可选个人 Relay</text>
+  <text x="585" y="544" class="sub">宿主连接与目标路由</text>
+  <text x="585" y="580" class="sub">请求 / 事件 / 文件转发</text>
+  <text x="585" y="647" class="small">云服务专用版本可裁剪</text>
+  <rect x="850" y="470" width="265" height="210" rx="12" fill="#243c56" />
+  <text x="870" y="507" class="blue">M2 共享产品运行时</text>
+  <text x="870" y="544" class="sub">Agent API · 业务调度</text>
+  <text x="870" y="580" class="sub">配置 / 产品视图 / 结算</text>
+  <text x="870" y="647" class="small">直接使用网络 Worker 绑定</text>
+  <text x="565" y="725" class="sub">控制面统一节点管理，产品服务保留业务调度</text>
+  <path d="M414 405H475V570H556" class="personal" />
+  <text x="475" y="359" text-anchor="middle" class="small">主动 WSS</text>
+  <text x="475" y="609" text-anchor="middle" class="small">所属宿主 API</text>
+  <rect x="1270" y="245" width="370" height="520" rx="20" class="panel" />
+  <text x="1295" y="288" class="head blue">Docker / Native Worker</text>
+  <text x="1295" y="319" class="sub">同一 talos-worker standalone 入口</text>
+  <rect x="1295" y="345" width="320" height="120" rx="12" fill="#1d2b38" />
+  <text x="1315" y="378">控制面客户端 · 主动 Connect</text>
+  <text x="1315" y="412" class="sub">Native → WSS</text>
+  <text x="1315" y="446" class="sub">Docker / Talo → TLS gRPC</text>
+  <rect x="1295" y="550" width="320" height="130" rx="12" fill="#1d2b38" />
+  <text x="1315" y="586">同一 M3 执行 + M4 环境</text>
+  <text x="1315" y="623" class="sub">本 Worker 历史 · 上下文 · 恢复</text>
+  <text x="1315" y="657" class="sub">容器 / 本机环境按宿主装配</text>
+  <text x="1295" y="725" class="sub">每 Worker 自持服务实例与节点数据</text>
+  <path d="M1118 570H1260" class="personal" />
+  <text x="1190" y="526" text-anchor="middle" class="small">任务 / 事件</text>
+  <text x="1190" y="610" text-anchor="middle" class="small">WSS / gRPC</text>
+  <rect x="40" y="800" width="1600" height="64" rx="13" fill="#1d2b38" />
+  <text x="70" y="840">复用基础：产品服务 · Store 端口 · Harness / Provider SPI · SDK · 模型 / 工具 / 沙箱能力</text>
+  <rect x="40" y="960" width="1600" height="62" rx="13" fill="#2b2924" />
+  <text x="70" y="997" fill="#e5bc74">M7 可选个人 Sync</text>
+  <text x="355" y="997" class="sub">按原水位消费常驻变更 / 删除记录 · 复制实现可裁剪 · 原同步协议保持</text>
+  <text x="40" y="151" class="small">单向 → 调用能力；↔ 双向通信</text>
+  <text x="700" y="457" class="small">路由查询</text>
+  <text x="990" y="457" class="small">目标 / 唤醒</text>
+  <rect x="40" y="880" width="1600" height="64" rx="13" fill="#203b36" />
+  <text x="70" y="918">M2 Store 常驻捕获：业务修改 / 代数 / tombstone 同事务记录，未装配 Sync 也保留，恢复后按原协议导出</text>
+</svg>

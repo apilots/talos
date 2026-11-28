@@ -1,11 +1,22 @@
 use super::*;
 use talos_agent_api::trajectory::*;
-use talos_store::session::{AgentExecutionStore, CommitTerminalSettlementParams};
 
-async fn fixture() -> (TalosService, Arc<DatabaseSessionStore>, Actor, AgentTurnRef) {
-    let (service, store) = test_application(
+async fn fixture() -> (
+    TalosService,
+    Arc<DatabaseSessionStore>,
+    Actor,
+    AgentTurnRef,
+    Arc<talos_store::execution::WorkerExecutionStore>,
+) {
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::Accepted,
+        }),
+        Arc::new(TestAgentCoordinator {
+            cancel_mode: TestCancelMode::Cancelled,
+            cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
+            compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         configured_test_config(),
     )
@@ -26,8 +37,15 @@ async fn fixture() -> (TalosService, Arc<DatabaseSessionStore>, Actor, AgentTurn
         1,
     )
     .unwrap();
-    crate::test_support::commit_test_running_turn(store.as_ref(), id.clone(), message).await;
-    (service, store, actor, id)
+    crate::test_worker::seed_running_worker(
+        service.sessions.as_ref(),
+        store.as_ref(),
+        journal.as_ref(),
+        id.clone(),
+        message,
+    )
+    .await;
+    (service, store, actor, id, journal)
 }
 fn request(id: &AgentTurnRef, n: u32) -> TrajectoryReadModelRequestResponse {
     TrajectoryReadModelRequestResponse {
@@ -46,40 +64,44 @@ fn request(id: &AgentTurnRef, n: u32) -> TrajectoryReadModelRequestResponse {
         outputs: vec![],
     }
 }
-async fn finish(store: &DatabaseSessionStore, id: &AgentTurnRef) {
-    let active = store
-        .get_agent_active_turn(&id.session_id)
+async fn finish(
+    _store: &DatabaseSessionStore,
+    id: &AgentTurnRef,
+    journal: &talos_store::execution::WorkerExecutionStore,
+) {
+    let checkpoint = journal.checkpoint(id).await.unwrap().unwrap();
+    let mut reducer =
+        talos_agent::AgentEventReducer::from_checkpoint(id.clone(), checkpoint).unwrap();
+    let event = CanonicalAgentEvent {
+        identity: id.clone(),
+        sequence: reducer.next_sequence(),
+        occurred_at: 2,
+        payload: CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: talos_agent_api::AgentStopReason::EndTurn,
+        }),
+    };
+    reducer.apply(event.clone()).unwrap();
+    let scope = journal
+        .session_scope(&id.session_id)
         .await
         .unwrap()
         .unwrap();
-    let last = store
-        .list_agent_turn_events(id, 100)
-        .await
-        .unwrap()
-        .last()
-        .unwrap()
-        .sequence;
-    store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: talos_agent_api::AgentEvent {
-                identity: id.clone(),
-                sequence: last + 1,
-                occurred_at: 2,
-                payload: talos_agent_api::AgentEventPayload::TurnCompleted(
-                    talos_agent_api::AgentTurnCompleted {
-                        stop_reason: talos_agent_api::AgentStopReason::EndTurn,
-                    },
-                ),
-            },
-            expected_event_seq: active.last_event_seq,
-            completed_turn_metrics: None,
-        })
+    journal
+        .append(
+            &scope,
+            vec![event],
+            &reducer.checkpoint(),
+            Some(agent_protocol::AgentExecutionSettlement::Finished {
+                metrics: reducer.checkpoint().metrics.clone(),
+                memory_usage: vec![],
+            }),
+        )
         .await
         .unwrap();
 }
 #[tokio::test]
 async fn tracing_reads_only_terminal_turns_and_preserves_old_null_and_original_access() {
-    let (service, store, actor, id) = fixture().await;
+    let (service, store, actor, id, journal) = fixture().await;
     let params = TrajectoryReadTurnRequest {
         identity: id.clone(),
         cursor: None,
@@ -90,7 +112,8 @@ async fn tracing_reads_only_terminal_turns_and_preserves_old_null_and_original_a
         .await
         .unwrap_err()
         .is_code(talos_error::ErrorCode::ResourceNotFound));
-    finish(&store, &id).await;
+    finish(&store, &id, journal.as_ref()).await;
+    service.reconcile_worker_events().await.unwrap();
     let value = service
         .read_turn_trajectory(&actor, params.clone())
         .await
@@ -117,7 +140,7 @@ async fn tracing_reads_only_terminal_turns_and_preserves_old_null_and_original_a
 }
 #[tokio::test]
 async fn terminal_pages_preserve_utf8_raw_arguments_scope_and_immutable_position() {
-    let (service, store, actor, id) = fixture().await;
+    let (service, store, actor, id, journal) = fixture().await;
     let raw = "{ \"text\": \"你好🙂\" }\n";
     let payload = TrajectoryPayload::Response {
         parts: vec![ResponsePart::ToolCall {
@@ -145,8 +168,8 @@ async fn terminal_pages_preserve_utf8_raw_arguments_scope_and_immutable_position
             complete: Some(true),
         }),
     }];
-    store
-        .append_history_supplement(SessionHistorySupplement {
+    journal
+        .append_supplement(SessionHistorySupplement {
             identity: id.clone(),
             clock_segments: vec![],
             requests: vec![first, request(&id, 2)],
@@ -155,7 +178,8 @@ async fn terminal_pages_preserve_utf8_raw_arguments_scope_and_immutable_position
         })
         .await
         .unwrap();
-    finish(&store, &id).await;
+    finish(&store, &id, journal.as_ref()).await;
+    service.reconcile_worker_events().await.unwrap();
     let mut cursor = None;
     let mut assembled = String::new();
     loop {

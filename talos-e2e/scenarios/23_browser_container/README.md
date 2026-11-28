@@ -44,6 +44,8 @@ and preserves disabled state across restart through the original Plugin API. In
 its disposable container, removing packaged environment metadata triggers exact-lock
 online preparation; another real Browser task must then succeed with the prepared
 environment. Persisted manual pause is resumed explicitly through the public API.
+The cold native client uses the same TLS ingress for product HTTP/media and
+Worker registration, without copying the Server database. This requires Caddy.
 The native account/directory fixture also runs the real `talos plugin` CLI against
 the outbound Docker Worker for both Skill and MCP lifecycle operations; no remote
 installation may appear in the client home. The same case's production Desktop

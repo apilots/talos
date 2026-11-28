@@ -12,7 +12,7 @@ import tempfile
 import time
 import urllib.request
 import uuid
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import yaml
 from playwright.sync_api import expect, sync_playwright
@@ -139,7 +139,9 @@ def home_retry(page, origin, database, fixture, project):
         page.screenshot(path=str(REPORT / 'home-http-restored-options.png'), full_page=True)
         page.keyboard.press('Escape')
         page.get_by_role('button', name='Send', exact=True).click()
-        page.wait_for_url('**/sessions/' + submissions[0][1]['sessionId'])
+        session_path = '/sessions/' + submissions[0][1]['sessionId']
+        page.wait_for_url(lambda url: urlsplit(str(url)).path == session_path)
+        assert parse_qs(urlsplit(page.url).query).get('computerId') == ['embedded']
         assert len(submissions) == 2 and submissions[0] == submissions[1], submissions
         pinning = verify_session_pinning(
             page, origin, database, submissions[0][1]['sessionId'], project['name'], REPORT,

@@ -7,6 +7,7 @@ async fn test_start_turn_handler_reuses_idempotent_response() {
         false,
         event_store.clone(),
         event_store.clone(),
+        None,
     )
     .await;
     let mut events = state.event_service.subscribe_live_events();
@@ -110,6 +111,7 @@ async fn test_start_turn_handler_accepts_shared_request() {
         false,
         event_store.clone(),
         event_store.clone(),
+        None,
     )
     .await;
     let app = Router::new()
@@ -273,11 +275,12 @@ async fn test_start_turn_handler_rejects_idempotency_hash_conflict() {
 #[tokio::test]
 async fn test_retry_turn_rejects_running_active_turn() {
     let event_store = test_agent_execution_store().await;
-    seed_running_agent_execution(event_store.as_ref(), "mock-session", "turn-running").await;
+    let worker_fixture = running_agent_events("mock-session", "turn-running").await;
     let state = test_state_with_event_store_and_agent_execution_store(
         false,
         event_store.clone(),
         event_store,
+        Some(worker_fixture),
     )
     .await;
     let app = Router::new()
@@ -318,12 +321,12 @@ async fn test_retry_turn_rejects_running_active_turn() {
 async fn submit_turn_input_handler_resumes_a_waiting_user_action() {
     let action = pending_dynamic_action("action-dynamic", "call-1", "Tool");
     let event_store = test_agent_execution_store().await;
-    seed_waiting_agent_execution(event_store.as_ref(), "mock-session", "turn-dynamic", action)
-        .await;
+    let worker_fixture = waiting_agent_events("mock-session", "turn-dynamic", action).await;
     let state = test_state_with_event_store_and_agent_execution_store(
         false,
         event_store.clone(),
         event_store,
+        Some(worker_fixture),
     )
     .await;
     let app = Router::new()

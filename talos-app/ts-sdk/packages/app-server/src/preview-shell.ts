@@ -6,7 +6,7 @@ export type PreviewOpenTargetId = "system" | "chrome" | "safari" | "firefox" | "
 export type PreviewOpenResource = { kind: "webpage"; url: string } | { kind: "file"; previewId: string; resourcePath: string };
 export interface PreviewOpenTarget { id: PreviewOpenTargetId; label: string; icon?: string }
 export interface DesktopPreviewBridge {
-  prepareCloud(request: AppProtocol.FilePreviewPrepareRequest, actorCredentials: AppProtocol.ActorCredentials): Promise<AppProtocol.FilePreviewDescriptor>;
+  prepareCloud(request: AppProtocol.FilePreviewPrepareRequest, actorCredentials: AppProtocol.ActorCredentials, computerId?: string): Promise<AppProtocol.FilePreviewDescriptor>;
   browser(operation: PreviewBrowserOperation): Promise<PreviewBrowserState | null>;
   onBrowserState(handler: (state: PreviewBrowserState) => void): () => void;
   targets(resource: PreviewOpenResource): Promise<PreviewOpenTarget[]>;

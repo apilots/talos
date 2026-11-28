@@ -1,5 +1,6 @@
 use super::*;
 use crate::automation::goal_loop::AutomationSkillResolver;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents, WorkerProjectionCommit};
 use talos_types::*;
 struct TestSkills;
 impl AutomationSkillResolver for TestSkills {
@@ -17,9 +18,23 @@ impl AutomationSkillResolver for TestSkills {
     }
 }
 async fn fixture() -> (TalosService, Arc<DatabaseSessionStore>) {
-    let (service, store) = test_application(
+    let (service, store, _) = fixture_with_worker().await;
+    (service, store)
+}
+async fn fixture_with_worker() -> (
+    TalosService,
+    Arc<DatabaseSessionStore>,
+    Arc<talos_store::execution::WorkerExecutionStore>,
+) {
+    let (service, store, journal) = test_application_with_worker(
         Arc::new(TestAgentExecution {
             mode: TestAgentExecutionMode::Accepted,
+        }),
+        Arc::new(TestAgentCoordinator {
+            cancel_mode: TestCancelMode::Cancelled,
+            cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
+            compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         configured_test_config(),
     )
@@ -36,7 +51,7 @@ async fn fixture() -> (TalosService, Arc<DatabaseSessionStore>) {
             .await
             .unwrap();
     }
-    (service, store)
+    (service, store, journal)
 }
 fn goal(id: &str, session: &str, status: GoalStatus) -> SessionGoal {
     let now = if status == GoalStatus::Complete {
@@ -206,7 +221,7 @@ async fn admitted(
     store: &DatabaseSessionStore,
     origin: Option<AutomationTurnOrigin>,
     input: AgentUserInput,
-) -> (AgentTurnRef, talos_store::session::AgentEventCommit) {
+) -> (AgentTurnRef, WorkerProjectionCommit) {
     let identity = AgentTurnRef::new("alice", format!("test-turn-{}", uuid::Uuid::new_v4()));
     let message = crate::turn::completed_agent_user_input(
         &identity.turn_id,
@@ -216,16 +231,14 @@ async fn admitted(
     )
     .unwrap();
     let commit = store
-        .commit_initial_admission(talos_store::session::CommitInitialAdmissionParams {
-            subagent_limit: None,
+        .project_test_events(TestWorkerEvents {
             automation_origin: origin,
-            events: crate::test_support::canonical_user_admission(
+            ..TestWorkerEvents::new(crate::test_support::canonical_user_admission(
                 identity.clone(),
                 message,
                 1,
                 true,
-            ),
-            command: None,
+            ))
         })
         .await
         .unwrap();
@@ -235,7 +248,7 @@ async fn admitted(
 async fn normal_end(
     store: &DatabaseSessionStore,
     identity: AgentTurnRef,
-    commit: talos_store::session::AgentEventCommit,
+    commit: WorkerProjectionCommit,
 ) -> CanonicalAgentEvent {
     let event = CanonicalAgentEvent {
         identity,
@@ -246,12 +259,15 @@ async fn normal_end(
         }),
     };
     store
-        .commit_terminal_settlement(talos_store::session::CommitTerminalSettlementParams {
-            event: event.clone(),
-            expected_event_seq: commit.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![event.clone()]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .unwrap();
     event
 }
@@ -616,16 +632,14 @@ async fn committed_user_steer_retains_bound_definition_management() {
     )
     .unwrap();
     store
-        .commit_running_input_admission(talos_store::session::CommitRunningInputAdmissionParams {
-            events: crate::test_support::canonical_user_admission(
+        .project_test_events(TestWorkerEvents::new(
+            crate::test_support::canonical_user_admission(
                 identity.clone(),
                 message,
                 commit.events.last().unwrap().sequence + 1,
                 false,
             ),
-            expected_event_seq: commit.active_turn.last_event_seq,
-            command: None,
-        })
+        ))
         .await
         .unwrap();
     assert!(db.has_user_steer(&identity).await.unwrap());

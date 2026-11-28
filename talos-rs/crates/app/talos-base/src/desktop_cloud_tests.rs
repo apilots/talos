@@ -47,6 +47,8 @@ async fn remote_job_retries_after_server_account_bootstrap() {
     let (cloud, server) = serve_cloud(router).await;
     let actor = Actor::regular("owner").with_access_token("token");
     let call = CloudCall {
+        file_transfer: false,
+        computer_id: None,
         method: Method::POST,
         path: "/v1/builtin-job/list",
         body: Some(json!({"computerId": "remote-worker"})),

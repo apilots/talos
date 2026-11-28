@@ -1,15 +1,10 @@
-//! Optional execution facts on the original durable TurnStarted event.
+//! Read-only legacy and projected trajectory metadata.
 use crate::session::DatabaseSessionStore;
 use talos_agent_api::{
     trajectory::{SessionHistorySupplement, TrajectoryPayload},
     AgentTurnRef,
 };
 use talos_error::{ErrorCode, TalosError, TalosResult};
-
-#[path = "supplement_merge.rs"]
-mod merge;
-
-const MAX_TURN_BYTES: usize = 32 * 1024 * 1024;
 
 fn codec(error: serde_json::Error) -> TalosError {
     TalosError::internal_with_source(
@@ -23,59 +18,6 @@ fn missing() -> TalosError {
         "The requested completed Turn was not found.",
     )
 }
-fn encode(value: &SessionHistorySupplement, limit: usize) -> TalosResult<String> {
-    let body = serde_json::to_string(value).map_err(codec)?;
-    if body.len() > limit {
-        return Err(TalosError::new(
-            ErrorCode::SessionBudgetExceeded,
-            "Execution history supplement exceeded its size limit.",
-        ));
-    }
-    Ok(body)
-}
-
-pub(super) async fn append(
-    store: &DatabaseSessionStore,
-    incoming: SessionHistorySupplement,
-) -> TalosResult<()> {
-    encode(&incoming, MAX_TURN_BYTES)?;
-    for payload in incoming.payloads.values() {
-        let bytes = serde_json::to_vec(payload).map_err(codec)?;
-        if bytes.len() > 4 * 1024 * 1024 {
-            return Err(TalosError::new(
-                ErrorCode::SessionBudgetExceeded,
-                "Execution history content exceeded its size limit.",
-            ));
-        }
-    }
-    // The original invocation deadline bounds this single normal admission.
-    // Pending progress writes must finish rather than silently discard this Turn.
-    let mut tx = store.storage.begin_transaction().await?;
-    let id = &incoming.identity;
-    let rows = tx.query("SELECT event_seq, execution_capture_json FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=1 AND json_extract(payload_json,'$.type')='turnStarted'", &[&id.session_id,&id.turn_id]).await?;
-    let row = rows.first().ok_or_else(missing)?;
-    if !tx.query("SELECT 1 FROM visible_agent_events WHERE session_id=? AND turn_id=? AND json_extract(payload_json,'$.type') IN ('turnCompleted','turnFailed') LIMIT 1", &[&id.session_id,&id.turn_id]).await?.is_empty() {
-        return Err(TalosError::new(ErrorCode::Conflict, "Completed Turn execution facts are immutable."));
-    }
-    let previous = row.get_string("execution_capture_json");
-    let merged = match previous.as_deref() {
-        Some(body) => merge::append(serde_json::from_str(body).map_err(codec)?, incoming)?,
-        None => merge::append_empty(incoming)?,
-    };
-    let body = encode(&merged, MAX_TURN_BYTES)?;
-    if previous.as_deref() != Some(&body) {
-        tx.execute(
-            "UPDATE agent_events SET execution_capture_json=? WHERE event_seq=?",
-            &[
-                &body,
-                &row.get_i64("event_seq").ok_or_else(missing)?.to_string(),
-            ],
-        )
-        .await?;
-    }
-    tx.commit().await
-}
-
 pub(super) async fn read_terminal(
     store: &DatabaseSessionStore,
     id: &AgentTurnRef,

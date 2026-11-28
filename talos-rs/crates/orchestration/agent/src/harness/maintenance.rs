@@ -111,8 +111,8 @@ where
             .await
     }
 
-    /// Stop admission, drain active operations, and release Provider resources.
-    pub async fn shutdown(&self, timeout: Duration) -> AgentResult<()> {
+    /// Stop admission and settle active operations without closing Provider resources.
+    pub async fn stop_execution(&self, timeout: Duration) -> AgentResult<()> {
         self.inner
             .accepting
             .store(false, std::sync::atomic::Ordering::Release);
@@ -167,6 +167,13 @@ where
             }
         }
 
+        Ok(())
+    }
+
+    /// Release Provider resources after the local execution phase has finished.
+    pub async fn shutdown(&self, timeout: Duration) -> AgentResult<()> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        self.stop_execution(timeout).await?;
         let cached_sessions = self
             .inner
             .sessions

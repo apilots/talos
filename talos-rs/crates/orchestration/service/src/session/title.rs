@@ -21,7 +21,7 @@ struct TitleInput {
 }
 
 impl SessionService {
-    /// Persist the first generated title before publishing a successful terminal fact.
+    /// Persist the first generated title for the exact visible, committed successful Turn.
     /// Model failures are reported, never replaced with an invented title or a failed Agent Turn.
     pub(crate) async fn generate_title(
         &self,

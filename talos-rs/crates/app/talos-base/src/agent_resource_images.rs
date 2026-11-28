@@ -4,8 +4,6 @@ pub struct NodeToolImageRpc {
     nodes: AgentNodeService,
     images: Arc<dyn ToolImageStore>,
     max_upload_bytes: u64,
-    authorization: Option<NodeSessionDataRpc>,
-    routes: Option<ResourceRoutes>,
 }
 
 impl NodeToolImageRpc {
@@ -18,8 +16,6 @@ impl NodeToolImageRpc {
             nodes,
             images,
             max_upload_bytes,
-            authorization: None,
-            routes: None,
         }
     }
 }
@@ -34,14 +30,6 @@ impl pb::agent_tool_image_rpc_server::AgentToolImageRpc for NodeToolImageRpc {
     }
 }
 impl NodeToolImageRpc {
-    pub(in crate::agent_node_rpc) fn with_routes(mut self, routes: ResourceRoutes) -> Self {
-        self.routes = Some(routes);
-        self
-    }
-    pub(crate) fn with_authorization(mut self, authorization: NodeSessionDataRpc) -> Self {
-        self.authorization = Some(authorization);
-        self
-    }
     pub(crate) async fn save_stream<S>(
         &self,
         stream: S,
@@ -56,31 +44,7 @@ impl NodeToolImageRpc {
             .await
             .transpose()?
             .ok_or_else(resource_status)?;
-        if let Some(caller) = first
-            .caller
-            .clone()
-            .filter(|caller| !caller.connection_id.is_empty())
-        {
-            if self.authorization.is_none() {
-                let routes = self.routes.as_ref().ok_or_else(resource_status)?;
-                let auth = first.auth.clone();
-                let requests = tokio_stream::once(Ok(first)).chain(stream).map(|value| {
-                    value.map(|value| pb::worker_rpc_call::Request::SaveToolImage(Box::new(value)))
-                });
-                let mut response = routes
-                    .forward(&self.nodes, auth, caller, Box::pin(requests))
-                    .await?;
-                let value = response
-                    .next()
-                    .await
-                    .transpose()?
-                    .ok_or_else(resource_status)?;
-                let pb::worker_rpc_result::Response::SaveToolImage(value) = value else {
-                    return Err(resource_status());
-                };
-                return Ok(Response::new(*value));
-            }
-        }
+
         let stream = tokio_stream::once(Ok(first)).chain(stream);
         let result = async {
             let mut stream = Box::pin(stream);
@@ -97,11 +61,7 @@ impl NodeToolImageRpc {
                 })?
                 .ok_or_else(invalid_resource_request)?;
             let auth = node_pb::decode_auth(first.auth)?;
-            let owner = if let Some(authorization) = &self.authorization {
-                authorization.authorize_owner(&auth).await?
-            } else {
-                self.nodes.authorize_lease_owner(&auth).await?
-            };
+            let owner = self.nodes.authorize_lease_owner(&auth).await?;
             let metadata = match first.body.ok_or_else(invalid_resource_request)? {
                 pb::save_tool_image_request::Body::Metadata(value) => value,
                 pb::save_tool_image_request::Body::Chunk(_) => {

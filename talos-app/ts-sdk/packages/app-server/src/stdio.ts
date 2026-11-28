@@ -175,6 +175,7 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       id,
       method,
       actor_credentials: actorCredentials ?? null,
+      ...(options?.computerId ? { computerId: options.computerId } : {}),
       params,
     };
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { automationRequestError, prepareAutomationMessage } from "@/features/automation";
 import { getTalosClient } from "@/shared/api/client";
+import { sessionPath } from "@/shared/api/session-route";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -153,7 +154,7 @@ function ChatHomeForm({ computers, scope, draftKey }: {
       current.saveComposerRequest(admission.draftKey);
       if (current.composerDrafts[admission.draftKey] === initialPrompt) saveDraft(admission.draftKey, "");
     }
-    if (ownerRef.current === admission) void navigate(`/sessions/${sessionId}`);
+    if (ownerRef.current === admission) void navigate(sessionPath(sessionId, request.nodeId));
   }
 
   async function handleCreateProject(input: string | { directory: string; name?: string }) {

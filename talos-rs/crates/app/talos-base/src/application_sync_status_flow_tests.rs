@@ -10,7 +10,7 @@ pub(super) async fn verify(
     let runtime = build_application_runtime_with_migration_dir(config.clone(), migration)
         .await
         .unwrap();
-    let identity = runtime.sync_host.verified_actor(actor).await.unwrap();
+    let identity = runtime.host.verified_actor(actor).await.unwrap();
     runtime
         .start_account_sync(
             &identity,
@@ -65,8 +65,8 @@ pub(super) async fn verify(
     tokio::time::timeout(Duration::from_secs(5), async {
         wait_for("cached-login Sync independent of Gateway", async || {
             restored
-                .sync_host
-                .sync_stores
+                .host
+                .stores
                 .handles
                 .lock()
                 .await
@@ -77,8 +77,8 @@ pub(super) async fn verify(
     })
     .await
     .expect("Gateway TLS must not delay saved document transport");
-    let handle = restored.sync_host.sync_stores.handles.lock().await[ACCOUNT].clone();
-    assert!(restored.sync_host.lifecycle.try_lock().is_err());
+    let handle = restored.host.stores.handles.lock().await[ACCOUNT].clone();
+    assert!(restored.host.lifecycle.try_lock().is_err());
     for _ in 0..5 {
         let status =
             tokio::time::timeout(Duration::from_secs(1), restored.service.sync_status(actor))
@@ -86,10 +86,10 @@ pub(super) async fn verify(
                 .expect("status must observe H while Worker registration is stalled")
                 .unwrap();
         assert_eq!(status.connection, SyncConnectionState::Connected);
-        restored.service.resume_account_sync(actor);
+        restored.service.resume_account_host(actor);
         assert!(Arc::ptr_eq(
             &handle,
-            &restored.sync_host.sync_stores.handles.lock().await[ACCOUNT]
+            &restored.host.stores.handles.lock().await[ACCOUNT]
         ));
     }
     tokio::time::timeout(Duration::from_secs(5), close(restored))

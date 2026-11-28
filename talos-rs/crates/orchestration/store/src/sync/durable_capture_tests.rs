@@ -204,3 +204,128 @@ async fn outbox_failure_preserves_committed_session_and_replays_after_reopening(
     sync.acknowledge(&project).await.unwrap();
     assert_eq!(sync.pending_changes(adapter.binding()).await.unwrap(), 0);
 }
+
+#[tokio::test]
+async fn restoring_capture_exports_updates_and_tombstones_committed_without_an_adapter() {
+    let source = peer(true).await;
+    let target = peer(false).await;
+    let projects = StorageProjectStore::new(source.storage.clone())
+        .await
+        .unwrap()
+        .with_sync(source.adapter.clone());
+    let project = projects
+        .create_project_on_node(
+            "Before adapter removal",
+            std::path::Path::new("/worker/restored"),
+            "account-1",
+            "embedded",
+        )
+        .await
+        .unwrap();
+    let resource = SyncResourceKey::Project {
+        project_id: project.project_id.clone(),
+    };
+    exchange(&source, &target, resource.clone()).await;
+    let offline = StorageProjectStore::new(source.storage.clone())
+        .await
+        .unwrap();
+    offline
+        .patch_project(
+            &project.project_id,
+            &ProjectPatch {
+                name: Some("Changed without adapter".into()),
+            },
+        )
+        .await
+        .unwrap();
+    let mut read = source.storage.begin_read_transaction().await.unwrap();
+    assert!(source
+        .adapter
+        .has_source_gap(&mut *read, &resource)
+        .await
+        .unwrap());
+    read.commit().await.unwrap();
+    let old_import = SyncImportBatch {
+        scope: source.adapter.binding.scope.clone(),
+        resource: resource.clone(),
+        version: Default::default(),
+        changes: vec![],
+    };
+    let rejected = source
+        .adapter
+        .prepare_import(&old_import)
+        .await
+        .unwrap_err();
+    assert_eq!(rejected.error_code(), talos_error::ErrorCode::Conflict);
+    exchange(&source, &target, resource.clone()).await;
+    let target_projects = StorageProjectStore::new(target.storage.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        target_projects
+            .get_project(&project.project_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .name,
+        "Changed without adapter"
+    );
+    offline.delete_project(&project.project_id).await.unwrap();
+    exchange(&source, &target, resource).await;
+    assert!(target_projects
+        .get_project(&project.project_id)
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn legacy_history_stays_local_without_new_sync_publication() {
+    let source = peer(true).await;
+    let id = "local-old-history";
+    source
+        .sessions
+        .insert_session_record(&record(id))
+        .await
+        .unwrap();
+    source
+        .storage
+        .execute(
+            "UPDATE sessions SET execution_architecture='legacy_read_only' WHERE session_key=?",
+            &[id],
+        )
+        .await
+        .unwrap();
+    let resource = SyncResourceKey::Session {
+        session_id: id.into(),
+    };
+    assert!(!source.adapter.collect_revision(&resource).await.unwrap());
+    let page = catalog::scan(
+        source.storage.as_ref(),
+        talos_sync::SyncScanParams {
+            binding: source.adapter.binding.clone(),
+            cursor: None,
+            limit: 100,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!page.resources.contains(&resource));
+    assert!(source
+        .sync
+        .export_pending(source.adapter.binding(), resource, 100)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(source
+        .sessions
+        .get_session_record(id)
+        .await
+        .unwrap()
+        .is_some());
+    assert!(source
+        .sessions
+        .ensure_worker_execution_session(id)
+        .await
+        .is_err());
+}

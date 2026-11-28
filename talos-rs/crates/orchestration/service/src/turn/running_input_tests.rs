@@ -143,7 +143,12 @@ async fn durable_input_delivery_outlives_the_request_owner() {
                 .await
         }
     });
-    agent_execution.input_permit_started.notified().await;
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        agent_execution.input_permit_started.notified(),
+    )
+    .await
+    .expect("accepted input must reach its Provider delivery permit");
     request_owner.abort();
     agent_execution.input_permit_release.notify_one();
     tokio::time::timeout(Duration::from_secs(1), async {
@@ -280,13 +285,44 @@ async fn steer_accepts_text_and_files_but_rejects_skills_without_consuming_them(
     let (service, _event_service, store, message_queue) =
         test_service(agent_execution.clone()).await;
     create_test_session_record(store.clone()).await;
-    store
-        .commit_maintenance_admission(CanonicalAgentEvent {
-            identity: talos_agent_api::AgentTurnRef::new("other-session", "maintenance"),
-            sequence: 1,
-            occurred_at: 1,
-            payload: CanonicalAgentEventPayload::TurnStarted(talos_agent_api::AgentTurnStarted {}),
-        })
+    let mut other = test_session();
+    other.id = "other-session".into();
+    store.insert_session_record(&other).await.unwrap();
+    let identity = talos_agent_api::AgentTurnRef::new(&other.id, "maintenance");
+    let context = service
+        .execution
+        .sessions
+        .build_agent_context(&other, identity.clone())
+        .await
+        .unwrap();
+    let event = CanonicalAgentEvent {
+        identity: identity.clone(),
+        sequence: 1,
+        occurred_at: 1,
+        payload: CanonicalAgentEventPayload::TurnStarted(talos_agent_api::AgentTurnStarted {}),
+    };
+    let mut reducer = talos_agent::AgentEventReducer::new(identity);
+    reducer.apply(event.clone()).unwrap();
+    let journal = agent_execution
+        .worker_store
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap();
+    journal
+        .admit(
+            &context.session,
+            &agent_protocol::AgentExecutionCommand::Compaction {
+                context: Box::new(context.clone()),
+            },
+            vec![event],
+            &reducer.checkpoint(),
+        )
+        .await
+        .unwrap();
+    service
+        .execution
+        .project_worker(&context.session)
         .await
         .unwrap();
     let started = submit_test_start(
@@ -402,4 +438,6 @@ async fn steer_accepts_text_and_files_but_rejects_skills_without_consuming_them(
         message_queue.list("s1").unwrap().messages,
         skill_queue.messages
     );
+    message_queue.delete("s1", &skill_id).unwrap();
+    complete_held_turn(&service, agent_execution.as_ref()).await;
 }

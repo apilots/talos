@@ -10,7 +10,6 @@ import "@/shared/i18n/setup";
 import { FilesPage } from "./FilesPage";
 import { useAppStore } from "@/shared/store/app-store";
 import { connectionScope } from "@/shared/store/connection-scope";
-import { getTalosClient } from "@/shared/api/client";
 import { productQueries } from "@/shared/api/product-queries";
 
 afterEach(() => {
@@ -22,7 +21,7 @@ afterEach(() => {
   useAppStore.setState(useAppStore.getInitialState());
 });
 
-async function offlineOrdinaryWorker(verifyNode: boolean) {
+function offlineOrdinaryWorker(localComputer: boolean = true) {
   const invoke = vi.fn();
   Object.defineProperty(window, "talos", { configurable: true, value: { invoke } });
   const http = vi.fn();
@@ -34,16 +33,9 @@ async function offlineOrdinaryWorker(verifyNode: boolean) {
   const projectId = "project";
   const file = { fileId: "notes", originalFilename: "notes.txt", mimeType: "text/plain", tags: [],
     sizeBytes: 5, metadata: {}, createdAt: 1, updatedAt: 1, scope: { type: "project", projectId } as const };
-  if (verifyNode) {
-    http.mockResolvedValueOnce(Response.json({ status: "success", data: { nodeId, managedWorkerPhase: null } }));
-    await getTalosClient({ nodeId });
-    expect(http).toHaveBeenCalledWith(expect.stringContaining(nodeId), expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: "Bearer alice-token" }) as unknown,
-    }));
-    productQueries.clear();
-  }
   http.mockReset().mockRejectedValue(new TypeError("Server offline"));
   invoke.mockImplementation((method: string, params: AppProtocol.FileUploadParams) => {
+    if (method === "desktop/workerIdentity") return Promise.resolve({ status: "success", data: { nodeId: localComputer ? nodeId : "this-computer" } });
     if (method === "computer/read" || method === "model/list") return Promise.resolve({ status: "error", error: {
       code: "serviceUnavailable", message: "Computer directory offline.", localization: null,
     } });
@@ -72,8 +64,8 @@ async function offlineOrdinaryWorker(verifyNode: boolean) {
   return { http, invoke, file, wrapper, sessionId };
 }
 
-it("lists and uploads Files for a verified ordinary Worker after an offline restart", async () => {
-  const { file, wrapper, invoke, http } = await offlineOrdinaryWorker(true);
+it("lists and uploads Files for a current Computer after an offline restart", async () => {
+  const { file, wrapper, invoke, http } = offlineOrdinaryWorker(true);
   const { container } = render(<MemoryRouter><FilesPage /></MemoryRouter>, { wrapper });
   await screen.findByText(file.originalFilename);
   fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -85,7 +77,7 @@ it("lists and uploads Files for a verified ordinary Worker after an offline rest
 });
 
 it("stages a project attachment in a saved standard chat without prior online Computer verification", async () => {
-  const { file, wrapper, invoke, sessionId } = await offlineOrdinaryWorker(false);
+  const { file, wrapper, invoke, sessionId } = offlineOrdinaryWorker(true);
   const { container } = render(<MemoryRouter><ChatSessionContent sessionId={sessionId} /></MemoryRouter>, { wrapper });
   await waitFor(() => expect((screen.getByRole<HTMLButtonElement>("button", { name: "Add" })).disabled).toBe(false), { timeout: 4_000 });
   fireEvent.click(screen.getByRole<HTMLButtonElement>("button", { name: "Add" }));
@@ -97,4 +89,11 @@ it("stages a project attachment in a saved standard chat without prior online Co
   }) as unknown }), expect.anything()));
   await screen.findByText("draft.txt");
   expect((screen.getByRole<HTMLButtonElement>("button", { name: "Send" })).disabled).toBe(true);
+});
+
+it("does not serve a remote Computer's files from a local copy when Server is offline", async () => {
+ const {http,invoke,wrapper}=offlineOrdinaryWorker(false);
+ render(<MemoryRouter><FilesPage /></MemoryRouter>,{wrapper});
+ await waitFor(()=>expect(http).toHaveBeenCalled());
+ expect(invoke.mock.calls.some(([method])=>method==="file/list")).toBe(false);
 });

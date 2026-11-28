@@ -42,7 +42,10 @@ impl SubagentService {
     ) -> TalosResult<SubagentSpawnResult> {
         Self::validate_request(&request)?;
         let service = self.clone();
-        await_admission(async move { service.spawn_owned(request).await }).await
+        await_admission(self.turns.track_admission()?, async move {
+            service.spawn_owned(request).await
+        })
+        .await
     }
 
     async fn spawn_owned(&self, request: SpawnSubagentRequest) -> TalosResult<SubagentSpawnResult> {

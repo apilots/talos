@@ -203,19 +203,19 @@ fn remote_unavailable() -> TalosError {
 
 #[async_trait]
 impl AgentCoordinator for CoordinatorImpl {
+    async fn read_session_events(
+        &self,
+        params: agent_protocol::AgentSessionEventsParams,
+    ) -> TalosResult<agent_protocol::AgentSessionEventsResult> {
+        let harness = self.session_harness(&params.session).await?;
+        harness.read_session_events(params).await
+    }
     async fn read_session_execution_state(
         &self,
         session: AgentSessionContext,
     ) -> TalosResult<Option<agent_protocol::SessionExecutionState>> {
         let harness = self.session_harness(&session).await?;
         harness.read_session_execution_state(session).await
-    }
-    async fn commit_session_execution_state(
-        &self,
-        params: agent_protocol::CommitSessionExecutionStateParams,
-    ) -> TalosResult<()> {
-        let harness = self.session_harness(&params.session).await?;
-        harness.commit_session_execution_state(params).await
     }
 
     async fn worker_environment(
@@ -349,6 +349,23 @@ impl AgentCoordinator for CoordinatorImpl {
         harness.clear_session(params, expected_history_cursor).await
     }
 
+    async fn retire_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        let harness = self
+            .harness(
+                &params.agent_id,
+                &params.session_id,
+                Some(&params.workspace.user_id),
+            )
+            .await?;
+        harness
+            .retire_session(params, expected_history_cursor)
+            .await
+    }
+
     async fn close_session(
         &self,
         params: AgentSessionContext,
@@ -430,6 +447,7 @@ mod affinity_tests {
             .unwrap();
         node_store
             .register(RegisterNodeParams {
+                product_owner: talos_types::NodeProductOwner::Server,
                 system_info: None,
                 node_id: "z-laptop".into(),
                 expected_credential_hash: [1; 32],

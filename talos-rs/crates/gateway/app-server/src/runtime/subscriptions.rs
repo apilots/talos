@@ -38,10 +38,14 @@ impl Subscriptions {
         app: &dyn AppServerApplication,
         actor: &Actor,
         params: SubscribeTimelineRequest,
+        computer_id: Option<String>,
         outgoing: tokio::sync::mpsc::Sender<OutgoingMessage>,
         id: RequestId,
     ) -> Result<(), ()> {
-        match app.subscribe_timeline_events(actor, params).await {
+        match app
+            .subscribe_scoped_timeline_events(actor, params, computer_id)
+            .await
+        {
             Ok(subscription) => {
                 let response = subscription.response();
                 let subscription_id = response.subscription_id.clone();

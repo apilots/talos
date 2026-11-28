@@ -61,7 +61,7 @@ timeout 90 "${TALOS_E2E_APP_SERVER_TEST_CLIENT_BIN}" automation-restart-e2e >"${
   exit 1
 }
 cat "${evidence}/restart.log"
-(cd "${REPO_ROOT}" && just test --locked -p talos-base --run-ignored only -E 'test(automation_worker_business)') >"${evidence}/remote-workers.log" 2>&1 || {
+(cd "${REPO_ROOT}" && just test --locked -p talos-base --features server --run-ignored only -E 'test(automation_worker_business)') >"${evidence}/remote-workers.log" 2>&1 || {
   cat "${evidence}/remote-workers.log" >&2
   exit 1
 }

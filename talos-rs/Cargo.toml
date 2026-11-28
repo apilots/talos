@@ -54,11 +54,13 @@ members = [
     "crates/orchestration/service",
     "crates/orchestration/router",
     "crates/orchestration/coordinator",
+    "crates/orchestration/control-plane",
     # Gateway
     "crates/gateway/core",
     "crates/gateway/http",
     "crates/gateway/app-protocol",
     "crates/gateway/app-server",
+    "crates/gateway/relay-server",
     # App
     "crates/app/talos-upgrade",
     "crates/app/talos-base",
@@ -181,13 +183,15 @@ agent-client = { path = "crates/orchestration/agent-client" }
 agent-protocol = { path = "crates/orchestration/agent-protocol" }
 talos-agent = { path = "crates/orchestration/agent" }
 talos-run-control = { path = "crates/orchestration/run-control" }
-talos-store = { path = "crates/orchestration/store" }
+talos-store = { path = "crates/orchestration/store", default-features = false }
 talos-sync = { path = "crates/orchestration/sync" }
 talos-sync-parser = { path = "crates/orchestration/sync-parser" }
 talos-sync-types = "=0.1.8"
 loro = { version = "=1.16.2", default-features = false }
 talos-sync-sdk = "=0.1.8"
-talos-service = { path = "crates/orchestration/service" }
+talos-service = { path = "crates/orchestration/service", default-features = false }
+talos-control-plane = { path = "crates/orchestration/control-plane" }
+talos-relay-server = { path = "crates/gateway/relay-server" }
 talos-llm-provider = { path = "crates/common/llm/provider" }
 talos-prompt = { path = "crates/common/prompt" }
 talos-llm-anthropic = { path = "crates/common/llm/anthropic" }
@@ -202,7 +206,7 @@ talos-storage = { path = "crates/infra/storage" }
 talos-channel = { path = "crates/perception/channels" }
 talos-sdk = { path = "apps/sdk" }
 talos-sdk-embedded = { path = "apps/sdk-embedded" }
-talos-base = { path = "crates/app/talos-base" }
+talos-base = { path = "crates/app/talos-base", default-features = false }
 talos-worker = { path = "crates/app/talos-worker" }
 talos-upgrade = { path = "crates/app/talos-upgrade" }
 

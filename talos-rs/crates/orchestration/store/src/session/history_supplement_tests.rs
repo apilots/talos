@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use talos_agent_api::trajectory::*;
 use talos_error::ErrorCode;
 
@@ -59,124 +60,117 @@ fn supplement(name: &str) -> SessionHistorySupplement {
         .into(),
     }
 }
-async fn finish(store: &TestStore, sequence: u64, tail: i64) {
+async fn finish(store: &TestStore, sequence: u64) {
     store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: event(
-                sequence,
-                AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            ),
-            expected_event_seq: tail,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![event(
+            sequence,
+            AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        )]))
         .await
         .unwrap();
 }
 
 #[tokio::test]
-async fn supplements_preserve_canonical_history_across_waiting_and_seal_at_terminal() {
+async fn sealed_worker_metadata_preserves_waiting_history_and_rejects_changed_replay() {
     let store = store().await;
     store
-        .insert_session_record(&session_record())
-        .await
-        .unwrap();
-    let admitted = store
-        .commit_initial_admission(initial_admission(admission()))
+        .project_test_events(initial_admission(admission()))
         .await
         .unwrap();
     let identity = AgentTurnRef::new("session-1", "turn-1");
     let before = store.list_agent_turn_events(&identity, 10).await.unwrap();
-    store
-        .append_history_supplement(supplement("first"))
-        .await
-        .unwrap();
-    assert_eq!(
-        store.list_agent_turn_events(&identity, 10).await.unwrap(),
-        before
-    );
     assert!(store
         .read_terminal_history_supplement(&identity)
         .await
         .unwrap_err()
         .is_code(ErrorCode::ResourceNotFound));
-    let paused = store
-        .commit_waiting_settlement(
-            waiting(3, "question"),
-            AgentContinuationRef {
-                opaque_id: "continuation".into(),
-            },
-            admitted.active_turn.last_event_seq,
-        )
-        .await
-        .unwrap();
     store
-        .append_history_supplement(supplement("resumed"))
+        .project_test_events(TestWorkerEvents::new(vec![waiting(3, "question")]))
         .await
         .unwrap();
-    // Repeating a final checkpoint is idempotent, with the same frozen request.
+    assert_eq!(
+        store.list_agent_turn_events(&identity, 10).await.unwrap()[..before.len()],
+        before
+    );
+    let mut sealed = supplement("first");
+    let mut resumed = supplement("resumed");
+    resumed.requests[0].request.ordinal = 2;
+    resumed.requests[0].tools = sealed.requests[0].tools.clone();
+    sealed.requests.extend(resumed.requests);
+    sealed.payloads.clear();
+    let source = store.worker_event_cursor("session-1").await.unwrap();
+    let terminal = event(
+        4,
+        AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: AgentStopReason::EndTurn,
+        }),
+    );
     store
-        .append_history_supplement(supplement("resumed"))
+        .project_test_events(TestWorkerEvents {
+            history_supplement: Some(sealed.clone()),
+            ..TestWorkerEvents::new(vec![terminal.clone()])
+        })
         .await
         .unwrap();
-    finish(&store, 4, paused.active_turn.last_event_seq).await;
     let saved = store
         .read_terminal_history_supplement(&identity)
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(saved, sealed);
     assert_eq!(
         saved
             .requests
             .iter()
-            .map(|r| r.request.ordinal)
+            .map(|request| request.request.ordinal)
             .collect::<Vec<_>>(),
         vec![1, 2]
     );
-    // Metadata reads exclude bodies; exactly equal catalogs share their saved ID.
     assert!(saved.payloads.is_empty());
-    let contents = store
-        .storage
-        .query(
-            "SELECT execution_capture_json FROM agent_events WHERE sequence=1",
-            &[],
-        )
+    assert_eq!(saved.requests[0].tools, saved.requests[1].tools);
+    let replay = store
+        .project_test_events(TestWorkerEvents {
+            history_supplement: Some(sealed.clone()),
+            after_cursor: Some(source.clone()),
+            ..TestWorkerEvents::new(vec![terminal.clone()])
+        })
         .await
         .unwrap();
-    let full: SessionHistorySupplement =
-        serde_json::from_str(&contents[0].get_string("execution_capture_json").unwrap()).unwrap();
-    assert_eq!(full.payloads.len(), 3);
-    assert_eq!(saved.requests[0].tools, saved.requests[1].tools);
+    assert!(replay.events.is_empty());
+    sealed.requests[0].request.connection_id = "changed-after-commit".into();
     assert!(store
-        .append_history_supplement(supplement("late"))
+        .project_test_events(TestWorkerEvents {
+            history_supplement: Some(sealed),
+            after_cursor: Some(source),
+            ..TestWorkerEvents::new(vec![terminal])
+        })
         .await
         .unwrap_err()
         .is_code(ErrorCode::Conflict));
+    for receipt in store.pending_worker_settlements("session-1").await.unwrap() {
+        store
+            .complete_worker_settlement(&receipt.cursor)
+            .await
+            .unwrap();
+    }
     store.clear_session_history("session-1", 20).await.unwrap();
     assert!(store
         .read_terminal_history_supplement(&identity)
         .await
         .unwrap_err()
         .is_code(ErrorCode::ResourceNotFound));
-    assert!(store
-        .append_history_supplement(supplement("deleted"))
-        .await
-        .is_err());
 }
 
 #[tokio::test]
 async fn old_null_content_is_distinct_from_corrupt_saved_content() {
     let store = store().await;
-    store
-        .insert_session_record(&session_record())
+    let _admitted = store
+        .project_test_events(initial_admission(admission()))
         .await
         .unwrap();
-    let admitted = store
-        .commit_initial_admission(initial_admission(admission()))
-        .await
-        .unwrap();
-    finish(&store, 3, admitted.active_turn.last_event_seq).await;
+    finish(&store, 3).await;
     let identity = AgentTurnRef::new("session-1", "turn-1");
     assert_eq!(
         store
@@ -245,55 +239,45 @@ async fn old_null_content_is_distinct_from_corrupt_saved_content() {
 }
 
 #[tokio::test]
-async fn optional_append_follows_pending_progress_and_keeps_invalid_links_atomic() {
+async fn invalid_worker_capture_rolls_back_the_terminal_projection_atomically() {
     let store = store().await;
     store
-        .insert_session_record(&session_record())
+        .project_test_events(initial_admission(admission()))
         .await
         .unwrap();
-    store
-        .commit_initial_admission(initial_admission(admission()))
-        .await
-        .unwrap();
-    let tx = store.storage.begin_transaction().await.unwrap();
-    let append = store.append_history_supplement(supplement("first"));
-    tokio::pin!(append);
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(10), &mut append)
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    let before = store.list_agent_turn_events(&identity, 10).await.unwrap();
+    let source = store.worker_event_cursor("session-1").await.unwrap();
+    let terminal = event(
+        3,
+        AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: AgentStopReason::EndTurn,
+        }),
+    );
+    let mut wrong_identity = supplement("wrong");
+    wrong_identity.payloads.clear();
+    wrong_identity.identity.turn_id = "another-turn".into();
+    for invalid in [wrong_identity, supplement("embedded-body")] {
+        assert!(store
+            .project_test_events(TestWorkerEvents {
+                history_supplement: Some(invalid),
+                ..TestWorkerEvents::new(vec![terminal.clone()])
+            })
             .await
-            .is_err()
-    );
-    tx.rollback().await.unwrap();
-    append.await.unwrap();
-    let before = store
-        .storage
-        .query(
-            "SELECT execution_capture_json FROM agent_events WHERE sequence=1",
-            &[],
-        )
-        .await
-        .unwrap()[0]
-        .get_string("execution_capture_json");
-    let mut bad = supplement("wrong");
-    bad.payloads.insert(
-        "prompt-wrong".into(),
-        TrajectoryPayload::Tools {
-            definitions: vec![],
-        },
-    );
+            .unwrap_err()
+            .is_code(ErrorCode::Conflict));
+        assert_eq!(
+            store.list_agent_turn_events(&identity, 10).await.unwrap(),
+            before
+        );
+        assert_eq!(
+            store.worker_event_cursor("session-1").await.unwrap(),
+            source
+        );
+    }
     assert!(store
-        .append_history_supplement(bad)
+        .get_agent_active_turn("session-1")
         .await
-        .unwrap_err()
-        .is_code(ErrorCode::InvalidRequest));
-    let after = store
-        .storage
-        .query(
-            "SELECT execution_capture_json FROM agent_events WHERE sequence=1",
-            &[],
-        )
-        .await
-        .unwrap()[0]
-        .get_string("execution_capture_json");
-    assert_eq!(before, after);
+        .unwrap()
+        .is_some());
 }

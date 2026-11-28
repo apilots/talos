@@ -23,10 +23,8 @@ use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
 use talos_store::profile::{MockProfileStore, ProfileUsageUpdate};
 use talos_store::project::StorageProjectStore;
-use talos_store::session::{
-    AgentExecutionStore, CommitInitialAdmissionParams, CommitTerminalSettlementParams,
-    DatabaseSessionStore, SessionRecord,
-};
+use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionRecord};
+
 use talos_types::talos::{SessionSourceProvider, SessionSourceType};
 
 use talos_types::{
@@ -165,12 +163,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             .await
             .expect("session store"),
     );
-    let memory_progress = Arc::new(crate::memory_progress::SessionMemoryProgress::new(
-        sessions.clone(),
-    ));
-    let history = Arc::new(talos_service::SessionHistoryService::new(Arc::new(
-        talos_service::TimelineEventService::new(sessions.clone()),
-    )));
+    let mut source_events = BTreeMap::new();
     for (session_id, user_id, last_activity) in [("s1", "u1", 2), ("s2", "u2", 1)] {
         let mut record = session_record(session_id, user_id, last_activity);
         if session_id == "s2" {
@@ -180,14 +173,15 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             .insert_session_record(&record)
             .await
             .expect("insert session");
-        commit_completed_history_turn(
-            sessions.as_ref(),
-            session_id,
-            &format!("turn-{session_id}"),
-            &format!("message-{session_id}"),
-            &format!("remember {user_id}"),
-        )
-        .await;
+        source_events.insert(
+            session_id.to_string(),
+            completed_history_events(
+                session_id,
+                &format!("turn-{session_id}"),
+                &format!("message-{session_id}"),
+                &format!("remember {user_id}"),
+            ),
+        );
     }
     let provider: Arc<dyn LlmProvider> = Arc::new(TestProvider {
         responses: Mutex::new(VecDeque::from([
@@ -212,9 +206,19 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             .build()
             .expect("inner model client"),
     );
-    let nodes = talos_service::AgentNodeService::new(Arc::new(
-        talos_store::node::DatabaseAgentNodeStore::new(&storage),
-    ));
+    use talos_store::node::AgentNodeStore;
+    let node_store = Arc::new(talos_store::node::DatabaseAgentNodeStore::new(&storage));
+    let nodes = talos_service::ProductNodeAccess::computer(
+        node_store
+            .upsert_embedded(
+                talos_types::NodeStatus::Enabled,
+                chrono::Utc::now().timestamp(),
+            )
+            .await
+            .unwrap()
+            .into_info(),
+        Arc::new(agent_protocol::NodeAdmissionGates::default()),
+    );
     let project_store = Arc::new(
         StorageProjectStore::new(storage.clone())
             .await
@@ -236,7 +240,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     let coordinator = Arc::new(CoordinatorImpl::new(
         Arc::new(talos_router::RouterImpl::new()),
         sessions.clone(),
-        Arc::new(talos_store::node::DatabaseAgentNodeStore::new(&storage)),
+        node_store,
     ));
     let runtime_home = tempfile::tempdir().unwrap();
     let mut worker_config = config.clone();
@@ -249,8 +253,6 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             runtime_home.path().to_path_buf(),
         )),
         talos_worker::TalosWorkerResources {
-            session_history_reader: history,
-            memory_progress_store: memory_progress,
             attachment_reader: file_service.clone(),
             tool_image_store: Arc::new(crate::tool_images::ToolImages(file_service.clone())),
             agent_control: None,
@@ -259,9 +261,55 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     )
     .await
     .unwrap();
-    for (id, harness) in worker.harnesses() {
+    worker.use_local_resources({
+        let data = crate::agent_node_resources_rpc::NodeSessionDataRpc::local(
+            sessions.clone(),
+            file_service.clone(),
+        );
+        let files = file_service.clone();
+        move |context| {
+            let data = data.clone();
+            let files = files.clone();
+            Box::pin(async move {
+                data.authorize_local_session(&context).await?;
+                Ok(talos_worker::TalosWorkerResources {
+                    attachment_reader: files.clone(),
+                    tool_image_store: Arc::new(crate::tool_images::ToolImages(files)),
+                    agent_control: None,
+                    automation_control: None,
+                })
+            })
+        }
+    });
+    for (session_id, user) in [("s1", "u1"), ("s2", "u2")] {
+        seed_worker_turn(
+            &worker,
+            sessions.as_ref(),
+            &config,
+            session_id,
+            user,
+            &format!("turn-{session_id}"),
+            source_events.remove(session_id).unwrap(),
+        )
+        .await;
+    }
+    let (worker_api, worker_auth) = worker
+        .start_local(
+            talos_error::SessionOwnerKind::Server,
+            talos_agent::SessionHold::Turn,
+        )
+        .await
+        .unwrap();
+    for (id, harness) in worker
+        .local_harnesses(
+            &worker_api,
+            &worker_auth,
+            "11111111-1111-4111-8111-111111111111",
+        )
+        .unwrap()
+    {
         coordinator
-            .register_agent("embedded".into(), id.clone(), harness.clone())
+            .register_agent("embedded".into(), id, harness)
             .await
             .unwrap();
     }
@@ -341,7 +389,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         .expect("requested model refs")
         .clone();
     assert!(!requested_model_refs.is_empty());
-    let expected_inner_model = config.agent.inner_model.unwrap();
+    let expected_inner_model = config.agent.inner_model.clone().unwrap();
     let usage_kinds = profiles
         .updates()
         .into_iter()
@@ -365,14 +413,26 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
 
     let u1_workspace = workspace.path().join("u1");
     let memory_path = u1_workspace.join("MEMORY.md");
-    commit_completed_history_turn(
+    seed_worker_turn(
+        &worker,
         sessions.as_ref(),
+        &config,
         "s1",
+        "u1",
         "turn-s1-2",
-        "message-s1-2",
-        "remember failure invariant",
+        completed_history_events(
+            "s1",
+            "turn-s1-2",
+            "message-s1-2",
+            "remember failure invariant",
+        ),
     )
     .await;
+    let memory_before_failure = worker
+        .execution_store()
+        .memory_progress("s1")
+        .await
+        .unwrap();
     let record_before_failure = sessions
         .get_session_record("s1")
         .await
@@ -384,14 +444,13 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         .process_session(record_before_failure.clone())
         .await
         .expect_err("Dream Memory must fail when usage recording fails");
-    let record_after_failure = sessions
-        .get_session_record("s1")
-        .await
-        .expect("reload session")
-        .expect("session record");
     assert_eq!(
-        record_after_failure.memory_processed_until_event_seq,
-        record_before_failure.memory_processed_until_event_seq
+        worker
+            .execution_store()
+            .memory_progress("s1")
+            .await
+            .unwrap(),
+        memory_before_failure
     );
 
     assert!(
@@ -400,13 +459,12 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     );
 }
 
-async fn commit_completed_history_turn(
-    store: &dyn AgentExecutionStore,
+fn completed_history_events(
     session_id: &str,
     turn_id: &str,
     message_id: &str,
     text: &str,
-) {
+) -> Vec<AgentEvent> {
     let occurred_at = 1_784_251_800;
     let identity = AgentTurnRef::new(session_id, turn_id);
     let completed_block = AgentMessageBlock {
@@ -434,69 +492,55 @@ async fn commit_completed_history_turn(
     let mut started_block = completed_block.clone();
     started_block.status = AgentMessageBlockStatus::Running;
     started_block.completed_at = None;
-    let admission = store
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: vec![
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 1,
-                    occurred_at,
-                    payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
-                },
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 2,
-                    occurred_at,
-                    payload: AgentEventPayload::MessageStarted(AgentMessageStarted {
-                        message: started_message,
-                    }),
-                },
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 3,
-                    occurred_at,
-                    payload: AgentEventPayload::MessageBlockStarted(AgentMessageBlockStarted {
-                        message_id: message_id.to_string(),
-                        block: started_block,
-                    }),
-                },
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 4,
-                    occurred_at: occurred_at + 1,
-                    payload: AgentEventPayload::MessageBlockCompleted(AgentMessageBlockCompleted {
-                        message_id: message_id.to_string(),
-                        block: completed_block,
-                    }),
-                },
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 5,
-                    occurred_at: occurred_at + 1,
-                    payload: AgentEventPayload::MessageCompleted(completed_message),
-                },
-            ],
-            command: None,
-        })
-        .await
-        .expect("canonical Turn admission should commit");
-    store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity,
-                sequence: 6,
-                occurred_at: occurred_at + 2,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: admission.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
-        .await
-        .expect("canonical Turn settlement should commit");
+    let mut events = vec![
+        AgentEvent {
+            identity: identity.clone(),
+            sequence: 1,
+            occurred_at,
+            payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+        },
+        AgentEvent {
+            identity: identity.clone(),
+            sequence: 2,
+            occurred_at,
+            payload: AgentEventPayload::MessageStarted(AgentMessageStarted {
+                message: started_message,
+            }),
+        },
+        AgentEvent {
+            identity: identity.clone(),
+            sequence: 3,
+            occurred_at,
+            payload: AgentEventPayload::MessageBlockStarted(AgentMessageBlockStarted {
+                message_id: message_id.to_string(),
+                block: started_block,
+            }),
+        },
+        AgentEvent {
+            identity: identity.clone(),
+            sequence: 4,
+            occurred_at: occurred_at + 1,
+            payload: AgentEventPayload::MessageBlockCompleted(AgentMessageBlockCompleted {
+                message_id: message_id.to_string(),
+                block: completed_block,
+            }),
+        },
+        AgentEvent {
+            identity: identity.clone(),
+            sequence: 5,
+            occurred_at: occurred_at + 1,
+            payload: AgentEventPayload::MessageCompleted(completed_message),
+        },
+    ];
+    events.push(AgentEvent {
+        identity,
+        sequence: events.last().unwrap().sequence + 1,
+        occurred_at: occurred_at + 2,
+        payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: AgentStopReason::EndTurn,
+        }),
+    });
+    events
 }
 
 fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> SessionRecord {
@@ -538,4 +582,82 @@ fn candidate_response(title: &str) -> String {
     format!(
         r#"{{"mode":"maintenance","memory_candidates":[{{"title":"{title}","body":"durable memory","kind":"fact","importance":"high"}}]}}"#
     )
+}
+
+async fn seed_worker_turn(
+    worker: &talos_worker::TalosWorker,
+    product: &DatabaseSessionStore,
+    config: &TalosConfig,
+    session_id: &str,
+    user_id: &str,
+    turn_id: &str,
+    events: Vec<AgentEvent>,
+) {
+    let identity = AgentTurnRef::new(session_id, turn_id);
+    let input = events
+        .iter()
+        .find_map(|event| match &event.payload {
+            AgentEventPayload::MessageCompleted(message) => Some(message.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let context = agent_protocol::AgentSessionContext {
+        agent_id: "dream-agent".into(),
+        session_id: session_id.into(),
+        workspace: config.resolve_workspace("default", user_id).unwrap(),
+    };
+    let journal = worker.execution_store();
+    journal
+        .admit(
+            &context,
+            &agent_protocol::AgentExecutionCommand::Input {
+                params: Box::new(agent_protocol::AgentInputParams {
+                    command: None,
+                    agent_id: "dream-agent".into(),
+                    identity,
+                    input: input.clone(),
+                }),
+            },
+            vec![events[0].clone()],
+            &agent_protocol::AgentRunCheckpoint {
+                last_sequence: 1,
+                messages: vec![],
+                metrics: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+    journal
+        .append(
+            &context,
+            events[1..].to_vec(),
+            &agent_protocol::AgentRunCheckpoint {
+                last_sequence: events.last().unwrap().sequence,
+                messages: vec![input],
+                metrics: Default::default(),
+            },
+            Some(agent_protocol::AgentExecutionSettlement::Finished {
+                memory_usage: vec![],
+                metrics: Default::default(),
+            }),
+        )
+        .await
+        .unwrap();
+    let page = journal
+        .read_events(agent_protocol::AgentSessionEventsParams {
+            session: context,
+            after_cursor: None,
+            limit: agent_protocol::MAX_EXECUTION_PAGE_EVENTS,
+        })
+        .await
+        .unwrap();
+    product
+        .project_worker_events(talos_store::session::WorkerProjectionParams {
+            execution_node_id: "embedded".into(),
+            session_id: session_id.into(),
+            after_cursor: None,
+            page,
+        })
+        .await
+        .unwrap();
 }

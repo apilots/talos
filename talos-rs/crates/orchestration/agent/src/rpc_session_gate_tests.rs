@@ -1,8 +1,8 @@
 use super::*;
-fn context(id: &str) -> AgentSessionContext {
+fn context() -> AgentSessionContext {
     AgentSessionContext {
         agent_id: "kernel".into(),
-        session_id: id.into(),
+        session_id: "session".into(),
         workspace: talos_config::EffectiveWorkspace {
             workspace_id: "pc".into(),
             user_id: "user".into(),
@@ -10,405 +10,176 @@ fn context(id: &str) -> AgentSessionContext {
         },
     }
 }
-#[test]
-fn restart_keeps_last_local_coordinator_and_shared_handoff_requires_the_exact_history_cursor() {
-    let home = tempfile::tempdir().unwrap();
-    let gate = SessionGate::new(home.path().join("history-cursors"));
-    let a = uuid::Uuid::new_v4().to_string();
-    let b = uuid::Uuid::new_v4().to_string();
-    let context = context("session");
-    let identity = AgentTurnRef::new("session", "turn-a");
-    let mut admitted = gate
-        .reserve(
-            &context,
-            &identity,
-            &a,
-            &Default::default(),
-            RunAdmission::NewTurn,
-        )
-        .unwrap();
-    assert!(gate
-        .reserve(
-            &context,
-            &AgentTurnRef::new("session", "turn-b"),
-            &b,
-            &Default::default(),
-            RunAdmission::NewTurn
-        )
-        .unwrap_err()
-        .is_code(ErrorCode::ActiveTurnRunning));
-    admitted.consuming(&identity).unwrap();
-    gate.cleaned(&identity).unwrap();
-    drop(admitted);
-    let history_cursor = SessionHistoryCursor {
-        completed_turn_id: Some("turn-a".into()),
-        completed_event_sequence: 5,
-        ..Default::default()
-    };
-    gate.commit(
-        &context,
-        &a,
-        Some(&identity),
-        history_cursor.clone(),
-        SessionStateVisibility::Local,
-        HistoryBootstrap::Forbidden,
-    )
-    .unwrap();
-    let restarted = SessionGate::new(home.path().join("history-cursors"));
-    assert_eq!(
-        restarted.read(&context).unwrap().history_cursor,
-        history_cursor
-    );
-    assert!(!restarted.read(&context).unwrap().handoff_ready);
-    assert!(restarted
-        .reserve(
-            &context,
-            &AgentTurnRef::new("session", "turn-b"),
-            &b,
-            &history_cursor,
-            RunAdmission::NewTurn
-        )
-        .is_err());
-    // Same coordinator continues offline; no hub or original creator is consulted.
-    drop(
-        restarted
-            .reserve(
-                &context,
-                &AgentTurnRef::new("session", "turn-a2"),
-                &a,
-                &history_cursor,
-                RunAdmission::NewTurn,
-            )
-            .unwrap(),
-    );
-    restarted
-        .commit(
-            &context,
-            &a,
-            Some(&identity),
-            history_cursor.clone(),
-            SessionStateVisibility::Shared,
-            HistoryBootstrap::Forbidden,
-        )
-        .unwrap();
-    assert!(restarted.read(&context).unwrap().handoff_ready);
-    assert!(restarted
-        .reserve(
-            &context,
-            &AgentTurnRef::new("session", "turn-b"),
-            &b,
-            &Default::default(),
-            RunAdmission::NewTurn
-        )
-        .is_err());
-    let mut changed_binding = context.clone();
-    changed_binding.agent_id = "another-harness".into();
-    assert!(restarted
-        .reserve(
-            &changed_binding,
-            &AgentTurnRef::new("session", "turn-b"),
-            &b,
-            &history_cursor,
-            RunAdmission::NewTurn
-        )
-        .is_err());
-    let shared = restarted.read(&context).unwrap();
-    drop(
-        restarted
-            .reserve(
-                &context,
-                &AgentTurnRef::new("session", "turn-b"),
-                &b,
-                &history_cursor,
-                RunAdmission::NewTurn,
-            )
-            .unwrap(),
-    );
-    assert_eq!(restarted.read(&context).unwrap(), shared);
-    let recovered = SessionGate::new(home.path().join("history-cursors"));
-    assert_eq!(recovered.read(&context).unwrap(), shared);
-    let next_identity = AgentTurnRef::new("session", "turn-b");
-    let mut run = recovered
-        .reserve(
-            &context,
-            &next_identity,
-            &b,
-            &history_cursor,
-            RunAdmission::NewTurn,
-        )
-        .unwrap();
-    run.consuming(&next_identity).unwrap();
-    drop(run);
-    let state = recovered.read(&context).unwrap();
-    assert_eq!(state.coordinator_id.as_deref(), Some(b.as_str()));
-    assert_eq!(state.active_turn, Some(next_identity));
-    assert!(!state.handoff_ready);
-}
-#[test]
-fn unconfirmed_restart_blocks_only_that_session_and_cannot_be_overwritten_by_an_old_store() {
-    let home = tempfile::tempdir().unwrap();
-    let root = home.path().join("history-cursors");
-    let gate = SessionGate::new(root.clone());
-    let a = uuid::Uuid::new_v4().to_string();
-    let bound = context("session");
-    let identity = AgentTurnRef::new("session", "turn");
-    let mut admitted = gate
-        .reserve(
-            &bound,
-            &identity,
-            &a,
-            &Default::default(),
-            RunAdmission::NewTurn,
-        )
-        .unwrap();
-    admitted.consuming(&identity).unwrap();
-    drop(admitted);
-    let restarted = SessionGate::new(root);
-    assert!(restarted
-        .reserve(
-            &bound,
-            &identity,
-            &a,
-            &Default::default(),
-            RunAdmission::Continuation
-        )
-        .unwrap_err()
-        .is_code(ErrorCode::RunCleanupUnconfirmed));
-    assert!(restarted
-        .commit(
-            &bound,
-            &a,
-            Some(&identity),
-            Default::default(),
-            SessionStateVisibility::Local,
-            HistoryBootstrap::TrustedLocal
-        )
-        .is_err());
-    let new_session = context("new-session");
-    let initial = restarted.read(&new_session).unwrap();
-    drop(
-        restarted
-            .reserve(
-                &new_session,
-                &AgentTurnRef::new("new-session", "turn"),
-                &a,
-                &Default::default(),
-                RunAdmission::NewTurn,
-            )
-            .unwrap(),
-    );
-    assert_eq!(restarted.read(&new_session).unwrap(), initial);
-    assert!(!restarted.path("new-session").exists());
-    std::fs::write(restarted.path("corrupt"), "invalid marker").unwrap();
-    assert!(restarted.read(&context("corrupt")).is_err());
-}
-
-#[test]
-fn configuration_excludes_waiting_recovered_sessions_and_blocks_new_admission() {
-    let home = tempfile::tempdir().unwrap();
-    let root = home.path().join("history-cursors");
-    let gate = SessionGate::new(root.clone());
-    let peer = uuid::Uuid::new_v4().to_string();
-    let session = context("waiting");
-    let identity = AgentTurnRef::new("waiting", "turn");
-    let mut run = gate
-        .reserve(
-            &session,
-            &identity,
-            &peer,
-            &Default::default(),
-            RunAdmission::NewTurn,
-        )
-        .unwrap();
-    run.consuming(&identity).unwrap();
-    gate.cleaned(&identity).unwrap();
-    drop(run);
-    assert!(gate
-        .reserve_configuration()
-        .unwrap_err()
-        .is_code(ErrorCode::ActiveTurnRunning));
-    let before = gate.read(&session).unwrap();
-    drop(
-        gate.reserve(
-            &session,
-            &identity,
-            &peer,
-            &Default::default(),
-            RunAdmission::Continuation,
-        )
-        .unwrap(),
-    );
-    assert_eq!(gate.read(&session).unwrap(), before);
-    let restarted = SessionGate::new(root);
-    assert!(restarted
-        .reserve_configuration()
-        .unwrap_err()
-        .is_code(ErrorCode::ActiveTurnRunning));
-    restarted
-        .commit(
-            &session,
-            &peer,
-            Some(&identity),
-            SessionHistoryCursor {
-                completed_turn_id: Some("turn".into()),
-                completed_event_sequence: 3,
-                ..Default::default()
-            },
-            SessionStateVisibility::Local,
-            HistoryBootstrap::Forbidden,
-        )
-        .unwrap();
-    let config = restarted.reserve_configuration().unwrap();
-    assert!(restarted
-        .reserve(
-            &context("another"),
-            &AgentTurnRef::new("another", "next"),
-            &peer,
-            &Default::default(),
-            RunAdmission::NewTurn
-        )
-        .unwrap_err()
-        .is_code(ErrorCode::ActiveTurnRunning));
-    drop(config);
-    assert!(restarted.reserve_configuration().is_ok());
-}
-
-#[test]
-fn stale_maintenance_cannot_take_over_after_another_peer_publishes_a_new_history_cursor() {
-    let home = tempfile::tempdir().unwrap();
-    let gate = SessionGate::new(home.path().join("history-cursors"));
-    let a = uuid::Uuid::new_v4().to_string();
-    let b = uuid::Uuid::new_v4().to_string();
-    let session = context("clear-race");
-    let stale = gate.read(&session).unwrap().history_cursor;
-    let identity = AgentTurnRef::new("clear-race", "new-turn");
-    let mut run = gate
-        .reserve(&session, &identity, &a, &stale, RunAdmission::NewTurn)
-        .unwrap();
-    run.consuming(&identity).unwrap();
-    gate.cleaned(&identity).unwrap();
-    drop(run);
-    let latest = SessionHistoryCursor {
+fn terminal(identity: &AgentTurnRef) -> SessionHistoryCursor {
+    SessionHistoryCursor {
+        history_generation: 0,
         completed_turn_id: Some(identity.turn_id.clone()),
         completed_event_sequence: 5,
-        ..Default::default()
-    };
-    gate.commit(
-        &session,
-        &a,
-        Some(&identity),
-        latest.clone(),
-        SessionStateVisibility::Local,
-        HistoryBootstrap::Forbidden,
-    )
-    .unwrap();
-    gate.commit(
-        &session,
-        &a,
-        None,
-        latest.clone(),
-        SessionStateVisibility::Shared,
-        HistoryBootstrap::Forbidden,
-    )
-    .unwrap();
-    let before = gate.read(&session).unwrap();
-    assert!(gate
-        .maintenance(&session, &b, &stale)
-        .unwrap_err()
-        .is_code(ErrorCode::Conflict));
-    assert_eq!(gate.read(&session).unwrap(), before);
-    let maintenance = gate.maintenance(&session, &b, &latest).unwrap();
+    }
+}
+
+#[test]
+fn every_ingress_shares_the_same_session_reservation() {
+    let home = tempfile::tempdir().unwrap();
+    let gate = SessionGate::new(home.path().join("gate"));
+    let manager = uuid::Uuid::new_v4().to_string();
+    let scope = context();
+    let identity = AgentTurnRef::new("session", "turn");
+    let _reserved = gate
+        .reserve(
+            &scope,
+            &identity,
+            &manager,
+            &Default::default(),
+            RunAdmission::NewTurn,
+        )
+        .unwrap();
     assert!(gate
         .reserve(
-            &session,
-            &AgentTurnRef::new("clear-race", "concurrent"),
-            &a,
-            &latest,
+            &scope,
+            &identity,
+            &manager,
+            &Default::default(),
             RunAdmission::NewTurn
         )
         .unwrap_err()
         .is_code(ErrorCode::ActiveTurnRunning));
-    drop(maintenance);
-    let reset = SessionHistoryCursor {
+}
+
+#[test]
+fn manager_transfer_requires_worker_terminal_settlement_and_idle_marker() {
+    let home = tempfile::tempdir().unwrap();
+    let root = home.path().join("gate");
+    let gate = SessionGate::new(root.clone());
+    let a = uuid::Uuid::new_v4().to_string();
+    let b = uuid::Uuid::new_v4().to_string();
+    let scope = context();
+    let identity = AgentTurnRef::new("session", "first");
+    let mut reservation = gate
+        .reserve(
+            &scope,
+            &identity,
+            &a,
+            &Default::default(),
+            RunAdmission::NewTurn,
+        )
+        .unwrap();
+    reservation.consuming(&identity).unwrap();
+    gate.cleaned(&identity).unwrap();
+    drop(reservation);
+    let next = AgentTurnRef::new("session", "next");
+    assert!(gate
+        .reserve(
+            &scope,
+            &next,
+            &b,
+            &Default::default(),
+            RunAdmission::NewTurn
+        )
+        .is_err());
+    gate.settled(&scope, &identity, terminal(&identity))
+        .unwrap();
+    let reopened = SessionGate::new(root);
+    assert!(reopened.read(&scope).unwrap().handoff_ready);
+    assert!(reopened
+        .reserve(
+            &scope,
+            &next,
+            &b,
+            &terminal(&identity),
+            RunAdmission::NewTurn
+        )
+        .is_ok());
+}
+
+#[test]
+fn rejected_admission_restores_idle_without_releasing_another_reservation() {
+    let home = tempfile::tempdir().unwrap();
+    let gate = SessionGate::new(home.path().join("gate"));
+    let manager = uuid::Uuid::new_v4().to_string();
+    let scope = context();
+    let identity = AgentTurnRef::new("session", "turn");
+    let reservation = gate
+        .reserve(
+            &scope,
+            &identity,
+            &manager,
+            &Default::default(),
+            RunAdmission::NewTurn,
+        )
+        .unwrap();
+    drop(reservation);
+    assert!(gate.read(&scope).unwrap().active_turn.is_none());
+    assert!(gate
+        .reserve(
+            &scope,
+            &identity,
+            &manager,
+            &Default::default(),
+            RunAdmission::NewTurn
+        )
+        .is_ok());
+}
+
+#[test]
+fn generation_reset_is_idempotent_and_rejects_old_terminal_facts() {
+    let home = tempfile::tempdir().unwrap();
+    let gate = SessionGate::new(home.path().join("gate"));
+    let manager = uuid::Uuid::new_v4().to_string();
+    let scope = context();
+    let identity = AgentTurnRef::new("session", "turn");
+    let mut reservation = gate
+        .reserve(
+            &scope,
+            &identity,
+            &manager,
+            &Default::default(),
+            RunAdmission::NewTurn,
+        )
+        .unwrap();
+    reservation.consuming(&identity).unwrap();
+    gate.cleaned(&identity).unwrap();
+    drop(reservation);
+    gate.settled(&scope, &identity, terminal(&identity))
+        .unwrap();
+    let cleared = SessionHistoryCursor {
         history_generation: 1,
         ..Default::default()
     };
-    gate.commit(
-        &session,
-        &b,
-        None,
-        reset.clone(),
-        SessionStateVisibility::Local,
-        HistoryBootstrap::Forbidden,
-    )
-    .unwrap();
-    assert_eq!(gate.read(&session).unwrap().history_cursor, reset);
+    gate.reset_cursor(&scope, cleared.clone()).unwrap();
+    gate.reset_cursor(&scope, cleared).unwrap();
+    assert!(gate
+        .settled(&scope, &identity, terminal(&identity))
+        .is_err());
 }
 
 #[test]
-fn takeover_confirms_cleanup_only_for_the_bound_turn_and_coordinator() {
-    let root = tempfile::tempdir().unwrap();
-    let context = context("orphan");
-    let turn = AgentTurnRef::new("orphan", "turn");
-    let peer = uuid::Uuid::new_v4().to_string();
-    let original = SessionGate::new(root.path().to_owned());
-    let mut reservation = original
+fn context_binding_and_configuration_exclusion_are_shared() {
+    let home = tempfile::tempdir().unwrap();
+    let gate = SessionGate::new(home.path().join("gate"));
+    let manager = uuid::Uuid::new_v4().to_string();
+    let scope = context();
+    let identity = AgentTurnRef::new("session", "turn");
+    let reservation = gate
         .reserve(
-            &context,
-            &turn,
-            &peer,
+            &scope,
+            &identity,
+            &manager,
             &Default::default(),
             RunAdmission::NewTurn,
         )
         .unwrap();
-    reservation.consuming(&turn).unwrap();
-
-    assert!(original
-        .confirm_orphan_cleanup("kernel", &turn, &peer, || true)
-        .unwrap_err()
-        .is_code(ErrorCode::RunCleanupUnconfirmed));
+    assert!(gate.reserve_configuration().is_err());
     drop(reservation);
-    let restarted = SessionGate::new(root.path().to_owned());
-    assert!(restarted
-        .confirm_orphan_cleanup("kernel", &turn, "wrong", || true)
-        .unwrap_err()
-        .is_code(ErrorCode::Conflict));
-    assert!(restarted
-        .confirm_orphan_cleanup("kernel", &turn, &peer, || false)
-        .unwrap_err()
-        .is_code(ErrorCode::RunCleanupUnconfirmed));
-    restarted
-        .confirm_orphan_cleanup("kernel", &turn, &peer, || true)
-        .unwrap();
-
-    let terminal = SessionHistoryCursor {
-        completed_turn_id: Some(turn.turn_id.clone()),
-        completed_event_sequence: 5,
-        ..Default::default()
-    };
-    restarted
-        .commit(
-            &context,
-            &peer,
-            Some(&turn),
-            terminal.clone(),
-            SessionStateVisibility::Local,
-            HistoryBootstrap::Forbidden,
-        )
-        .unwrap();
-
-    // Without a reservation, reads see the other runtime's durable update.
-    let state = original.read(&context).unwrap();
-    assert_eq!(state.history_cursor, terminal);
-    assert_eq!(state.active_turn, None);
-    assert!(original.state.lock().unwrap().reservations.is_empty());
-    assert!(original
+    let configuration = gate.reserve_configuration().unwrap();
+    assert!(gate
         .reserve(
-            &context,
-            &AgentTurnRef::new("orphan", "next"),
-            &peer,
-            &terminal,
-            RunAdmission::NewTurn,
+            &scope,
+            &identity,
+            &manager,
+            &Default::default(),
+            RunAdmission::NewTurn
         )
-        .is_ok());
+        .is_err());
+    drop(configuration);
 }

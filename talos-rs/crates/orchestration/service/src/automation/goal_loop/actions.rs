@@ -359,7 +359,8 @@ impl SessionAutomationService {
                         }
                     }
                     self.store.replace_loop(&task, &next).await?;
-                    if next.config_revision != task.config_revision
+                    if self.executes()
+                        && next.config_revision != task.config_revision
                         && matches!(next.schedule, LoopSchedule::ModelDecided {})
                         && next.next_due_at.is_none()
                         && !queued

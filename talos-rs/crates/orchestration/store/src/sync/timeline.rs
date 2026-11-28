@@ -10,22 +10,6 @@ use talos_sync::{
     SyncTimelineEntry, SyncTurnMetadata,
 };
 
-pub(super) async fn tail(
-    tx: &mut dyn StorageTransaction,
-    session_id: &str,
-    generation: u64,
-) -> TalosResult<i64> {
-    Ok(tx
-        .query(
-            "SELECT MAX(event_seq) AS tail FROM committed_agent_events WHERE session_id = ? AND history_generation = ?",
-            &[session_id, &generation.to_string()],
-        )
-        .await?
-        .first()
-        .and_then(|r| r.get_i64("tail"))
-        .unwrap_or(0))
-}
-
 pub(super) async fn read_events(
     adapter: &StoreSyncAdapter,
     tx: &mut dyn StorageTransaction,
@@ -140,15 +124,4 @@ pub(super) async fn project_commands(
         }
     }
     Ok(changes)
-}
-
-pub(super) async fn command_tail(
-    tx: &mut dyn StorageTransaction,
-    session_id: &str,
-    generation: u64,
-) -> TalosResult<i64> {
-    Ok(tx.query(
-        "SELECT MAX(revision) AS tail FROM session_command_revisions WHERE session_id = ? AND history_generation = ?",
-        &[session_id, &generation.to_string()],
-    ).await?.first().and_then(|row| row.get_i64("tail")).unwrap_or(0))
 }

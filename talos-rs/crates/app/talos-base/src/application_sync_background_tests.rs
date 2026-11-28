@@ -2,6 +2,7 @@ use super::*;
 use std::{path::Path, time::Duration};
 use talos_config::{Config, TalosPaths};
 
+#[cfg(feature = "server")]
 #[tokio::test]
 async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
@@ -73,7 +74,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     .await
     .unwrap();
     let actor = Actor::regular("idle-account").with_access_token("initial-credential");
-    runtime.service.resume_account_sync(&actor);
+    runtime.service.resume_account_host(&actor);
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(2), observed.recv())
             .await
@@ -82,7 +83,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
         "initial-credential"
     );
     for _ in 0..20 {
-        runtime.service.resume_account_sync(&actor);
+        runtime.service.resume_account_host(&actor);
         runtime.service.sync_status(&actor).await.unwrap();
     }
     assert!(
@@ -95,7 +96,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     // Initial admission has no existing Auth refresh task to recover an outage.
     // The same credential must recover without another resume or lifecycle event.
     let recovering = Actor::regular(&actor.user_id).with_access_token("recovering-credential");
-    runtime.service.resume_account_sync(&recovering);
+    runtime.service.resume_account_host(&recovering);
     for _ in 0..2 {
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(7), observed.recv())
@@ -107,7 +108,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     }
     tokio::time::timeout(Duration::from_secs(2), async {
         while runtime
-            .sync_host
+            .host
             .failures
             .read()
             .unwrap()
@@ -118,7 +119,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     })
     .await
     .expect("the same credential must complete initialization after Cloud recovers");
-    runtime.service.resume_account_sync(&refreshed);
+    runtime.service.resume_account_host(&refreshed);
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(2), observed.recv())
             .await
@@ -127,10 +128,10 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
         "new-credential"
     );
     // Lifecycle events reuse Auth's verified context instead of revalidating Cloud.
-    runtime.sync_host.notify_refresh(&actor.user_id);
-    runtime.sync_host.worker_failures.send_replace(None);
+    runtime.host.notify_refresh(&actor.user_id);
+    runtime.host.worker_failures.send_replace(None);
     let rejected = Actor::regular(&actor.user_id).with_access_token("rejected-credential");
-    runtime.service.resume_account_sync(&rejected);
+    runtime.service.resume_account_host(&rejected);
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(2), observed.recv())
             .await
@@ -145,7 +146,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     let pending = Actor::regular(&actor.user_id)
         .with_role(talos_auth::UserRole::Admin)
         .with_access_token("pending-enrollment");
-    runtime.service.resume_account_sync(&pending);
+    runtime.service.resume_account_host(&pending);
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(2), observed.recv())
             .await
@@ -156,7 +157,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             if runtime
-                .sync_host
+                .host
                 .failures
                 .read()
                 .unwrap()
@@ -176,11 +177,11 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     store.cancel_node_creation().unwrap();
     // Recovery publishes a cleared Worker failure through the existing watch.
     // The unavailable test Gateway proves reconciliation resumed immediately.
-    runtime.sync_host.worker_failures.send_replace(None);
+    runtime.host.worker_failures.send_replace(None);
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             if runtime
-                .sync_host
+                .host
                 .failures
                 .read()
                 .unwrap()
@@ -195,7 +196,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     .await
     .expect("explicit recovery must wake terminal initialization without polling");
     store.cancel_node_creation().unwrap();
-    runtime.service.resume_account_sync(&refreshed);
+    runtime.service.resume_account_host(&refreshed);
     assert!(
         tokio::time::timeout(Duration::from_millis(200), observed.recv())
             .await
@@ -203,7 +204,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
         "restoration and lifecycle events reuse an existing verified context"
     );
     let transient = Actor::regular(&actor.user_id).with_access_token("transient-credential");
-    runtime.service.resume_account_sync(&transient);
+    runtime.service.resume_account_host(&transient);
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(2), observed.recv())
             .await
@@ -218,10 +219,10 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
             .unwrap(),
         "transient-credential"
     );
-    runtime.service.resume_account_sync(&refreshed);
+    runtime.service.resume_account_host(&refreshed);
     tokio::time::timeout(Duration::from_secs(2), async {
         while runtime
-            .sync_host
+            .host
             .failures
             .read()
             .unwrap()
@@ -232,7 +233,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     })
     .await
     .expect("changed credentials must resume the original supervisor promptly");
-    runtime.shutdown_sync().await.unwrap();
+    runtime.shutdown_host().await.unwrap();
     runtime.worker_rpc.shutdown().await.unwrap();
     runtime.resource_stop.cancel();
     runtime.automation.shutdown().await.unwrap();
@@ -241,9 +242,9 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     server.abort();
     drop(logging);
     let log = std::fs::read_to_string(log_file).unwrap();
-    assert_eq!(log.matches("Sync account maintenance started").count(), 1);
-    assert_eq!(log.matches("Sync account maintenance stopped").count(), 1);
-    assert!(log.contains("Sync account initialized; waiting for lifecycle changes"));
+    assert_eq!(log.matches("Account host maintenance started").count(), 1);
+    assert_eq!(log.matches("Account host maintenance stopped").count(), 1);
+    assert!(log.contains("Account host initialized; waiting for lifecycle changes"));
     assert_eq!(
         log.matches("Cloud authorization refresh started").count(),
         4
@@ -252,7 +253,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
         log.matches("Cloud authorization refresh stopped").count(),
         4
     );
-    assert!(log.contains("sync_account_initialization_failed"));
+    assert!(log.contains("account_host_initialization_failed"));
     assert!(log.contains("phase=VerifyAccount"));
     assert!(log.contains("phase=ReconcileWorkerAndBinding"));
     assert!(log.contains("wake_reason=TemporaryFailureRetry"));
@@ -287,23 +288,25 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
     .await
     .unwrap();
     let actor = Actor::regular("snapshot-account").with_access_token("fixture-token");
-    let host = &runtime.sync_host;
+    let host = &runtime.host;
     let lifecycle = host.lifecycle.lock().await;
     let retirement = host.registration_retirement.lock().await;
     let before = std::fs::read(config.source_path()).unwrap();
-    let first = tokio::time::timeout(Duration::from_secs(1), runtime.service.sync_status(&actor))
+    // Both lifecycle locks stay held throughout these assertions. The wall-clock
+    // budget only guards deadlock, including concurrent full-suite startup load.
+    let first = tokio::time::timeout(Duration::from_secs(3), runtime.service.sync_status(&actor))
         .await
         .expect("snapshot must not wait for lifecycle or retirement")
         .unwrap();
     assert!(host.background.lock().unwrap().tasks.is_empty());
-    runtime.service.resume_account_sync(&actor);
+    runtime.service.resume_account_host(&actor);
     let supervisor_id = host.background.lock().unwrap().tasks[&actor.user_id]
         .task
         .id();
     for _ in 0..20 {
-        runtime.service.resume_account_sync(&actor);
+        runtime.service.resume_account_host(&actor);
         let snapshot =
-            tokio::time::timeout(Duration::from_secs(1), runtime.service.sync_status(&actor))
+            tokio::time::timeout(Duration::from_secs(3), runtime.service.sync_status(&actor))
                 .await
                 .expect("polls must return while background work is stalled")
                 .unwrap();
@@ -311,7 +314,7 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
     }
     assert_eq!(host.background.lock().unwrap().tasks.len(), 1);
     let refreshed = Actor::regular(&actor.user_id).with_access_token("refreshed-fixture-token");
-    runtime.service.resume_account_sync(&refreshed);
+    runtime.service.resume_account_host(&refreshed);
     {
         let background = host.background.lock().unwrap();
         let refresh = &background.tasks[&actor.user_id];
@@ -319,17 +322,18 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
         assert_eq!(refresh.actor.borrow().access_token, refreshed.access_token);
     }
     assert_eq!(std::fs::read(config.source_path()).unwrap(), before);
+    #[cfg(feature = "sync")]
     assert!(runtime.sync.saved_bindings().await.unwrap().is_empty());
-    let pause = tokio::time::timeout(Duration::from_secs(1), host.pause_refresh(&actor.user_id))
+    let pause = tokio::time::timeout(Duration::from_secs(3), host.pause_refresh(&actor.user_id))
         .await
         .expect("cancelling queued maintenance must not wait for lifecycle");
     for _ in 0..20 {
-        runtime.service.resume_account_sync(&actor);
+        runtime.service.resume_account_host(&actor);
     }
     assert!(host.background.lock().unwrap().tasks.is_empty());
     drop(pause);
     assert!(host.background.lock().unwrap().tasks.is_empty());
-    runtime.service.resume_account_sync(&actor);
+    runtime.service.resume_account_host(&actor);
     assert_eq!(host.background.lock().unwrap().tasks.len(), 1);
     let pause = host.suspend_refresh(&actor).await;
     host.schedule_active_refresh(&refreshed);
@@ -340,15 +344,15 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
         .suspended
         .contains_key(&actor.user_id));
     assert!(host.background.lock().unwrap().tasks.is_empty());
-    runtime.service.resume_account_sync(&actor);
+    runtime.service.resume_account_host(&actor);
     assert!(host.background.lock().unwrap().tasks.is_empty());
     drop(pause);
-    runtime.service.resume_account_sync(&actor);
+    runtime.service.resume_account_host(&actor);
     assert!(
         host.background.lock().unwrap().tasks.is_empty(),
         "late authenticated responses must not undo logout"
     );
-    runtime.service.resume_account_sync_after_login(&actor);
+    runtime.service.resume_account_host_after_login(&actor);
     assert_eq!(host.background.lock().unwrap().tasks.len(), 1);
     // Reproduce enrollment holding the Worker lock while a remote RPC is stalled.
     let pause = host.pause_refresh(&actor.user_id).await;
@@ -379,21 +383,21 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
     );
     use talos_app_server::AppServerApplication;
     tokio::time::timeout(
-        Duration::from_secs(1),
-        desktop.drain_background_tasks(Duration::from_secs(1)),
+        Duration::from_secs(3),
+        desktop.drain_background_tasks(Duration::from_secs(3)),
     )
     .await
     .expect("Desktop shutdown must cancel enrollment before locking its Worker")
     .unwrap();
     assert!(runtime.worker_registration.try_lock().is_ok());
-    tokio::time::timeout(Duration::from_secs(1), runtime.shutdown_sync())
+    tokio::time::timeout(Duration::from_secs(3), runtime.shutdown_host())
         .await
         .expect("shutdown must cancel maintenance before draining Sync")
         .unwrap();
     assert!(host.background.lock().unwrap().tasks.is_empty());
     assert_eq!(runtime.service.sync_status(&actor).await.unwrap(), first);
     assert!(host.background.lock().unwrap().tasks.is_empty());
-    runtime.service.resume_account_sync(&actor);
+    runtime.service.resume_account_host(&actor);
     assert!(host.background.lock().unwrap().tasks.is_empty());
     drop(retirement);
     drop(lifecycle);
@@ -431,34 +435,38 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
     .await
     .unwrap();
     assert!(restarted
-        .sync_host
+        .host
         .background
         .lock()
         .unwrap()
         .tasks
         .contains_key(&actor.user_id));
-    restarted.shutdown_sync().await.unwrap();
+    restarted.shutdown_host().await.unwrap();
     restarted.worker_rpc.shutdown().await.unwrap();
     restarted.resource_stop.cancel();
     restarted.automation.shutdown().await.unwrap();
     restarted.worker.shutdown().await.unwrap();
 }
 
+#[cfg(feature = "sync")]
 #[tokio::test]
 async fn saved_document_transport_starts_while_worker_gateway_is_stalled() {
     document_transport_starts_while_worker_gateway_is_stalled(DocumentBinding::Retained).await;
 }
 
+#[cfg(feature = "sync")]
 #[tokio::test]
 async fn first_document_discovery_starts_while_worker_gateway_is_stalled() {
     document_transport_starts_while_worker_gateway_is_stalled(DocumentBinding::Undiscovered).await;
 }
 
+#[cfg(feature = "sync")]
 enum DocumentBinding {
     Retained,
     Undiscovered,
 }
 
+#[cfg(feature = "sync")]
 async fn document_transport_starts_while_worker_gateway_is_stalled(binding: DocumentBinding) {
     use axum::{routing::post, Json, Router};
     use serde_json::json;
@@ -503,7 +511,7 @@ async fn document_transport_starts_while_worker_gateway_is_stalled(binding: Docu
     .await
     .unwrap();
     let actor = Actor::regular("account").with_access_token("fixture-token");
-    let verified = runtime.sync_host.verified_actor(&actor).await.unwrap();
+    let verified = runtime.host.verified_actor(&actor).await.unwrap();
     if matches!(binding, DocumentBinding::Retained) {
         runtime
             .sync
@@ -521,7 +529,7 @@ async fn document_transport_starts_while_worker_gateway_is_stalled(binding: Docu
             .await
             .unwrap();
     }
-    runtime.service.resume_account_sync(&actor);
+    runtime.service.resume_account_host(&actor);
 
     let (_worker_connection, _) = tokio::time::timeout(Duration::from_secs(3), gateway.accept())
         .await
@@ -534,16 +542,16 @@ async fn document_transport_starts_while_worker_gateway_is_stalled(binding: Docu
             .unwrap();
     if matches!(binding, DocumentBinding::Retained) {
         assert!(runtime
-            .sync_host
-            .sync_stores
+            .host
+            .stores
             .handles
             .lock()
             .await
             .contains_key(&actor.user_id));
     }
-    assert!(runtime.sync_host.lifecycle.try_lock().is_err());
+    assert!(runtime.host.lifecycle.try_lock().is_err());
 
-    runtime.shutdown_sync().await.unwrap();
+    runtime.shutdown_host().await.unwrap();
     runtime.worker_rpc.shutdown().await.unwrap();
     runtime.resource_stop.cancel();
     runtime.automation.shutdown().await.unwrap();

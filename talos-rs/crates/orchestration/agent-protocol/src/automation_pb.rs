@@ -10,6 +10,7 @@ use talos_types::{
 mod actions;
 #[path = "automation_pb/facts.rs"]
 mod facts;
+pub use facts::{decode_origin, encode_origin};
 
 pub fn encode_model_params(
     value: AutomationModelRequest,

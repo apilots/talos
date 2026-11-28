@@ -1,3 +1,4 @@
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -59,7 +60,10 @@ async fn commit_completed_turn(
     store: &DatabaseSessionStore,
     session_id: &str,
     turn_id: &str,
+    completed_at: i64,
 ) -> i64 {
+    let started_at = completed_at.checked_sub(2).unwrap();
+    let input_completed_at = completed_at.checked_sub(1).unwrap();
     let identity = AgentTurnRef::new(session_id, turn_id);
     let started_message = AgentMessage {
         message_id: format!("message-{turn_id}"),
@@ -67,56 +71,54 @@ async fn commit_completed_turn(
         role: AgentMessageRole::User,
         status: AgentMessageStatus::InProgress,
         blocks: Vec::new(),
-        created_at: 10,
+        created_at: started_at,
         completed_at: None,
     };
     let mut completed_message = started_message.clone();
     completed_message.status = AgentMessageStatus::Completed;
-    completed_message.completed_at = Some(11);
-    let admission = store
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
-            automation_origin: None,
-            events: vec![
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 1,
-                    occurred_at: 10,
-                    payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
-                },
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 2,
-                    occurred_at: 10,
-                    payload: AgentEventPayload::MessageStarted(AgentMessageStarted {
-                        message: started_message,
-                    }),
-                },
-                AgentEvent {
-                    identity: identity.clone(),
-                    sequence: 3,
-                    occurred_at: 11,
-                    payload: AgentEventPayload::MessageCompleted(completed_message),
-                },
-            ],
-            command: None,
-        })
+    completed_message.completed_at = Some(input_completed_at);
+    let _admission = store
+        .project_test_events(TestWorkerEvents::new(vec![
+            AgentEvent {
+                identity: identity.clone(),
+                sequence: 1,
+                occurred_at: started_at,
+                payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+            },
+            AgentEvent {
+                identity: identity.clone(),
+                sequence: 2,
+                occurred_at: started_at,
+                payload: AgentEventPayload::MessageStarted(AgentMessageStarted {
+                    message: started_message,
+                }),
+            },
+            AgentEvent {
+                identity: identity.clone(),
+                sequence: 3,
+                occurred_at: input_completed_at,
+                payload: AgentEventPayload::MessageCompleted(completed_message),
+            },
+        ]))
         .await
         .expect("canonical Turn admission should commit");
     store
-        .commit_terminal_settlement(CommitTerminalSettlementParams {
-            event: AgentEvent {
-                identity,
-                sequence: 4,
-                occurred_at: 12,
-                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                    stop_reason: AgentStopReason::EndTurn,
-                }),
-            },
-            expected_event_seq: admission.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity,
+            sequence: 4,
+            occurred_at: completed_at,
+            payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .expect("canonical Turn settlement should commit")
         .event_seq
 }
@@ -230,7 +232,7 @@ async fn active_subagent_turn_check_uses_one_tree_query() {
 }
 
 #[tokio::test]
-async fn delete_session_tree_removes_descendants_and_runtime_rows() {
+async fn delete_session_tree_removes_runtime_rows_but_retains_pending_facts() {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     run_migrations(storage.pool(), &test_migrations_dir())
         .await
@@ -296,7 +298,15 @@ async fn delete_session_tree_removes_descendants_and_runtime_rows() {
             counts[0].get_i64("idempotency_keys"),
             counts[0].get_i64("command_revisions"),
         ),
-        (Some(0), Some(0), Some(0), Some(0), Some(0))
+        (Some(0), Some(2), Some(0), Some(0), Some(2))
+    );
+    assert_eq!(
+        storage
+            .query("SELECT COUNT(*) AS count FROM visible_agent_events", &[])
+            .await
+            .unwrap()[0]
+            .get_i64("count"),
+        Some(0)
     );
 }
 
@@ -337,7 +347,7 @@ async fn session_patch_updates_only_settings_owned_columns() {
     let store = store().await;
     let record = record("session-1", "user-1", Some("project-1".to_string()), None);
     store.insert_session_record(&record).await.unwrap();
-    let terminal_event_seq = commit_completed_turn(&store, "session-1", "turn-1").await;
+    let terminal_event_seq = commit_completed_turn(&store, "session-1", "turn-1", 30).await;
     let terminal_event_seq =
         u64::try_from(terminal_event_seq).expect("terminal event sequence should be positive");
     store
@@ -348,6 +358,11 @@ async fn session_patch_updates_only_settings_owned_columns() {
     store
         .update_context_usage("session-1", &measured_context)
         .await
+        .unwrap();
+    let before = store
+        .get_session_record("session-1")
+        .await
+        .unwrap()
         .unwrap();
     let conf = SessionConf {
         model_selection: Some(ModelSelection::without_reasoning(ModelRef {
@@ -375,21 +390,12 @@ async fn session_patch_updates_only_settings_owned_columns() {
         .await
         .unwrap()
         .unwrap();
+    let mut expected = before;
+    expected.conf = conf;
+    expected.current_directory = Some(PathBuf::from("/tmp/updated"));
+    expected.last_activity = 42;
     assert_eq!(loaded, updated);
-    assert_eq!(loaded.title, DEFAULT_SESSION_TITLE);
-    assert_eq!(loaded.message_count, 0);
-    assert_eq!(loaded.memory_processed_until_event_seq, terminal_event_seq);
-    assert_eq!(loaded.latest_turn_seq, 0);
-    assert_eq!(loaded.usage.context, Some(measured_context));
-    assert_eq!(loaded.user_id, "user-1");
-    assert_eq!(loaded.conf, conf);
-    assert_eq!(loaded.agent_id, "agent-a");
-    assert_eq!(loaded.workspace_id, "workspace-alpha");
-    assert_eq!(loaded.project_id.as_deref(), Some("project-1"));
-    assert_eq!(
-        loaded.current_directory,
-        Some(PathBuf::from("/tmp/updated"))
-    );
+    assert_eq!(loaded, expected);
 }
 
 #[tokio::test]
@@ -434,7 +440,7 @@ async fn memory_cursor_advance_is_idempotent() {
         .insert_session_record(&record("session-1", "user-1", None, None))
         .await
         .unwrap();
-    let terminal_event_seq = commit_completed_turn(&store, "session-1", "turn-1").await;
+    let terminal_event_seq = commit_completed_turn(&store, "session-1", "turn-1", 30).await;
     let terminal_event_seq =
         u64::try_from(terminal_event_seq).expect("terminal event sequence should be positive");
 
@@ -465,7 +471,7 @@ async fn memory_cursor_rejects_a_stale_expected_value() {
         .insert_session_record(&record("session-1", "user-1", None, None))
         .await
         .unwrap();
-    let terminal_event_seq = commit_completed_turn(&store, "session-1", "turn-1").await;
+    let terminal_event_seq = commit_completed_turn(&store, "session-1", "turn-1", 30).await;
     let terminal_event_seq =
         u64::try_from(terminal_event_seq).expect("terminal event sequence should be positive");
 
@@ -559,7 +565,7 @@ async fn memory_pending_session_pages_use_a_stable_cursor() {
     let mut processed = record("session-1", "user-1", None, None);
     processed.last_activity = 3;
     let mut first_pending = record("session-2", "user-1", None, None);
-    first_pending.last_activity = 2;
+    first_pending.last_activity = 25_000;
     let mut second_pending = record("session-3", "user-1", None, None);
     second_pending.last_activity = 1;
     for session in [&processed, &first_pending, &second_pending] {
@@ -568,7 +574,7 @@ async fn memory_pending_session_pages_use_a_stable_cursor() {
             .await
             .expect("insert session");
     }
-    let processed_event_seq = commit_completed_turn(&store, "session-1", "turn-1").await;
+    let processed_event_seq = commit_completed_turn(&store, "session-1", "turn-1", 30).await;
     store
         .advance_memory_processed_until_event_seq(
             "session-1",
@@ -577,8 +583,8 @@ async fn memory_pending_session_pages_use_a_stable_cursor() {
         )
         .await
         .expect("processed cursor should advance");
-    commit_completed_turn(&store, "session-2", "turn-2").await;
-    commit_completed_turn(&store, "session-3", "turn-3").await;
+    commit_completed_turn(&store, "session-2", "turn-2", 20).await;
+    commit_completed_turn(&store, "session-3", "turn-3", 10).await;
 
     let first_page = store
         .list_session_records(&SessionQuery {
@@ -601,6 +607,8 @@ async fn memory_pending_session_pages_use_a_stable_cursor() {
         .await
         .expect("second pending page");
 
+    assert_eq!(first_page[0].last_activity, 25_000);
+    assert_eq!(second_page[0].last_activity, 10_000);
     assert_eq!(first_page[0].id, "session-2");
     assert_eq!(second_page[0].id, "session-3");
 }
@@ -609,13 +617,23 @@ async fn memory_pending_session_pages_use_a_stable_cursor() {
 async fn memory_pending_uses_canonical_terminal_events_after_message_count_reset() {
     let store = store().await;
     let mut cleared = record("session-1", "user-1", None, None);
-    cleared.message_count = 0;
-    cleared.latest_turn_seq = 101;
+    // The fixture commits Turn 101, then resets only its derived message summary.
+    cleared.message_count = 200;
+    cleared.latest_turn_seq = 100;
     store
         .insert_session_record(&cleared)
         .await
         .expect("insert cleared session");
-    commit_completed_turn(&store, "session-1", "turn-101").await;
+    commit_completed_turn(&store, "session-1", "turn-101", 30).await;
+    // A reset summary cannot hide an unprocessed canonical terminal fact.
+    store
+        .storage
+        .execute(
+            "UPDATE sessions SET message_count=0 WHERE session_key='session-1'",
+            &[],
+        )
+        .await
+        .unwrap();
 
     let records = store
         .list_session_records(&SessionQuery {
@@ -702,4 +720,53 @@ async fn session_patch_pinned_preserves_last_activity_and_allows_active_turn() {
         .unwrap();
     assert!(!unpinned.pinned);
     assert_eq!(unpinned.last_activity, 123);
+}
+
+#[tokio::test]
+async fn legacy_history_remains_readable_but_cannot_become_worker_execution() {
+    let store = store().await;
+    let old = record("legacy", "alice", None, None);
+    store.insert_session_record(&old).await.unwrap();
+    store
+        .storage
+        .execute(
+            "UPDATE sessions SET execution_architecture='legacy_read_only' WHERE session_key=?",
+            &["legacy"],
+        )
+        .await
+        .unwrap();
+    let error = store
+        .ensure_worker_execution_session("legacy")
+        .await
+        .unwrap_err();
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+    assert_eq!(
+        store
+            .get_session_record("legacy")
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        "legacy"
+    );
+    store
+        .insert_session_record(&record("new", "alice", None, None))
+        .await
+        .unwrap();
+    store.ensure_worker_execution_session("new").await.unwrap();
+    let remote = store
+        .list_session_records(&SessionQuery {
+            worker_execution_only: true,
+            limit: Some(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        remote
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["new"]
+    );
 }

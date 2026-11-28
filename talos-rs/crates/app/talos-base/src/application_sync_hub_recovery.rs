@@ -1,12 +1,12 @@
 //! Account-owned Hub identity replacement, independent of Computer observations.
-use super::application_sync::ApplicationSyncHost;
+use super::application_host::ApplicationHost;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::Actor;
 use talos_sync::SyncBindParams;
 
 /// Hub discovery/recovery must not delay independent control-plane observations.
 pub(crate) async fn maintain_hub_identity(
-    host: std::sync::Weak<ApplicationSyncHost>,
+    host: std::sync::Weak<ApplicationHost>,
     mut actors: tokio::sync::watch::Receiver<Actor>,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
@@ -29,12 +29,12 @@ pub(crate) async fn maintain_hub_identity(
     }
 }
 
-impl ApplicationSyncHost {
+impl ApplicationHost {
     /// A verified connection may discover a replacement Hub after its old identity is retired.
     /// Recovery runs in owned maintenance; business reads never wait for this handshake.
     pub(crate) async fn refresh_hub_identity(&self, actor: &Actor) -> TalosResult<()> {
         let current = self
-            .sync_stores
+            .stores
             .handles
             .lock()
             .await

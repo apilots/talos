@@ -2,6 +2,7 @@
 use super::*;
 use agent_protocol::{WorkerEnvironment, WorkerEnvironmentContext};
 use talos_types::{FsDirectoryCreateRequest, FsDirectoryReadRequest};
+use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 #[tokio::test]
 async fn embedded_direct_and_outbound_environment_share_paths_under_computer_authorization() {

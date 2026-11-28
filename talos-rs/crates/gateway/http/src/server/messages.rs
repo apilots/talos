@@ -1,3 +1,4 @@
+use super::product_scope::ProductJson;
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -17,7 +18,7 @@ pub(super) async fn start_turn_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     headers: HeaderMap,
-    Json(request): Json<StartTurnRequest>,
+    ProductJson(request): ProductJson<StartTurnRequest>,
 ) -> Result<Response, ApiError> {
     let idempotency_key = start_turn_idempotency_key(&headers, request.client_request_id.clone())?;
     let ack = state

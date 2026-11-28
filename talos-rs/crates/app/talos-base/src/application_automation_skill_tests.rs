@@ -52,6 +52,7 @@ impl ResolverFixture {
             .unwrap();
         nodes
             .register(RegisterNodeParams {
+                product_owner: talos_types::NodeProductOwner::Server,
                 node_id: "laptop-1".into(),
                 expected_credential_hash: [11; 32],
                 lease_token_hash: [22; 32],

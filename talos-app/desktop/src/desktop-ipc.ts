@@ -32,7 +32,7 @@ export function registerDesktopIpcHandlers(
     headers.set("Access-Control-Allow-Origin", "*");
     return new Response(response.body, { status: response.status, headers });
   });
-  ipcMain.handle(TALOS_IPC.previewPrepareCloud, (event, request: AppProtocol.FilePreviewPrepareRequest, credentials: unknown) =>
+  ipcMain.handle(TALOS_IPC.previewPrepareCloud, (event, request: AppProtocol.FilePreviewPrepareRequest, credentials: unknown, computerId?: unknown) =>
     ipcResponse(async () => {
       assertProductRenderer(event);
       const { actorCredentials } = assertDesktopRendererInvoke("file/preview/prepare", request, { actorCredentials: credentials });
@@ -41,11 +41,15 @@ export function registerDesktopIpcHandlers(
       const actor = await runtime.invoke<AppProtocol.UserCurrentResponse>("user/current", {}, { actorCredentials });
       const client = createBrowserTalosClient({ baseUrl: DESKTOP_CLOUD_ORIGIN, fetch: cloudFetch,
         getToken: () => actorCredentials.credential.token, getUserId: () => actor.user.user_id });
-      const descriptor = await client.files.preview.prepare(request);
+      if (computerId !== undefined && (typeof computerId !== "string" || !computerId.trim() || computerId.length > 128)) {
+        throw new TalosApiError({ code: AppProtocol.ErrorCode.InvalidRequest, message: "Invalid Computer identity.", localization: null });
+      }
+      const product = typeof computerId === "string" ? client.forComputer(computerId) : client;
+      const descriptor = await product.files.preview.prepare(request);
       const native = { ...descriptor, previewId: "server-" + descriptor.previewId };
       filePreviews.remember(native, actorCredentials, event.sender, epoch, {
-        read: part => client.files.preview.read({ ...part, previewId: descriptor.previewId }),
-        close: () => client.files.preview.close({ previewId: descriptor.previewId }, AbortSignal.timeout(5_000)),
+        read: part => product.files.preview.read({ ...part, previewId: descriptor.previewId }),
+        close: () => product.files.preview.close({ previewId: descriptor.previewId }, AbortSignal.timeout(5_000)),
       });
       return native;
     }));

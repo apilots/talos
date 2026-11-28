@@ -20,16 +20,24 @@ use talos_types::*;
 pub(super) async fn prepare(
     State(state): State<Arc<HttpApiState>>,
     Extension(identity): Extension<RequestIdentity>,
+    origin: Option<Extension<talos_app_protocol::relay::RelayCallbackOrigin>>,
     Json(request): Json<FilePreviewPrepareRequest>,
-) -> Result<JsonResponse<FilePreviewDescriptor>, ApiError> {
-    Ok(api_success(
-        state
-            .gateway
-            .prepare_file_preview(&shared_actor(&identity), request)
-            .await
-            .map_err(ApiError::from_talos_error)?,
-    ))
+) -> Result<Response, ApiError> {
+    let descriptor = state
+        .gateway
+        .prepare_file_preview(&shared_actor(&identity), request)
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    let mut response = api_success(descriptor).into_response();
+    if origin.is_some() {
+        response.headers_mut().insert(
+            "x-talos-product-operation",
+            axum::http::HeaderValue::from_static("file-preview-prepare"),
+        );
+    }
+    Ok(response)
 }
+
 pub(super) async fn read(
     State(state): State<Arc<HttpApiState>>,
     Extension(identity): Extension<RequestIdentity>,
@@ -68,6 +76,29 @@ pub(super) async fn resource_delivery(
         Some((preview_id, path)) => {
             if state.lifecycle.is_quiescing_or_later() {
                 return ApiError::new(ErrorCode::ServiceUnavailable).into_response();
+            }
+            let route = match PersonalPreviewRoute::from_host_label(&preview_id) {
+                Ok(route) => route,
+                Err(error) => return ApiError::from_talos_error(error).into_response(),
+            };
+            if let Some(route) = route {
+                let Some(router) = &state.product_router else {
+                    return ApiError::new(ErrorCode::ServiceUnavailable).into_response();
+                };
+                let mut request = request;
+                let target = format!("/v1/file-previews/resources/{}/{path}", route.preview_id());
+                let target = match target.parse() {
+                    Ok(value) => value,
+                    Err(_) => return ApiError::new(ErrorCode::InvalidRequest).into_response(),
+                };
+                *request.uri_mut() = target;
+                return match router.preview(route.computer_id(), request).await {
+                    Ok(super::product_routing::ProductRoute::Remote(response)) => response,
+                    Ok(super::product_routing::ProductRoute::Local(_)) => {
+                        ApiError::new(ErrorCode::InvalidRequest).into_response()
+                    }
+                    Err(error) => ApiError::from_talos_error(error).into_response(),
+                };
             }
             match deliver(state, request, preview_id, path).await {
                 Ok(response) => response,
@@ -226,4 +257,116 @@ async fn deliver(
     response.body(body).map_err(|error| {
         TalosError::internal_with_source("Build the preview resource response.", error)
     })
+}
+
+/// A single DNS label preserves preview origin isolation and absolute asset URLs.
+/// The Host's opaque preview grant remains the only content authority.
+pub struct PersonalPreviewRoute {
+    computer_id: uuid::Uuid,
+    preview_id: uuid::Uuid,
+}
+impl PersonalPreviewRoute {
+    pub fn new(computer_id: &str, preview_id: &str) -> talos_error::TalosResult<Self> {
+        Ok(Self {
+            computer_id: uuid::Uuid::parse_str(computer_id).map_err(|error| {
+                TalosError::from_source(
+                    ErrorCode::InvalidRequest,
+                    "Personal preview Computer identity is invalid.",
+                    error,
+                )
+            })?,
+            preview_id: uuid::Uuid::parse_str(preview_id).map_err(|error| {
+                TalosError::from_source(
+                    ErrorCode::InvalidRequest,
+                    "Personal preview capability is invalid.",
+                    error,
+                )
+            })?,
+        })
+    }
+    pub fn host_label(&self) -> String {
+        format!(
+            "r-{}-{}",
+            base36(self.computer_id.as_u128()),
+            base36(self.preview_id.as_u128())
+        )
+    }
+    pub fn from_host_label(label: &str) -> talos_error::TalosResult<Option<Self>> {
+        let Some(label) = label.strip_prefix("r-") else {
+            return Ok(None);
+        };
+        let invalid = || {
+            TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Personal preview routing identity is invalid.",
+            )
+        };
+        let (computer, preview) = label.split_once('-').ok_or_else(invalid)?;
+        let decode = |value: &str| {
+            if value.is_empty()
+                || value.len() > 25
+                || !value
+                    .bytes()
+                    .all(|value| value.is_ascii_lowercase() || value.is_ascii_digit())
+            {
+                return Err(invalid());
+            }
+            u128::from_str_radix(value, 36)
+                .map(uuid::Uuid::from_u128)
+                .map_err(|_| invalid())
+        };
+        Ok(Some(Self {
+            computer_id: decode(computer)?,
+            preview_id: decode(preview)?,
+        }))
+    }
+    pub fn computer_id(&self) -> String {
+        self.computer_id.to_string()
+    }
+    pub fn preview_id(&self) -> String {
+        self.preview_id.to_string()
+    }
+}
+fn base36(mut value: u128) -> String {
+    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut buffer = [b'0'; 25];
+    let mut index = 25;
+    loop {
+        index -= 1;
+        buffer[index] = DIGITS[(value % 36) as usize];
+        value /= 36;
+        if value == 0 {
+            break;
+        }
+    }
+    buffer[index..]
+        .iter()
+        .map(|byte| char::from(*byte))
+        .collect()
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::*;
+    #[test]
+    fn personal_preview_label_round_trips_within_one_wildcard_dns_label() {
+        let computer = uuid::Uuid::from_u128(u128::MAX).to_string();
+        let preview = uuid::Uuid::new_v4().to_string();
+        let route = PersonalPreviewRoute::new(&computer, &preview).unwrap();
+        let label = route.host_label();
+        assert!(label.len() <= 63);
+        let decoded = PersonalPreviewRoute::from_host_label(&label)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (decoded.computer_id(), decoded.preview_id()),
+            (computer, preview)
+        );
+        assert!(PersonalPreviewRoute::from_host_label("r-zzzzzzzzzzzzzzzzzzzzzzzzz-1").is_err());
+        assert!(PersonalPreviewRoute::from_host_label("r-1-1-extra").is_err());
+        assert!(PersonalPreviewRoute::from_host_label("r--1").is_err());
+        assert!(PersonalPreviewRoute::from_host_label("local-preview")
+            .unwrap()
+            .is_none());
+    }
 }

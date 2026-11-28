@@ -163,58 +163,6 @@ pub(super) async fn release(store: &DatabaseSessionStore, lease: CommandLease) -
     Ok(())
 }
 
-pub(super) async fn complete_command(
-    transaction: &mut dyn StorageTransaction,
-    lease: &CommandLease,
-    expected_command: IdempotentCommand,
-    committed_event_seq: i64,
-    updated_at: i64,
-) -> TalosResult<()> {
-    validate_lease(lease)?;
-    if lease.command != expected_command {
-        return Err(execution_conflict(
-            "idempotency lease does not match the committed command",
-        ));
-    }
-    let committed_event_seq = committed_event_seq.to_string();
-    let updated_at = updated_at.to_string();
-    let affected = transaction
-        .execute(
-            r#"
-            UPDATE agent_command_idempotency
-            SET status = 'completed', outcome = 'accepted', committed_event_seq = ?,
-                lease_id = NULL, lease_expires_at = NULL, updated_at = ?
-            WHERE session_id = ? AND command = ? AND idempotency_key = ?
-              AND status = 'reserved' AND lease_id = ?
-              AND request_id = ? AND turn_id = ? AND message_id = ?
-            "#,
-            &[
-                committed_event_seq.as_str(),
-                updated_at.as_str(),
-                lease.session_id.as_str(),
-                lease.command.as_str(),
-                lease.idempotency_key.as_str(),
-                lease.lease_id.as_str(),
-                lease.request_id.as_str(),
-                lease.turn_id.as_str(),
-                lease.message_id.as_str(),
-            ],
-        )
-        .await?;
-    if affected != 1 {
-        return Err(execution_conflict(
-            "idempotency lease changed before Turn admission commit",
-        ));
-    }
-    record_completion(
-        transaction,
-        &lease.session_id,
-        lease.command,
-        &lease.idempotency_key,
-    )
-    .await
-}
-
 async fn load(
     transaction: &mut dyn StorageTransaction,
     session_id: &str,
@@ -333,7 +281,7 @@ async fn repair_completed(
     Ok(record)
 }
 
-async fn record_completion(
+pub(crate) async fn record_completion(
     transaction: &mut dyn StorageTransaction,
     session_id: &str,
     command: IdempotentCommand,
@@ -395,6 +343,8 @@ async fn reclaim(
         ));
     }
     Ok(CommandLease {
+        reclaimed: true,
+        created_at: existing.record.created_at,
         session_id: existing.record.session_id,
         command: existing.record.command,
         idempotency_key: existing.record.idempotency_key,
@@ -486,6 +436,8 @@ fn parse_record(row: &Row) -> TalosResult<StoredRecord> {
 
 fn lease_from_request(requested: CommandReservation) -> CommandLease {
     CommandLease {
+        reclaimed: false,
+        created_at: requested.now,
         session_id: requested.session_id,
         command: requested.command,
         idempotency_key: requested.idempotency_key,

@@ -1,8 +1,8 @@
 use super::*;
 use crate::session::{
-    AgentExecutionStore, CommitInitialAdmissionParams, DatabaseSessionStore, SessionRecord,
-    SessionStore, SessionTreeIdentity,
+    AgentExecutionStore, DatabaseSessionStore, SessionRecord, SessionStore, SessionTreeIdentity,
 };
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 use talos_agent_api::{
     AgentEvent, AgentEventPayload, AgentMessage, AgentMessageRole, AgentMessageStatus,
     AgentTurnStarted,
@@ -97,11 +97,9 @@ fn task() -> SessionLoop {
 async fn admit(f: &Fixture, origin: Option<AutomationTurnOrigin>) -> TalosResult<()> {
     let identity = AgentTurnRef::new("s", "t");
     f.session
-        .commit_initial_admission(CommitInitialAdmissionParams {
-            subagent_limit: None,
+        .project_test_events(TestWorkerEvents {
             automation_origin: origin,
-            command: None,
-            events: vec![
+            ..TestWorkerEvents::new(vec![
                 AgentEvent {
                     identity: identity.clone(),
                     sequence: 1,
@@ -122,7 +120,7 @@ async fn admit(f: &Fixture, origin: Option<AutomationTurnOrigin>) -> TalosResult
                         completed_at: Some(1),
                     }),
                 },
-            ],
+            ])
         })
         .await
         .map(|_| ())
@@ -186,26 +184,22 @@ async fn later_user_steer_does_not_inherit_triggering_input_origin() {
         .create_goal(&goal("g"), Some(&identity))
         .await
         .unwrap();
-    let active = f.session.get_agent_active_turn("s").await.unwrap().unwrap();
+    let _active = f.session.get_agent_active_turn("s").await.unwrap().unwrap();
     f.session
-        .commit_running_input_admission(crate::session::CommitRunningInputAdmissionParams {
-            expected_event_seq: active.last_event_seq,
-            command: None,
-            events: vec![AgentEvent {
-                identity: identity.clone(),
-                sequence: 3,
-                occurred_at: 2,
-                payload: AgentEventPayload::MessageCompleted(AgentMessage {
-                    message_id: "steer-message".into(),
-                    turn_id: "t".into(),
-                    role: AgentMessageRole::User,
-                    status: AgentMessageStatus::Completed,
-                    blocks: vec![],
-                    created_at: 2,
-                    completed_at: Some(2),
-                }),
-            }],
-        })
+        .project_test_events(TestWorkerEvents::new(vec![AgentEvent {
+            identity: identity.clone(),
+            sequence: 3,
+            occurred_at: 2,
+            payload: AgentEventPayload::MessageCompleted(AgentMessage {
+                message_id: "steer-message".into(),
+                turn_id: "t".into(),
+                role: AgentMessageRole::User,
+                status: AgentMessageStatus::Completed,
+                blocks: vec![],
+                created_at: 2,
+                completed_at: Some(2),
+            }),
+        }]))
         .await
         .unwrap();
     let binding = f.automation.input_origin(&identity).await.unwrap().unwrap();

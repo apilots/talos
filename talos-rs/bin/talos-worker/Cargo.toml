@@ -26,12 +26,12 @@ chrono = { workspace = true }
 libc = { workspace = true }
 rcgen = "0.14"
 talos-auth = { workspace = true }
-talos-base = { workspace = true }
+talos-base = { workspace = true, features = ["server"] }
 talos-config = { workspace = true }
 talos-coordinator = { path = "../../crates/orchestration/coordinator" }
 talos-error = { workspace = true }
 talos-router = { path = "../../crates/orchestration/router" }
-talos-service = { workspace = true }
+talos-service = { workspace = true, features = ["product"] }
 talos-storage = { workspace = true }
 talos-store = { workspace = true }
 tempfile = "3"

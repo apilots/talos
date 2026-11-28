@@ -64,7 +64,7 @@ describe("ElectronAppServerClient", () => {
           name: "talos-app-server",
           version: "0.1.5",
           auth_enabled: false,
-          cloud_auth_url: "http://127.0.0.1:8787",
+          cloud_auth_url: "http://127.0.0.1:8787", capabilities: { sync: true, relay: true },
         },
       } })),
       invoke:  function <T>(): Promise<AppProtocol.ApiResponse<T>> {
@@ -78,7 +78,7 @@ describe("ElectronAppServerClient", () => {
       name: "talos-app-server",
           version: "0.1.5",
       auth_enabled: false,
-      cloud_auth_url: "http://127.0.0.1:8787",
+      cloud_auth_url: "http://127.0.0.1:8787", capabilities: { sync: true, relay: true },
     });
   });
 

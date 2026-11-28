@@ -58,6 +58,7 @@ pub fn decode_session_context(
 
 pub fn encode_context(value: AgentContext) -> TalosResult<pb::AgentContext> {
     Ok(pb::AgentContext {
+        tree_identity: Some(encode_tree_identity(value.tree_identity)),
         history_cursor: value
             .history_cursor
             .map(crate::execution_state_pb::encode_history_cursor),
@@ -81,6 +82,7 @@ pub fn decode_context(
         return Err(invalid());
     }
     Ok(AgentContext {
+        tree_identity: decode_tree_identity(value.tree_identity)?,
         history_cursor: value
             .history_cursor
             .map(crate::execution_state_pb::decode_history_cursor)
@@ -94,6 +96,46 @@ pub fn decode_context(
         model_selection: decode_model_selection(value.model_selection)?,
         permission_mode: decode_permission(value.permission_mode)?,
     })
+}
+
+pub fn encode_tree_identity(value: talos_types::SessionTreeIdentity) -> pb::AgentSessionTree {
+    let identity = match value {
+        talos_types::SessionTreeIdentity::Primary => {
+            pb::agent_session_tree::Identity::Primary(pb::Empty {})
+        }
+        talos_types::SessionTreeIdentity::Subagent {
+            parent,
+            tree_root_session_id,
+            path,
+        } => pb::agent_session_tree::Identity::Subagent(pb::AgentSubagentSession {
+            parent: Some(encode_turn_ref(parent)),
+            tree_root_session_id,
+            path: path.to_string(),
+        }),
+    };
+    pb::AgentSessionTree {
+        identity: Some(identity),
+    }
+}
+
+pub fn decode_tree_identity(
+    value: Option<pb::AgentSessionTree>,
+) -> TalosResult<talos_types::SessionTreeIdentity> {
+    match value.and_then(|value| value.identity).ok_or_else(invalid)? {
+        pb::agent_session_tree::Identity::Primary(_) => {
+            Ok(talos_types::SessionTreeIdentity::Primary)
+        }
+        pb::agent_session_tree::Identity::Subagent(value) => {
+            if value.tree_root_session_id.is_empty() {
+                return Err(invalid());
+            }
+            Ok(talos_types::SessionTreeIdentity::Subagent {
+                parent: decode_turn_ref(value.parent)?,
+                tree_root_session_id: value.tree_root_session_id,
+                path: value.path.parse()?,
+            })
+        }
+    }
 }
 
 pub fn encode_metrics(value: AgentRunMetrics) -> pb::RunMetrics {
@@ -362,6 +404,7 @@ mod tests {
         let node_home = PathBuf::from("/tmp/talos-remote-node");
         let config = Config::default().with_runtime_paths(TalosPaths::from_home(node_home.clone()));
         let context = AgentContext {
+            tree_identity: talos_types::SessionTreeIdentity::Primary,
             history_cursor: None,
             session: AgentSessionContext {
                 agent_id: "talos".into(),

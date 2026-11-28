@@ -1,4 +1,6 @@
 use super::*;
+use crate::test_support::commit_test_running_turn;
+use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 
 #[tokio::test]
 async fn retry_accepts_the_exact_initial_message_of_a_failed_canonical_turn() {
@@ -80,21 +82,24 @@ async fn commit_terminal_source(
     .expect("canonical User message should be valid");
     let admission = commit_test_running_turn(store, identity.clone(), message).await;
     store
-        .commit_terminal_settlement(talos_store::session::CommitTerminalSettlementParams {
-            event: CanonicalAgentEvent {
-                identity,
-                sequence: admission
-                    .events
-                    .last()
-                    .expect("canonical admission event")
-                    .sequence
-                    .saturating_add(1),
-                occurred_at: 2,
-                payload,
-            },
-            expected_event_seq: admission.active_turn.last_event_seq,
-            completed_turn_metrics: None,
-        })
+        .project_test_events(TestWorkerEvents::new(vec![CanonicalAgentEvent {
+            identity,
+            sequence: admission
+                .events
+                .last()
+                .expect("canonical admission event")
+                .sequence
+                .saturating_add(1),
+            occurred_at: 2,
+            payload,
+        }]))
         .await
+        .map(|commit| {
+            commit
+                .events
+                .into_iter()
+                .last()
+                .expect("terminal Worker projection")
+        })
         .expect("canonical terminal source should commit");
 }
