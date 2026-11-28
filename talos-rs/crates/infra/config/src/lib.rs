@@ -461,3 +461,7 @@ pub fn provider_config_for_llm<'a>(
 mod tests;
 
 pub use domains::mcp_auth::{McpAuthentication, McpCredentialBinding, McpOAuthConfig};
+
+#[cfg(test)]
+#[path = "template_tests.rs"]
+mod template_tests;

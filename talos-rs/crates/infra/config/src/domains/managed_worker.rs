@@ -150,13 +150,7 @@ impl Default for ServerRuntimePolicy {
 
 impl TalosRuntimeConfig {
     pub(crate) fn validate(&self, config: &Config) -> TalosResult<()> {
-        let Some(runtime) = &self.worker.runtime else {
-            return Ok(());
-        };
         let invalid = |message| TalosError::new(ErrorCode::InvalidRequest, message);
-        if !config.gateway.auth || config.agent_node.control_plane.is_none() {
-            return Err(invalid("The managed Worker runtime requires an authenticated Server with an Agent node control plane."));
-        }
         let policy = &self.server.runtime;
         if policy.request_wait_seconds == 0
             || policy.request_wait_seconds > policy.start_timeout_seconds
@@ -168,6 +162,12 @@ impl TalosRuntimeConfig {
             return Err(invalid(
                 "talos.server.runtime.idle_timeout_seconds must be positive.",
             ));
+        }
+        let Some(runtime) = &self.worker.runtime else {
+            return Ok(());
+        };
+        if !config.gateway.auth || config.agent_node.control_plane.is_none() {
+            return Err(invalid("The managed Worker runtime requires an authenticated Server with an Agent node control plane."));
         }
         match runtime.kind {
             WorkerRuntimeKind::DockerEngine => {

@@ -1,4 +1,6 @@
+use crate::validate::is_unresolved_placeholder;
 use serde::{Deserialize, Serialize};
+use talos_error::{TalosError, TalosResult};
 
 use crate::{
     default_timezone, AgentKernelPromptConfig, PlannerMode, PluginsRuntimeConfig, RuntimeEnv,
@@ -318,5 +320,228 @@ impl Default for AgentKernelConfig {
             skills: SkillsRuntimeConfig::default(),
             plugins: PluginsRuntimeConfig::default(),
         }
+    }
+}
+
+impl AgentKernelConfig {
+    /// Validate shared structural policy without opening tools or external resources.
+    pub(crate) fn validate(&self, path: &str) -> TalosResult<()> {
+        crate::parse_timezone(&self.timezone)
+            .map_err(|error| error.context(format!("validate {path}.timezone")))?;
+        if self.tool_parallelism == 0 {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("{path}.tool_parallelism must be > 0"),
+            ));
+        }
+        if self.tool_result_max_bytes == 0 {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("{path}.tool_result_max_bytes must be > 0"),
+            ));
+        }
+        if self.context_compaction_max_bytes == 0 {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("{path}.context_compaction_max_bytes must be > 0"),
+            ));
+        }
+        self.tools
+            .environment
+            .validate()
+            .map_err(|error| error.context(format!("validate {path}.tools.environment")))?;
+        let logs = &self.tools.bash.output_log;
+        logs.validate()
+            .map_err(|error| error.context(format!("validate {path}.tools.bash.output_log")))?;
+        if self.tools.bash.max_output_bytes < 256 || self.tool_result_max_bytes < 256 {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Tool result and local execution output limits must be at least 256 bytes.",
+            ));
+        }
+        if self.prompt.bootstrap.max_chars_per_file == 0 {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("{path}.prompt.bootstrap.max_chars_per_file must be > 0"),
+            ));
+        }
+        if self.prompt.window.compaction_buffer_tokens == 0 {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("{path}.prompt.window.compaction_buffer_tokens must be > 0"),
+            ));
+        }
+        if self.compaction.trigger_ratio_percent == 0
+            || self.compaction.trigger_ratio_percent >= 100
+        {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("{path}.compaction.trigger_ratio_percent must be in 1..100"),
+            ));
+        }
+        if self.compaction.hard_ratio_percent == 0 || self.compaction.hard_ratio_percent > 100 {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("{path}.compaction.hard_ratio_percent must be in 1..=100"),
+            ));
+        }
+        if self.compaction.trigger_ratio_percent >= self.compaction.hard_ratio_percent {
+            return Err(TalosError::new(talos_error::ErrorCode::InvalidRequest,
+            format!("{path}.compaction.trigger_ratio_percent must be < {path}.compaction.hard_ratio_percent"),
+        ));
+        }
+        for (name, value) in [
+            ("recent_messages_keep", self.compaction.recent_messages_keep),
+            (
+                "recent_messages_max_chars",
+                self.compaction.recent_messages_max_chars,
+            ),
+            (
+                "compacted_recent_messages_max_chars",
+                self.compaction.compacted_recent_messages_max_chars,
+            ),
+            (
+                "compacted_recent_messages_keep",
+                self.compaction.compacted_recent_messages_keep,
+            ),
+            (
+                "recent_summaries_keep",
+                self.compaction.recent_summaries_keep,
+            ),
+            ("summary_max_chars", self.compaction.summary_max_chars),
+            (
+                "compacted_summary_max_chars",
+                self.compaction.compacted_summary_max_chars,
+            ),
+            (
+                "source_recent_messages_limit",
+                self.compaction.source_recent_messages_limit,
+            ),
+            (
+                "source_recent_tool_results_limit",
+                self.compaction.source_recent_tool_results_limit,
+            ),
+            (
+                "tool_output_max_chars",
+                self.compaction.tool_output_max_chars,
+            ),
+            (
+                "compacted_tool_output_max_chars",
+                self.compaction.compacted_tool_output_max_chars,
+            ),
+            (
+                "source_recent_tool_exchanges_limit",
+                self.compaction.source_recent_tool_exchanges_limit,
+            ),
+            (
+                "tool_exchange_max_chars",
+                self.compaction.tool_exchange_max_chars,
+            ),
+            (
+                "compacted_tool_exchange_max_chars",
+                self.compaction.compacted_tool_exchange_max_chars,
+            ),
+            (
+                "retrieved_memories_keep",
+                self.compaction.retrieved_memories_keep,
+            ),
+            (
+                "retrieved_memory_max_chars",
+                self.compaction.retrieved_memory_max_chars,
+            ),
+            (
+                "compacted_retrieved_memory_max_chars",
+                self.compaction.compacted_retrieved_memory_max_chars,
+            ),
+        ] {
+            if value == 0 {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!("{path}.compaction.{name} must be > 0"),
+                ));
+            }
+        }
+        if self.compaction.compacted_recent_messages_max_chars
+            > self.compaction.recent_messages_max_chars
+        {
+            return Err(TalosError::new(talos_error::ErrorCode::InvalidRequest,
+            format!("{path}.compaction.compacted_recent_messages_max_chars must be <= {path}.compaction.recent_messages_max_chars"),
+        ));
+        }
+        if self.compaction.compacted_summary_max_chars > self.compaction.summary_max_chars {
+            return Err(TalosError::new(talos_error::ErrorCode::InvalidRequest,
+            format!("{path}.compaction.compacted_summary_max_chars must be <= {path}.compaction.summary_max_chars"),
+        ));
+        }
+        if self.compaction.compacted_tool_output_max_chars > self.compaction.tool_output_max_chars {
+            return Err(TalosError::new(talos_error::ErrorCode::InvalidRequest,
+            format!("{path}.compaction.compacted_tool_output_max_chars must be <= {path}.compaction.tool_output_max_chars"),
+        ));
+        }
+        if self.compaction.compacted_tool_exchange_max_chars
+            > self.compaction.tool_exchange_max_chars
+        {
+            return Err(TalosError::new(talos_error::ErrorCode::InvalidRequest,
+            format!("{path}.compaction.compacted_tool_exchange_max_chars must be <= {path}.compaction.tool_exchange_max_chars"),
+        ));
+        }
+        if self.compaction.compacted_retrieved_memory_max_chars
+            > self.compaction.retrieved_memory_max_chars
+        {
+            return Err(TalosError::new(talos_error::ErrorCode::InvalidRequest,
+            format!("{path}.compaction.compacted_retrieved_memory_max_chars must be <= {path}.compaction.retrieved_memory_max_chars"),
+        ));
+        }
+        if let Some(model) = self.compaction.model.as_ref() {
+            if model.trim().is_empty() || is_unresolved_placeholder(model) {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!("{path}.compaction.model is empty or unresolved placeholder"),
+                ));
+            }
+        }
+        if self.output.max_tokens == 0 {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("{path}.output.max_tokens must be > 0"),
+            ));
+        }
+        if self.output.upper_limit == 0 {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("{path}.output.upper_limit must be > 0"),
+            ));
+        }
+        if self.output.max_tokens > self.output.upper_limit {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("{path}.output.max_tokens must be <= {path}.output.upper_limit"),
+            ));
+        }
+        match &self.prompt.window.reserved_output_tokens {
+            crate::ReservedOutputPolicy::UseModelDefault => {}
+            crate::ReservedOutputPolicy::Fixed { tokens } => {
+                if *tokens == 0 {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!(
+                            "{path}.prompt.window.reserved_output_tokens.fixed.tokens must be > 0"
+                        ),
+                    ));
+                }
+            }
+            crate::ReservedOutputPolicy::Ratio {
+                numerator,
+                denominator,
+            } => {
+                if *numerator == 0 || *denominator == 0 {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!("{path}.prompt.window.reserved_output_tokens.ratio must be > 0"),
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 }

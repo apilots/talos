@@ -409,6 +409,46 @@ their listener, TLS and registration settings using that same schema. Keep every
 writable field in maintained templates: managed upgrades remove keys absent from
 the selected template. Derived paths and private registration state stay outside YAML.
 
+Configuration ownership is logical; these groups do not introduce new YAML roots:
+
+| Owner | Existing fields | Composition |
+| --- | --- | --- |
+| Common host | `timezone`, `logging`, local `storage`, `cloud` endpoints | Every product uses the same types and ConfigStore; paths derive from `TALOS_HOME`. |
+| Product management | `automation`, `channels`, `agent.message_queue`, command idempotency | Desktop/TUI manage local work; the cloud Server manages cloud work. |
+| Server control plane | `gateway`, `agent_node.control_plane`, `talos.server`, `talos.worker.runtime` | Authenticated API, registration, routing, managed Docker/Kubernetes lifecycle. |
+| Worker execution | `workspaces`, `memory`, `fs`, `agent.kernel`, Agent definitions, `llm`, `agent_node.runner` | The executing host owns its model catalog, credentials, tools and execution history. |
+
+`sync` remains an optional product module, independent of registration and execution.
+All three profiles expose every active serialized field, including per-model defaults,
+Telegram token-file options and the required official MCP discovery source. Optional
+TLS/registration/managed-runtime groups stay `null`; commented examples document their
+fields, defaults and required deployment inputs without enabling those capabilities.
+An explicit Agent `provider.kernel` uses its own typed defaults, including writable
+`timezone: UTC`; only root `agent.kernel.timezone` derives from the host timezone.
+Model HTTP deadlines are shown explicitly (10/120/90/900 seconds); `null` preserves
+adapter defaults. Existing profile-specific endpoints, authentication, logging,
+selections and catalogs are intentional and are not replaced with one environment's values.
+
+Whole-file validation checks schema and cross-field consistency in every product.
+Only assembled/enabled capabilities require external credentials, processes or resources.
+Do not turn derived paths, protected registration credentials, wire-size/security limits,
+transport heartbeats, retry/polling implementation constants or built-in prompt policy
+into unrelated YAML settings. New operational settings belong in their existing typed
+owner and in all maintained templates; they do not require another configuration layer.
+
+The pre-load upgrader refreshes the packaged template, aligns existing managed keys,
+then materializes missing typed defaults inside saved lists, dynamic catalogs and active
+optional groups. This default-materialization step preserves valid configured values,
+variants and explicit `null`, never merges shipped models into saved catalogs, and never
+expands secret placeholders into saved YAML. Existing unique invalid-value repairs and
+packaged Docker `runner.transport` defaults still apply before materialization.
+Runtime-mandated discovery sources may be appended by their existing typed policy.
+The result must pass full validation before the exact original is backed up and the new
+file is written atomically. A second upgrade does not rewrite or back up the file.
+This happens before normal Server/Desktop/TUI/Worker configuration loading; it is not a
+DB migration. Explicit `TALOS_CONFIG` files are operator-managed and intentionally are
+not rewritten. Keep such files aligned with the complete shipped template when upgrading.
+
 ## End-to-end tests
 
 ```bash

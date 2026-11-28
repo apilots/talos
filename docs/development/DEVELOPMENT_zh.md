@@ -58,6 +58,23 @@ $TALOS_HOME/logs/talos.log
 Provider secret 保存在 `.env` 中，配置引用对应的 `TALOS_LLM_*_API_KEY` 环境变量。
 仓库默认配置位于 `conf/`，由 Runtime 复制或升级，不直接编辑用户 home 中的文件。
 
+默认、dev、prod 使用同一套 schema 和 ConfigStore，按产品入口装配能力。配置按职责分为
+通用主机（时区、日志、本地存储及云端地址）、产品管理（Automation、渠道、发送策略）、
+Server 控制面（注册、路由、托管 Worker 生命周期）和 Worker 执行（Harness、模型、工具、
+Memory）四组；分组不新增 YAML 根节点。Sync 保持可选，与注册和执行解耦。
+完整结构和跨字段约束统一校验；仅启用的能力要求相应凭据、进程和资源。
+
+三份模板显式列出可写默认字段；未启用的 TLS、Worker 注册、Docker/Kubernetes 等可选组
+保持 `null`，注释展示字段、默认值和部署必填项。路径派生值、协议及安全限制、内部心跳和
+轮询常量不变成新的配置项。升级复用启动前的模板刷新与规范化流程：补齐自定义 Provider、
+列表及已启用可选组内的缺省字段，保留原值、目录、枚举变体、显式 `null` 和 secret 占位符。
+此保留约定针对新增的缺省字段补全步骤；既有唯一无效值修复、Docker 注册 transport 的
+打包默认值仍先按原规则处理。显式 Agent provider.kernel 使用独立的类型默认值（时区 UTC），
+根 agent.kernel.timezone 才从主机时区派生。不向已有模型列表合并发行版模型；官方 MCP 源
+按已有规则补入。完整校验通过后先备份原文，
+再原子写入；重复升级不写文件。显式 `TALOS_CONFIG` 仍由使用者管理，不自动改写。
+完整字段归属和升级约定见 [Runtime configuration](DEVELOPMENT.md#runtime-configuration)。
+
 CI 的 Rust、Node 和 pnpm 版本统一来自 `.github/release-toolchain.env`。
 `pr-e2e.yml` 负责 PR/main 调度，命名复用工作流分别展示 WebUI、Desktop、TUI、
 Server 内部模块和轻量安装契约。`talos-webui.yml` 与 `talos-desktop.yml` 共享

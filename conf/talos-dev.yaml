@@ -1,5 +1,13 @@
+# One schema for Desktop, TUI, Server and Worker. Entrypoints assemble capabilities.
+# All fields are structurally validated; external dependencies are needed only when enabled.
+# Profile values may differ; optional groups stay null until explicitly configured.
+# Derived logging.file, storage.connection_string and agent.kernel.timezone are not writable.
+# See docs/development/DEVELOPMENT.md#runtime-configuration for ownership and upgrades.
+
+# Common host configuration.
 timezone: Asia/Shanghai
 
+# Worker execution: local paths, memory, Harness, model catalog and tools belong to this host.
 workspaces:
   default_workspace_id: default
   definitions:
@@ -10,6 +18,8 @@ memory:
   memory_dirname: memory
   file_list_default_limit: 20
   file_list_max_limit: 90
+
+# Product management: local Desktop/TUI or cloud Server schedules and policies.
 automation:
   profile_usage_retention:
     cron: "0 15 3 * * 1"
@@ -20,17 +30,47 @@ automation:
     cron: "0 30 3 * * *"
     batch_size: 50
     max_batches: 10
+
+# Server control plane: authenticated product API. No local loopback RPC is required.
 gateway:
   port: 8080
   host: 0.0.0.0
   auth: false
 agent_node:
   embedded_worker: true
+  # Optional TLS listener example (paths/address are deployment inputs, not defaults):
+  # control_plane: {bind_address: "0.0.0.0:9210", tls_certificate_file: "/run/talos/server.crt", tls_private_key_file: "/run/talos/server.key"}
   control_plane: null
+  # Optional registered Worker example. Omitted/null transport selects outbound WSS.
+  # Docker packaging explicitly selects direct; registration credentials stay in a protected file.
+  # runner: {transport: outbound, node_id: "<registered-node-id>", control_plane_endpoint: "https://server.example.invalid:9210", credential_file: "/run/talos/worker.json", trusted_ca_file: null}
   runner: null
 # Managed Talo Workers are opt-in on the authenticated Server.
 talos:
   worker:
+    # Optional Server-managed runtime: enable only with authenticated control-plane TLS.
+    # image and control_plane_endpoint below are required deployment inputs, not defaults.
+    # runtime:
+    #   kind: DockerEngine  # DockerEngine | Kubernetes
+    #   image: "<repository>@sha256:<64-hex-digest>"
+    #   control_plane_endpoint: "https://server.example.invalid:9210"
+    #   trusted_ca_file: null
+    #   docker_engine:
+    #     socket_path: /var/run/docker.sock
+    #     worker: null  # Optional {image, control_plane_endpoint, trusted_ca_file: null} overrides the shared connection.
+    #     resources: {cpu_cores: 4, memory_bytes: 8589934592, shm_bytes: 1073741824}
+    #   kubernetes:
+    #     namespace: default
+    #     storage_class: talos-xfs-quota
+    #     seccomp_profile: talos/chromium-seccomp.json
+    #     worker: null  # Same connection override as docker_engine.worker.
+    #     resources: {cpu_cores: 4, memory_bytes: 8589934592, shm_bytes: 1073741824}
+    #     home_bytes: 100000000000
+    #     home_quota_enforced: false  # Must be explicitly asserted after cluster verification.
+    #     kubeconfig_source: null  # null: Mounted when a path is set, otherwise InCluster; also supports Pasted.
+    #     kubeconfig_path: null
+    #     kubeconfig_context: null
+    #     pasted_kubeconfig: null  # Credential reference UUID; never inline credential contents.
     runtime: null
   server:
     runtime:
@@ -39,6 +79,7 @@ talos:
       start_timeout_seconds: 120
       wake_cooldown_seconds: 60
 
+# Common product endpoints for authentication, registration and remote access; not local execution state.
 cloud:
   api_base_url: http://127.0.0.1:8787
   agent_base_url: https://127.0.0.1:9210
@@ -51,6 +92,8 @@ fs:
     enabled: true
     root: home
     show_hidden: true
+
+# Worker Harness configuration; message_queue and idempotency also define product admission policy.
 agent:
   name: talos
   inner_model:
@@ -110,23 +153,32 @@ agent:
       max_available_summary_bytes: 8192
     plugins:
       sources:
-      - source_type: official
-        display_name: Apilots Skills
-        kind: git
-        url: https://github.com/apilots/skills
-        reference: main
-        sparse_paths:
-        - skills
+        - source_type: official
+          display_name: Apilots Skills
+          kind: git
+          url: https://github.com/apilots/skills
+          reference: main
+          sparse_paths:
+            - skills
+        - source_type: official
+          display_name: Apilots MCPs
+          kind: git
+          url: https://github.com/apilots/mcps
+          reference: main
+          sparse_paths:
+            - mcp
       roots:
-      - kind: skill
-        path: ~/.agents/skills
-        read_only: true
-      - kind: skill
-        path: ~/.codex/skills
-        read_only: true
+        - kind: skill
+          path: ~/.agents/skills
+          read_only: true
+        - kind: skill
+          path: ~/.codex/skills
+          read_only: true
     planner_mode: built_in
     prompt:
       window:
+        # Alternatives: {kind: use_model_default} or {kind: ratio, numerator: 1, denominator: 8}.
+        # Ratio fields are required inputs; the shipped profile explicitly chooses fixed below.
         reserved_output_tokens:
           kind: fixed
           tokens: 8192
@@ -167,6 +219,13 @@ agent:
       retrieved_memory_max_chars: 2000
       compacted_retrieved_memory_max_chars: 800
       model: null
+  # Optional Agent definition; provider:null inherits the shared Kernel config above.
+  # agents:
+  #   - {id: default, name: talos, enabled: true, description: null, provider: null}
+  # A Kernel override uses provider: {type: kernel, kernel: {...}} with the complete
+  # agent.kernel field set above and its typed defaults, not a separate config schema.
+  # Explicit provider.kernel is a full override, not a merge; its timezone defaults
+  # to UTC and is writable, whereas the root agent.kernel.timezone is derived.
   agents: []
   command_idempotency_ttl_hours: 24
   identity: null
@@ -177,6 +236,8 @@ agent:
     max_depth: 3
     max_active_turns: 20
   timeline_replay_batch_size: 1024
+
+# Product management: optional messaging integrations; disabled channels do not require tokens.
 channels:
   whatsapp:
     enabled: false
@@ -195,33 +256,35 @@ channels:
     mode: polling
     webhook_url: null
     accounts:
-    - id: telegram-default
-      enabled: false
-      token: ${TALOS_TELEGRAM_ACCOUNT_1_TOKEN}
-      dm_policy: open
-      group_policy: mention
-      allow_from: []
-      group_allow_from: []
-      mode: polling
-      webhook_url: ${TALOS_TELEGRAM_ACCOUNT_1_WEBHOOK_URL}
-      groups:
-      - id: ${TALOS_TELEGRAM_GROUP_ID}
-        require_mention: true
+      - id: telegram-default
+        enabled: false
+        token: ${TALOS_TELEGRAM_ACCOUNT_1_TOKEN}
+        dm_policy: open
+        group_policy: mention
         allow_from: []
-        topics:
-        - id: ${TALOS_TELEGRAM_TOPIC_ID}
-          require_mention: false
-          allow_from: []
-    - id: telegram-webhook
-      enabled: false
-      token: ${TALOS_TELEGRAM_ACCOUNT_2_TOKEN}
-      dm_policy: open
-      group_policy: mention
-      allow_from: []
-      group_allow_from: []
-      mode: webhook
-      webhook_url: ${TALOS_TELEGRAM_ACCOUNT_2_WEBHOOK_URL}
-      groups: []
+        group_allow_from: []
+        mode: polling
+        webhook_url: ${TALOS_TELEGRAM_ACCOUNT_1_WEBHOOK_URL}
+        groups:
+          - id: ${TALOS_TELEGRAM_GROUP_ID}
+            require_mention: true
+            allow_from: []
+            topics:
+              - id: ${TALOS_TELEGRAM_TOPIC_ID}
+                require_mention: false
+                allow_from: []
+        token_file: null
+      - id: telegram-webhook
+        enabled: false
+        token: ${TALOS_TELEGRAM_ACCOUNT_2_TOKEN}
+        dm_policy: open
+        group_policy: mention
+        allow_from: []
+        group_allow_from: []
+        mode: webhook
+        webhook_url: ${TALOS_TELEGRAM_ACCOUNT_2_WEBHOOK_URL}
+        groups: []
+        token_file: null
     webhook_secret: null
   discord:
     enabled: false
@@ -235,7 +298,13 @@ channels:
     dm_policy: open
     dm_scope: per_channel_peer_topic
     token: null
+
+# Worker model configuration: values are shared by native and embedded Worker APIs on this host.
+# HTTP timeout defaults are explicit; null still selects the same adapter defaults.
+# Model cost defaults are zero when not supplied; no model pricing is inferred.
+# reasoning_efforts: null permits standard levels; [] disables graded effort.
 llm:
+  custom_providers: {}
   provider: deepseek
   model: deepseek-flash
   # Optional custom Provider example. Comments only; this endpoint is not usable.
@@ -259,6 +328,7 @@ llm:
   #         reasoning_effort: medium
   #         # Accepted effort values; independent of enable_thinking. [] means no graded effort.
   #         reasoning_efforts: [light, medium, high]
+  #         cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
   #         speed: standard
   #         input: [text]
   #         # Chat-only outgoing reasoning projection; this is not request KV.
@@ -268,193 +338,173 @@ llm:
   #           chat_template_kwargs:
   #             enable_thinking: true
   anthropic:
-    http_timeouts: null
+    http_timeouts: {connect_secs: 10, response_secs: 120, stream_idle_secs: 90, stream_total_secs: 900}
     api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
     base_url: https://api.anthropic.com/v1
     protocol: messages
     models:
-    - id: claude-fable-5-2
-      name: Claude Fable 5.2
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: high
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      request_parameters:
-        thinking:
-          type: adaptive
-      cost:
-        input: 8
-        output: 40
-        cache_read: 0.2
-        cache_write: 10
-    - id: claude-opus-5-5
-      name: Claude Opus 5.5
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      request_parameters:
-        thinking:
-          type: adaptive
-      cost:
-        input: 4
-        output: 20
-        cache_read: 0.2
-        cache_write: 5
-    - id: claude-opus-5
-      name: Claude Opus 5
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: high
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      request_parameters:
-        thinking:
-          type: adaptive
-      cost:
-        input: 5
-        output: 25
-        cache_read: 0.5
-        cache_write: 6.25
-    - id: claude-sonnet-5-5
-      name: Claude Sonnet 5.5
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: high
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      request_parameters:
-        thinking:
-          type: adaptive
-      cost:
-        input: 2
-        output: 10
-        cache_read: 0.1
-        cache_write: 2.5
-    - id: claude-haiku-5-5
-      name: Claude Haiku 5.5
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      request_parameters:
-        thinking:
-          type: adaptive
-    - id: claude-opus-4-8
-      name: Claude Opus 4.8
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      request_parameters:
-        thinking:
-          type: adaptive
-      cost:
-        input: 0
-        output: 0
-        cache_read: 0
-        cache_write: 0
-    - id: claude-sonnet-4-6
-      name: Claude Sonnet 4.6
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      request_parameters:
-        thinking:
-          type: adaptive
-      cost:
-        input: 0
-        output: 0
-        cache_read: 0
-        cache_write: 0
-    - id: claude-haiku-4-5-20251001
-      name: Claude Haiku 4.5
-      context_window: 200000
-      reasoning: true
-      reasoning_effort: medium
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      cost:
-        input: 0.0
-        output: 0.0
-        cache_read: 0.0
-        cache_write: 0.0
-  # All built-in and custom connections accept the same optional HTTP policy.
-  # Omit it or use null for shared defaults: connect 10s, response 120s,
-  # stream idle 90s, stream total 900s. Responses uses HTTP/SSE here.
+      - id: claude-fable-5-2
+        name: Claude Fable 5.2
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: high
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        request_parameters:
+          thinking:
+            type: adaptive
+        cost: {input: 8, output: 40, cache_read: 0.2, cache_write: 10}
+        reasoning_replay: protocol_default
+      - id: claude-opus-5-5
+        name: Claude Opus 5.5
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        request_parameters:
+          thinking:
+            type: adaptive
+        cost: {input: 4, output: 20, cache_read: 0.2, cache_write: 5}
+        reasoning_replay: protocol_default
+      - id: claude-opus-5
+        name: Claude Opus 5
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: high
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        request_parameters:
+          thinking:
+            type: adaptive
+        cost: {input: 5, output: 25, cache_read: 0.5, cache_write: 6.25}
+        reasoning_replay: protocol_default
+      - id: claude-sonnet-5-5
+        name: Claude Sonnet 5.5
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: high
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        request_parameters:
+          thinking:
+            type: adaptive
+        cost: {input: 2, output: 10, cache_read: 0.1, cache_write: 2.5}
+        reasoning_replay: protocol_default
+      - id: claude-haiku-5-5
+        name: Claude Haiku 5.5
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        request_parameters:
+          thinking:
+            type: adaptive
+        reasoning_replay: protocol_default
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+      - id: claude-opus-4-8
+        name: Claude Opus 4.8
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        request_parameters:
+          thinking:
+            type: adaptive
+        cost: {input: 0, output: 0, cache_read: 0, cache_write: 0}
+        reasoning_replay: protocol_default
+      - id: claude-sonnet-4-6
+        name: Claude Sonnet 4.6
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        request_parameters:
+          thinking:
+            type: adaptive
+        cost: {input: 0, output: 0, cache_read: 0, cache_write: 0}
+        reasoning_replay: protocol_default
+      - id: claude-haiku-4-5-20251001
+        name: Claude Haiku 4.5
+        context_window: 200000
+        reasoning: true
+        reasoning_effort: medium
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
   openai:
-    http_timeouts: null
+    http_timeouts: {connect_secs: 10, response_secs: 120, stream_idle_secs: 90, stream_total_secs: 900}
     # http_timeouts:
     #   connect_secs: 10
     #   response_secs: 120
@@ -464,304 +514,303 @@ llm:
     base_url: https://api.openai.com/v1
     protocol: responses
     models:
-    - id: gpt-6.2-astra
-      name: GPT-6.2 Astra
-      context_window: 1050000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      cost:
-        input: 8.0
-        output: 40.0
-        cache_read: 0.4
-        cache_write: 10.0
-    - id: gpt-6.2-sol
-      name: GPT-6.2 Sol
-      context_window: 1050000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      cost:
-        input: 2.0
-        output: 10.0
-        cache_read: 0.1
-        cache_write: 2.5
-    - id: gpt-6.1-terra
-      name: GPT-6.1 Terra
-      context_window: 1050000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      cost:
-        input: 1.0
-        output: 5.0
-        cache_read: 0.05
-        cache_write: 1.25
-    - id: gpt-6-luna
-      name: GPT-6 Luna
-      context_window: 1050000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      cost:
-        input: 0.1
-        output: 0.5
-        cache_read: 0.01
-        cache_write: 0.125
-    - id: gpt-6.1-sol
-      name: GPT-6.1 Sol
-      context_window: 1050000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      cost:
-        input: 2
-        output: 10
-        cache_read: 0.1
-        cache_write: 2.5
-    - id: gpt-6-astra
-      name: GPT-6 Astra
-      context_window: 1050000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      cost:
-        input: 10
-        output: 50
-        cache_read: 1
-        cache_write: 12.5
-    - id: gpt-6-sol
-      name: GPT-6 Sol
-      context_window: 1050000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      cost:
-        input: 2
-        output: 10
-        cache_read: 0.2
-        cache_write: 2.5
+      - id: gpt-6.2-astra
+        name: GPT-6.2 Astra
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        cost: {input: 8.0, output: 40.0, cache_read: 0.4, cache_write: 10.0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+      - id: gpt-6.2-sol
+        name: GPT-6.2 Sol
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        cost: {input: 2.0, output: 10.0, cache_read: 0.1, cache_write: 2.5}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+      - id: gpt-6.1-terra
+        name: GPT-6.1 Terra
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        cost: {input: 1.0, output: 5.0, cache_read: 0.05, cache_write: 1.25}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+      - id: gpt-6-luna
+        name: GPT-6 Luna
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        cost: {input: 0.1, output: 0.5, cache_read: 0.01, cache_write: 0.125}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+      - id: gpt-6.1-sol
+        name: GPT-6.1 Sol
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        cost: {input: 2, output: 10, cache_read: 0.1, cache_write: 2.5}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+      - id: gpt-6-astra
+        name: GPT-6 Astra
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        cost: {input: 10, output: 50, cache_read: 1, cache_write: 12.5}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+      - id: gpt-6-sol
+        name: GPT-6 Sol
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        cost: {input: 2, output: 10, cache_read: 0.2, cache_write: 2.5}
+        reasoning_replay: protocol_default
+        request_parameters: {}
   bailian:
-    http_timeouts: null
+    http_timeouts: {connect_secs: 10, response_secs: 120, stream_idle_secs: 90, stream_total_secs: 900}
     api_key: ${TALOS_LLM_BAILIAN_API_KEY}
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     protocol: chat
     models:
-    - id: qwen4-max
-      name: Qwen4 Max
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: high
-      reasoning_efforts:
-      - light
-      - high
-      - xhigh
-      speed: standard
-      input:
-      - text
-      - image
-    - id: qwen3.8-max
-      name: Qwen 3.8 Max
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - xhigh
-      speed: standard
-      input:
-      - text
-      - image
-    - id: qwen3.8-flash
-      name: Qwen 3.8 Flash
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - xhigh
-      speed: standard
-      input:
-      - text
-      - image
-    - id: qwen3.7-plus
-      name: Qwen 3.7 Plus
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      speed: standard
-      input:
-      - text
-      - image
-      cost:
-        input: 0
-        output: 0
-        cache_read: 0
-        cache_write: 0
-    - id: qwen3.8-max-0902
-      name: Qwen 3.8 Max 0902
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - xhigh
-      speed: standard
-      input:
-      - text
-      - image
-    - id: qwen3.7-max
-      name: Qwen 3.7 Max
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      speed: standard
-      input:
-      - text
-      - image
-      cost:
-        input: 0
-        output: 0
-        cache_read: 0
-        cache_write: 0
-    - id: qwen3.6-flash
-      name: Qwen 3.6 Flash
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      speed: standard
-      input:
-      - text
-      - image
-      cost:
-        input: 0.0
-        output: 0.0
-        cache_read: 0.0
-        cache_write: 0.0
-    - id: qwen3.8-27b
-      name: Qwen 3.8 27B
-      context_window: 1000000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - xhigh
-      speed: standard
-      input:
-      - text
-      - image
+      - id: qwen4-max
+        name: Qwen4 Max
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: high
+        reasoning_efforts:
+          - light
+          - high
+          - xhigh
+        speed: standard
+        input:
+          - text
+          - image
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+      - id: qwen3.8-max
+        name: Qwen 3.8 Max
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - xhigh
+        speed: standard
+        input:
+          - text
+          - image
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+      - id: qwen3.8-flash
+        name: Qwen 3.8 Flash
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - xhigh
+        speed: standard
+        input:
+          - text
+          - image
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+      - id: qwen3.7-plus
+        name: Qwen 3.7 Plus
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        speed: standard
+        input:
+          - text
+          - image
+        cost: {input: 0, output: 0, cache_read: 0, cache_write: 0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
+      - id: qwen3.8-max-0902
+        name: Qwen 3.8 Max 0902
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - xhigh
+        speed: standard
+        input:
+          - text
+          - image
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+      - id: qwen3.7-max
+        name: Qwen 3.7 Max
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        speed: standard
+        input:
+          - text
+          - image
+        cost: {input: 0, output: 0, cache_read: 0, cache_write: 0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
+      - id: qwen3.6-flash
+        name: Qwen 3.6 Flash
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        speed: standard
+        input:
+          - text
+          - image
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
+      - id: qwen3.8-27b
+        name: Qwen 3.8 27B
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - xhigh
+        speed: standard
+        input:
+          - text
+          - image
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
   deepseek:
-    http_timeouts: null
+    http_timeouts: {connect_secs: 10, response_secs: 120, stream_idle_secs: 90, stream_total_secs: 900}
     api_key: ${TALOS_LLM_DEEPSEEK_API_KEY}
     base_url: https://api.deepseek.com
     protocol: chat
     models:
-    - id: deepseek-flash
-      name: DeepSeek V4.1 Flash
-      context_window: 1048576
-      reasoning: true
-      reasoning_effort: high
-      reasoning_efforts:
-      - light
-      - high
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-    - id: deepseek-v4-pro
-      name: DeepSeek V4 Pro 0813
-      context_window: 1048576
-      reasoning: true
-      reasoning_effort: high
-      reasoning_efforts:
-      - light
-      - high
-      - max
-      speed: standard
-      input:
-      - text
-      cost:
-        input: 0
-        output: 0
-        cache_read: 0
-        cache_write: 0
+      - id: deepseek-flash
+        name: DeepSeek V4.1 Flash
+        context_window: 1048576
+        reasoning: true
+        reasoning_effort: high
+        reasoning_efforts:
+          - light
+          - high
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+      - id: deepseek-v4-pro
+        name: DeepSeek V4 Pro 0813
+        context_window: 1048576
+        reasoning: true
+        reasoning_effort: high
+        reasoning_efforts:
+          - light
+          - high
+          - max
+        speed: standard
+        input:
+          - text
+        cost: {input: 0, output: 0, cache_read: 0, cache_write: 0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
   ollama:
-    http_timeouts: null
+    http_timeouts: {connect_secs: 10, response_secs: 120, stream_idle_secs: 90, stream_total_secs: 900}
     api_key: null
     base_url: http://localhost:11434
     protocol: chat
@@ -774,8 +823,11 @@ llm:
         reasoning_efforts: []
         speed: standard
         input:
-        - text
-        - image
+          - text
+          - image
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
       - id: "qwen3:8b"
         name: "Qwen3 8B"
         context_window: 40960
@@ -783,11 +835,10 @@ llm:
         reasoning_effort: "medium"
         speed: "standard"
         input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
+        cost: {input: 0, output: 0, cache_read: 0, cache_write: 0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
       - id: "deepseek-r1:8b"
         name: "DeepSeek R1 8B"
         context_window: 131072
@@ -795,11 +846,10 @@ llm:
         reasoning_effort: "medium"
         speed: "standard"
         input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
+        cost: {input: 0, output: 0, cache_read: 0, cache_write: 0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
       - id: "gpt-oss:20b"
         name: "GPT OSS 20B"
         context_window: 131072
@@ -807,124 +857,116 @@ llm:
         reasoning_effort: "medium"
         speed: "standard"
         input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
+        cost: {input: 0, output: 0, cache_read: 0, cache_write: 0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
   openrouter:
-    http_timeouts: null
+    http_timeouts: {connect_secs: 10, response_secs: 120, stream_idle_secs: 90, stream_total_secs: 900}
     api_key: ${TALOS_LLM_OPENROUTER_API_KEY}
     base_url: https://openrouter.ai/api/v1
     protocol: chat
     models:
-    - id: openai/gpt-6.2-astra
-      name: GPT-6.2 Astra
-      context_window: 1050000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      cost:
-        input: 8
-        output: 40
-        cache_read: 0.4
-        cache_write: 10
-    - id: openai/gpt-6.2-sol
-      name: GPT-6.2 Sol
-      context_window: 1050000
-      reasoning: true
-      reasoning_effort: medium
-      reasoning_efforts:
-      - light
-      - medium
-      - high
-      - xhigh
-      - max
-      speed: standard
-      input:
-      - text
-      - image
-      - file
-      cost:
-        input: 2
-        output: 10
-        cache_read: 0.1
-        cache_write: 2.5
-    - id: openai/gpt-oss-120b:free
-      name: GPT OSS 120B Free
-      context_window: 131072
-      reasoning: true
-      reasoning_effort: medium
-      speed: standard
-      input:
-      - text
-      cost:
-        input: 0.0
-        output: 0.0
-        cache_read: 0.0
-        cache_write: 0.0
-    - id: openai/gpt-oss-20b
-      name: GPT OSS 20B
-      context_window: 131072
-      reasoning: true
-      reasoning_effort: medium
-      speed: standard
-      input:
-      - text
-      cost:
-        input: 0.03
-        output: 0.13
-        cache_read: 0.03
-        cache_write: 0
-    - id: tencent/hy3:free
-      name: Tencent HY3 Free
-      context_window: 262144
-      reasoning: false
-      reasoning_effort: medium
-      speed: standard
-      input:
-      - text
-      cost:
-        input: 0.0
-        output: 0.0
-        cache_read: 0.0
-        cache_write: 0.0
-    - id: meta-llama/llama-3.3-70b-instruct
-      name: Llama 3.3 70B Instruct
-      context_window: 131072
-      reasoning: false
-      reasoning_effort: medium
-      speed: standard
-      input:
-      - text
-      cost:
-        input: 0.59
-        output: 0.79
-        cache_read: 0.295
-        cache_write: 0
-    - id: meta-llama/llama-3.3-70b-instruct:free
-      name: Llama 3.3 70B Instruct Free
-      context_window: 131072
-      reasoning: false
-      reasoning_effort: medium
-      speed: standard
-      input:
-      - text
-      cost:
-        input: 0.0
-        output: 0.0
-        cache_read: 0.0
-        cache_write: 0.0
+      - id: openai/gpt-6.2-astra
+        name: GPT-6.2 Astra
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        cost: {input: 8, output: 40, cache_read: 0.4, cache_write: 10}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+      - id: openai/gpt-6.2-sol
+        name: GPT-6.2 Sol
+        context_window: 1050000
+        reasoning: true
+        reasoning_effort: medium
+        reasoning_efforts:
+          - light
+          - medium
+          - high
+          - xhigh
+          - max
+        speed: standard
+        input:
+          - text
+          - image
+          - file
+        cost: {input: 2, output: 10, cache_read: 0.1, cache_write: 2.5}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+      - id: openai/gpt-oss-120b:free
+        name: GPT OSS 120B Free
+        context_window: 131072
+        reasoning: true
+        reasoning_effort: medium
+        speed: standard
+        input:
+          - text
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
+      - id: openai/gpt-oss-20b
+        name: GPT OSS 20B
+        context_window: 131072
+        reasoning: true
+        reasoning_effort: medium
+        speed: standard
+        input:
+          - text
+        cost: {input: 0.03, output: 0.13, cache_read: 0.03, cache_write: 0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
+      - id: tencent/hy3:free
+        name: Tencent HY3 Free
+        context_window: 262144
+        reasoning: false
+        reasoning_effort: medium
+        speed: standard
+        input:
+          - text
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
+      - id: meta-llama/llama-3.3-70b-instruct
+        name: Llama 3.3 70B Instruct
+        context_window: 131072
+        reasoning: false
+        reasoning_effort: medium
+        speed: standard
+        input:
+          - text
+        cost: {input: 0.59, output: 0.79, cache_read: 0.295, cache_write: 0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
+      - id: meta-llama/llama-3.3-70b-instruct:free
+        name: Llama 3.3 70B Instruct Free
+        context_window: 131072
+        reasoning: false
+        reasoning_effort: medium
+        speed: standard
+        input:
+          - text
+        cost: {input: 0.0, output: 0.0, cache_read: 0.0, cache_write: 0.0}
+        reasoning_replay: protocol_default
+        request_parameters: {}
+        reasoning_efforts: null
+
+# Common host diagnostics; file location is derived from TALOS_HOME.
 logging:
   level: info
   format: text
@@ -940,6 +982,7 @@ logging:
     max_bytes: 20971520
     max_files: 5
 
+# Local persistence. The entrypoint selects product/Worker stores; this is not remote Session ownership.
 storage:
   database_type: sqlite
   max_connections: 5
