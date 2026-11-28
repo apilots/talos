@@ -22,7 +22,8 @@ import signal
 from fixture import model_config, tool_responses
 
 def respond(request):
-    assert request.get("reasoning_effort") == "low", "Reasoning effort did not reach the provider"
+    assert request.get("reasoning_effort") == "max", "Reasoning effort did not reach the provider"
+    assert request.get("max_tokens") == 131072, "Arena output limit did not reach the provider"
     if results := tool_responses(request):
         assert "ARENA_SMOKE_TOOL_OK" in results[-1]["content"]
         return "ARENA_SMOKE_DONE"
@@ -40,7 +41,7 @@ async def smoke(output):
     paths.mkdir()
     with TemporaryDirectory(prefix="arena-smoke-") as temporary:
         directory = Path(temporary)
-        shutil.copyfile(ROOT / "talos-e2e/docker/tui-install-ubuntu-24.04.Dockerfile",
+        shutil.copyfile(ROOT / "talos-e2e/docker/tui-install-debian-12.Dockerfile",
                         directory / "Dockerfile")
         server = directory / "model_server.py"
         server.write_text(MODEL_SERVER)
@@ -62,8 +63,7 @@ async def smoke(output):
                 agent = CustomAgent(
                     logs_dir=paths.agent_dir, model_name="arena-controlled",
                     base_url=result.stdout.strip(), model_api_format="openai_chat_completions",
-                    model_api_key_name="ARENA_FIXTURE_KEY", extra_env={"ARENA_FIXTURE_KEY": "fixture"},
-                    reasoning_effort="low")
+                    model_api_key_name="ARENA_FIXTURE_KEY", extra_env={"ARENA_FIXTURE_KEY": "fixture"})
                 context = AgentContext()
                 await agent.setup(environment)
                 try:
@@ -83,7 +83,7 @@ async def smoke(output):
                 assert provenance["version"] == VERSION and provenance["source"] == SOURCE, provenance
                 assert provenance["product_sha256"] == PRODUCTS[provenance["machine"]][1], provenance
                 summary = {"status": "passed", "controlled_model": True, "release": VERSION, "evidence_dir": str(output),
-                           "reasoning_effort": "low", "steps": len(trace["steps"]),
+                           "reasoning_effort": "max", "max_output_tokens": 131072, "steps": len(trace["steps"]),
                            "context": context.model_dump(), "provenance": provenance}
                 (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
                 print(json.dumps(summary))

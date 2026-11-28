@@ -16,13 +16,13 @@ from harbor.agents.capabilities import AgentCapabilities
 from harbor.models.model_api_format import ModelApiFormat
 
 
-VERSION = "0.1.18"
-SOURCE = "b8c9c73a5d768e6a6ab840b37a774afede88cc4c"
+VERSION = "0.1.19"
+SOURCE = "d8ff8a7278f482602ce35dbad77ee1e122c17996"
 RELEASE_ROOT = f"https://github.com/apilots/talos/releases/download/v{VERSION}"
 SOURCE_ROOT = f"https://raw.githubusercontent.com/apilots/talos/{SOURCE}/talos-bench/runtime"
 PRODUCTS = {
-    "x86_64": ("amd64", "556e96b390ec442dc268c24abdde348bd6ee54fc0f5905d7b8a2b422d01d5a2c"),
-    "aarch64": ("arm64", "5997694f62b1737016c043ec6e00a048b48f5e30d787ce4fba61034536db2ebc"),
+    "x86_64": ("amd64", "9d5f01a8a2188c9ae57d87be63c87962843fc9efef028b31905939c4b8ac554a"),
+    "aarch64": ("arm64", "79db86dbf116583b04fe142bd44e2c45648d8e2ef029b3d5ef218140237a5a61"),
 }
 RUNTIME_FILES = {
     "payload.py": "558b49c06b2525bb1e8b6d1f3a8a107b285399328950c561bbf158f0538f7f97",
@@ -80,24 +80,27 @@ def load_payload(product):
 
 
 def talos_connection(connection, effort):
-    formats = {ModelApiFormat.OPENAI_CHAT_COMPLETIONS: "chat",
-               ModelApiFormat.OPENAI_RESPONSES: "responses"}
+    formats = {ModelApiFormat.OPENAI_CHAT_COMPLETIONS: ("chat", "max_tokens"),
+               ModelApiFormat.OPENAI_RESPONSES: ("responses", "max_output_tokens")}
     if connection.model_api_format not in formats:
         raise ValueError("Talos Arena supports OpenAI Chat Completions and Responses")
     if not connection.model_id or not connection.api_key or not connection.execution_base_url:
         raise ValueError("Talos Arena requires a model, API credential and endpoint")
+    protocol, limit = formats[connection.model_api_format]
     model = {"id": connection.model_id, "name": connection.model_id,
-             "context_window": 128000, "input": ["text"]}
+             "context_window": 128000, "input": ["text"],
+             "request_parameters": {limit: 131072}}
     if effort is not None:
-        efforts = {"low": "light", "medium": "medium", "high": "high", "xhigh": "xhigh"}
+        efforts = {"low": "light", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max"}
         if effort not in efforts:
-            raise ValueError("Talos Arena supports low, medium, high and xhigh reasoning effort")
-        model.update(reasoning=True, reasoning_effort=efforts[effort])
+            raise ValueError("Talos Arena supports low, medium, high, xhigh and max reasoning effort")
+        model.update(reasoning=True, reasoning_effort=efforts[effort],
+                     reasoning_efforts=[efforts[effort]])
     llm = {"provider": "arena", "model": connection.model_id, "custom_providers": {"arena": {
         "name": "Runta Arena",
         "api_key": "${TALOS_LLM_OPENAI_API_KEY}",
         "base_url": connection.execution_base_url,
-        "protocol": formats[connection.model_api_format], "models": [model]}}}
+        "protocol": protocol, "models": [model]}}}
     quoted = json.dumps(connection.api_key).replace("$", r"\$")
     return llm, f"TALOS_LLM_OPENAI_API_KEY={quoted}"
 
@@ -115,6 +118,8 @@ class CustomAgent(BaseAgent):
     )
 
     def __init__(self, *args, reasoning_effort=None, **kwargs):
+        if reasoning_effort is None:
+            reasoning_effort = "max"
         super().__init__(*args, reasoning_effort=reasoning_effort, **kwargs)
         self.effort = reasoning_effort
         self._directory = None
@@ -169,6 +174,7 @@ class CustomAgent(BaseAgent):
             "model": self.model_connection.model_id,
             "api_format": str(self.model_connection.model_api_format),
             "reasoning_effort": self.effort,
+            "max_output_tokens": 131072,
         }, indent=2) + "\n")
 
     async def run(self, instruction, environment, context):
