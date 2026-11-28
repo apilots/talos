@@ -9,6 +9,9 @@ export type { BrowserAction, BrowserTabAction, BrowserHostRequest, BrowserHostOp
 import type { DesktopMediaFrame, DesktopStreamOpen, DesktopStreamSend, DesktopStreamClose, DesktopWorkerIdentityResponse, DesktopWorkerEnrollParams, DesktopViewGrant, DesktopOpenRequest } from "./desktop";
 export type { DesktopMediaFrame, DesktopStreamOpen, DesktopStreamSend, DesktopStreamClose, DesktopWorkerIdentityResponse, DesktopWorkerEnrollParams, DesktopViewGrant, DesktopOpenRequest };
 
+import type { FilePreviewDocument, FilePreviewDocumentUnavailable, FilePreviewSource, FilePreviewMetadata, FilePreviewPrepareRequest, FilePreviewDescriptor, FilePreviewReadRequest, FilePreviewContent, FilePreviewCloseRequest, FilePreviewCloseResponse } from "./file-preview";
+export type { FilePreviewDocument, FilePreviewDocumentUnavailable, FilePreviewSource, FilePreviewMetadata, FilePreviewPrepareRequest, FilePreviewDescriptor, FilePreviewReadRequest, FilePreviewContent, FilePreviewCloseRequest, FilePreviewCloseResponse };
+
 export type ProtocolVersion = { major: number, minor: number, };
 
 export const PROTOCOL_VERSION = {"major":0,"minor":5} as const;
@@ -797,46 +800,6 @@ export type FileReadRequest = { fileId: string, };
 export type FileReadResponse = { file: FileInfo, };
 
 export type FileContentResponse = { file: FileInfo, dataBase64: string, };
-
-export type FilePreviewDocument = { "kind": "pdf", resourcePath: string, } | { "kind": "unavailable", reason: FilePreviewDocumentUnavailable, };
-
-export type FilePreviewDocumentUnavailable = "converterUnavailable" | "conversionFailed" | "tooLarge";
-
-export type FilePreviewSource = { "kind": "file", fileId: string, } | { "kind": "sessionPath", sessionId: string, path: string, };
-
-export type FilePreviewMetadata = { name: string, mimeType: string, sizeBytes: number, };
-
-export type FilePreviewPrepareRequest = { source: FilePreviewSource, };
-
-export type FilePreviewDescriptor = {
-/**
- * Ephemeral scoped capability. Never persist or share this identifier.
- */
-previewId: string,
-/**
- * URL path relative to the preview root; never a host filesystem path.
- */
-entryPath: string,
-/**
- * Configured per-preview HTTP origin; native transports supply their own URL adapter.
- */
-resourceBaseUrl: string | null, metadata: FilePreviewMetadata,
-/**
- * Additional document capability; absent means browser/text presentation of the source.
- */
-document: FilePreviewDocument | null, expiresAt: number, };
-
-export type FilePreviewReadRequest = { previewId: string, resourcePath: string, offset: number,
-/**
- * At most one MiB per request. Zero reads metadata only.
- */
-limit: number, };
-
-export type FilePreviewContent = { metadata: FilePreviewMetadata, offset: number, dataBase64: string, };
-
-export type FilePreviewCloseRequest = { previewId: string, };
-
-export type FilePreviewCloseResponse = { closed: boolean, };
 
 export type FileUpdateRequest = { fileId: string, tags?: Array<string>, metadata?: { [key in string]?: string }, };
 

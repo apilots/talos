@@ -224,7 +224,7 @@ def workspace(cluster):
     require(not tool_results, 'Model called a tool despite the scenario instruction; automatic reflection not isolated')
     user_id = cluster.users['alice']['user']['user_id']
     server_workspace = cluster.server_home / 'workspace-talos' / user_id
-    node_workspace = cluster.nodes['alice-a']['home'] / 'workspace-talos' / user_id
+    node_workspace = cluster.nodes['alice-a']['home'] / 'worker-workspaces' / user_id
     artifacts = [json.loads(line) for path in (node_workspace / 'sessions' / session).glob('*.jsonl')
                  for line in path.read_text().splitlines() if line.strip()]
     require(any(record.get('kind') == 'transcript' for record in artifacts), f'Worker transcript missing for {session}')
@@ -253,7 +253,20 @@ def workspace(cluster):
         source_calls = {json.loads(row[0])['modelUsage']['requestId'] for row in source.execute(
             'SELECT formation_json FROM dream_formations WHERE session_id=?', (session,))}
     require(all(row[2] in source_calls for row in recorded), 'Product Dream accounting lost the Worker call identity')
-    passed('dream_uses_target_worker_model_without_server_model_configuration')
+    require(not (cluster.server_home / 'data/worker').exists(),
+            'Pure control-plane Server instantiated a local Worker execution namespace')
+    require(cluster.query('SELECT workspace_id FROM sessions WHERE session_key=?', (session,)) == [('remote-team',)],
+            'Session lost the Worker-only Workspace identity')
+    title_usage = cluster.query(
+        "SELECT model_provider,model_id,last_request_id FROM profile_turn_usage WHERE session_id=? AND usage_kind='title'",
+        (session,))
+    require(title_usage and all(row[:2] == (selected['provider'], selected['id']) for row in title_usage),
+            'Title generation did not use the target Worker model')
+    with sqlite3.connect(f"file:{cluster.nodes['alice-a']['home']}/data/worker/execution.sqlite?mode=ro", uri=True) as source:
+        title_calls = {json.loads(row[0])['modelUsage']['requestId'] for row in source.execute(
+            'SELECT result_json FROM session_title_results WHERE session_id=?', (session,))}
+    require(all(row[2] in title_calls for row in title_usage), 'Product title accounting lost the Worker call identity')
+    passed('auxiliary_models_and_workspace_stay_on_target_worker_without_embedded_server_worker')
     unexpected = [str(path.relative_to(server_workspace)) for path in server_workspace.rglob('*') if path.is_file()]
     require(not unexpected, f'Maintenance created remote Workspace files on control plane: {unexpected}')
     passed('scheduled_dream_memory_on_worker_with_control_plane_usage')

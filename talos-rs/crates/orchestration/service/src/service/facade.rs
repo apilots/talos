@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::InnerModelClient;
 use talos_agent_api::{SubmitTurnInputRequest, SubmitTurnInputResponse};
 use talos_auth::{AuthService, UserService};
 use talos_coordinator::AgentCoordinator;
@@ -79,7 +78,7 @@ pub struct TalosService {
         Arc<std::sync::Mutex<std::collections::HashMap<[u8; 32], desktop::ViewerRoute>>>,
     management_host: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn ManagementHost>>>>,
     oauth_relay_origin: String,
-    mcp_product_owner: talos_types::NodeProductOwner,
+    product_owner: talos_types::NodeProductOwner,
     oauth_routes:
         Arc<std::sync::Mutex<std::collections::HashMap<[u8; 32], Arc<mcp_oauth::McpRelayRoute>>>>,
     oauth_capacity: Arc<tokio::sync::Semaphore>,
@@ -214,7 +213,7 @@ impl TalosService {
             management_host: Default::default(),
             native_jobs: Default::default(),
             oauth_relay_origin: base_config.cloud.agent_base_url.clone(),
-            mcp_product_owner: talos_types::NodeProductOwner::Server,
+            product_owner: talos_types::NodeProductOwner::Server,
             oauth_routes: Arc::default(),
             oauth_capacity: Arc::new(tokio::sync::Semaphore::new(32)),
             desktop_ingress: Default::default(),
@@ -249,18 +248,11 @@ impl TalosService {
         }
     }
 
-    /// Installs the product model used for Session title generation.
-    #[must_use]
     /// Product assembly fixes execution ownership and browser callback policy.
     pub fn with_product_owner(mut self, owner: talos_types::NodeProductOwner) -> Self {
-        self.mcp_product_owner = owner;
+        self.product_owner = owner;
         self.access.set_product_owner(owner);
         self.sessions.set_product_owner(owner);
-        self
-    }
-
-    pub fn with_inner_model(mut self, inner_model: Arc<InnerModelClient>) -> Self {
-        self.turns = self.turns.with_inner_model(inner_model);
         self
     }
 

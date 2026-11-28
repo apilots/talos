@@ -1,8 +1,8 @@
-# Spec 046 — 五项验收缺口修复计划
+# Spec 046 — 验收缺口与执行边界收口计划
 
 ## 目标与基线
 
-以已合并 PR #218 的最新 main 为基线，在现有独立 worktree 的修复分支完成五项已确认缺口。
+以已合并 PR #218 的最新 main 为基线，在现有独立 worktree 的修复分支完成五项已确认缺口，并收口侧会话复核确认的四项执行／装配边界。
 业务与技术决策继续以 [主 Spec](spec/refactor-046-worker-session-execution/design.md)、[执行与产品数据](spec/refactor-046-worker-session-execution/execution-ownership.md)、[模块与产品组装](spec/refactor-046-worker-session-execution/worker-entrypoints.md) 为准。
 原七模块、五产品、控制面/Relay 边界保持；本计划替换已过早完成的验收声明，聚焦落实既有承诺。
 
@@ -11,7 +11,9 @@
 - Worker 是执行历史、上下文、检查点、私有续跑和执行结果的唯一 owner；产品仅调度、管理和幂等消费事实。
 - 复用现有 Services、Stores、Worker、受保护 API、锁及生命周期，不增加平行恢复服务、队列、SDK 或第二状态机。
 - Sync 可选，捕获常驻；未装配期间的修改与删除必须能在恢复后沿原协议补传。禁止把未知架构当作可上传或放开旧历史。
-- Dream 由产品 owner 触发，目标 Worker 执行并使用其模型/凭证；托管自动休眠要唤醒，手动停机意图保持。
+- 所有 Agent 与辅助模型调用均在目标 Worker，包括 Dream、压缩和标题；产品 owner 负责触发、管理和幂等归账，不持有原始模型 router。托管自动休眠要唤醒，手动停机意图保持。
+- 工作区路径、Office 转换与产物属于实际目标 Worker。节点配置按 nodeId 写目标机器；共享实现不表示共享跨机配置文件。
+- Server 可仅装配控制面和网络 Worker 端口；本机 Worker 为可选装配。TUI/Desktop 继续默认具备完整本机执行能力。
 - 产品视图重建不得清空 Worker、提升执行代数或丢失产品配置、命令身份、用量/调度账本；重放不得重复结算。
 - 云端全局内置维护任务继续保留现有整实例所有权保护，不把普通云 Worker owner 当作全局管理员。本轮不扩大这项权限。
 - 不修改 Sync 协议/密码学，不新增跨机器执行迁移或跨 Agent Goal 拆分，不改 main 工作树。
@@ -40,15 +42,24 @@
 
 **状态**：已完成。
 
-## 阶段 3：Dream 执行与托管唤醒归位
+## 阶段 3：辅助执行、资源与产品装配边界归位
 
-**目标**：Dream/run-once 接入已有 managed wake/readiness，模型调用在目标 Worker，产品端只管计划和结果/用量。
+**目标**：Dream/run-once 接入已有 managed wake/readiness；所有辅助模型与资源实际操作在目标 Worker，产品端只管计划、授权、展示与结果/用量。
 
 **实施**：复用现有托管派发与活动保护，唤醒后复核空闲/权限；目标 Worker 复用 ConfigService/provider router、内置模型策略和本地历史/Memory。移除 Server ModelPrompt 往返执行依赖，沿原类型化接口返回结果和幂等用量，内嵌与独立入口使用同一能力。
 
 **成功标准**：自动 IdleSleep 可由合格 Dream 唤醒，手动停止不被越权唤醒；目标节点模型和凭证生效，Server 无需目标执行模型；并发维护/聊天/reload/撤销共享既有锁和作用域。
 
 **验证**：独立 Worker 与 Server 配置不同模型的正常路径、Server 不执行 Dream 模型调用、空闲资格与并发、唤醒/手动停止/不可达、结果与用量不重复；更新受影响协议和所有调用者，不留未发布兼容 shim。
+
+**侧会话复核后的实施补充**：
+
+1. Dream 在维护锁／活动保护内复用 SessionService 的目标工作区解析，保留持久 workspace namespace；不按 Server 工作区配置重建目标路径。
+2. 标题沿原 AgentHarness 语义端口在目标 Worker 生成；读取本地有界历史，保留结果／实际用量以供产品幂等归账，移除产品层 InnerModel/provider 调用。
+3. SessionPath 的 Office 转换和产物归固定 Session Worker；产品 File 授权与原件归产品 owner，明确目标 nodeId 后将转换交给 Worker。沿原 preview 生命周期和分块能力，禁止整文件超过 RPC 帧限制或不可见地回落 embedded。
+4. Server 装配显式可关闭本机 Worker，不依赖本机 Agent、模型密钥或执行数据库；现有默认内嵌模式保持，TUI/Desktop 仍装配本机 Worker。不另建 runtime／配置服务。
+
+**补充验证**：Server 与 Worker 的工作区 ID／根路径／模型不同；Server 无目标模型凭据时标题与 Dream 仍成功；Server 无 Office 转换器时远端 Worker 提供预览；无本机 Agent／模型的纯控制面可注册、调度远端 Worker；直调／网络入口共享权限、锁和事实消费。以正常入口自动回归与真实服务验证，不只断言构造成功。
 
 **状态**：已完成。
 
@@ -66,7 +77,7 @@
 
 ## 阶段 5：集成、真实服务本地验收与交付
 
-**目标**：五项修复按 Spec 正常入口验收，不把单测、隔离探针或 E2E 通过等同于完整交付。
+**目标**：全部修复按 Spec 正常入口验收，不把单测、隔离探针或 E2E 通过等同于完整交付。
 
 **真实服务要求**：除相关本地 E2E 外，实际启动独立 Talos Server、独立 Worker、必要的本地 Sync/托管服务，经真实 API/SDK 执行业务。使用 main 的 .env 中可用真实模型连接，密钥仅注入测试进程，不打印、不提交。记录进程/端点类型、请求、结果与故障恢复证据；服务不使用用户生产数据。
 
@@ -80,10 +91,10 @@
 
 **其他检查**：受影响 just test/just fix、格式/严格 Clippy/错误契约/生成物、可选产品依赖与 NoSync，相关本地 E2E；新无历史独立 Sub Agent 复审。范围适合的正常入口场景加入 hosted PR gate。真实多机/外部服务前提未满足时明确记录，不能标为通过或用模拟结果替代。
 
-**成功标准**：五项实现与可运行验收闭环、无安全边界放宽或重复实现；实际结果留在根 output，工作进度留在根 IMPLEMENTATION_PLAN.md；形成英文修复 PR 并完成最新提交 CI。
+**成功标准**：原五项与补充四项执行／装配边界均实现可运行验收闭环、无安全边界放宽或重复实现；实际结果留在根 output，工作进度留在根 IMPLEMENTATION_PLAN.md；形成英文修复 PR 并完成最新提交 CI。
 
 **状态**：进行中。
 
 ## 分工与依赖
 
-Sync、历史查询和 Dream 分别由独立实现 owner 处理；Sync owner 补完删除缺口后接手重建 Store，主审负责重建 Service/API、共享合同、生成物、Spec/PLAN、串行集成和真实服务验收。共享 Store/protocol 文件的编辑先协调，不并行覆盖。每阶段只在其成功条件通过后完成，不再以代码接线或旧 CI 绿灯代替本轮验收。
+原五项完成后，补充边界按标题、资源预览、Server 可选装配三个独立实现 owner 分工；主审负责 Dream 工作区、共享合同与串行集成。原 Sync、历史查询和 Dream 分别由独立实现 owner 处理；Sync owner 补完删除缺口后接手重建 Store，主审负责重建 Service/API、共享合同、生成物、Spec/PLAN、串行集成和真实服务验收。共享 Store/protocol 文件的编辑先协调，不并行覆盖。每阶段只在其成功条件通过后完成，不再以代码接线或旧 CI 绿灯代替本轮验收。

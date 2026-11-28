@@ -1,6 +1,6 @@
 use super::{
-    apply_runtime_options, build_application_runtime_with_migration_dir, create_llm_provider,
-    resolve_webui_dir, TalosServerOptions, WebuiLookupInput, WebuiLookupResult,
+    apply_runtime_options, build_application_runtime_with_migration_dir, resolve_webui_dir,
+    TalosServerOptions, WebuiLookupInput, WebuiLookupResult,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,10 +11,6 @@ use talos_config::{
     AgentDefinitionConfig, AgentProviderConfig, Config, ProviderModelConfig, TalosPaths,
 };
 use talos_coordinator::AgentCoordinator;
-use talos_llm_provider::ChatRequest;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-use tokio::sync::oneshot;
 use tokio::time::Duration;
 
 #[path = "application_shutdown_tests.rs"]
@@ -169,39 +165,6 @@ fn provider_model(id: &str) -> ProviderModelConfig {
     }
 }
 
-async fn spawn_json_server(body: impl Into<String>) -> (String, oneshot::Receiver<String>) {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("test server should bind");
-    let addr = listener
-        .local_addr()
-        .expect("test server address should exist");
-    let body = body.into();
-    let (path_tx, path_rx) = oneshot::channel();
-    tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.expect("request should arrive");
-        let mut buffer = vec![0; 4096];
-        let read = socket.read(&mut buffer).await.expect("request should read");
-        let request = String::from_utf8_lossy(&buffer[..read]);
-        let path = request
-            .lines()
-            .next()
-            .and_then(|line| line.split_whitespace().nth(1))
-            .unwrap_or_default()
-            .to_string();
-        path_tx.send(path).expect("path should send");
-        let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        socket
-            .write_all(response.as_bytes())
-            .await
-            .expect("response should write");
-    });
-    (format!("http://{addr}"), path_rx)
-}
-
 #[tokio::test]
 async fn application_runtime_builds_when_model_key_is_missing() {
     let mut config = Config::default();
@@ -323,102 +286,6 @@ async fn application_runtime_skips_disabled_agent_definitions() {
     let _ = fs::remove_dir_all(workspace);
 }
 
-#[tokio::test]
-async fn setup_required_provider_reports_configuration_error_for_model_blocks() {
-    let mut config = Config::default();
-    config.llm.provider = "openai".to_string();
-    config.llm.model = "missing-model".to_string();
-    config.llm.openai.api_key = None;
-    let provider = create_llm_provider(&config).unwrap();
-
-    let result = provider
-        .stream_model_blocks(ChatRequest::new_user("hello", "missing-model"))
-        .await;
-    let err = match result {
-        Ok(_) => panic!("setup-required provider should fail"),
-        Err(err) => err,
-    };
-
-    assert!(format!("{err}").contains("model setup required"));
-}
-
-#[tokio::test]
-async fn openrouter_provider_uses_chat_completions_path_and_concrete_provider() {
-    let body = r#"{"model":"test-model","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
-    let (base_url, path_rx) = spawn_json_server(body).await;
-
-    let mut config = Config::default();
-    config.llm.provider = "openrouter".to_string();
-    config.llm.model = "test-model".to_string();
-    config.llm.openrouter.api_key = Some("test-key".to_string());
-    config.llm.openrouter.base_url = Some(base_url);
-    config.llm.openrouter.models = vec![provider_model("test-model")];
-
-    let provider = create_llm_provider(&config).expect("provider should be created");
-    assert_eq!(provider.name(), "openrouter");
-    assert_eq!(provider.default_model(), "test-model");
-
-    let response = provider
-        .chat(ChatRequest::new_user("hello", "test-model"))
-        .await
-        .expect("chat should succeed");
-    let path = path_rx.await.expect("path should be captured");
-
-    assert_eq!(path, "/chat/completions");
-    assert_eq!(response.content, "ok");
-}
-
-#[tokio::test]
-async fn openai_provider_uses_responses_without_protocol_configuration() {
-    let body = r#"{"id":"resp_1","model":"gpt-test","status":"completed","output_text":"ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
-    let (base_url, path_rx) = spawn_json_server(body).await;
-
-    let mut config = Config::default();
-    config.llm.provider = "openai".to_string();
-    config.llm.model = "gpt-test".to_string();
-    config.llm.openai.api_key = Some("test-key".to_string());
-    config.llm.openai.base_url = Some(base_url);
-    config.llm.openai.models = vec![provider_model("gpt-test")];
-
-    let provider = create_llm_provider(&config).expect("provider should be created");
-    assert_eq!(provider.name(), "openai");
-
-    let response = provider
-        .chat(ChatRequest::new_user("hello", "gpt-test"))
-        .await
-        .expect("chat should succeed");
-    let path = path_rx.await.expect("path should be captured");
-
-    assert_eq!(path, "/responses");
-    assert_eq!(response.content, "ok");
-}
-
-#[tokio::test]
-async fn deepseek_provider_uses_chat_completions_path_and_concrete_provider() {
-    let body = r#"{"model":"deepseek-v4-pro","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
-    let (base_url, path_rx) = spawn_json_server(body).await;
-    let mut config = Config::default();
-    config.llm.provider = "deepseek".to_string();
-    config.llm.model = "deepseek-v4-pro".to_string();
-    config.llm.deepseek.api_key = Some("test-key".to_string());
-    config.llm.deepseek.base_url = Some(base_url);
-    config.llm.deepseek.models = vec![provider_model("deepseek-v4-pro")];
-
-    let provider = create_llm_provider(&config).expect("provider should be created");
-    let response = provider
-        .chat(ChatRequest::new_user("hello", "deepseek-v4-pro"))
-        .await
-        .expect("chat should succeed");
-
-    assert_eq!(provider.name(), "deepseek");
-    assert_eq!(provider.default_model(), "deepseek-v4-pro");
-    assert_eq!(
-        path_rx.await.expect("path should be captured"),
-        "/chat/completions"
-    );
-    assert_eq!(response.content, "ok");
-}
-
 #[cfg(unix)]
 #[path = "application_mcp_tests.rs"]
 mod mcp_tests;
@@ -507,6 +374,7 @@ async fn personal_product_assembly_has_no_registration_or_managed_worker_authori
     let mut config = Config::default();
     let workspace = isolate_runtime_workspace(&mut config, "personal-no-control-plane");
     config.gateway.auth = false;
+    config.agent_node.embedded_worker = false;
     config.storage.connection_string = workspace.join("personal.sqlite").to_string_lossy().into();
     config.llm.anthropic.models = vec![provider_model(&config.llm.model)];
     std::fs::create_dir_all(config.source_path().parent().unwrap()).unwrap();
@@ -525,6 +393,7 @@ async fn personal_product_assembly_has_no_registration_or_managed_worker_authori
         #[cfg(feature = "server")]
         assert!(runtime.service.nodes.server().is_err());
     }
+    assert!(runtime.worker.is_some());
     let denied = runtime
         .service
         .nodes

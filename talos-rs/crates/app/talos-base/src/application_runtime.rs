@@ -6,9 +6,8 @@ use talos_config::Config;
 use talos_coordinator::CoordinatorImpl;
 use talos_error::TalosResult;
 use talos_gateway::{Gateway, ServiceGateway};
-use talos_llm_provider::LlmProviderRouter;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
-use talos_service::{FileService, InnerModelClient, TalosService, TimelineEventService};
+use talos_service::{FileService, TalosService, TimelineEventService};
 use talos_store::node::DatabaseAgentNodeStore;
 use talos_store::project::{ProjectStore, StorageProjectStore};
 use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionStore};
@@ -16,7 +15,6 @@ use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionSto
 #[cfg(feature = "server")]
 use talos_tools::AgentControl;
 use talos_tools::ToolImageStore;
-use talos_types::{resolve_default_model_selection, resolve_model_catalog};
 use talos_worker::{TalosWorker, TalosWorkerResources};
 
 use super::{
@@ -83,83 +81,98 @@ pub(crate) async fn build_application_runtime_with_policy(
     let attachment_reader: Arc<dyn talos_agent::AttachmentReader> = file_service.clone();
     let tool_image_store: Arc<dyn ToolImageStore> =
         Arc::new(super::tool_images::ToolImages(file_service.clone()));
-    let worker = TalosWorker::build_with_browser_host(
-        config.clone(),
-        TalosWorkerResources {
-            attachment_reader: file_service.clone(),
-            tool_image_store: tool_image_store.clone(),
-            agent_control: None,
-            automation_control: None,
-        },
-        if std::env::var_os("TALOS_DESKTOP_HOSTNAME").is_some() {
-            talos_types::BrowserHostKind::Desktop
-        } else {
-            talos_types::BrowserHostKind::Server
-        },
-    )
-    .await?;
+    let worker = if product_owner == talos_types::NodeProductOwner::Computer
+        || config.agent_node.embedded_worker
+    {
+        Some(
+            TalosWorker::build_with_browser_host(
+                config.clone(),
+                TalosWorkerResources {
+                    attachment_reader: file_service.clone(),
+                    tool_image_store: tool_image_store.clone(),
+                    agent_control: None,
+                    automation_control: None,
+                },
+                if std::env::var_os("TALOS_DESKTOP_HOSTNAME").is_some() {
+                    talos_types::BrowserHostKind::Desktop
+                } else {
+                    talos_types::BrowserHostKind::Server
+                },
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
     file_service.reconcile_incomplete().await?;
-    let default_model_selection = resolve_default_model_selection(&config.llm)?;
-    let default_agent_id = worker
-        .deployments()
-        .first()
-        .map(|deployment| deployment.agent_id.clone())
-        .expect("TalosWorker requires an enabled Agent deployment");
     let router: Arc<dyn Router> = Arc::new(RouterImpl::new());
+    let default_agent_id = if let Some(worker) = &worker {
+        worker
+            .deployments()
+            .first()
+            .ok_or_else(|| {
+                talos_error::TalosError::internal("Embedded Worker has no Agent deployment.")
+            })?
+            .agent_id
+            .clone()
+    } else {
+        // Routing policy selects an Agent identity; only Workers instantiate deployments.
+        talos_agent::AgentDefinitionLoader::load(&config.agent)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                talos_error::TalosError::internal("Product routing has no Agent definition.")
+            })?
+            .id
+    };
     router
         .add_binding(Binding {
             id: "default_binding".to_string(),
-            agent_id: default_agent_id.clone(),
+            agent_id: default_agent_id,
             rule: MatchRule::Default,
             priority: 1,
         })
         .await?;
-
-    let reloadable_llm_provider_router = worker.provider_router();
-    let llm_provider_router: Arc<dyn LlmProviderRouter> = reloadable_llm_provider_router.clone();
-    let model_catalog = resolve_model_catalog(&config.llm);
-    let inner_model = Arc::new(
-        InnerModelClient::builder()
-            .configured_model(config.agent.inner_model.clone())
-            .agent_default_model(default_model_selection.model_ref.clone())
-            .model_catalog(model_catalog.clone())
-            .provider_router(llm_provider_router.clone())
-            .profile_store(profile_store.clone())
-            .profile_timezone(config.agent.kernel.timezone.clone())
-            .build()?,
-    );
-    let tool_registry = worker.tool_registry();
-
     let coordinator = Arc::new(CoordinatorImpl::new(
         router,
         session_store.clone(),
         node_store.clone(),
     ));
-    let (worker_rpc, local_auth) = worker
-        .start_local(session_ownership.kind, session_ownership.hold)
-        .await?;
-    coordinator
-        .register_environment(
-            "embedded".into(),
-            worker.local_environment(&worker_rpc, local_auth.clone())?,
-        )
-        .await;
-    for (agent_id, agent) in worker.local_harnesses(&worker_rpc, &local_auth, host_id.as_str())? {
-        coordinator
-            .register_agent("embedded".into(), agent_id, agent)
-            .await?;
-    }
     use talos_store::node::AgentNodeStore;
-    let embedded = node_store
-        .upsert_embedded(
-            if worker.deployments().is_empty() {
-                talos_types::NodeStatus::Disabled
-            } else {
-                talos_types::NodeStatus::Enabled
-            },
-            chrono::Utc::now().timestamp(),
-        )
-        .await?;
+    let (worker_rpc, embedded) = if let Some(worker) = &worker {
+        let (rpc, local_auth) = worker
+            .start_local(session_ownership.kind, session_ownership.hold)
+            .await?;
+        coordinator
+            .register_environment(
+                "embedded".into(),
+                worker.local_environment(&rpc, local_auth.clone())?,
+            )
+            .await;
+        for (agent_id, agent) in worker.local_harnesses(&rpc, &local_auth, host_id.as_str())? {
+            coordinator
+                .register_agent("embedded".into(), agent_id, agent)
+                .await?;
+        }
+        let embedded = node_store
+            .upsert_embedded(
+                talos_types::NodeStatus::Enabled,
+                chrono::Utc::now().timestamp(),
+            )
+            .await?;
+        (Some(rpc), Some(embedded))
+    } else {
+        // Preserve an existing record while retiring its execution availability.
+        if node_store.get("embedded").await?.is_some() {
+            node_store
+                .upsert_embedded(
+                    talos_types::NodeStatus::Disabled,
+                    chrono::Utc::now().timestamp(),
+                )
+                .await?;
+        }
+        (None, None)
+    };
     #[cfg(feature = "server")]
     let node_service = (product_owner == talos_types::NodeProductOwner::Server)
         .then(|| talos_service::AgentNodeService::new(node_store.clone()));
@@ -167,14 +180,17 @@ pub(crate) async fn build_application_runtime_with_policy(
     let product_nodes = match &node_service {
         Some(server) => talos_service::ProductNodeAccess::from(server.clone()),
         None => talos_service::ProductNodeAccess::computer(
-            embedded.into_info(),
+            embedded
+                .expect("Computer composition owns its embedded Worker")
+                .into_info(),
             Arc::new(agent_protocol::NodeAdmissionGates::default()),
         ),
     };
-
     #[cfg(not(feature = "server"))]
     let product_nodes = talos_service::ProductNodeAccess::computer(
-        embedded.into_info(),
+        embedded
+            .expect("Computer composition owns its embedded Worker")
+            .into_info(),
         Arc::new(agent_protocol::NodeAdmissionGates::default()),
     );
 
@@ -200,7 +216,6 @@ pub(crate) async fn build_application_runtime_with_policy(
             auth_service.clone(),
             user_service,
         )
-        .with_inner_model(inner_model.clone())
         .with_product_owner(product_owner),
     );
     service
@@ -209,9 +224,14 @@ pub(crate) async fn build_application_runtime_with_policy(
             config.talos_paths().talos_home,
         ))?;
     service.set_coordinator_id(host_id.as_str().into());
-    let session_owner = worker_rpc.session_owner();
-    let loop_scan_enabled = session_owner.background_scan_enabled();
-    service.set_session_owner(session_owner);
+    let loop_scan_enabled = if let Some(rpc) = &worker_rpc {
+        let session_owner = rpc.session_owner();
+        let enabled = session_owner.background_scan_enabled();
+        service.set_session_owner(session_owner);
+        enabled
+    } else {
+        product_owner == talos_types::NodeProductOwner::Server
+    };
     service.install_session_automation(
         session_store_impl.automation_store(),
         Arc::new(
@@ -248,28 +268,29 @@ pub(crate) async fn build_application_runtime_with_policy(
         session_store.clone(),
         attachment_reader.clone(),
     );
-    worker.use_local_resources({
-        let service = Arc::downgrade(&service);
-        let attachments = attachment_reader.clone();
-        let images = tool_image_store.clone();
-        move |session| {
-            let data = local_data.clone();
-            let service = service.clone();
-            let (attachments, images) = (attachments.clone(), images.clone());
-            Box::pin(async move {
-                let record = data.authorize_local_session(&session).await?;
-                let files = Arc::new(super::tool_images::InvocationFiles {
-                    owner_user_id: record.user_id,
-                    attachments,
-                    images,
-                });
-                let service = service.upgrade().ok_or_else(|| {
-                    talos_error::TalosError::new(
-                        talos_error::ErrorCode::ServiceUnavailable,
-                        "Local application is shutting down",
-                    )
-                })?;
-                Ok(TalosWorkerResources {
+    if let Some(worker) = &worker {
+        worker.use_local_resources({
+            let service = Arc::downgrade(&service);
+            let attachments = attachment_reader.clone();
+            let images = tool_image_store.clone();
+            move |session| {
+                let data = local_data.clone();
+                let service = service.clone();
+                let (attachments, images) = (attachments.clone(), images.clone());
+                Box::pin(async move {
+                    let record = data.authorize_local_session(&session).await?;
+                    let files = Arc::new(super::tool_images::InvocationFiles {
+                        owner_user_id: record.user_id,
+                        attachments,
+                        images,
+                    });
+                    let service = service.upgrade().ok_or_else(|| {
+                        talos_error::TalosError::new(
+                            talos_error::ErrorCode::ServiceUnavailable,
+                            "Local application is shutting down",
+                        )
+                    })?;
+                    Ok(TalosWorkerResources {
                     attachment_reader: files.clone(),
                     tool_image_store: files,
                     agent_control: Some(Arc::new(ApplicationAgentControl::new(service.clone()))),
@@ -279,9 +300,10 @@ pub(crate) async fn build_application_runtime_with_policy(
                         ),
                     )),
                 })
-            })
-        }
-    });
+                })
+            }
+        });
+    }
     let resource_stop = tokio_util::sync::CancellationToken::new();
     let resource_stop_guard = std::sync::Arc::new(resource_stop.clone().drop_guard());
     let media = super::desktop_relay::DesktopRelay::new(resource_stop.clone());
@@ -292,23 +314,25 @@ pub(crate) async fn build_application_runtime_with_policy(
             auth: auth_service.clone(),
         },
     ))?;
-    if worker.browser().snapshot()?.host == talos_types::BrowserHostKind::Docker {
-        let registered = worker.registered_desktop_connector();
-        worker
-            .browser()
-            .set_desktop_connector(Arc::new(move |request| {
-                let local = media.clone();
-                let registered = registered.clone();
-                Box::pin(async move {
-                    // Route by the trusted reservation owner; an invalid local nonce
-                    // must fail locally rather than retry through a different ingress.
-                    if local.contains_reservation(&request.binding.stream_id).await {
-                        local.attach_local_worker(request).await
-                    } else {
-                        registered(request).await
-                    }
-                })
-            }))?;
+    if let Some(worker) = &worker {
+        if worker.browser().snapshot()?.host == talos_types::BrowserHostKind::Docker {
+            let registered = worker.registered_desktop_connector();
+            worker
+                .browser()
+                .set_desktop_connector(Arc::new(move |request| {
+                    let local = media.clone();
+                    let registered = registered.clone();
+                    Box::pin(async move {
+                        // Route by the trusted reservation owner; an invalid local nonce
+                        // must fail locally rather than retry through a different ingress.
+                        if local.contains_reservation(&request.binding.stream_id).await {
+                            local.attach_local_worker(request).await
+                        } else {
+                            registered(request).await
+                        }
+                    })
+                }))?;
+        }
     }
 
     let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(service.clone()));
@@ -317,7 +341,6 @@ pub(crate) async fn build_application_runtime_with_policy(
         service.clone(),
         coordinator.clone(),
         profile_store.clone(),
-        &config,
         config.automation.dream_memory_maintenance.clone(),
     );
     use talos_store::automation::native_jobs::NativeJobControlStore;
@@ -339,12 +362,16 @@ pub(crate) async fn build_application_runtime_with_policy(
     .await?;
 
     // No external MCP starts until every fallible assembly step has completed.
-    worker.activate_mcp()?;
+    if let Some(worker) = &worker {
+        worker.activate_mcp()?;
+    }
     let worker_failures = tokio::sync::watch::channel(None).0;
-    let registration = if let Some(runner) = &config.agent_node.runner {
+    let registration = if let (Some(worker), Some(worker_rpc), Some(runner)) =
+        (&worker, &worker_rpc, &config.agent_node.runner)
+    {
         let failures = worker_failures.clone();
         match talos_worker::RegisteredWorker::attach(
-            &worker,
+            worker,
             worker_rpc.clone(),
             runner,
             product_owner,
@@ -482,7 +509,6 @@ pub(crate) async fn build_application_runtime_with_policy(
         coordinator,
         #[cfg(feature = "server")]
         node_service,
-        tool_registry,
         #[cfg(feature = "server")]
         session_store,
         #[cfg(feature = "server")]

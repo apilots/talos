@@ -52,6 +52,11 @@ it("uses the same resource contract for a session path", async () => {
   expect(screen.getByRole("textbox", { name: "File location" })).toHaveValue("output/report.md");
   expect(api.prepare).toHaveBeenCalledWith({ source: session });
 });
+it("passes the selected conversion Worker for a registered File", async () => {
+  setup({ kind: "file", fileId: "notes", nodeId: "worker-b" });
+  await screen.findByRole("heading", { name: "Product" });
+  expect(api.prepare).toHaveBeenCalledWith({ source: { kind: "file", fileId: "notes", nodeId: "worker-b" } });
+});
 it("uses the SDK URL for native HTML assets without eagerly copying their bytes", async () => {
   api.prepare.mockResolvedValue({ ...descriptor, metadata: { name: "report.html", mimeType: "text/html", sizeBytes: 12 * 1024 * 1024 } });
   setup();

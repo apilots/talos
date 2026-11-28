@@ -12,8 +12,6 @@ pub mod file;
 mod fs;
 #[cfg(feature = "product")]
 mod history;
-#[cfg(feature = "product")]
-mod inner_model;
 mod memory;
 #[cfg(feature = "product")]
 mod message_queue;
@@ -60,10 +58,6 @@ pub use desktop::DesktopIngress;
 pub use file::{FileByteStream, FileContent, FileService};
 #[cfg(feature = "product")]
 pub use history::SessionHistoryService;
-#[cfg(feature = "product")]
-pub use inner_model::{
-    resolve_inner_model_ref, InnerModelChatParams, InnerModelClient, InnerModelClientBuilder,
-};
 pub use memory::MemoryService;
 #[cfg(feature = "product")]
 pub use message_queue::SessionMessageQueueService;

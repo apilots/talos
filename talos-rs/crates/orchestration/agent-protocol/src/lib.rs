@@ -8,6 +8,12 @@ mod checkpoint;
 pub mod connection_pb;
 mod context;
 pub mod desktop_pb;
+mod session_title;
+pub mod session_title_pb;
+pub use session_title::{
+    AgentSessionTitleMode, AgentSessionTitleOutcome, AgentSessionTitleParams,
+    AgentSessionTitleResult,
+};
 mod dream;
 pub mod dream_pb;
 pub use dream::{DreamMemoryCursor, DreamMemoryFormation, DreamMemoryParams, DreamMemoryResult};

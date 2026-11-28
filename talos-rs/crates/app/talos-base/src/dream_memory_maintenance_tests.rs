@@ -69,11 +69,12 @@ impl AuthService for TestAuthService {
 
 #[tokio::test]
 async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
-    let workspace = tempfile::tempdir().expect("workspace");
+    let workspace = tempfile::tempdir().expect("Worker workspace");
+    let server_workspace = tempfile::tempdir().expect("Server workspace");
     let mut config =
         TalosConfig::default().with_workspace_definition(talos_config::WorkspaceDefinition::new(
             talos_config::DEFAULT_WORKSPACE_ID,
-            workspace.path().to_path_buf(),
+            server_workspace.path().to_path_buf(),
         ));
     let mut agent_kernel = config.agent.kernel.clone();
     agent_kernel.timezone = "Pacific/Kiritimati".to_string();
@@ -134,6 +135,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     let mut source_events = BTreeMap::new();
     for (session_id, user_id, last_activity) in [("s1", "u1", 2), ("s2", "u2", 1)] {
         let mut record = session_record(session_id, user_id, last_activity);
+        record.workspace_id = "worker-only".into();
         if session_id == "s2" {
             record.conf.model_selection = None;
         }
@@ -206,7 +208,13 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         node_store,
     ));
     let runtime_home = tempfile::tempdir().unwrap();
-    let mut worker_config = config.clone();
+    let mut worker_config =
+        config
+            .clone()
+            .with_workspace_definition(talos_config::WorkspaceDefinition::new(
+                "worker-only",
+                workspace.path(),
+            ));
     worker_config.agent.kernel.timezone = agent_kernel.timezone.clone();
     worker_config.llm = serde_json::from_value(serde_json::json!({
         "provider":"worker-local", "model":"worker-default", "custom_providers":{
@@ -224,9 +232,11 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     config.agent.agents.clear();
     config.agent.kernel.timezone = "Pacific/Honolulu".into();
     let worker = talos_worker::TalosWorker::build(
-        worker_config.with_runtime_paths(talos_config::TalosPaths::from_home(
-            runtime_home.path().to_path_buf(),
-        )),
+        worker_config
+            .clone()
+            .with_runtime_paths(talos_config::TalosPaths::from_home(
+                runtime_home.path().to_path_buf(),
+            )),
         talos_worker::TalosWorkerResources {
             attachment_reader: file_service.clone(),
             tool_image_store: Arc::new(crate::tool_images::ToolImages(file_service.clone())),
@@ -260,7 +270,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         seed_worker_turn(
             &worker,
             sessions.as_ref(),
-            &config,
+            &worker_config,
             session_id,
             user,
             &format!("turn-{session_id}"),
@@ -275,6 +285,14 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         )
         .await
         .unwrap();
+    coordinator
+        .register_environment(
+            "embedded".into(),
+            worker
+                .local_environment(&worker_api, worker_auth.clone())
+                .unwrap(),
+        )
+        .await;
     for (id, harness) in worker
         .local_harnesses(
             &worker_api,
@@ -307,7 +325,6 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         service,
         coordinator,
         profiles.clone(),
-        &config,
         DreamMemoryMaintenanceConfig {
             batch_size: 1,
             max_batches: 2,
@@ -351,6 +368,11 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         ));
     }
 
+    assert_eq!(
+        std::fs::read_dir(server_workspace.path()).unwrap().count(),
+        0,
+        "Dream must not resolve or write the Server workspace"
+    );
     let second_report = maintenance.run().await.expect("second daily maintenance");
 
     assert_eq!(
@@ -395,7 +417,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     seed_worker_turn(
         &worker,
         sessions.as_ref(),
-        &config,
+        &worker_config,
         "s1",
         "u1",
         "turn-s1-2",
@@ -448,7 +470,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     seed_worker_turn(
         &worker,
         sessions.as_ref(),
-        &config,
+        &worker_config,
         "s1",
         "u1",
         "turn-invalid",
@@ -494,6 +516,64 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     assert!(
         sessions.has_pending_dream_memory("s2").await.unwrap(),
         "missing product projections must remain conservative wake candidates"
+    );
+    // Reuse the same real Worker/model fixture for the migrated title path.
+    let context = agent_protocol::AgentSessionContext {
+        agent_id: "dream-agent".into(),
+        session_id: "s1".into(),
+        workspace: worker_config
+            .resolve_workspace("worker-only", "u1")
+            .unwrap(),
+    };
+    let harness = maintenance
+        .coordinator
+        .session_harness(&context)
+        .await
+        .unwrap();
+    let mut title = agent_protocol::AgentSessionTitleParams {
+        session: context,
+        identity: AgentTurnRef::new("s1", "turn-s1"),
+        mode: agent_protocol::AgentSessionTitleMode::Generate,
+    };
+    model
+        .responses
+        .lock()
+        .unwrap()
+        .extend(["Worker-owned title".into(), "  ".into()]);
+    let generated = harness
+        .generate_session_title(title.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        generated.outcome,
+        agent_protocol::AgentSessionTitleOutcome::Generated {
+            title: "Worker-owned title".into(),
+        }
+    );
+    assert_eq!(
+        generated.model_usage.as_ref().unwrap().model_ref,
+        expected_inner_model
+    );
+    let requests_after_title = model.requests.lock().unwrap().len();
+    assert_eq!(
+        harness.generate_session_title(title.clone()).await.unwrap(),
+        Some(generated)
+    );
+    assert_eq!(model.requests.lock().unwrap().len(), requests_after_title);
+    title.identity = AgentTurnRef::new("s1", "turn-s1-2");
+    let failed = harness
+        .generate_session_title(title)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        failed.outcome,
+        agent_protocol::AgentSessionTitleOutcome::Failed { .. }
+    ));
+    assert!(
+        failed.model_usage.is_some(),
+        "Paid malformed title usage must remain replayable"
     );
     model_server.abort();
 
@@ -648,7 +728,9 @@ async fn seed_worker_turn(
     let context = agent_protocol::AgentSessionContext {
         agent_id: "dream-agent".into(),
         session_id: session_id.into(),
-        workspace: config.resolve_workspace("default", user_id).unwrap(),
+        workspace: config
+            .resolve_workspace(&config.workspaces.default_workspace_id, user_id)
+            .unwrap(),
     };
     let journal = worker.execution_store();
     journal

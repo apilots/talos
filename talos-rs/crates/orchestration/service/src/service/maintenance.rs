@@ -48,13 +48,15 @@ impl TalosService {
 
     /// Qualify idle maintenance before waking a managed Worker and retain activity
     /// through execution and product settlement. Dispatch honors manual-stop intent.
+    /// Resolve the saved Workspace and namespace through that Worker before the
+    /// operation; product-host filesystem configuration never supplies execution paths.
     pub async fn run_idle_worker_maintenance<T, F, Fut>(
         &self,
         session_id: &str,
         operation: F,
     ) -> ServiceResult<Option<T>>
     where
-        F: FnOnce() -> Fut,
+        F: FnOnce(agent_protocol::AgentSessionContext) -> Fut,
         Fut: std::future::Future<Output = ServiceResult<T>>,
     {
         self.turns
@@ -110,7 +112,8 @@ impl TalosService {
                         "Dream Memory requires an idle Session.",
                     ));
                 }
-                let result = operation().await;
+                let context = self.sessions.build_agent_session_context(&current).await?;
+                let result = operation(context).await;
                 self.nodes
                     .record_managed_activity(&session.execution_node_id)
                     .await?;

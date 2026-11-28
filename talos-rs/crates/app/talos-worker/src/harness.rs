@@ -143,6 +143,13 @@ impl AgentHarness for WorkerHarness {
         self.execution.shutdown(timeout)
     }
 
+    fn generate_session_title(
+        &self,
+        params: AgentSessionTitleParams,
+    ) -> AgentFuture<'_, AgentResult<Option<AgentSessionTitleResult>>> {
+        Box::pin(self.generate_title(params))
+    }
+
     fn form_dream_memory(
         &self,
         params: DreamMemoryParams,
@@ -291,6 +298,9 @@ fn guard_execution(
     execution.settlement = AgentRunSettlementReceiver::new(receiver);
     execution
 }
+
+#[path = "session_title.rs"]
+mod session_title;
 
 #[cfg(test)]
 #[path = "harness_tests.rs"]

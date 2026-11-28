@@ -29,11 +29,16 @@ message ModelCatalog {
 }
 message PreviewOpenParams { string root = 1; string path = 2; int64 expires_at = 3; }
 message PreviewReadParams { string handle = 1; string path = 2; uint64 offset = 3; uint32 limit = 4; }
-message PreviewOperation { oneof operation { PreviewOpenParams open = 1; PreviewReadParams read = 2; string close = 3; } }
+message PreviewOpenFileParams { PreviewMetadata metadata = 1; int64 expires_at = 2; uint64 max_bytes = 3; }
+message PreviewWriteParams { string handle = 1; uint64 offset = 2; bytes data = 3; }
+message PreviewPrepareDocumentParams { string handle = 1; uint64 max_bytes = 2; }
+message PreviewOperation { oneof operation { PreviewOpenParams open = 1; PreviewReadParams read = 2; string close = 3; PreviewOpenFileParams open_file = 4; PreviewWriteParams write = 5; PreviewPrepareDocumentParams prepare_document = 6; } }
+enum PreviewDocumentUnavailable { PREVIEW_DOCUMENT_UNAVAILABLE_UNSPECIFIED = 0; PREVIEW_DOCUMENT_UNAVAILABLE_CONVERTER_UNAVAILABLE = 1; PREVIEW_DOCUMENT_UNAVAILABLE_CONVERSION_FAILED = 2; PREVIEW_DOCUMENT_UNAVAILABLE_TOO_LARGE = 3; }
+message PreviewDocument { oneof result { string pdf = 1; PreviewDocumentUnavailable unavailable = 2; } }
 message PreviewMetadata { string name = 1; string mime_type = 2; uint64 size_bytes = 3; }
 message PreviewOpened { string handle = 1; string resource_path = 2; PreviewMetadata metadata = 3; }
 message PreviewContent { PreviewMetadata metadata = 1; uint64 offset = 2; bytes data = 3; }
-message PreviewResult { oneof result { PreviewOpened opened = 1; PreviewContent content = 2; Empty closed = 3; } }
+message PreviewResult { oneof result { PreviewOpened opened = 1; PreviewContent content = 2; Empty closed = 3; Empty written = 4; PreviewDocument document = 5; } }
 message PreviewResourceRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PreviewOperation params = 3; }
 message PreviewResourceResponse { oneof result { PreviewResult content = 1; Failure failure = 2; } }
 message DirectoryReadParams {

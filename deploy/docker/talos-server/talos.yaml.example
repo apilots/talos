@@ -32,6 +32,8 @@ gateway:
 
 # runner starts null and is saved by administrator enrollment; preserve it after claim.
 agent_node:
+  # Set false for a management-only Server with network Workers and no local model.
+  embedded_worker: true
   control_plane:
     bind_address: 0.0.0.0:9443
     tls_certificate_file: /run/talos-tls/server.crt

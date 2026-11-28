@@ -89,6 +89,7 @@ message WorkerRpcCall {
     SessionRequest read_workspace_memory = 16;
     UpdateWorkspaceMemoryRequest update_workspace_memory = 17;
     FormDreamMemoryRequest form_dream_memory = 18;
+    GenerateSessionTitleRequest generate_session_title = 131;
     ShutdownRequest shutdown = 19;
     ListMemoryFilesRequest list_memory_files = 40;
     ReadMemoryFileRequest read_memory_file = 41;
@@ -164,6 +165,7 @@ message WorkerRpcResult {
     EmptyResponse empty = 13;
     WorkspaceMemoryResponse workspace_memory = 14;
     FormDreamMemoryResponse dream_memory = 15;
+    GenerateSessionTitleResponse session_title = 131;
     // RPC status/framing failure; method results retain their existing response shape.
     Failure failure = 16;
     ListMemoryFilesResponse list_memory_files = 40;

@@ -12,7 +12,10 @@ use talos_types::{
 pub(super) async fn available(runtime: &crate::TalosApplicationRuntime, server: &str) {
     tokio::time::timeout(Duration::from_secs(8), async {
         while !runtime
-            .tool_registry
+            .worker
+            .as_ref()
+            .unwrap()
+            .tool_registry()
             .is_tool_available(&format!("mcp__{server}__inspect"))
         {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -22,6 +25,8 @@ pub(super) async fn available(runtime: &crate::TalosApplicationRuntime, server: 
     .unwrap_or_else(|_| {
         let listed = runtime
             .worker
+            .as_ref()
+            .unwrap()
             .plugin_manager()
             .list_mcp_servers(McpServerListRequest::default())
             .unwrap();
@@ -123,7 +128,10 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
             .await
             .unwrap();
     assert!(!runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .list_tool_names()
         .iter()
         .any(|name| name.starts_with("mcp__")));
@@ -138,7 +146,7 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
             "name": name, "transport": {"type":"stdio", "command":"/usr/bin/python3", "args":["server.py", workspace.join(name), "normal"]}
         })).unwrap()).unwrap();
     }
-    let plugins = &runtime.worker.plugin_manager();
+    let plugins = &runtime.worker.as_ref().unwrap().plugin_manager();
     let added = plugins
         .add_source(PluginSourceAddRequest {
             node_id: None,
@@ -191,7 +199,10 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
         first_pid
     );
     assert!(runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .is_tool_available("mcp__healthy__changed"));
     plugins
         .disable(PluginDisableRequest {
@@ -201,7 +212,10 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
         .await
         .unwrap();
     assert!(!runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .is_tool_available("mcp__healthy__inspect"));
     plugins
         .enable(PluginEnableRequest {
@@ -218,15 +232,23 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
     .unwrap();
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .config_service()
         .reload_config(ConfigReloadRequest { node_id: None })
         .await
         .unwrap();
     assert!(runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .is_tool_available("mcp__healthy__inspect"));
     assert!(!runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .is_tool_available("mcp__damaged__inspect"));
     let listed = plugins
         .list_plugins(PluginListRequest {
@@ -270,7 +292,10 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
         .await
         .unwrap();
     assert!(!runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .is_tool_available("mcp__healthy__inspect"));
     runtime.shutdown().await.unwrap();
     fs::remove_dir_all(workspace).unwrap();

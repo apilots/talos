@@ -19,11 +19,6 @@ pub enum ModelUsageKind {
 }
 
 impl ModelUsageKind {
-    /// Returns whether this kind is valid for `InnerModelClient` calls.
-    pub const fn is_inner(self) -> bool {
-        matches!(self, Self::Title | Self::Memory | Self::Dream)
-    }
-
     /// Returns the canonical storage and diagnostic value for this kind.
     pub const fn as_str(self) -> &'static str {
         match self {

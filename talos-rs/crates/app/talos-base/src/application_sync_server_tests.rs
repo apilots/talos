@@ -282,8 +282,8 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
                 account: &host.service.account,
                 auth: &host.auth_service,
                 worker: &host.worker_registration,
-                execution: &host.worker,
-                rpc: &host.worker_rpc,
+                execution: host.worker.as_ref().unwrap(),
+                rpc: host.worker_rpc.as_ref().unwrap(),
                 device_name: "delayed administrator",
                 worker_failures: &host.worker_failures,
             }
@@ -344,5 +344,276 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
             std::fs::write(directory.path().join(".worker-state.lock"), "").unwrap();
         }
     }
+    auth_server.abort();
+}
+
+#[tokio::test]
+async fn server_without_local_agents_or_model_keys_manages_network_worker() {
+    let directory = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api = format!("http://{}", listener.local_addr().unwrap());
+    let auth_server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route("/v1/auth/introspect", post(introspect)),
+        )
+        .await
+        .unwrap();
+    });
+    let paths = TalosPaths::from_home(directory.path().to_owned());
+    paths.ensure_base_dirs().unwrap();
+    let mut config = Config::default().with_runtime_paths(paths);
+    config.apply_derived_paths();
+    config.gateway.auth = true;
+    config.gateway.host = "127.0.0.1".into();
+    config.gateway.port = port().port();
+    config.cloud.api_base_url = api;
+    config.sync.enabled = Some(false);
+    config.agent_node.embedded_worker = false;
+    config.agent.agents = vec![talos_config::AgentDefinitionConfig {
+        id: "default".into(),
+        name: "Routing identity".into(),
+        enabled: false,
+        description: None,
+        provider: None,
+    }];
+    config.agent.inner_model = None;
+    config.llm.anthropic.api_key = None;
+    config.llm.anthropic.models.clear();
+    let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+    let cert = directory.path().join("server.crt");
+    let key = directory.path().join("server.key");
+    std::fs::write(&cert, certificate.cert.pem()).unwrap();
+    std::fs::write(&key, certificate.signing_key.serialize_pem()).unwrap();
+    let rpc = port();
+    config.agent_node.control_plane = Some(talos_config::AgentNodeControlConfig {
+        bind_address: rpc.to_string(),
+        tls_certificate_file: cert.clone(),
+        tls_private_key_file: key,
+    });
+    config.cloud.agent_base_url = format!("https://{rpc}");
+    config.cloud.agent_trusted_ca_file = Some(cert.clone());
+    let mut document = serde_json::to_value(&config).unwrap();
+    document["logging"].as_object_mut().unwrap().remove("file");
+    document["storage"]
+        .as_object_mut()
+        .unwrap()
+        .remove("connection_string");
+    std::fs::write(config.source_path(), serde_json::to_vec(&document).unwrap()).unwrap();
+    let migration =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite");
+    let report = startup::FinishStartupReport {
+        resources: talos_upgrade::RuntimeResourcesReport {
+            database_migrations: talos_config::DatabaseMigrationsInstallReport {
+                source_dir: migration.clone(),
+                target_dir: migration.clone(),
+                backend_dir: migration,
+                database_type: talos_config::DatabaseType::Sqlite,
+                changed: false,
+            },
+        },
+    };
+    let server = start_server_after_startup(config.reload().unwrap(), None, &report)
+        .await
+        .unwrap();
+    assert!(server.host.worker.is_none());
+    assert!(server.host.worker_rpc.is_none());
+    let host = server.host.clone();
+    let coordinator = server.coordinator.clone();
+    let handle = server.handle();
+    let task = tokio::spawn(server.run());
+    wait_for("management-only Server RPC ready", async || {
+        tokio::net::TcpStream::connect(rpc).await.is_ok()
+    })
+    .await;
+    let gateway = agent_client::AgentNodeClient::connect(
+        &config.cloud.agent_base_url,
+        agent_client::AgentTlsTrust::Certificate(std::fs::read(cert).unwrap()),
+    )
+    .await
+    .unwrap();
+    let created = gateway
+        .create_node(
+            ADMIN_TOKEN,
+            talos_types::CreateNodeRequest {
+                display_name: "Network Worker".into(),
+                endpoint: None,
+                owner_user_id: None,
+                credential_expires_at: chrono::Utc::now().timestamp() + 3600,
+            },
+        )
+        .await
+        .unwrap();
+    let id = created.node.node_id;
+    let registration = gateway
+        .register(agent_protocol::NodeRequest {
+            auth: agent_protocol::NodeAuth {
+                node_id: id.clone(),
+                token: created.credential.token,
+            },
+            params: agent_protocol::RegisterParams {
+                product_owner: talos_types::NodeProductOwner::Computer,
+                deployments: vec![agent_protocol::Deployment {
+                    agent_id: "default".into(),
+                }],
+                system_info: None,
+            },
+        })
+        .await
+        .unwrap();
+    gateway
+        .heartbeat(agent_protocol::NodeRequest {
+            auth: agent_protocol::NodeAuth {
+                node_id: id.clone(),
+                token: registration.lease_token.clone(),
+            },
+            params: agent_protocol::HeartbeatParams {
+                health: talos_types::NodeHealth::Healthy,
+            },
+        })
+        .await
+        .unwrap();
+    let auth = agent_protocol::NodeAuth {
+        node_id: id.clone(),
+        token: registration.lease_token.clone(),
+    };
+    let adapter = agent_client::AgentHarnessRpcAdapter::new(
+        id.clone(),
+        Arc::new(std::sync::RwLock::new(config.clone())),
+        Vec::new(),
+    );
+    adapter
+        .install_registration(
+            registration,
+            tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        )
+        .unwrap();
+    let worker_stop = tokio_util::sync::CancellationToken::new();
+    let transport = gateway.clone();
+    let stop = worker_stop.clone();
+    let worker = tokio::spawn(async move {
+        transport
+            .run_execution_connection(auth, adapter, stop)
+            .await
+    });
+    wait_for("network Worker published", async || {
+        gateway
+            .get_node(ADMIN_TOKEN, &id)
+            .await
+            .is_ok_and(|node| node.available)
+    })
+    .await;
+    assert_eq!(
+        coordinator
+            .resolve_agent(talos_coordinator::AgentSelectionParams::for_session_source(
+                talos_types::talos::SessionSource::http(),
+                "server-admin".into(),
+            ),)
+            .await
+            .unwrap(),
+        "default"
+    );
+    let registered = gateway.get_node(ADMIN_TOKEN, &id).await.unwrap();
+    assert_eq!(registered.owner_user_id.as_deref(), Some("server-admin"));
+    assert!(registered.available);
+    let computers = reqwest::Client::new()
+        .get(format!(
+            "http://127.0.0.1:{}/v1/computers",
+            config.gateway.port
+        ))
+        .bearer_auth(ADMIN_TOKEN)
+        .send()
+        .await
+        .unwrap();
+    assert!(computers.status().is_success());
+    let body: Value = computers.json().await.unwrap();
+    assert_eq!(body["data"]["data"].as_array().unwrap().len(), 1);
+    assert_eq!(body["data"]["data"][0]["nodeId"], id);
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{}", config.gateway.port);
+    let status: Value = client
+        .get(format!("{url}/v1/sync/status"))
+        .bearer_auth(ADMIN_TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(status["data"]["localComputerId"].is_null());
+    let policy: Value = client
+        .put(format!("{url}/v1/config"))
+        .bearer_auth(ADMIN_TOKEN)
+        .json(&json!({"type":"sessionMessageSendPolicy","value":"steer"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(policy["status"], "success");
+    let policy: Value = client
+        .get(format!("{url}/v1/config/sessionMessageSendPolicy"))
+        .bearer_auth(ADMIN_TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(policy["data"]["policy"], "steer");
+    let jobs: Value = client
+        .post(format!("{url}/v1/builtin-job/list"))
+        .bearer_auth(ADMIN_TOKEN)
+        .json(&json!({"computerId":"embedded"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(jobs["status"], "success");
+    let job = &jobs["data"]["data"][0];
+    assert_eq!(job["computerId"], job["executionInstanceId"]);
+    for action in ["pause", "resume"] {
+        let result: Value = client
+            .post(format!("{url}/v1/builtin-job/control"))
+            .bearer_auth(ADMIN_TOKEN)
+            .json(&json!({
+                "computerId":job["computerId"], "executionInstanceId":job["executionInstanceId"],
+                "jobId":job["id"], "action":action,
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(result["status"], "success");
+        assert_eq!(result["data"]["paused"], action == "pause");
+    }
+    gateway.list_computers(TOKEN, None).await.unwrap();
+    let denied = client
+        .post(format!("{url}/v1/builtin-job/list"))
+        .bearer_auth(TOKEN)
+        .json(&json!({"computerId":"embedded"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), reqwest::StatusCode::FORBIDDEN);
+    let denied = client
+        .get(format!("{url}/v1/config/sessionMessageSendPolicy"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), reqwest::StatusCode::FORBIDDEN);
+
+    assert!(host.worker_registration.lock().await.is_none());
+    assert!(config.reload().unwrap().agent_node.runner.is_none());
+    worker_stop.cancel();
+    worker.await.unwrap().unwrap();
+    handle.shutdown().await.unwrap();
+    task.await.unwrap().unwrap();
     auth_server.abort();
 }

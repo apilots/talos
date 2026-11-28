@@ -10,6 +10,7 @@ fn node_network_configuration_requires_authenticated_tls() {
     let mut config = AgentNodeConfig {
         control_plane: Some(control),
         runner: None,
+        ..Default::default()
     };
     let mut gateway = GatewayConfig::default();
     assert!(config.validate(&gateway).is_err());
@@ -64,4 +65,18 @@ fn explicit_worker_listener_configuration_is_rejected() {
         "worker_rpc:\n  bind_address: 0.0.0.0:18801\n"
     )
     .is_err());
+}
+
+#[test]
+fn server_embedded_worker_defaults_on_and_round_trips_opt_out() {
+    let default: AgentNodeConfig = serde_yaml::from_str("{}").unwrap();
+    assert!(default.embedded_worker);
+    let disabled: AgentNodeConfig = serde_yaml::from_str("embedded_worker: false").unwrap();
+    assert!(!disabled.embedded_worker);
+    let encoded = serde_yaml::to_string(&disabled).unwrap();
+    assert!(
+        !serde_yaml::from_str::<AgentNodeConfig>(&encoded)
+            .unwrap()
+            .embedded_worker
+    );
 }

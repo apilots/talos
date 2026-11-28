@@ -22,6 +22,24 @@ use tonic::{
 
 struct DreamHarness(Arc<dyn AgentHarness>);
 impl AgentHarness for DreamHarness {
+    fn generate_session_title(
+        &self,
+        params: agent_protocol::AgentSessionTitleParams,
+    ) -> agent_protocol::AgentFuture<
+        '_,
+        agent_protocol::AgentResult<Option<agent_protocol::AgentSessionTitleResult>>,
+    > {
+        Box::pin(async move {
+            assert_eq!(params.identity.session_id, params.session.session_id);
+            Ok(Some(agent_protocol::AgentSessionTitleResult {
+                outcome: agent_protocol::AgentSessionTitleOutcome::Generated {
+                    title: "Worker title".into(),
+                },
+                model_usage: Some(dream_result().formation.unwrap().model_usage),
+            }))
+        })
+    }
+
     fn start(
         &self,
         params: agent_protocol::AgentRunParams,
@@ -516,12 +534,31 @@ async fn stalled_outbound_consumer_fails_only_its_call_while_other_calls_progres
         assert_eq!(
             independent_client
                 .form_dream_memory(agent_protocol::DreamMemoryParams {
-                    session,
+                    session: session.clone(),
                     after_cursor: None
                 })
                 .await
                 .unwrap(),
             dream_result()
+        );
+        let result = independent_client
+            .generate_session_title(agent_protocol::AgentSessionTitleParams {
+                mode: agent_protocol::AgentSessionTitleMode::Generate,
+                identity: talos_agent_api::AgentTurnRef::new(&session.session_id, "title-turn"),
+                session,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            result.model_usage,
+            Some(dream_result().formation.unwrap().model_usage)
+        );
+        assert_eq!(
+            result.outcome,
+            agent_protocol::AgentSessionTitleOutcome::Generated {
+                title: "Worker title".into()
+            }
         );
     };
     let (failed, ()) = tokio::time::timeout(Duration::from_secs(8), async {

@@ -3,6 +3,39 @@
 use super::*;
 
 impl AgentHarness for RemoteAgentClient {
+    fn generate_session_title(
+        &self,
+        params: agent_protocol::AgentSessionTitleParams,
+    ) -> AgentFuture<'_, AgentResult<Option<agent_protocol::AgentSessionTitleResult>>> {
+        Box::pin(async move {
+            self.check_agent(&params.session.agent_id)?;
+            let caller =
+                self.execution_caller(&params.session, Some(params.identity.turn_id.clone()), None);
+            let response = rpc_response(
+                self.transport.generate_session_title(rpc_request(
+                    pb::GenerateSessionTitleRequest {
+                        auth: Some(node_pb::encode_auth(self.auth.clone())),
+                        caller: Some(caller),
+                        params: Some(agent_protocol::session_title_pb::encode_params(params)),
+                    },
+                    Duration::from_secs(300),
+                )),
+                Duration::from_secs(300),
+            )
+            .await?
+            .into_inner();
+            match response.result.ok_or_else(invalid_response)? {
+                pb::generate_session_title_response::Result::Generated(result) => {
+                    agent_protocol::session_title_pb::decode_result(result).map(Some)
+                }
+                pb::generate_session_title_response::Result::NoInput(_) => Ok(None),
+                pb::generate_session_title_response::Result::Failure(error) => {
+                    Err(error_pb::decode_failure(error)?)
+                }
+            }
+        })
+    }
+
     fn read_execution_payload(
         &self,
         params: agent_protocol::AgentExecutionPayloadParams,

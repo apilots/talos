@@ -238,6 +238,12 @@ Sync ACK 不作为准入条件，Session 不自动迁移到其他 Worker。
 保留 Goal/Loop 互斥、预算校验、用户队列顺序和取消规则。
 模型/工具内循环、按需压缩和 Session Memory 注入归执行层，User/Workspace Memory 保留资源权限。
 Dream 维护使用已有空闲 Session 维护边界，不创建聊天 Session 或 Goal/Loop Turn。
+Dream 的工作区必须在原维护锁和节点活动保护内，复用正常 Session 的目标 WorkerEnvironment 解析已保存 workspace_id 与持久用户 namespace，不按 Server 工作区配置拼接根路径。
+
+标题生成同样由目标 Worker 通过原 Harness 语义端口读取本地有界终态历史并执行模型；保留原调用身份、结果及用量。产品只写生成标题并通过既有 Profile 幂等归账，不保留可直接调用 provider 的 InnerModel 实例。模型选择随目标 Worker 配置更新生效；辅助失败仍沿原产品 notice／错误处理边界，不改变主 Turn 的执行结果。
+
+Office 预览的转换进程和临时 PDF 在目标 Worker。SessionPath 按已绑定 Session 的节点和资源根授权；产品 File 原件继续归产品 FileStore，转换节点由请求 nodeId 明确指定，省略仅指原本机入口，缺少本机能力时明确拒绝。产品只保存有时限预览票据、授权与描述，读取产物继续经原 Worker handle，关闭／到期复用原清理机制。
+
 Dream 的模型选择、凭证、调用和 Memory 形成均在目标 Worker，复用其 ConfigService、provider router 与既有内置模型策略，不再把 prompt 返回 Server 执行。Worker 保留同代 Dream 调用事实（原 request ID、模型、用量、形成结果/类型化失败和已覆盖来源位置），每次按产品消费游标最多返回一条；产品先以原 request ID 幂等结算，再持久化自身消费游标。结果交付或产品事务失败后，按原游标补读，不重新调用模型、不增加 ACK 或出站投递队列。只有已读尽该游标后的形成事实时，才可将返回的 Worker 处理进度视为已覆盖，避免丢失崩溃前已产生用量的调用。该产品消费游标与派生 Timeline 独立，视图重建保留，Session clear 才随代数清理。
 
 

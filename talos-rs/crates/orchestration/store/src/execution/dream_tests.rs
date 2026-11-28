@@ -66,10 +66,25 @@ async fn dream_usage_replays_after_restart_and_is_isolated_by_session_generation
             .to_api_error(),
         ),
     };
-    let cursor = store
-        .append_dream_formation(&session(), &formation)
-        .await
-        .unwrap();
+    let cursor = {
+        let mut writer = store.pool.begin().await.unwrap();
+        sqlx::query("UPDATE sessions SET generation=generation WHERE session_id=?")
+            .bind("session")
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+        let scope = session();
+        let append = store.append_dream_formation(&scope, &formation);
+        tokio::pin!(append);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut append)
+                .await
+                .is_err(),
+            "A concurrent writer must serialize before Dream binding reads"
+        );
+        writer.commit().await.unwrap();
+        append.await.unwrap()
+    };
     // Simulate a crash after local progress commits but before the receipt is finalized.
     store
         .advance_memory_progress("session", 0, 2)

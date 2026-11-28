@@ -1,4 +1,4 @@
-//! Worker-owned model selection shared by built-in Memory workloads.
+//! Worker-owned model selection shared by built-in auxiliary workloads.
 
 use std::sync::{Arc, RwLock};
 

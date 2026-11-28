@@ -89,9 +89,24 @@ AppServer/TUI 装配共享产品服务、本机持久化、内嵌 Worker 和可�
 TalosServer 在同一产品运行时之上装配控制面及可选 Relay/Sync；使用远端 Worker 时注入网络句柄。
 独立 Worker 不装配完整产品运行时，只组合 Worker 与注册客户端。
 Server 自己的内嵌执行保持受保护 lib 直调；如需发布同一 Worker，发布句柄复用相同实例。
+Server 的 `agent_node.embedded_worker` 只控制其本机 Worker 装配，默认保留原内嵌行为。显式关闭时只构造原产品／控制面／网络注册路径，不构造本机 Worker、Agent、模型客户端或执行数据库；本机节点接口明确不可用，不回落任意远端。默认 Agent 逻辑路由仍由原产品配置声明并匹配 Worker 发布的 Agent ID；读取定义仅组装路由，不实例化被禁用的本机 Agent，也不据远端首个部署猜测路由。TUI/Desktop 始终装配完整本机 Worker。关闭本机 Worker 不关闭原产品 Goal/Loop 扫描、任务调度或维护任务。
+纯 Server 的内置实例维护任务沿原 builtin-job API 管理，已认证管理员可用原 `embedded` 当前宿主别名发现，再按返回的稳定宿主／execution instance 身份控制；普通 Worker owner 无此权限。这不是本机 Worker 或 Computer 注册，不向 SyncStatus／目录伪造 Computer 身份。产品发送策略等整实例配置同样沿产品 owner 的管理员授权，不依赖本机 Worker 可达；个人端仍保留原本机所有权校验。
 宿主统一管理启动、就绪发布、停止准入和 drain，接入断线不能销毁本机产品库或无关执行。
 EmbeddedServerClient 在 talos-sdk-embedded；RegisteredWorker 在 talos-worker 内通过 agent-client::AgentNodeRunner/AgentNodeClient 接线。
 RegisteredWorker::attach 使用已存在的 Worker/适配器，独立宿主创建一次 Worker；接入适配器不为每种传输重新创建配置、历史或凭证服务。
+
+### 原有 Worker 端口的四类职责
+
+按职责整理现有 AgentHarness 与 WorkerEnvironment，不因此新增四个 crate、SDK、服务或注册表。
+
+| 类别 | 原能力端口与职责 | 产品侧保留 |
+| --- | --- | --- |
+| Agent 执行 | AgentHarness 的准入、输入、事件、取消、续跑与压缩；同一 Worker 原 SessionOwner／执行 gate／Store。 | 绑定、调度、观察与幂等结算。 |
+| Session 辅助执行 | 原 AgentHarness 的 Dream、标题等语义操作；目标 Worker 本地历史、动态模型配置、结果和实际用量。 | 计划／触发、标题展示持久化、Profile 归账；不接收 prompt 后自行调用模型。 |
+| 节点环境管理 | WorkerEnvironment 的 ConfigService、模型、插件、Skills/MCP；nodeId 决定实际配置文件 owner。 | 请求授权、节点选择与管理界面；不复制远端配置文件。 |
+| 节点资源操作 | WorkerEnvironment 的文件、Git、预览、浏览器、桌面；文件读取／转换进程／临时产物在选定节点。 | 原件若属产品 File 仍由产品鉴权存储，预览票据与展示属产品；SessionPath 固定原 Session Worker。 |
+
+四类入口均沿现有受保护边界，校验身份、目标、资源作用域与执行代数，复用同一实例、锁和关闭生命周期。辅助模型操作按实际调用保留可重读结果／用量，产品按稳定调用身份幂等消费；不新增 ACK／出站恢复队列。Office 文件沿既有预览 handle 与有界分块交付，不能整文件塞进单个 RPC。
 
 ### Worker 服务实例与持久化复用
 

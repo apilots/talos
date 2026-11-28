@@ -406,6 +406,13 @@ impl AgentHarness for LocalExecutionHarness {
         self.inner.update_workspace_memory(context, update)
     }
 
+    fn generate_session_title(
+        &self,
+        params: agent_protocol::AgentSessionTitleParams,
+    ) -> AgentFuture<'_, AgentResult<Option<agent_protocol::AgentSessionTitleResult>>> {
+        self.inner.generate_session_title(params)
+    }
+
     fn form_dream_memory(
         &self,
         params: agent_protocol::DreamMemoryParams,

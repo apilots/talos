@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use talos_config::{DreamMemoryMaintenanceConfig, TalosPaths, WorkspaceConfig};
+use talos_config::DreamMemoryMaintenanceConfig;
 use talos_error::TalosResult;
 use talos_service::TalosService;
 use talos_store::profile::{ModelCallUsageUpdate, ProfileStore, ProfileUsageUpdate};
@@ -21,8 +21,6 @@ pub(super) struct DreamMemoryMaintenance {
     service: Arc<TalosService>,
     coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
     profiles: Arc<dyn ProfileStore>,
-    workspaces: WorkspaceConfig,
-    workspace_paths: TalosPaths,
     config: DreamMemoryMaintenanceConfig,
 }
 
@@ -32,7 +30,6 @@ impl DreamMemoryMaintenance {
         service: Arc<TalosService>,
         coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
         profiles: Arc<dyn ProfileStore>,
-        runtime_config: &talos_config::Config,
         config: DreamMemoryMaintenanceConfig,
     ) -> Self {
         Self {
@@ -40,8 +37,6 @@ impl DreamMemoryMaintenance {
             service,
             coordinator,
             profiles,
-            workspaces: runtime_config.workspaces.clone(),
-            workspace_paths: runtime_config.talos_paths(),
             config,
         }
     }
@@ -103,9 +98,10 @@ impl DreamMemoryMaintenance {
         {
             return Ok(false);
         }
+        let session_id = record.id.clone();
         let result = self
             .service
-            .run_idle_worker_maintenance(&record.id, || async {
+            .run_idle_worker_maintenance(&session_id, |context| async move {
                 let record = self
                     .session_store
                     .get_session_record(&record.id)
@@ -126,16 +122,6 @@ impl DreamMemoryMaintenance {
                 {
                     return Ok(false);
                 }
-                let workspace = self.workspaces.resolve(
-                    &self.workspace_paths,
-                    &record.workspace_id,
-                    &record.user_id,
-                )?;
-                let context = talos_agent::AgentSessionContext {
-                    agent_id: record.agent_id.clone(),
-                    session_id: record.id.clone(),
-                    workspace,
-                };
                 let harness = self.coordinator.session_harness(&context).await?;
                 let after = self.session_store.dream_memory_cursor(&record.id).await?;
                 let result = harness

@@ -202,7 +202,7 @@ async fn direct_and_tls_rpc_use_the_same_paused_harness_execution() {
 
     let (client, _, _, _, stop, task) = server(harness).await;
     let mut remote = client
-        .start(run_params(identity, "message-1"))
+        .start(run_params(identity.clone(), "message-1"))
         .await
         .unwrap();
     assert_eq!(
@@ -222,6 +222,19 @@ async fn direct_and_tls_rpc_use_the_same_paused_harness_execution() {
         remote.settlement.recv().await.unwrap(),
         AgentRunSettlement::Finished { .. }
     ));
+    let title = client
+        .generate_session_title(agent_protocol::AgentSessionTitleParams {
+            session: session_params(),
+            identity,
+            mode: agent_protocol::AgentSessionTitleMode::Generate,
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(title.model_usage.is_none());
+    assert!(
+        matches!(title.outcome, agent_protocol::AgentSessionTitleOutcome::Failed { error } if error.code == talos_error::ErrorCode::ServiceUnavailable)
+    );
     stop.cancel();
     task.await.unwrap();
 }

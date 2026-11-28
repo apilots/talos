@@ -18,6 +18,13 @@ export function bindComputerTarget(
     resolve ? resolve(request?.nodeId ?? nodeId).then(owner => owner.forComputer?.(request?.nodeId ?? nodeId) ?? owner) : client;
   return {
     ...client,
+    files: { ...client.files, preview: {
+      ...client.files.preview,
+      prepare: async request => {
+        const source = request.source.kind === "file" ? { ...request.source, nodeId: request.source.nodeId ?? nodeId } : request.source;
+        return (await owner(source.kind === "file" ? source : undefined)).files.preview.prepare({ ...request, source });
+      },
+    } },
     models: { list: async request => (await owner(request)).models.list({ ...target, ...request }) },
     llm: {
       get: async request => (await owner(request)).llm.get({ ...target, ...request }),

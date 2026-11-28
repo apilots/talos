@@ -435,10 +435,22 @@ impl Fixture {
 
     async fn shutdown_runtime(&self) {
         self.runtime.shutdown_host().await.unwrap();
-        self.runtime.worker_rpc.shutdown().await.unwrap();
+        self.runtime
+            .worker_rpc
+            .as_ref()
+            .unwrap()
+            .shutdown()
+            .await
+            .unwrap();
         self.runtime.resource_stop.cancel();
         self.runtime.automation.shutdown().await.unwrap();
-        self.runtime.worker.shutdown().await.unwrap();
+        self.runtime
+            .worker
+            .as_ref()
+            .unwrap()
+            .shutdown()
+            .await
+            .unwrap();
     }
 
     async fn restart(&mut self) {

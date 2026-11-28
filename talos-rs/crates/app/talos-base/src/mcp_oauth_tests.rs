@@ -47,6 +47,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
             .unwrap();
     let imported = runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .import_mcp_server(McpServerImportRequest {
             node_id: None,
@@ -77,7 +79,7 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
-    let plugins = runtime.worker.plugin_manager();
+    let plugins = runtime.worker.as_ref().unwrap().plugin_manager();
     let replacements = tokio::join!(
         plugins.start_mcp_authentication(request()),
         plugins.start_mcp_authentication(request()),
@@ -134,6 +136,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     invoke(&runtime).await;
     let read = runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .read(PluginReadRequest {
             node_id: None,
@@ -167,6 +171,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
 
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .disable(PluginDisableRequest {
             node_id: None,
@@ -177,6 +183,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     fs::write(workspace.join("changed-resource"), "").unwrap();
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .enable(PluginEnableRequest {
             node_id: None,
@@ -188,6 +196,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
         loop {
             let state = runtime
                 .worker
+                .as_ref()
+                .unwrap()
                 .plugin_manager()
                 .list_mcp_servers(McpServerListRequest::default())
                 .unwrap();
@@ -203,11 +213,16 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     .await
     .unwrap();
     assert!(!runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .is_tool_available("mcp__oauth_http__inspect"));
     fs::remove_file(workspace.join("changed-resource")).unwrap();
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .disable(PluginDisableRequest {
             node_id: None,
@@ -217,6 +232,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
         .unwrap();
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .enable(PluginEnableRequest {
             node_id: None,
@@ -229,6 +246,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
 
     let stale = runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .start_mcp_authentication(request())
         .await
@@ -237,6 +256,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     let stale_callback = grant.headers()["location"].to_str().unwrap().to_string();
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
             node_id: None,
@@ -250,6 +271,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     assert!(matches!(
         runtime
             .worker
+            .as_ref()
+            .unwrap()
             .plugin_manager()
             .read_mcp_authentication(McpAuthenticationReadRequest {
                 node_id: None,
@@ -262,6 +285,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
 
     let restarted = runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .start_mcp_authentication(request())
         .await
@@ -275,6 +300,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     invoke(&runtime).await;
     let read = runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .read(PluginReadRequest {
             node_id: None,
@@ -302,11 +329,17 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     let storage_error = source.store.refresh_guard().await.err().unwrap();
     expire(&refresh_lock.with_file_name(format!("{}.json", source.reference)));
     let invocation = runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .build_function_invocation("storage-failure", "mcp__oauth_http__inspect", json!({}))
         .unwrap();
     assert!(runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .execute_invocation_unchecked_with_context(
             invocation,
             talos_tools::ToolContext::new("oauth", "user")
@@ -317,6 +350,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
         loop {
             let page = runtime
                 .worker
+                .as_ref()
+                .unwrap()
                 .plugin_manager()
                 .list_mcp_servers(McpServerListRequest::default())
                 .unwrap();
@@ -334,6 +369,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     fs::remove_dir(&refresh_lock).unwrap();
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .disable(PluginDisableRequest {
             node_id: None,
@@ -343,6 +380,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
         .unwrap();
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .enable(PluginEnableRequest {
             node_id: None,
@@ -364,7 +403,7 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
             .join("mcp-credentials")
             .join(format!("{}.json", source.reference)),
     );
-    let registry = runtime.tool_registry.clone();
+    let registry = runtime.worker.as_ref().unwrap().tool_registry().clone();
     let calling = tokio::spawn(async move {
         let invocation = registry
             .build_function_invocation("blocked-refresh", "mcp__oauth_http__inspect", json!({}))
@@ -379,6 +418,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     wait_file(&workspace.join("refresh-count")).await;
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
             node_id: None,
@@ -395,7 +436,7 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     );
     assert!(source.store.load().await.unwrap().is_none());
     fs::write(workspace.join("hold-discovery"), "").unwrap();
-    let service = runtime.worker.plugin_manager();
+    let service = runtime.worker.as_ref().unwrap().plugin_manager();
     let request = request();
     let discovering = tokio::spawn(async move { service.start_mcp_authentication(request).await });
     wait_file(&workspace.join("discovery-started")).await;
@@ -440,11 +481,17 @@ async fn wait_file(path: &Path) {
 }
 async fn invoke(runtime: &crate::TalosApplicationRuntime) {
     let invocation = runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .build_function_invocation("call", "mcp__oauth_http__inspect", json!({}))
         .unwrap();
     runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .execute_invocation_unchecked_with_context(
             invocation,
             talos_tools::ToolContext::new("oauth", "user"),

@@ -19,6 +19,7 @@ service AgentHarnessRpc {
   rpc CloseSession(SessionRequest) returns (EmptyResponse);
   rpc ReadWorkspaceMemory(SessionRequest) returns (WorkspaceMemoryResponse);
   rpc UpdateWorkspaceMemory(UpdateWorkspaceMemoryRequest) returns (WorkspaceMemoryResponse);
+  rpc GenerateSessionTitle(GenerateSessionTitleRequest) returns (GenerateSessionTitleResponse);
   rpc FormDreamMemory(stream FormDreamMemoryRequest) returns (stream FormDreamMemoryResponse);
   rpc Shutdown(ShutdownRequest) returns (EmptyResponse);
 }
@@ -66,7 +67,6 @@ message Settlement {
   oneof result { WaitingSettlement waiting = 1; FinishedSettlement finished = 2; }
 }
 
-// Invocation-scoped model callback, not a generic LLM transport. These fields
 // Dream runs entirely on the target Worker; the product consumes retained execution facts.
 message DreamMemoryCursor { uint64 generation = 1; int64 offset = 2; }
 message DreamMemoryParams { SessionContext context = 1; DreamMemoryCursor after_cursor = 2; }
@@ -122,3 +122,15 @@ message ReadExecutionPayloadParams {SessionContext session=1;TurnRef identity=2;
 message ReadExecutionPayloadRequest {NodeAuth auth=1;CoordinatorCallContext caller=2;ReadExecutionPayloadParams params=3;}
 message ExecutionPayloadChunk {string data=1;optional uint64 next_offset=2;}
 message ReadExecutionPayloadResponse {oneof result {ExecutionPayloadChunk chunk=1;Failure failure=2;}}
+
+// The target Worker owns input history, model selection and retained execution facts.
+enum AgentSessionTitleMode { AGENT_SESSION_TITLE_MODE_UNSPECIFIED = 0; AGENT_SESSION_TITLE_MODE_GENERATE = 1; AGENT_SESSION_TITLE_MODE_READ_RETAINED = 2; }
+message AgentSessionTitleParams { SessionContext session = 1; TurnRef identity = 2; AgentSessionTitleMode mode = 3; }
+message GenerateSessionTitleRequest { NodeAuth auth = 1; CoordinatorCallContext caller = 2; AgentSessionTitleParams params = 3; }
+message AgentSessionTitleResult {
+  oneof outcome { string title = 1; Failure failure = 2; }
+  AgentMemoryModelUsage model_usage = 3;
+}
+message GenerateSessionTitleResponse {
+  oneof result { AgentSessionTitleResult generated = 1; Empty no_input = 2; Failure failure = 3; }
+}

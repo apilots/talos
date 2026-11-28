@@ -1,7 +1,6 @@
 //! Live delivery only wakes the single cursor-based product projection path.
 use super::{ActiveTimelineStream, AgentExecutionDriver, ExecutionPurpose, RunningInputCommit};
 use talos_agent::{AgentProgressEventReceiver, AgentRunSettlement, AgentRunSettlementReceiver};
-use talos_agent_api::AgentEventPayload;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use tokio::sync::mpsc;
 
@@ -85,42 +84,14 @@ impl AgentExecutionDriver {
         Ok(Some(settlement))
     }
 
-    /// The same writer finalizes title delivery after live or recovered settlement.
+    /// The same writer acknowledges live or recovered settlement delivery.
     pub(super) async fn finish_product_delivery(
         &self,
         active: &ActiveTimelineStream,
         settlement: &AgentRunSettlement,
         purpose: &ExecutionPurpose,
     ) -> TalosResult<()> {
-        if let AgentRunSettlement::Finished { event, .. } = settlement {
-            if !purpose.is_compaction()
-                && matches!(event.payload, AgentEventPayload::TurnCompleted(_))
-            {
-                if let Some(model) = &self.inner_model {
-                    let record = self
-                        .execution_store
-                        .get_agent_event_by_sequence(&event.identity, event.sequence)
-                        .await?
-                        .ok_or_else(|| {
-                            TalosError::internal("Projected Worker terminal event is missing.")
-                        })?;
-                    let checkpoint = self
-                        .event_service
-                        .turn_checkpoint(&event.identity, record.event_seq)
-                        .await?;
-                    if let Err(error) = self
-                        .sessions
-                        .generate_title(model, event, &checkpoint.messages)
-                        .await
-                    {
-                        self.report_warning(
-                            &event.identity,
-                            error.context("generate Session title"),
-                        )
-                        .await;
-                    }
-                }
-            }
+        if let AgentRunSettlement::Finished { .. } = settlement {
             let _ = active.terminal_commit_tx.send(true);
         } else if purpose.is_compaction() {
             return Err(TalosError::new(

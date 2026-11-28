@@ -19,6 +19,9 @@ pub enum FilePreviewSource {
     File {
         #[ts(rename = "fileId")]
         file_id: String,
+        /// Conversion Worker. Omission selects only the embedded Computer.
+        #[ts(rename = "nodeId", optional)]
+        node_id: Option<String>,
     },
     SessionPath {
         #[ts(rename = "sessionId")]
@@ -120,14 +123,32 @@ pub struct FilePreviewBytes {
     pub data: bytes::Bytes,
 }
 
-/// Internal Worker operations. Only the service derives the filesystem root;
-/// subsequent reads use an owned directory handle, never reopen that root path.
+/// Preview operations on the selected Worker. The service derives Session roots
+/// and authorizes staged product File inputs. Handles own source and converted
+/// data until close or expiry; Session reads never reopen the root path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerPreviewRequest {
     Open {
         root: PathBuf,
         path: PathBuf,
         expires_at: i64,
+    },
+    /// Open a bounded conversion input for an authorized product File.
+    OpenFile {
+        metadata: FilePreviewMetadata,
+        expires_at: i64,
+        max_bytes: u64,
+    },
+    /// Append one contiguous input chunk; at most FILE_PREVIEW_MAX_READ_BYTES.
+    Write {
+        handle: String,
+        offset: u64,
+        data: bytes::Bytes,
+    },
+    /// Convert on the handle owner. Both input and output obey max_bytes.
+    PrepareDocument {
+        handle: String,
+        max_bytes: u64,
     },
     Read {
         handle: String,
@@ -147,6 +168,8 @@ pub enum WorkerPreviewResponse {
         resource_path: String,
         metadata: FilePreviewMetadata,
     },
+    Written,
+    Document(FilePreviewDocument),
     Content(FilePreviewBytes),
     Closed,
 }

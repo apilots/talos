@@ -137,6 +137,27 @@ pub trait AgentHarness: Send + Sync {
         memory_unavailable()
     }
 
+    /// Propose a title from one successful local Turn, retaining its result and actual usage.
+    /// No model routing, prompts or product history cross this boundary. A missing result
+    /// means no title input or retained result exists; product metadata remains caller-owned.
+    fn generate_session_title(
+        &self,
+        _params: crate::AgentSessionTitleParams,
+    ) -> AgentFuture<'_, AgentResult<Option<crate::AgentSessionTitleResult>>> {
+        Box::pin(async {
+            Ok(Some(crate::AgentSessionTitleResult {
+                outcome: crate::AgentSessionTitleOutcome::Failed {
+                    error: talos_error::TalosError::new(
+                        talos_error::ErrorCode::ServiceUnavailable,
+                        "Session title generation is unavailable on this Worker.",
+                    )
+                    .to_api_error(),
+                },
+                model_usage: None,
+            }))
+        })
+    }
+
     /// Form one idle Session's memory using execution-node policy, date and files.
     /// The caller excludes Turn admission and idempotently settles returned usage before
     /// advancing its own consumption cursor. The Worker retains execution facts.

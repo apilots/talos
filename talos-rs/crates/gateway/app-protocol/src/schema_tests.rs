@@ -16,6 +16,7 @@ fn typescript_fixture_is_current() {
         ("automation.ts", generate_automation_typescript()),
         ("browser.ts", generate_browser_typescript()),
         ("desktop.ts", generate_desktop_typescript()),
+        ("file-preview.ts", generate_file_preview_typescript()),
         ("worker-runtime.ts", generate_worker_runtime_typescript()),
     ] {
         let actual = std::fs::read_to_string(typescript_fixture_path().with_file_name(name))

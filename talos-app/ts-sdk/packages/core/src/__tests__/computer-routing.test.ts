@@ -21,6 +21,19 @@ describe("Computer routing through both client transports", () => {
     expect(request.mock.calls[2][1]?.headers).toEqual({ "x-talos-computer": "computer-c" });
   });
 
+  it("keeps File conversion on the selected Worker and Session paths on their saved owner", async () => {
+    const request = vi.fn<HttpAdapter["request"]>().mockResolvedValue({});
+    const client = new TalosClient({ request: request as HttpAdapter["request"] }, noopStreamAdapter(), "https://talos.test").forComputer("worker-b");
+    await client.files.preview.prepare({ source: { kind: "file", fileId: "report" } });
+    await client.files.preview.prepare({ source: { kind: "file", fileId: "report", nodeId: "worker-c" } });
+    await client.files.preview.prepare({ source: { kind: "sessionPath", sessionId: "saved", path: "report.docx" } });
+    expect(request.mock.calls.map(([, options]) => JSON.parse(options!.body as string) as unknown)).toEqual([
+      { source: { kind: "file", fileId: "report", nodeId: "worker-b" } },
+      { source: { kind: "file", fileId: "report", nodeId: "worker-c" } },
+      { source: { kind: "sessionPath", sessionId: "saved", path: "report.docx" } },
+    ]);
+  });
+
   it("uses normalized absolute URLs for workspace info and model requests", async () => {
     const info = { workspaceId: "team", rootPrefix: "/srv/team", userWorkspaceDir: "/srv/team/alice" };
     const request = vi.fn<(url: string, options?: import("../adapters").HttpRequestOptions) => Promise<unknown>>().mockResolvedValue(info);

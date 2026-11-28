@@ -100,6 +100,7 @@ async fn execution_survives_restart_with_only_execution_domain_tables() {
             "agent_events",
             "dream_formations",
             "session_history_supplements",
+            "session_title_results",
             "sessions",
             "turn_admissions",
             "turn_checkpoints",
@@ -781,3 +782,6 @@ mod history_window;
 
 #[path = "dream_tests.rs"]
 mod dream;
+
+#[path = "session_title_tests.rs"]
+mod session_title;

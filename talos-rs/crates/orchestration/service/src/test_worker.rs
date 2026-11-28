@@ -9,8 +9,38 @@ use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_error::TalosResult;
 use talos_store::session::{AgentExecutionStore, SessionStore};
 
-struct CoordinatorHarness(Arc<dyn AgentCoordinator>);
+struct CoordinatorHarness(
+    Arc<dyn AgentCoordinator>,
+    Arc<talos_store::execution::WorkerExecutionStore>,
+    Arc<Mutex<AdmissionFault>>,
+);
 impl AgentHarness for CoordinatorHarness {
+    fn generate_session_title(
+        &self,
+        params: AgentSessionTitleParams,
+    ) -> AgentFuture<'_, AgentResult<Option<AgentSessionTitleResult>>> {
+        Box::pin(async move {
+            let title_error = {
+                let mut fault = self.2.lock().unwrap();
+                match &*fault {
+                    AdmissionFault::TitleDeliveryBusy(code) => {
+                        let code = *code;
+                        *fault = AdmissionFault::None;
+                        Some(code)
+                    }
+                    _ => None,
+                }
+            };
+            if let Some(code) = title_error {
+                return Err(talos_error::TalosError::new(
+                    code,
+                    "Worker Session maintenance is busy.",
+                ));
+            }
+            self.1.read_session_title(&params).await
+        })
+    }
+
     fn start(&self, params: AgentRunParams) -> AgentFuture<'_, AgentResult<AgentRunExecution>> {
         Box::pin(self.0.start(params))
     }
@@ -50,13 +80,14 @@ impl AgentHarness for CoordinatorHarness {
         Box::pin(self.0.shutdown(timeout))
     }
 }
-/// Select one fault for the next paused start; consuming it restores healthy delivery.
+/// Select one admission or title-delivery fault; consuming it restores healthy delivery.
 #[derive(Default)]
 pub(crate) enum AdmissionFault {
     #[default]
     None,
     BeforeCommit,
     AfterCommit,
+    TitleDeliveryBusy(talos_error::ErrorCode),
 }
 
 struct DurableCoordinator {
@@ -110,6 +141,9 @@ impl AgentCoordinator for DurableCoordinator {
         let fault = std::mem::take(&mut *self.admission_fault.lock().unwrap());
         match fault {
             AdmissionFault::None => {}
+            AdmissionFault::TitleDeliveryBusy(code) => {
+                *self.admission_fault.lock().unwrap() = AdmissionFault::TitleDeliveryBusy(code);
+            }
             AdmissionFault::BeforeCommit => {
                 execution.admission.permit = AgentAdmissionPermit::new(async {
                     Err(AgentAdmissionUnconfirmed::wrap(
@@ -201,7 +235,11 @@ pub(crate) async fn durable_with_store_and_fault(
         Arc::new(DurableCoordinator {
             delegate: coordinator.clone(),
             harness: Arc::new(talos_agent::LocalExecutionHarness::new(
-                Arc::new(CoordinatorHarness(coordinator)),
+                Arc::new(CoordinatorHarness(
+                    coordinator,
+                    store.clone(),
+                    admission_fault.clone(),
+                )),
                 store.clone(),
             )),
             _directory: directory,

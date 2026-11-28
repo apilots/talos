@@ -1,5 +1,6 @@
 //! A replicated display view never grants authority to delete remote execution.
 use super::*;
+use talos_coordinator::AgentCoordinator;
 
 pub(super) async fn verify_unconnected_remote_deletion(
     a: &TalosApplicationRuntime,

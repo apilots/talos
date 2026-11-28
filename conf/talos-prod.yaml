@@ -29,6 +29,7 @@ gateway:
   auth: true
 
 agent_node:
+  embedded_worker: true
   control_plane: null
   runner: null
 

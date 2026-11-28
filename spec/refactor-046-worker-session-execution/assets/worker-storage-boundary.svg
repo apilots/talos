@@ -38,7 +38,7 @@ text { font-family:'PingFang SC','Microsoft YaHei',sans-serif; fill:#f0f4f8; fon
 <text x="725" y="267">受保护 Harness / WorkerEnvironment API</text>
 <text x="725" y="304" class="sub">lib / WSS / gRPC → 同一实例、配置状态、execution gate 与资源生命周期</text>
 <path d="M465 290H690" class="call"/>
-<text x="485" y="220" class="small">输入 / 绑定 / 定义版本</text>
+<text x="485" y="220" class="small">输入 / 辅助执行 / 资源请求</text>
 <text x="485" y="246" class="small">控制命令 · API 调用</text>
 <path d="M890 333V377" class="call"/>
 <path d="M1320 333V377" class="call"/>
@@ -47,19 +47,19 @@ text { font-family:'PingFang SC','Microsoft YaHei',sans-serif; fill:#f0f4f8; fon
 <text x="725" y="467" class="sub">ConfigService · MemoryService</text>
 <text x="725" y="501" class="sub">PluginManagerService</text>
 <text x="725" y="535" class="sub">McpCredentialStore · BrowserRuntime</text>
-<text x="725" y="563" class="small">模型 / 搜索配置归目标 Worker</text>
+<text x="725" y="563" class="small">配置 / Office 转换归目标 Worker</text>
 <rect x="1130" y="390" width="390" height="190" rx="13" fill="#243c56"/>
 <text x="1155" y="429" class="head">已下沉执行持久化</text>
 <text x="1155" y="467" class="sub">准入输入 · 历史 / 有序事件</text>
 <text x="1155" y="501" class="sub">执行检查点 · 终态</text>
-<text x="1155" y="535" class="sub">Memory 形成进度</text>
+<text x="1155" y="535" class="sub">Memory / 标题结果与实际用量</text>
 <text x="1155" y="563" class="small">拆执行记录，不搬完整产品 Session 库</text>
 <path d="M895 585V632" class="call"/>
 <path d="M1325 585V632" class="call"/>
 <rect x="700" y="645" width="820" height="225" rx="13" fill="#192735"/>
 <text x="725" y="684" class="head">Worker 自己的数据 · 沿既有 owner / 后端保存</text>
 <text x="725" y="725" class="sub">配置 YAML / env / 凭证 · 插件状态 · Memory 文件 + memory-index.sqlite</text>
-<text x="725" y="762" class="sub">worker/execution.sqlite：执行事实 / 检查点 / Memory 进度，独立事务</text>
+<text x="725" y="762" class="sub">worker/execution.sqlite：执行事实 / 检查点 / 辅助调用事实，独立事务</text>
 <text x="725" y="799" class="sub">Provider 私有产物：KernelSessionArtifactStore / FileKernelSessionArtifactStore</text>
 <text x="725" y="836" class="small">原 Provider 文件继续原路径保存，不要求再次迁移进执行库；按节点 / Session / scope 隔离</text>
 <path d="M1530 485H1542V949H500V740H470" class="event"/>

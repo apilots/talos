@@ -73,7 +73,7 @@ impl TalosService {
             .await?;
         let environment = self.access.worker_environment(actor, &node_id).await?;
         if callback_origin.is_none()
-            && self.mcp_product_owner == talos_types::NodeProductOwner::Computer
+            && self.product_owner == talos_types::NodeProductOwner::Computer
         {
             return environment
                 .start_mcp_authentication(

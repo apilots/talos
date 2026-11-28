@@ -77,6 +77,12 @@ impl WorkerExecutionStore {
         formation: &DreamMemoryFormation,
     ) -> TalosResult<DreamMemoryCursor> {
         let mut tx = self.pool.begin().await.map_err(database_error)?;
+        // Reserve the writer before reading its binding, as for execution append.
+        sqlx::query("UPDATE sessions SET generation=generation WHERE session_id=?")
+            .bind(&session.session_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(database_error)?;
         let (generation, active) = Self::binding(&mut tx, session).await?;
         if active.is_some() {
             return Err(conflict());
@@ -102,6 +108,12 @@ impl WorkerExecutionStore {
         formation: &DreamMemoryFormation,
     ) -> TalosResult<()> {
         let mut tx = self.pool.begin().await.map_err(database_error)?;
+        // Reserve the writer before reading its binding, as for execution append.
+        sqlx::query("UPDATE sessions SET generation=generation WHERE session_id=?")
+            .bind(&session.session_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(database_error)?;
         let (generation, active) = Self::binding(&mut tx, session).await?;
         if active.is_some() || generation != cursor.generation {
             return Err(conflict());

@@ -25,7 +25,7 @@ use talos_logging::LogGuard;
 #[cfg(feature = "server")]
 use talos_service::AgentNodeService;
 use talos_service::{TalosService, TimelineEventService};
-use talos_tools::{AgentControl, AgentControlFuture, ToolRegistry};
+use talos_tools::{AgentControl, AgentControlFuture};
 use talos_types::{
     AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, ListSubagentsRequest,
     SendMessageResult, SendSubagentMessageRequest, SpawnSubagentRequest, SubagentSnapshot,
@@ -90,8 +90,6 @@ mod tool_images;
 
 #[cfg(test)]
 pub(crate) use application_runtime::build_application_runtime_with_migration_dir;
-#[cfg(test)]
-use talos_worker::create_llm_provider;
 
 pub use talos_agent::SessionHold;
 
@@ -150,8 +148,8 @@ pub struct TalosApplicationRuntime {
     #[cfg(all(test, feature = "sync"))]
     pub(crate) sync: Arc<talos_sync::TalosSync>,
     pub(crate) host_id: String,
-    pub(crate) worker: talos_worker::TalosWorker,
-    pub(crate) worker_rpc: Arc<talos_worker::WorkerRpcHost>,
+    pub(crate) worker: Option<talos_worker::TalosWorker>,
+    pub(crate) worker_rpc: Option<Arc<talos_worker::WorkerRpcHost>>,
     pub(crate) resource_stop: tokio_util::sync::CancellationToken,
     _resource_stop_guard: Arc<tokio_util::sync::DropGuard>,
     pub(crate) worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
@@ -164,7 +162,6 @@ pub struct TalosApplicationRuntime {
     pub coordinator: Arc<CoordinatorImpl>,
     #[cfg(feature = "server")]
     pub node_service: Option<AgentNodeService>,
-    pub tool_registry: Arc<ToolRegistry>,
     #[cfg(feature = "server")]
     pub(crate) session_store: Arc<dyn talos_store::session::SessionStore>,
     #[cfg(feature = "server")]
@@ -391,6 +388,8 @@ async fn run_json_rpc_stdio_after_startup(
         let bridge = talos_app_server::DesktopHostBridge::new();
         runtime
             .worker
+            .as_ref()
+            .expect("Computer composition owns its embedded Worker")
             .browser()
             .set_backend(talos_browser::NativeBrowser::new(bridge.clone()))?;
         Some(bridge)
@@ -402,7 +401,10 @@ async fn run_json_rpc_stdio_after_startup(
     let app = Arc::new(
         talos_app_server::TalosApplicationAdapter::new(service.clone(), replay_limit)
             .with_drain_provider(Box::new(ProductDeliveryDrain {
-                worker: runtime.worker.clone(),
+                worker: runtime
+                    .worker
+                    .clone()
+                    .expect("Computer composition owns its embedded Worker"),
                 service: service.clone(),
                 automation: runtime.automation.clone(),
             }))

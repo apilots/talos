@@ -14,19 +14,33 @@ impl TalosService {
         self
     }
 
+    async fn ensure_product_config_access(&self, actor: &Actor) -> TalosResult<()> {
+        if actor.user_id.trim().is_empty()
+            || (self.product_owner == NodeProductOwner::Server && actor.auth_disabled)
+        {
+            return Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::Unauthenticated,
+                "Product configuration requires an authenticated actor.",
+            ));
+        }
+        match self.product_owner {
+            NodeProductOwner::Computer => self.access.ensure_worker_access(actor, "embedded").await,
+            NodeProductOwner::Server => {
+                if actor.role != talos_auth::UserRole::Admin {
+                    return Err(talos_error::TalosError::authorization_denied());
+                }
+                Ok(())
+            }
+        }
+    }
+
     pub async fn get_config(
         &self,
         actor: &Actor,
         mut request: ConfigGetRequest,
     ) -> TalosResult<ConfigResponse> {
         if request.path == ConfigPath::SessionMessageSendPolicy {
-            if actor.user_id.trim().is_empty() {
-                return Err(talos_error::TalosError::new(
-                    talos_error::ErrorCode::Unauthenticated,
-                    "Product configuration requires an authenticated actor.",
-                ));
-            }
-            self.access.ensure_worker_access(actor, "embedded").await?;
+            self.ensure_product_config_access(actor).await?;
             return self
                 .product_config_store
                 .load_session_message_send_policy()
@@ -44,13 +58,7 @@ impl TalosService {
         mut request: ConfigUpdateRequest,
     ) -> TalosResult<ConfigResponse> {
         if let ConfigValue::SessionMessageSendPolicy(policy) = &request.value {
-            if actor.user_id.trim().is_empty() {
-                return Err(talos_error::TalosError::new(
-                    talos_error::ErrorCode::Unauthenticated,
-                    "Product configuration requires an authenticated actor.",
-                ));
-            }
-            self.access.ensure_worker_access(actor, "embedded").await?;
+            self.ensure_product_config_access(actor).await?;
             self.product_config_store
                 .save_session_message_send_policy(*policy)?;
             return Ok(ConfigResponse::SessionMessageSendPolicy { policy: *policy });

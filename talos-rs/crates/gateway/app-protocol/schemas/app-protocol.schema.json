@@ -7647,6 +7647,13 @@
                 "file"
               ],
               "type": "string"
+            },
+            "node_id": {
+              "description": "Conversion Worker. Omission selects only the embedded Computer.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [

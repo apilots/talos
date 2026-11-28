@@ -131,6 +131,9 @@ impl ApplicationHost {
     /// The central Server's first administrator claims its Worker. Later logins
     /// must preserve that personal owner and must not interrupt its registration.
     async fn can_enroll_local_worker(&self, actor: &RequestIdentity) -> TalosResult<bool> {
+        if self.worker.is_none() {
+            return Ok(false);
+        }
         if YamlConfigStore::new(self.config.source_path())
             .removed_registration_owner()?
             .is_some()
@@ -263,8 +266,14 @@ impl ApplicationHost {
                 account: &self.service.account,
                 auth: &self.auth_service,
                 worker: &self.worker_registration,
-                execution: &self.worker,
-                rpc: &self.worker_rpc,
+                execution: self
+                    .worker
+                    .as_ref()
+                    .expect("Enrollment requires a local Worker"),
+                rpc: self
+                    .worker_rpc
+                    .as_ref()
+                    .expect("Enrollment requires a local Worker transport"),
                 device_name: &name,
                 worker_failures: &self.worker_failures,
             }

@@ -2,7 +2,7 @@
 use super::*;
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_gateway_http::{HttpServer, ServerLifecycle, ServerLifecycleState};
-use talos_service::{AgentNodeService, PluginManagerService};
+use talos_service::AgentNodeService;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use webui::resolve_packaged_webui_dir;
@@ -21,9 +21,7 @@ pub struct TalosServerRuntime {
     lifecycle: Arc<ServerLifecycle>,
     automation: Automation,
     _native_job_host: Arc<dyn talos_service::NativeJobHost>,
-    plugins: PluginManagerService,
-    browser: Arc<talos_browser::BrowserRuntime>,
-    worker_rpc: Arc<talos_worker::WorkerRpcHost>,
+    worker_rpc: Option<Arc<talos_worker::WorkerRpcHost>>,
     resource_stop: tokio_util::sync::CancellationToken,
     _resource_stop_guard: Arc<tokio_util::sync::DropGuard>,
     worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
@@ -123,8 +121,6 @@ impl TalosServerRuntime {
             shutdown_token,
             lifecycle,
             automation,
-            plugins,
-            browser,
             worker_rpc,
             resource_stop,
             _resource_stop_guard,
@@ -165,11 +161,12 @@ impl TalosServerRuntime {
             let shutdown_token_for_rpc = shutdown_token.clone();
             tasks.spawn(async move { node_rpc_server.run(shutdown_token_for_rpc).await });
         }
-        let transport = worker_rpc.clone();
-        tasks.spawn(async move {
-            transport.stopped().await;
-            transport.shutdown().await
-        });
+        if let Some(transport) = worker_rpc.clone() {
+            tasks.spawn(async move {
+                transport.stopped().await;
+                transport.shutdown().await
+            });
+        }
         let result = match tasks.join_next().await {
             Some(Ok(result)) => result,
             Some(Err(error)) => Err(TalosError::internal_with_source(
@@ -186,14 +183,16 @@ impl TalosServerRuntime {
         signal_task.abort();
         quiesce_task.abort();
 
-        let background_result = host.worker.shutdown_background_tasks().await;
+        let background_result = match &host.worker {
+            Some(worker) => worker.shutdown_background_tasks().await,
+            None => Ok(()),
+        };
         let shutdown_result = application_automation::shutdown_server(
-            &host.worker,
+            host.worker.as_ref(),
             &coordinator,
             &automation,
             &service,
             &lifecycle,
-            &plugins,
         )
         .await;
         let registration = match worker_registration.lock().await.take() {
@@ -202,10 +201,18 @@ impl TalosServerRuntime {
         };
         let result = application_automation::combine(result, registration);
         let result = application_automation::combine(result, background_result);
-        let result = application_automation::combine(result, browser.shutdown().await);
+        let result = match &host.worker {
+            Some(worker) => {
+                application_automation::combine(result, worker.browser().shutdown().await)
+            }
+            None => result,
+        };
         let result = application_automation::combine(result, host.shutdown().await);
         let result = application_automation::combine(result, shutdown_result);
-        let result = application_automation::combine(result, worker_rpc.shutdown().await);
+        let result = match &worker_rpc {
+            Some(rpc) => application_automation::combine(result, rpc.shutdown().await),
+            None => result,
+        };
         auth_service.shutdown().await;
         {
             resource_stop.cancel();
@@ -263,9 +270,11 @@ pub(super) async fn start_server_after_startup(
                 },
             )
             .and_then(|server| {
-                server
-                    .with_worker_adapter(runtime.worker_rpc.adapter())
-                    .with_coordinator_id(runtime.host_id.as_str().into())
+                let server = match &runtime.worker_rpc {
+                    Some(rpc) => server.with_worker_adapter(rpc.adapter()),
+                    None => server,
+                };
+                server.with_coordinator_id(runtime.host_id.as_str().into())
             })
         })
         .transpose()?;
@@ -327,8 +336,6 @@ pub(super) async fn start_server_after_startup(
         lifecycle: http_server.lifecycle(),
         automation: runtime.automation,
         _native_job_host: runtime._native_job_host,
-        plugins: runtime.worker.plugin_manager(),
-        browser: runtime.worker.browser(),
         worker_rpc: runtime.worker_rpc,
         resource_stop: runtime.resource_stop,
         _resource_stop_guard: runtime._resource_stop_guard,

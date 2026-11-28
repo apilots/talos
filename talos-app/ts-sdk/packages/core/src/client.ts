@@ -588,7 +588,7 @@ export class TalosClient {
   files = {
     preview: createFilePreviewClient({
       prepare: (request: import("./types").FilePreviewPrepareRequest) =>
-        this.http.request<import("./types").FilePreviewDescriptor>(this.url("/v1/file-previews"), { method: "POST", body: JSON.stringify(request) }),
+        this.http.request<import("./types").FilePreviewDescriptor>(this.url("/v1/file-previews"), { method: "POST", body: JSON.stringify({ ...request, source: request.source.kind === "file" ? this.withComputer(request.source) : request.source }) }),
       read: (request: import("./types").FilePreviewReadRequest) =>
         this.http.request<import("./types").FilePreviewContent>(this.url("/v1/file-previews/read"), { method: "POST", body: JSON.stringify(request) }),
       close: (request: import("./types").FilePreviewCloseRequest, signal?: AbortSignal) =>

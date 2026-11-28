@@ -97,6 +97,16 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
     };
     let mut owner_config = config(&home.path().join("owner"));
     owner_config.agent_node.control_plane = Some(control_config.clone());
+    owner_config.agent_node.embedded_worker = false;
+    owner_config.agent.agents = vec![talos_config::AgentDefinitionConfig {
+        id: "default".into(),
+        name: "Routing identity".into(),
+        enabled: false,
+        description: None,
+        provider: None,
+    }];
+    owner_config.agent.inner_model = None;
+    owner_config.llm = Default::default();
     owner_config.cloud.agent_base_url = format!("https://{ingress}");
     owner_config.cloud.agent_trusted_ca_file = Some(cert.clone());
     persist(&owner_config);
@@ -106,6 +116,7 @@ async fn run(transport: AgentNodeTransport, finish: Finish) {
     )
     .await
     .unwrap();
+    assert!(runtime.worker.is_none());
     let server = NodeRpcServer::new(
         &control_config,
         runtime.node_service.clone().expect("Server authority"),

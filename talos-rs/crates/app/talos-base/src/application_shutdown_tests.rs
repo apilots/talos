@@ -1,5 +1,6 @@
 use super::*;
 use talos_app_server::BackgroundTaskDrain;
+use tokio::{io::AsyncReadExt, net::TcpListener, sync::oneshot};
 
 #[tokio::test]
 async fn stdio_delivery_drain_then_runtime_shutdown_closes_the_worker_once() {
@@ -12,7 +13,7 @@ async fn stdio_delivery_drain_then_runtime_shutdown_closes_the_worker_once() {
         .await
         .unwrap();
     let drain = crate::ProductDeliveryDrain {
-        worker: runtime.worker.clone(),
+        worker: runtime.worker.as_ref().unwrap().clone(),
         service: runtime.service.clone(),
         automation: runtime.automation.clone(),
     };
@@ -113,6 +114,8 @@ async fn runtime_shutdown_stops_local_execution_before_draining_product_facts() 
         .unwrap();
     let terminal = runtime
         .worker
+        .as_ref()
+        .unwrap()
         .execution_store()
         .terminal_events(session_id, None, 10)
         .await

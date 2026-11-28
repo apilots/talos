@@ -236,8 +236,12 @@ Agent progress / settlement             Service product-effect failure
 Only Agent facts --> Agent reducer / checkpoint / Provider continuation
 ```
 
-Title generation and eligible memory reflection run before terminal commit;
-their failures produce warnings without replacing the main execution result.
+Eligible Memory reflection runs on the Worker before its terminal commit. Title
+generation is a Worker semantic operation over its retained successful Turn; the
+product consumes the retained proposal and actual usage during completion. Both
+use the target Worker configuration. Auxiliary failures produce warnings without
+replacing the main execution result; product accounting retries read the same
+Worker result without another model call.
 Other completion effects, including usage and queue handling, have their own
 failure boundaries. Notices can therefore precede or follow the terminal fact.
 Interactive clients retain Session subscriptions; Turn-limited subscriptions

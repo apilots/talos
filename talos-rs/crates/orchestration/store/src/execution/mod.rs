@@ -12,6 +12,7 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 mod dream;
 mod history;
 mod read;
+mod session_title;
 pub(crate) mod supplement_merge;
 mod write;
 

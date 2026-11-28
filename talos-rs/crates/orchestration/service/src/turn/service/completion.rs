@@ -195,11 +195,14 @@ impl TurnService {
                 let memory_result = self
                     .record_worker_memory_usage(&session, &fact.settlement)
                     .await;
+                let title_result = self.generate_worker_title(&session, &event).await;
                 let finish_result = self.finish_turn(&event, None, Some(metrics), false).await;
-                let failed =
-                    profile_result.is_err() || memory_result.is_err() || finish_result.is_err();
+                let failed = profile_result.is_err()
+                    || memory_result.is_err()
+                    || title_result.is_err()
+                    || finish_result.is_err();
                 let finish_result = finish_result.map(|notice| completion_notice = notice);
-                for result in [profile_result, memory_result, finish_result] {
+                for result in [profile_result, memory_result, title_result, finish_result] {
                     if let Err(error) = result {
                         self.execution.report_warning(&event.identity, error).await;
                     }
