@@ -163,16 +163,32 @@ class Cluster:
             timezone = 'Pacific/Honolulu' if 'control_plane' in node_config else 'Pacific/Kiritimati'
             document['timezone'] = timezone
             document['agent']['kernel']['timezone'] = timezone
+        if self.dream_maintenance and 'control_plane' not in node_config:
+            document['workspaces'] = {'default_workspace_id': 'remote-team', 'definitions': [
+                {'workspace_id': 'remote-team', 'root_prefix': 'worker-workspaces'}]}
         if self.dream_maintenance and 'control_plane' in node_config:
+            document['agent_node']['embedded_worker'] = False
+            document['agent']['agents'] = [{'id': 'default', 'name': 'Disabled local Agent', 'enabled': False}]
             document.setdefault('automation', {})['dream_memory_maintenance'] = {
                 'cron': '0/15 * * * * *', 'batch_size': 10, 'max_batches': 1}
+            # Remote maintenance must not depend on a Server execution model or credential.
+            document['llm'] = {
+                'provider': 'dream-server-unavailable', 'model': 'server-only-model',
+                'custom_providers': {'dream-server-unavailable': {
+                    'name': 'Unavailable Server model', 'protocol': 'chat',
+                    'base_url': 'http://127.0.0.1:9', 'models': [{'id': 'server-only-model'}]}}}
+            document['agent']['inner_model'] = {
+                'provider': 'dream-server-unavailable', 'id': 'server-only-model'}
         path = conf / 'talos.yaml'
         path.write_text(yaml.safe_dump(document, sort_keys=False))
         env_template = Path(os.environ.get('TALOS_TEST_ENV_TEMPLATE', ROOT / '.env'))
         if env_template.is_file():
             shutil.copyfile(env_template, home / '.env')
             (home / '.env').chmod(0o600)
-        return dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(path), TALOS_RESOURCE_DIR=str(ROOT))
+        env = dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(path), TALOS_RESOURCE_DIR=str(ROOT))
+        if self.dream_maintenance and 'control_plane' in node_config:
+            env = {key: value for key, value in env.items() if not key.startswith('TALOS_LLM_')}
+        return env
 
     def start_control_plane(self):
         """Start real Auth and Server without requiring execution Workers or models."""

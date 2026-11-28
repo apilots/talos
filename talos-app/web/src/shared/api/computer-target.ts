@@ -16,8 +16,23 @@ export function bindComputerTarget(
   const target = { nodeId };
   const owner = (request?: { nodeId?: string | null }) =>
     resolve ? resolve(request?.nodeId ?? nodeId).then(owner => owner.forComputer?.(request?.nodeId ?? nodeId) ?? owner) : client;
-  return {
-    ...client,
+  let files: TalosWebClient["files"] | undefined;
+  let preview: TalosWebClient["files"]["preview"] | undefined;
+  let sessions: TalosWebClient["sessions"] | undefined;
+  let desktop: TalosWebClient["desktop"] | undefined;
+  const bindings: Partial<TalosWebClient> = {
+    get files() {
+      return files ??= new Proxy(client.files, {
+        get: (source, key, receiver): unknown => key === "preview" ? preview ??= {
+          ...source.preview,
+          prepare: async request => {
+            if (request.source.kind === "sessionPath") return client.files.preview.prepare(request);
+            const source = { ...request.source, nodeId: request.source.nodeId ?? nodeId };
+            return (await owner(source)).files.preview.prepare({ ...request, source });
+          },
+        } : Reflect.get(source, key, receiver),
+      });
+    },
     models: { list: async request => (await owner(request)).models.list({ ...target, ...request }) },
     llm: {
       get: async request => (await owner(request)).llm.get({ ...target, ...request }),
@@ -27,28 +42,30 @@ export function bindComputerTarget(
       get: async (path, request) => (await owner(request)).config.get(path, { ...target, ...request }),
       update: async (value, request) => (await owner(request)).config.update(value, { ...target, ...request }),
     },
-    sessions: {
-      ...client.sessions,
-      get: async request => {
-        const response = await client.sessions.get(request);
-        return { ...response, session: productComputerRecord(response.session, nodeId) };
-      },
-      list: async request => {
-        const response = await (await owner(request)).sessions.list({ projectId: null, limit: null, offset: null, ...target, ...request });
-        return { ...response, sessions: response.sessions.map(session => productComputerRecord(session, request?.nodeId ?? nodeId)) };
-      },
-      patch: async request => {
-        const response = await client.sessions.patch(request);
-        return { ...response, session: productComputerRecord(response.session, nodeId) };
-      },
-      compact: async request => {
-        const response = await client.sessions.compact(request);
-        return { ...response, session: productComputerRecord(response.session, nodeId) };
-      },
-      clear: async request => {
-        const response = await client.sessions.clear(request);
-        return { ...response, session: productComputerRecord(response.session, nodeId) };
-      },
+    get sessions() {
+      return sessions ??= {
+        ...client.sessions,
+        get: async request => {
+          const response = await client.sessions.get(request);
+          return { ...response, session: productComputerRecord(response.session, nodeId) };
+        },
+        list: async request => {
+          const response = await (await owner(request)).sessions.list({ projectId: null, limit: null, offset: null, ...target, ...request });
+          return { ...response, sessions: response.sessions.map(session => productComputerRecord(session, request?.nodeId ?? nodeId)) };
+        },
+        patch: async request => {
+          const response = await client.sessions.patch(request);
+          return { ...response, session: productComputerRecord(response.session, nodeId) };
+        },
+        compact: async request => {
+          const response = await client.sessions.compact(request);
+          return { ...response, session: productComputerRecord(response.session, nodeId) };
+        },
+        clear: async request => {
+          const response = await client.sessions.clear(request);
+          return { ...response, session: productComputerRecord(response.session, nodeId) };
+        },
+      };
     },
     projects: {
       list: async request => {
@@ -86,7 +103,9 @@ export function bindComputerTarget(
       suggest: async request => (await owner(request)).skills.suggest({ ...target, ...request }),
       read: async request => (await owner(request)).skills.read({ ...target, ...request }),
     },
-    desktop: { ...client.desktop, open: async request => (await owner()).desktop.open({ ...request, nodeId }) },
+    get desktop() {
+      return desktop ??= { ...client.desktop, open: async request => (await owner()).desktop.open({ ...request, nodeId }) };
+    },
     browser: { operate: async request => (await owner()).browser.operate({ ...request, nodeId }) },
     mcp: {
       list: async request => (await owner(request)).mcp.list({ ...target, ...request }),
@@ -107,13 +126,22 @@ export function bindComputerTarget(
       sources: { add: async request => (await owner(request)).plugin.sources.add({ ...target, ...request }) },
     },
   };
+  return new Proxy(client, {
+    get: (source, key, receiver): unknown => Object.hasOwn(bindings, key)
+      ? Reflect.get(bindings, key) : Reflect.get(source, key, receiver),
+  });
 }
 
 /** Defer ownership lookup without restricting routing to only a subset of APIs. */
 export function deferProductClient(local: TalosWebClient, resolve: () => Promise<TalosWebClient>): TalosWebClient {
   const productNamespaces = new Set(["trajectory", "automation", "builtinJobs", "profile", "llm", "config", "models", "sessions", "messageQueue", "projects", "files", "fs", "memory", "workspaceDocs", "skills", "desktop", "browser", "mcp", "plugin", "turns"]);
   const member = (source: unknown, path: PropertyKey[]): unknown => path.reduce((value, key) => Reflect.get(value as object, key), source);
-  const namespace = (path: PropertyKey[]): object => new Proxy((member(local, path) ?? {}) as object, {
+  const namespace = (path: PropertyKey[]): object => new Proxy({}, {
+    ownKeys: () => Reflect.ownKeys(member(local, path) as object),
+    getOwnPropertyDescriptor: (_, key) => {
+      const descriptor = Reflect.getOwnPropertyDescriptor(member(local, path) as object, key);
+      return descriptor ? { ...descriptor, configurable: true } : undefined;
+    },
     get: (_, key) => {
       const next = [...path, key];
       const value = member(local, next);

@@ -341,13 +341,34 @@ impl AgentHarness for LocalAgentHarness {
                 .await
         })
     }
+    fn generate_session_title(
+        &self,
+        mut params: agent_protocol::AgentSessionTitleParams,
+    ) -> crate::AgentFuture<'_, TalosResult<Option<agent_protocol::AgentSessionTitleResult>>> {
+        Box::pin(async move {
+            let session = self.session(params.session)?;
+            params.session = session.clone();
+            let lease = self.adapter.authorize(&self.auth)?;
+            let _reservation = self
+                .adapter
+                .session_gate
+                .reflection(&session, &self.coordinator_id)?;
+            let _resources = self
+                .adapter
+                .bind_resources(&self.auth, &session, None)
+                .await?;
+            let harness = self.adapter.harness(&self.agent_id)?;
+            tokio::select! { biased; _ = lease.ended() => Err(unauthenticated()), result = harness.generate_session_title(params) => result }
+        })
+    }
+
     fn form_dream_memory(
         &self,
-        session: agent_protocol::AgentSessionContext,
-        model: agent_protocol::DreamMemoryModelCall,
-    ) -> crate::AgentFuture<'_, TalosResult<Option<u64>>> {
+        mut params: agent_protocol::DreamMemoryParams,
+    ) -> crate::AgentFuture<'_, TalosResult<agent_protocol::DreamMemoryResult>> {
         Box::pin(async move {
-            let session = self.session(session)?;
+            let session = self.session(params.session)?;
+            params.session = session.clone();
             let lease = self.adapter.authorize(&self.auth)?;
             let _reflection = self
                 .adapter
@@ -358,7 +379,7 @@ impl AgentHarness for LocalAgentHarness {
                 .bind_resources(&self.auth, &session, None)
                 .await?;
             let harness = self.adapter.harness(&self.agent_id)?;
-            tokio::select! { biased; _ = lease.ended() => Err(unauthenticated()), result = harness.form_dream_memory(session, model) => result }
+            tokio::select! { biased; _ = lease.ended() => Err(unauthenticated()), result = harness.form_dream_memory(params) => result }
         })
     }
     fn shutdown(&self, timeout: Duration) -> crate::AgentFuture<'_, TalosResult<()>> {

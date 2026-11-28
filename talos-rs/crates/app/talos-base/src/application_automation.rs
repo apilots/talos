@@ -51,10 +51,10 @@ impl TalosApplicationRuntime {
     pub async fn shutdown(&self) -> TalosResult<()> {
         let automation_result = self.automation.shutdown().await;
         self.service.begin_execution_drain();
-        let execution_result = self
-            .worker
-            .stop_execution(BACKGROUND_TASK_DRAIN_TIMEOUT)
-            .await;
+        let execution_result = match &self.worker {
+            Some(worker) => worker.stop_execution(BACKGROUND_TASK_DRAIN_TIMEOUT).await,
+            None => Ok(()),
+        };
         // Cursor recovery still needs the registered Harness until delivery finishes.
         let delivery_result =
             drain_product_delivery(&self.service, BACKGROUND_TASK_DRAIN_TIMEOUT).await;
@@ -62,7 +62,10 @@ impl TalosApplicationRuntime {
             Some(registration) => registration.shutdown().await,
             None => Ok(()),
         };
-        let background_result = self.worker.shutdown_background_tasks().await;
+        let background_result = match &self.worker {
+            Some(worker) => worker.shutdown_background_tasks().await,
+            None => Ok(()),
+        };
         let drain_result = self
             .coordinator
             .shutdown(BACKGROUND_TASK_DRAIN_TIMEOUT)
@@ -79,9 +82,16 @@ impl TalosApplicationRuntime {
         let result = combine(result, delivery_result);
         let result = combine(result, background_result);
         let result = combine(result, registration_result);
-        let result = combine(result, self.worker.browser().shutdown().await);
-        let result = combine(result, self.worker.plugin_manager().shutdown_mcp().await);
-        let result = combine(result, self.worker_rpc.shutdown().await);
+        let result = if let Some(worker) = &self.worker {
+            let result = combine(result, worker.browser().shutdown().await);
+            combine(result, worker.plugin_manager().shutdown_mcp().await)
+        } else {
+            result
+        };
+        let result = match &self.worker_rpc {
+            Some(rpc) => combine(result, rpc.shutdown().await),
+            None => result,
+        };
         {
             self.resource_stop.cancel();
             result
@@ -180,12 +190,11 @@ pub(super) fn combine(
 
 #[cfg(feature = "server")]
 pub(super) async fn shutdown_server(
-    worker: &talos_worker::TalosWorker,
+    worker: Option<&talos_worker::TalosWorker>,
     coordinator: &Arc<CoordinatorImpl>,
     automation: &Automation,
     service: &talos_service::TalosService,
     lifecycle: &Arc<ServerLifecycle>,
-    plugins: &talos_service::PluginManagerService,
 ) -> TalosResult<()> {
     if lifecycle.current() == ServerLifecycleState::Stopped {
         return Ok(());
@@ -201,10 +210,13 @@ pub(super) async fn shutdown_server(
     );
     let result = automation.shutdown().await;
     service.begin_execution_drain();
-    let result = combine(
-        result,
-        worker.stop_execution(BACKGROUND_TASK_DRAIN_TIMEOUT).await,
-    );
+    let result = match worker {
+        Some(worker) => combine(
+            result,
+            worker.stop_execution(BACKGROUND_TASK_DRAIN_TIMEOUT).await,
+        ),
+        None => result,
+    };
     let result = combine(
         result,
         drain_product_delivery(service, BACKGROUND_TASK_DRAIN_TIMEOUT).await,
@@ -212,7 +224,10 @@ pub(super) async fn shutdown_server(
     if let Err(err) = coordinator.shutdown(BACKGROUND_TASK_DRAIN_TIMEOUT).await {
         warn!(error = %err, "background task drain failed on shutdown");
     }
-    let result = combine(result, plugins.shutdown_mcp().await);
+    let result = match worker {
+        Some(worker) => combine(result, worker.plugin_manager().shutdown_mcp().await),
+        None => result,
+    };
     lifecycle.store(ServerLifecycleState::Stopped);
     result
 }

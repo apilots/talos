@@ -27,6 +27,46 @@ impl<'a> ManagedCaller<'a> {
 }
 
 impl AgentNodeService {
+    /// Wait for qualified background work and retain the existing activity admission lock.
+    /// Dispatch authority never changes a manually stopped Worker's intent.
+    pub async fn acquire_managed_dispatch(
+        &self,
+        owner: &str,
+        node_id: &str,
+    ) -> TalosResult<Option<tokio::sync::OwnedRwLockReadGuard<()>>> {
+        if node_id == "embedded" {
+            return Ok(None);
+        }
+        if self.store.managed_worker_by_node(node_id).await?.is_none() {
+            return Ok(None);
+        }
+        let generation = self
+            .wait_managed_worker(
+                ManagedCaller::Dispatch(owner),
+                node_id,
+                Duration::from_secs(self.managed_runtime()?.policy.start_timeout_seconds.into()),
+            )
+            .await?;
+        let admission = self.admission.for_node(node_id).read_owned().await;
+        let current = self
+            .store
+            .managed_worker_by_node(node_id)
+            .await?
+            .ok_or_else(not_found)?;
+        ManagedCaller::Dispatch(owner).authorize(self.managed_runtime()?)?;
+        ensure_owner(&current, owner)?;
+        if current.generation != generation
+            || current.desired != Desired::Running
+            || !self.managed_node_is_available(node_id).await?
+        {
+            return Err(unavailable());
+        }
+        self.store
+            .record_managed_worker_activity(node_id, now())
+            .await?;
+        Ok(Some(admission))
+    }
+
     pub async fn managed_conversation_node(
         &self,
         actor: &Actor,

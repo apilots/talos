@@ -86,6 +86,16 @@ macro_rules! unary {
 }
 impl HarnessTransport {
     unary!(
+        generate_session_title,
+        GenerateSessionTitleRequest,
+        GenerateSessionTitleResponse,
+        GenerateSessionTitle,
+        SessionTitle,
+        |_: &pb::GenerateSessionTitleRequest| Duration::from_secs(300),
+        Unary
+    );
+
+    unary!(
         read_execution_payload,
         ReadExecutionPayloadRequest,
         ReadExecutionPayloadResponse,

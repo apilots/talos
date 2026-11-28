@@ -48,8 +48,14 @@ impl DesktopApplication {
             account: runtime.service.account.clone(),
             auth: runtime.auth_service.clone(),
             worker: runtime.worker_registration.clone(),
-            execution: runtime.worker.clone(),
-            rpc: runtime.worker_rpc.clone(),
+            execution: runtime
+                .worker
+                .clone()
+                .expect("Desktop composition owns its embedded Worker"),
+            rpc: runtime
+                .worker_rpc
+                .clone()
+                .expect("Desktop composition owns its embedded Worker"),
             device_name,
             worker_failures: runtime.worker_failures.clone(),
             local,

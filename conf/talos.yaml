@@ -29,6 +29,9 @@ gateway:
   auth: true
 
 agent_node:
+  # Disable only on Talos Server to manage network Workers without local execution.
+  # TUI and Desktop always keep their embedded Worker.
+  embedded_worker: true
   control_plane: null
   runner: null
 

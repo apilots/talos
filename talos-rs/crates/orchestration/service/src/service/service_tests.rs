@@ -65,6 +65,9 @@ mod turn_interrupt_tests;
 
 #[path = "admission_recovery_tests.rs"]
 mod admission_recovery_tests;
+#[path = "session_title_tests.rs"]
+mod session_title_tests;
+
 #[path = "compaction_tests.rs"]
 mod compaction_tests;
 #[path = "interrupt_queue_tests.rs"]
@@ -73,6 +76,8 @@ mod interrupt_queue_tests;
 mod maintenance_tests;
 #[path = "ownership_boundary_tests.rs"]
 mod ownership_boundary_tests;
+#[path = "view_rebuild_tests.rs"]
+mod view_rebuild_tests;
 
 pub(super) struct TestAgentExecution {
     pub(super) mode: TestAgentExecutionMode,
@@ -631,6 +636,7 @@ async fn test_application_with_storage(
         config,
         environment,
         storage,
+        None,
     )
     .await;
     (service, store)
@@ -646,7 +652,8 @@ async fn test_application_with_worker(
     Arc<talos_store::execution::WorkerExecutionStore>,
 ) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
-    test_application_with_worker_storage(agent_execution, coordinator, config, None, storage).await
+    test_application_with_worker_storage(agent_execution, coordinator, config, None, storage, None)
+        .await
 }
 
 async fn test_application_with_worker_storage(
@@ -655,6 +662,7 @@ async fn test_application_with_worker_storage(
     config: TalosConfig,
     environment: Option<Arc<dyn agent_protocol::WorkerEnvironment>>,
     storage: Arc<SqliteStorage>,
+    delivery_fault: Option<Arc<Mutex<crate::test_worker::AdmissionFault>>>,
 ) -> (
     TalosService,
     Arc<DatabaseSessionStore>,
@@ -703,11 +711,13 @@ async fn test_application_with_worker_storage(
     };
     let (durable, journal) = crate::test_worker::durable_with_store_and_fault(
         coordinator.clone(),
-        Arc::new(Mutex::new(if lose_confirmation {
-            crate::test_worker::AdmissionFault::AfterCommit
-        } else {
-            crate::test_worker::AdmissionFault::None
-        })),
+        delivery_fault.unwrap_or_else(|| {
+            Arc::new(Mutex::new(if lose_confirmation {
+                crate::test_worker::AdmissionFault::AfterCommit
+            } else {
+                crate::test_worker::AdmissionFault::None
+            }))
+        }),
     )
     .await;
     let coordinator = if fault_injected_worker {

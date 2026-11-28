@@ -8,6 +8,7 @@ use axum::{
     http::Request,
 };
 use std::fs;
+use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 use talos_gateway_http::{HttpServer, ProductRequestRouter, ProductRoute};
@@ -465,6 +466,7 @@ async fn server_routes_personal_product_and_preview_without_copying_its_business
         talos_app_protocol::requests::ClientRequestParams::FilePreviewPrepare(
             FilePreviewPrepareRequest {
                 source: FilePreviewSource::File {
+                    node_id: None,
                     file_id: file.file_id.clone(),
                 },
             },
@@ -667,6 +669,8 @@ async fn server_routes_personal_product_and_preview_without_copying_its_business
         );
         let imported = host
             .worker
+            .as_ref()
+            .unwrap()
             .plugin_manager()
             .import_mcp_server(McpServerImportRequest {
                 node_id: None,

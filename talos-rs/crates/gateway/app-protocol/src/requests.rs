@@ -21,10 +21,10 @@ use talos_types::{
     ProjectListRequest, ProjectPatchRequest, ProjectReadRequest, RecoverTimelineRequest,
     RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
     SessionCompactRequest, SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest,
-    SessionListRequest, SessionPatchRequest, SkillsListRequest, SkillsReadRequest,
-    SkillsRefreshRequest, SkillsResolveRequest, SkillsSuggestRequest, StartTurnRequest,
-    SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest,
-    WorkspaceDocWriteRequest, WorkspaceInfoRequest,
+    SessionListRequest, SessionPatchRequest, SessionRebuildViewRequest, SkillsListRequest,
+    SkillsReadRequest, SkillsRefreshRequest, SkillsResolveRequest, SkillsSuggestRequest,
+    StartTurnRequest, SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest,
+    WorkspaceDocReadRequest, WorkspaceDocWriteRequest, WorkspaceInfoRequest,
 };
 
 #[path = "client_method.rs"]
@@ -126,6 +126,8 @@ pub enum ClientRequestParams {
     SessionCompact(SessionCompactRequest),
     #[serde(rename = "session/clear")]
     SessionClear(SessionClearRequest),
+    #[serde(rename = "session/rebuildView")]
+    SessionRebuildView(SessionRebuildViewRequest),
     #[serde(rename = "session/active_turn")]
     SessionActiveTurn(SessionActiveTurnRequest),
     #[serde(rename = "session/history")]
@@ -416,6 +418,9 @@ impl ClientRequest {
                 ClientRequestParams::SessionCompact(decode(params_value)?)
             }
             ClientMethod::SessionClear => ClientRequestParams::SessionClear(decode(params_value)?),
+            ClientMethod::SessionRebuildView => {
+                ClientRequestParams::SessionRebuildView(decode(params_value)?)
+            }
             ClientMethod::SessionActiveTurn => {
                 ClientRequestParams::SessionActiveTurn(decode(params_value)?)
             }
@@ -716,6 +721,7 @@ impl ClientRequestParams {
             Self::SessionClose(..) => ClientMethod::SessionClose,
             Self::SessionCompact(..) => ClientMethod::SessionCompact,
             Self::SessionClear(..) => ClientMethod::SessionClear,
+            Self::SessionRebuildView(..) => ClientMethod::SessionRebuildView,
             Self::SessionActiveTurn(..) => ClientMethod::SessionActiveTurn,
             Self::SessionHistory(..) => ClientMethod::SessionHistory,
             Self::TimelineRecover(..) => ClientMethod::TimelineRecover,

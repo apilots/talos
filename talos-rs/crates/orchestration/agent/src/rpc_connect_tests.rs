@@ -22,6 +22,24 @@ use tonic::{
 
 struct DreamHarness(Arc<dyn AgentHarness>);
 impl AgentHarness for DreamHarness {
+    fn generate_session_title(
+        &self,
+        params: agent_protocol::AgentSessionTitleParams,
+    ) -> agent_protocol::AgentFuture<
+        '_,
+        agent_protocol::AgentResult<Option<agent_protocol::AgentSessionTitleResult>>,
+    > {
+        Box::pin(async move {
+            assert_eq!(params.identity.session_id, params.session.session_id);
+            Ok(Some(agent_protocol::AgentSessionTitleResult {
+                outcome: agent_protocol::AgentSessionTitleOutcome::Generated {
+                    title: "Worker title".into(),
+                },
+                model_usage: Some(dream_result().formation.unwrap().model_usage),
+            }))
+        })
+    }
+
     fn start(
         &self,
         params: agent_protocol::AgentRunParams,
@@ -78,20 +96,14 @@ impl AgentHarness for DreamHarness {
     }
     fn form_dream_memory(
         &self,
-        _: agent_protocol::AgentSessionContext,
-        model_call: agent_protocol::DreamMemoryModelCall,
-    ) -> agent_protocol::AgentFuture<'_, agent_protocol::AgentResult<Option<u64>>> {
+        params: agent_protocol::DreamMemoryParams,
+    ) -> agent_protocol::AgentFuture<
+        '_,
+        agent_protocol::AgentResult<agent_protocol::DreamMemoryResult>,
+    > {
         Box::pin(async move {
-            let reply = model_call(agent_protocol::dream_pb::decode_prompt(
-                pb::DreamMemoryModelPrompt {
-                    system: "Form memory".into(),
-                    user: "Session facts".into(),
-                },
-            ))
-            .await?;
-            assert_eq!(reply.content, "formed memory");
-            assert_eq!(reply.usage.total_tokens, 3);
-            Ok(Some(17))
+            assert!(params.after_cursor.is_none());
+            Ok(dream_result())
         })
     }
 }
@@ -516,30 +528,37 @@ async fn stalled_outbound_consumer_fails_only_its_call_while_other_calls_progres
             run.settlement.recv().await.unwrap(),
             AgentRunSettlement::Finished { .. }
         ));
-        let model_call: agent_protocol::DreamMemoryModelCall = Arc::new(|messages| {
-            assert_eq!(messages[0].content, "Form memory");
-            assert_eq!(messages[1].content, "Session facts");
-            Box::pin(async {
-                agent_protocol::dream_pb::decode_reply(pb::DreamMemoryModelReply {
-                    content: "formed memory".into(),
-                    usage: Some(pb::TokenUsage {
-                        input_tokens: 2,
-                        output_tokens: 1,
-                        total_tokens: 3,
-                        ..Default::default()
-                    }),
-                })
-            })
-        });
         let mut session = session_params();
         session.agent_id = "agent-2".into();
         session.session_id = "session-4".into();
         assert_eq!(
             independent_client
-                .form_dream_memory(session, model_call)
+                .form_dream_memory(agent_protocol::DreamMemoryParams {
+                    session: session.clone(),
+                    after_cursor: None
+                })
                 .await
                 .unwrap(),
-            Some(17)
+            dream_result()
+        );
+        let result = independent_client
+            .generate_session_title(agent_protocol::AgentSessionTitleParams {
+                mode: agent_protocol::AgentSessionTitleMode::Generate,
+                identity: talos_agent_api::AgentTurnRef::new(&session.session_id, "title-turn"),
+                session,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            result.model_usage,
+            Some(dream_result().formation.unwrap().model_usage)
+        );
+        assert_eq!(
+            result.outcome,
+            agent_protocol::AgentSessionTitleOutcome::Generated {
+                title: "Worker title".into()
+            }
         );
     };
     let (failed, ()) = tokio::time::timeout(Duration::from_secs(8), async {
@@ -606,4 +625,33 @@ async fn registered_worker_backpressures_a_consuming_progress_stream() {
         .await
         .unwrap();
     fixture.close().await;
+}
+
+fn dream_result() -> agent_protocol::DreamMemoryResult {
+    agent_protocol::DreamMemoryResult {
+        processed_until_seq: 17,
+        formation: Some(agent_protocol::DreamMemoryFormation {
+            covers_until_seq: Some(17),
+            model_usage: agent_protocol::AgentMemoryModelUsage {
+                request_id: "worker-dream-call".into(),
+                model_ref: talos_types::ModelRef {
+                    provider: "worker-provider".into(),
+                    id: "worker-model".into(),
+                },
+                usage: talos_types::TokenUsage {
+                    input_tokens: 2,
+                    output_tokens: 1,
+                    total_tokens: 3,
+                    ..Default::default()
+                },
+                completed_at: 100,
+                timezone: "Asia/Shanghai".into(),
+            },
+            failure: None,
+        }),
+        next_cursor: agent_protocol::DreamMemoryCursor {
+            generation: 0,
+            offset: 7,
+        },
+    }
 }

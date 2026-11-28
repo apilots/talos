@@ -760,3 +760,6 @@ async fn product_goal_binding_does_not_change_the_original_worker_provenance() {
         Some(events[1].cursor.clone())
     );
 }
+
+#[path = "worker_projection_rebuild_tests.rs"]
+mod rebuild;

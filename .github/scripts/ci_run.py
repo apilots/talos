@@ -151,6 +151,10 @@ def record(directory: Path, key: str, task: dict) -> None:
 
 def check_product_features(packages: list[str]) -> None:
     """Keep optional product composition covered when its owning runtime changes."""
+    if {'talos-base', 'talos-service', 'talos-worker', 'talos-worker-bin'} & set(packages):
+        # Test/all-target builds unify product dev-dependency features. This normal
+        # binary check must compile the Worker without the product feature.
+        run('just', 'check', '--locked', '-p', 'talos-worker-bin', '--bin', 'talos-worker')
     if 'talos-base' not in packages:
         return
     for features in ('', 'sync', 'relay-client', 'sync,relay-client',

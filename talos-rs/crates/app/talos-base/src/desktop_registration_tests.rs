@@ -232,7 +232,13 @@ async fn desktop_worker_identity_returns_local_system_info_without_server_or_enr
     fixture.server.await.unwrap().unwrap();
     assert!(host.worker.lock().await.is_none());
     let expected = talos_types::DesktopWorkerIdentityResponse {
-        system_info: fixture.runtime.worker.system_info().clone(),
+        system_info: fixture
+            .runtime
+            .worker
+            .as_ref()
+            .unwrap()
+            .system_info()
+            .clone(),
         node_id: Some("embedded".into()),
         control_plane_endpoint: Some(fixture.config.cloud.agent_base_url.clone()),
         control_plane_trusted_ca_pem: crate::desktop_worker::control_plane_trusted_ca_pem(
@@ -288,7 +294,10 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .is_code(ErrorCode::Unauthenticated));
     fixture.login("user-1");
     let identity = host.enroll_worker(None, None).await.unwrap();
-    assert_eq!(&identity.system_info, fixture.runtime.worker.system_info());
+    assert_eq!(
+        &identity.system_info,
+        fixture.runtime.worker.as_ref().unwrap().system_info()
+    );
     let trust = fixture
         .config
         .cloud
@@ -772,7 +781,7 @@ async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enro
 #[tokio::test]
 async fn embedded_shutdown_retires_browser_ipc_before_returning() {
     let fixture = DesktopFixture::new().await;
-    let browser = fixture.runtime.worker.browser();
+    let browser = fixture.runtime.worker.as_ref().unwrap().browser();
     let socket = browser.start_ipc(fixture.home.path()).await.unwrap();
     assert!(tokio::net::UnixStream::connect(&socket).await.is_ok());
     fixture.runtime.shutdown().await.unwrap();

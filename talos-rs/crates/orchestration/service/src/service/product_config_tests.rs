@@ -17,9 +17,10 @@ async fn product_policy_uses_product_store_without_connecting_selected_worker() 
     )
     .await;
     let service = service.with_product_config_store(product_store.clone());
+    let admin = Actor::regular("member").with_role(talos_auth::UserRole::Admin);
     let response = service
         .update_config(
-            &Actor::regular("member"),
+            &admin,
             ConfigUpdateRequest {
                 node_id: Some("offline-worker-with-no-registration".into()),
                 value: ConfigValue::SessionMessageSendPolicy(SessionMessageSendPolicy::Steer),
@@ -39,7 +40,7 @@ async fn product_policy_uses_product_store_without_connecting_selected_worker() 
     );
     let response = service
         .get_config(
-            &Actor::regular("member"),
+            &admin,
             ConfigGetRequest {
                 node_id: Some("another-unreachable-worker".into()),
                 path: ConfigPath::SessionMessageSendPolicy,
@@ -51,6 +52,23 @@ async fn product_policy_uses_product_store_without_connecting_selected_worker() 
         response,
         ConfigResponse::SessionMessageSendPolicy {
             policy: SessionMessageSendPolicy::Steer,
+        }
+    );
+    let computer = service.with_product_owner(talos_types::NodeProductOwner::Computer);
+    let response = computer
+        .get_config(
+            &Actor::regular("member"),
+            ConfigGetRequest {
+                node_id: None,
+                path: ConfigPath::SessionMessageSendPolicy,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response,
+        ConfigResponse::SessionMessageSendPolicy {
+            policy: SessionMessageSendPolicy::Steer
         }
     );
 }

@@ -15,7 +15,9 @@ class ProductFeatureGateTests(unittest.TestCase):
         with patch.dict(os.environ, {'TALOS_TEST_ARCHIVE': '/archive/default.tar.zst'}):
             with patch.object(ci_run, 'run') as run:
                 ci_run.check_product_features(['talos-base'])
-        checks = [call.args for call in run.call_args_list[:8]]
+        self.assertEqual(run.call_args_list[0].args,
+                         ('just', 'check', '--locked', '-p', 'talos-worker-bin', '--bin', 'talos-worker'))
+        checks = [call.args for call in run.call_args_list[1:9]]
         base = ('just', 'check', '--locked', '-p', 'talos-base', '--no-default-features', '--all-targets')
         self.assertEqual(checks, [
             base, base + ('--features', 'sync'), base + ('--features', 'relay-client'),
@@ -23,7 +25,7 @@ class ProductFeatureGateTests(unittest.TestCase):
             base + ('--features', 'server,sync'), base + ('--features', 'server,relay'),
             base + ('--features', 'server,sync,relay'),
         ])
-        suites = run.call_args_list[8:]
+        suites = run.call_args_list[9:]
         self.assertEqual([call.args for call in suites], [
             ('just', 'test', '--locked', '-p', 'talos-store', '--no-default-features'),
             ('just', 'test', '--locked', '-p', 'talos-base', '--no-default-features'),

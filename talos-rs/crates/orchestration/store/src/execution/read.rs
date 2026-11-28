@@ -215,18 +215,24 @@ impl WorkerExecutionStore {
         &self,
         identity: &AgentTurnRef,
     ) -> TalosResult<Option<talos_types::AutomationInputOrigin>> {
-        let request: Option<String> = sqlx::query_scalar("SELECT request_json FROM turn_admissions WHERE session_id=? AND turn_id=? AND generation=(SELECT generation FROM sessions WHERE session_id=?) ORDER BY first_offset LIMIT 1").bind(&identity.session_id).bind(&identity.turn_id).bind(&identity.session_id).fetch_optional(&self.pool).await.map_err(database_error)?;
-        match request
-            .as_deref()
-            .map(decode::<agent_protocol::AgentExecutionCommand>)
-            .transpose()?
-        {
-            Some(agent_protocol::AgentExecutionCommand::Run { params }) => {
-                let message_id = params.input.message_id;
-                Ok(params
-                    .automation_origin
-                    .map(|origin| talos_types::AutomationInputOrigin { message_id, origin }))
+        let row: Option<(Option<String>, Option<String>, i64)> = sqlx::query_as("SELECT CASE WHEN length(CAST(json_extract(request_json,'$.params.automation_origin') AS BLOB))<=? THEN json_extract(request_json,'$.params.automation_origin') END, CASE WHEN length(CAST(json_extract(request_json,'$.params.input.messageId') AS BLOB))<=? THEN json_extract(request_json,'$.params.input.messageId') END, COALESCE(length(CAST(json_extract(request_json,'$.params.automation_origin') AS BLOB)),0)+COALESCE(length(CAST(json_extract(request_json,'$.params.input.messageId') AS BLOB)),0) FROM turn_admissions WHERE session_id=? AND turn_id=? AND generation=(SELECT generation FROM sessions WHERE session_id=?) ORDER BY first_offset LIMIT 1")
+            .bind(agent_protocol::MAX_EXECUTION_EVENT_BYTES as i64).bind(agent_protocol::MAX_EXECUTION_EVENT_BYTES as i64).bind(&identity.session_id).bind(&identity.turn_id).bind(&identity.session_id).fetch_optional(&self.pool).await.map_err(database_error)?;
+        match row {
+            Some((_, _, bytes)) if bytes as usize > agent_protocol::MAX_EXECUTION_EVENT_BYTES => {
+                Err(TalosError::new(
+                    ErrorCode::ContextWindowExceeded,
+                    "Worker history automation metadata exceeds its bounded read limit.",
+                ))
             }
+            Some((Some(origin), Some(message_id), _)) => {
+                Ok(Some(talos_types::AutomationInputOrigin {
+                    message_id,
+                    origin: decode(&origin)?,
+                }))
+            }
+            Some((Some(_), None, _)) => Err(TalosError::internal(
+                "Worker history automation message identity is missing.",
+            )),
             _ => Ok(None),
         }
     }
@@ -351,16 +357,31 @@ impl WorkerExecutionStore {
         after: Option<i64>,
         limit: usize,
     ) -> TalosResult<Vec<(i64, AgentEvent)>> {
-        let rows: Vec<(i64, String)> = match after {
-            Some(after) => sqlx::query_as("SELECT event_offset, event_json FROM agent_events WHERE session_id = ? AND generation = (SELECT generation FROM sessions WHERE session_id = ?) AND event_offset > ? AND json_extract(settlement_json, '$.type') = 'finished' ORDER BY event_offset LIMIT ?")
-                .bind(session_id).bind(session_id).bind(after).bind(limit.clamp(1, 256) as i64).fetch_all(&self.pool).await,
-            None => sqlx::query_as("SELECT event_offset, event_json FROM agent_events WHERE session_id = ? AND generation = (SELECT generation FROM sessions WHERE session_id = ?) AND json_extract(settlement_json, '$.type') = 'finished' ORDER BY event_offset DESC LIMIT ?")
-                .bind(session_id).bind(session_id).bind(limit.clamp(1, 256) as i64).fetch_all(&self.pool).await,
-        }.map_err(database_error)?;
-        let mut events = rows
-            .into_iter()
-            .map(|(seq, event)| Ok((seq, decode(&event)?)))
-            .collect::<TalosResult<Vec<_>>>()?;
+        let direction = if after.is_some() { "ASC" } else { "DESC" };
+        let query = format!("WITH candidates AS (SELECT event_offset,length(CAST(event_json AS BLOB)) AS bytes FROM agent_events WHERE session_id=? AND generation=(SELECT generation FROM sessions WHERE session_id=?) AND event_offset>? AND json_extract(settlement_json,'$.type')='finished' ORDER BY event_offset {direction} LIMIT ?), bounded AS (SELECT *,sum(bytes) OVER (ORDER BY event_offset {direction}) AS total FROM candidates) SELECT bounded.event_offset,CASE WHEN bytes<=? AND total<=? THEN body.event_json END,bytes FROM bounded JOIN agent_events body ON body.event_offset=bounded.event_offset ORDER BY bounded.event_offset {direction}");
+        let rows: Vec<(i64, Option<String>, i64)> = sqlx::query_as(&query)
+            .bind(session_id)
+            .bind(session_id)
+            .bind(after.unwrap_or_default())
+            .bind(limit.clamp(1, 256) as i64)
+            .bind(agent_protocol::MAX_EXECUTION_EVENT_BYTES as i64)
+            .bind(MAX_EXECUTION_PAGE_BYTES as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(database_error)?;
+        let mut events = Vec::new();
+        for (sequence, body, bytes) in rows {
+            if bytes as usize > agent_protocol::MAX_EXECUTION_EVENT_BYTES {
+                return Err(TalosError::new(
+                    ErrorCode::ContextWindowExceeded,
+                    "Worker terminal history exceeds its bounded item limit.",
+                ));
+            }
+            let Some(body) = body else {
+                break;
+            };
+            events.push((sequence, decode(&body)?));
+        }
         events.sort_by_key(|(seq, _)| *seq);
         Ok(events)
     }

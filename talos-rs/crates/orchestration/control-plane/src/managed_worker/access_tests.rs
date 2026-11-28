@@ -389,3 +389,47 @@ async fn managed_worker_info_reports_configured_idle_timeout_seconds() {
     let roundtrip: ManagedWorkerInfo = serde_json::from_value(json).unwrap();
     assert_eq!(roundtrip.idle_timeout_seconds, Some(600));
 }
+
+#[tokio::test]
+async fn background_maintenance_cannot_wake_a_manually_stopped_worker() {
+    use std::sync::atomic::Ordering;
+    let (service, mut record) = seeded_service().await;
+    let auth = Arc::new(ManagedAuth::default());
+    auth.0.store(true, Ordering::SeqCst);
+    service
+        .install_managed_worker_runtime(
+            Arc::new(UnusedRuntime),
+            auth,
+            WorkerRuntimeConfig {
+                kind: WorkerRuntimeKind::DockerEngine,
+                image: "fixture".into(),
+                control_plane_endpoint: "https://fixture.invalid".into(),
+                trusted_ca_file: None,
+                docker_engine: Default::default(),
+                kubernetes: Default::default(),
+            },
+            ServerRuntimePolicy::default(),
+            None,
+        )
+        .unwrap();
+    record.desired = Desired::ManualStop;
+    service
+        .store
+        .write_managed_worker(&record, record.generation, Write::Checkpoint)
+        .await
+        .unwrap();
+    let error = service
+        .acquire_managed_dispatch("owner", &record.node_id)
+        .await
+        .err()
+        .unwrap();
+    assert!(error.is_code(ErrorCode::ServiceUnavailable));
+    let unchanged = service
+        .store
+        .managed_worker("owner")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(unchanged.desired == Desired::ManualStop);
+    assert_eq!(unchanged.generation, record.generation);
+}

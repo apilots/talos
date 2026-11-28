@@ -5,8 +5,10 @@ use serde::Serialize;
 mod automation;
 mod browser;
 mod desktop;
+mod file_preview;
 pub use browser::generate_typescript as generate_browser_typescript;
 pub use desktop::generate_typescript as generate_desktop_typescript;
+pub use file_preview::generate_typescript as generate_file_preview_typescript;
 mod error_codes;
 use error_codes::{export_app_server_error_code, export_error_code_runtime_enum};
 mod typescript;
@@ -43,6 +45,7 @@ pub struct AppProtocolSchemaRoot {
     pub created_node: talos_types::CreatedNode,
     pub node_credential: talos_types::NodeCredential,
     pub profile_read_response: talos_types::ProfileReadResponse,
+    pub session_rebuild_view_response: talos_types::SessionRebuildViewResponse,
     pub session_get_response: talos_types::SessionGetResponse,
     pub session_list_response: talos_types::SessionListResponse,
     pub start_turn_request: talos_types::StartTurnRequest,
@@ -156,6 +159,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&automation::imports());
     output.push_str(&browser::imports());
     output.push_str(&desktop::imports());
+    output.push_str(&file_preview::imports());
     output.push_str(&export::<crate::version::ProtocolVersion>());
     let version = serde_json::to_string(&crate::version::ProtocolVersion::CURRENT)
         .expect("serialize protocol version");
@@ -196,6 +200,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SessionCompactResponse>());
     output.push_str(&export::<talos_types::SessionClearRequest>());
     output.push_str(&export::<talos_types::SessionClearResponse>());
+    output.push_str(&export::<talos_types::SessionRebuildViewRequest>());
+    output.push_str(&export::<talos_types::SessionRebuildViewResponse>());
     output.push_str(&export::<talos_types::SessionInfo>());
     output.push_str(&export::<talos_types::SessionUsage>());
     output.push_str(&export::<talos_types::ContextUsage>());
@@ -429,16 +435,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::FileReadRequest>());
     output.push_str(&export::<talos_types::FileReadResponse>());
     output.push_str(&export::<talos_types::FileContentResponse>());
-    output.push_str(&export::<talos_types::FilePreviewDocument>());
-    output.push_str(&export::<talos_types::FilePreviewDocumentUnavailable>());
-    output.push_str(&export::<talos_types::FilePreviewSource>());
-    output.push_str(&export::<talos_types::FilePreviewMetadata>());
-    output.push_str(&export::<talos_types::FilePreviewPrepareRequest>());
-    output.push_str(&export::<talos_types::FilePreviewDescriptor>());
-    output.push_str(&export::<talos_types::FilePreviewReadRequest>());
-    output.push_str(&export::<talos_types::FilePreviewContent>());
-    output.push_str(&export::<talos_types::FilePreviewCloseRequest>());
-    output.push_str(&export::<talos_types::FilePreviewCloseResponse>());
 
     output.push_str(&export::<talos_types::FileUpdateRequest>());
     output.push_str(&export::<talos_types::FileUpdateResponse>());

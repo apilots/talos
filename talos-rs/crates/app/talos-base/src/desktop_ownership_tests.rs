@@ -109,10 +109,24 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
     let credential = std::fs::read(&credential_path).unwrap();
     persist_desktop_config(&config);
     fixture.runtime.shutdown_host().await.unwrap();
-    fixture.runtime.worker_rpc.shutdown().await.unwrap();
+    fixture
+        .runtime
+        .worker_rpc
+        .as_ref()
+        .unwrap()
+        .shutdown()
+        .await
+        .unwrap();
     fixture.runtime.resource_stop.cancel();
     fixture.runtime.automation.shutdown().await.unwrap();
-    fixture.runtime.worker.shutdown().await.unwrap();
+    fixture
+        .runtime
+        .worker
+        .as_ref()
+        .unwrap()
+        .shutdown()
+        .await
+        .unwrap();
     drop(host);
     drop(fixture.runtime);
     let restarted = crate::build_application_runtime_with_migration_dir(
@@ -293,10 +307,16 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
     if let Some(worker) = restarted.worker_registration.lock().await.take() {
         worker.shutdown().await.unwrap();
     }
-    restarted.worker_rpc.shutdown().await.unwrap();
+    restarted
+        .worker_rpc
+        .as_ref()
+        .unwrap()
+        .shutdown()
+        .await
+        .unwrap();
     restarted.resource_stop.cancel();
     restarted.automation.shutdown().await.unwrap();
-    restarted.worker.shutdown().await.unwrap();
+    restarted.worker.as_ref().unwrap().shutdown().await.unwrap();
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
     cloud.abort();
@@ -311,7 +331,9 @@ async fn offline_desktop_reads_its_own_session_without_falling_back_for_remote_p
     let fixture = DesktopFixture::new().await;
     let mut record = session_record();
     record.execution_node_id = "embedded".into();
-    record.agent_id = fixture.runtime.worker.deployments()[0].agent_id.clone();
+    record.agent_id = fixture.runtime.worker.as_ref().unwrap().deployments()[0]
+        .agent_id
+        .clone();
     record.conf.model_selection =
         Some(talos_types::resolve_default_model_selection(&fixture.config.llm).unwrap());
     fixture

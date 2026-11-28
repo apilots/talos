@@ -256,7 +256,7 @@ impl ApplicationHost {
     pub(crate) async fn read_status(&self, actor: &Actor) -> TalosResult<SyncStatusResponse> {
         let config = YamlConfigStore::new(self.config.source_path()).load_sync()?;
         // Snapshot identity without triggering retirement, registration or RPC.
-        let local_computer_id = if actor.auth_disabled {
+        let local_computer_id = if actor.auth_disabled && self.worker.is_some() {
             Some("embedded".into())
         } else {
             if self.owns_local_computer(actor).await? {

@@ -234,10 +234,16 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     .await
     .expect("changed credentials must resume the original supervisor promptly");
     runtime.shutdown_host().await.unwrap();
-    runtime.worker_rpc.shutdown().await.unwrap();
+    runtime
+        .worker_rpc
+        .as_ref()
+        .unwrap()
+        .shutdown()
+        .await
+        .unwrap();
     runtime.resource_stop.cancel();
     runtime.automation.shutdown().await.unwrap();
-    runtime.worker.shutdown().await.unwrap();
+    runtime.worker.as_ref().unwrap().shutdown().await.unwrap();
     runtime.auth_service.shutdown().await;
     server.abort();
     drop(logging);
@@ -401,10 +407,16 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
     assert!(host.background.lock().unwrap().tasks.is_empty());
     drop(retirement);
     drop(lifecycle);
-    runtime.worker_rpc.shutdown().await.unwrap();
+    runtime
+        .worker_rpc
+        .as_ref()
+        .unwrap()
+        .shutdown()
+        .await
+        .unwrap();
     runtime.resource_stop.cancel();
     runtime.automation.shutdown().await.unwrap();
-    runtime.worker.shutdown().await.unwrap();
+    runtime.worker.as_ref().unwrap().shutdown().await.unwrap();
     drop(desktop);
     drop(runtime);
 
@@ -442,10 +454,16 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
         .tasks
         .contains_key(&actor.user_id));
     restarted.shutdown_host().await.unwrap();
-    restarted.worker_rpc.shutdown().await.unwrap();
+    restarted
+        .worker_rpc
+        .as_ref()
+        .unwrap()
+        .shutdown()
+        .await
+        .unwrap();
     restarted.resource_stop.cancel();
     restarted.automation.shutdown().await.unwrap();
-    restarted.worker.shutdown().await.unwrap();
+    restarted.worker.as_ref().unwrap().shutdown().await.unwrap();
 }
 
 #[cfg(feature = "sync")]
@@ -552,10 +570,16 @@ async fn document_transport_starts_while_worker_gateway_is_stalled(binding: Docu
     assert!(runtime.host.lifecycle.try_lock().is_err());
 
     runtime.shutdown_host().await.unwrap();
-    runtime.worker_rpc.shutdown().await.unwrap();
+    runtime
+        .worker_rpc
+        .as_ref()
+        .unwrap()
+        .shutdown()
+        .await
+        .unwrap();
     runtime.resource_stop.cancel();
     runtime.automation.shutdown().await.unwrap();
-    runtime.worker.shutdown().await.unwrap();
+    runtime.worker.as_ref().unwrap().shutdown().await.unwrap();
     auth.abort();
 }
 

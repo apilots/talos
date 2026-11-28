@@ -40,6 +40,7 @@ impl Fixture {
             configured_test_config(),
             None,
             storage.clone(),
+            None,
         )
         .await;
         Self {

@@ -23,9 +23,6 @@ mod environment;
 mod worktree;
 pub(crate) use worktree::WorktreeDirective;
 
-#[path = "title.rs"]
-mod title;
-
 #[path = "execution_boundary.rs"]
 mod execution_boundary;
 
@@ -403,6 +400,15 @@ impl SessionService {
         self.coordinator.read_execution_payload(params).await
     }
 
+    pub(crate) async fn ensure_worker_execution_session(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<()> {
+        self.session_store
+            .ensure_worker_execution_session(session_id)
+            .await
+    }
+
     pub(crate) async fn load_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
         self.session_store.get_session_record(session_id).await
     }
@@ -489,6 +495,17 @@ impl SessionService {
         record.memory_processed_until_event_seq = 0;
         record.usage = talos_types::SessionUsage::default();
         Ok(record)
+    }
+
+    pub(crate) async fn set_generated_title(
+        &self,
+        identity: &talos_agent_api::AgentTurnRef,
+        title: &str,
+    ) -> TalosResult<()> {
+        self.session_store
+            .set_generated_title(identity, title)
+            .await?;
+        Ok(())
     }
 
     #[cfg(test)]

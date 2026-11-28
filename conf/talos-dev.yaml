@@ -25,6 +25,7 @@ gateway:
   host: 0.0.0.0
   auth: false
 agent_node:
+  embedded_worker: true
   control_plane: null
   runner: null
 # Managed Talo Workers are opt-in on the authenticated Server.

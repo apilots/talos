@@ -56,6 +56,7 @@ pub fn auth(request: &pb::worker_rpc_call::Request) -> Option<&pb::NodeAuth> {
         ReadWorkspaceMemory,
         UpdateWorkspaceMemory,
         FormDreamMemory,
+        GenerateSessionTitle,
         Shutdown,
         ListMemoryFiles,
         ReadMemoryFile,

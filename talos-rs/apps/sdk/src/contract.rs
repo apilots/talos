@@ -37,13 +37,14 @@ use talos_types::{
     SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
     SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
     SessionGetResponse, SessionHistoryRequest, SessionListRequest, SessionListResponse,
-    SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
-    SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
-    SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest,
-    StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
-    UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    SessionPatchRequest, SessionRebuildViewRequest, SessionRebuildViewResponse,
+    SessionUpdateResponse, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
+    SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse,
+    SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest, StartTurnResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest, UserCurrentResponse,
+    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
+    WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::sync::mpsc;
 
@@ -365,6 +366,11 @@ pub trait GatewayClient: Send {
         &mut self,
         request: SessionClearRequest,
     ) -> TalosResult<SessionClearResponse>;
+
+    async fn rebuild_session_view(
+        &mut self,
+        request: SessionRebuildViewRequest,
+    ) -> TalosResult<SessionRebuildViewResponse>;
 
     async fn recover_timeline(
         &mut self,

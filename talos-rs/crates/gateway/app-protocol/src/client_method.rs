@@ -94,6 +94,8 @@ pub enum ClientMethod {
     SessionCompact,
     #[serde(rename = "session/clear")]
     SessionClear,
+    #[serde(rename = "session/rebuildView")]
+    SessionRebuildView,
     #[serde(rename = "session/active_turn")]
     SessionActiveTurn,
     #[serde(rename = "session/history")]
@@ -296,6 +298,7 @@ impl ClientMethod {
             Self::SessionClose => "session/close",
             Self::SessionCompact => "session/compact",
             Self::SessionClear => "session/clear",
+            Self::SessionRebuildView => "session/rebuildView",
             Self::SessionActiveTurn => "session/active_turn",
             Self::SessionHistory => "session/history",
             Self::TimelineRecover => "timeline/recover",
@@ -432,6 +435,7 @@ impl FromStr for ClientMethod {
             "session/close" => Ok(Self::SessionClose),
             "session/compact" => Ok(Self::SessionCompact),
             "session/clear" => Ok(Self::SessionClear),
+            "session/rebuildView" => Ok(Self::SessionRebuildView),
             "session/active_turn" => Ok(Self::SessionActiveTurn),
             "session/history" => Ok(Self::SessionHistory),
             "timeline/recover" => Ok(Self::TimelineRecover),

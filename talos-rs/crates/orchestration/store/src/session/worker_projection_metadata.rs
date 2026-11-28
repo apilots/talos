@@ -66,3 +66,19 @@ pub(super) async fn project(
     }
     Ok(())
 }
+
+/// Restore canonical provenance after source-fingerprint validation without
+/// rebinding admission controls or completing any command receipt again.
+pub(super) async fn restore(
+    tx: &mut dyn StorageTransaction,
+    fact: &AgentCommittedEvent,
+) -> TalosResult<()> {
+    let identity = &fact.event.identity;
+    if let Some(supplement) = &fact.history_supplement {
+        tx.execute("UPDATE agent_events SET execution_capture_json=COALESCE(execution_capture_json,?) WHERE session_id=? AND turn_id=? AND sequence=1 AND history_generation=?", &[&encode(supplement)?, &identity.session_id, &identity.turn_id, &fact.cursor.generation.to_string()]).await?;
+    }
+    if let Some(input) = &fact.automation_input {
+        tx.execute("UPDATE agent_events SET automation_origin_json=COALESCE(automation_origin_json,?),automation_input_message_id=COALESCE(automation_input_message_id,?) WHERE session_id=? AND turn_id=? AND sequence=1 AND history_generation=?", &[&encode(&input.origin)?, &input.message_id, &identity.session_id, &identity.turn_id, &fact.cursor.generation.to_string()]).await?;
+    }
+    Ok(())
+}

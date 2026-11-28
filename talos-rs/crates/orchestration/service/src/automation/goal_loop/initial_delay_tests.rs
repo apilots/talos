@@ -1,6 +1,5 @@
 //! First automatic admission uses existing definition timestamps and cancellation.
 use super::*;
-use crate::test_support::{ProjectTestWorkerEvents, TestWorkerEvents};
 
 pub(super) async fn create(
     service: &TalosService,
@@ -86,6 +85,16 @@ async fn initial_loop_due_scan_admits_once_then_uses_original_minute_cadence() {
         .unwrap()
         .messages
         .is_empty());
+    service.scan_session_loops(deadline + 1).await.unwrap();
+    assert_eq!(
+        store
+            .get_agent_active_turn("alice")
+            .await
+            .unwrap()
+            .unwrap()
+            .identity,
+        active.identity
+    );
     let terminal = CanonicalAgentEvent {
         identity: active.identity.clone(),
         sequence: u64::try_from(active.last_event_seq).unwrap() + 1,
@@ -94,17 +103,6 @@ async fn initial_loop_due_scan_admits_once_then_uses_original_minute_cadence() {
             stop_reason: talos_agent_api::AgentStopReason::EndTurn,
         }),
     };
-    store
-        .project_test_events(TestWorkerEvents::new(vec![terminal.clone()]))
-        .await
-        .map(|commit| {
-            commit
-                .events
-                .into_iter()
-                .last()
-                .expect("terminal Worker projection")
-        })
-        .unwrap();
     let session = store.get_session_record("alice").await.unwrap().unwrap();
     service
         .turns
@@ -114,5 +112,5 @@ async fn initial_loop_due_scan_admits_once_then_uses_original_minute_cadence() {
         .await
         .unwrap();
     let after = store.automation_store().loop_task(&task.id).await.unwrap();
-    assert!(after.next_due_at.unwrap() >= terminal.occurred_at + 60);
+    assert_eq!(after.next_due_at, Some(terminal.occurred_at + 60));
 }

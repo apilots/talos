@@ -87,7 +87,7 @@ class Fixture(BaseHTTPRequestHandler):
             chunks = self.delegate_chunks(call, history[user_index:])
         elif case in CHECKPOINT_CASES:
             if case == "checkpoint-unreadable":
-                # Keep the event decodable, but make its snapshot fail the replay invariant.
+                # Corrupt only the product view, leaving canonical Worker history intact.
                 with sqlite3.connect(self.server.database) as db:
                     changed = db.execute(
                         """UPDATE agent_events SET payload_json=json_set(payload_json, '$.data.status', 'inProgress')
@@ -180,7 +180,13 @@ def exercise(root, work, report):
                         title = db.execute("SELECT title FROM sessions WHERE session_key=?", (session,)).fetchone()
                         notices = [json.loads(row[0]) for row in db.execute(
                             "SELECT payload_json FROM agent_events WHERE session_id=? AND sequence IS NULL", (session,))]
+                        user_status = db.execute(
+                            """SELECT json_extract(payload_json,'$.data.status') FROM agent_events
+                               WHERE session_id=? AND json_extract(payload_json,'$.type')='messageCompleted'
+                                 AND json_extract(payload_json,'$.data.role')='user'""", (session,)).fetchone()
                     server.checkpoint_details[case] = {"title": title, "notices": notices}
+                    if case == "checkpoint-unreadable":
+                        server.checkpoint_details[case]["userStatus"] = user_status[0]
                     (report / f"{case}.product.json").write_text(json.dumps(server.checkpoint_details[case]))
 
                 lines = result.stderr.splitlines()
@@ -251,10 +257,11 @@ def exercise(root, work, report):
                 ("checkpoint-effects", "memory", "PROTOCOL_OK:call_checkpoint-effects"),
                 ("checkpoint-effects", "title", "PROTOCOL_OK:call_checkpoint-effects"),
                 ("checkpoint-unreadable", "memory", "PROTOCOL_OK:call_checkpoint-unreadable"),
+                ("checkpoint-unreadable", "title", "PROTOCOL_OK:call_checkpoint-unreadable"),
             ], (server.checkpoint_effects, server.checkpoint_details)
             with sqlite3.connect(server.database) as db:
-                title = db.execute("SELECT title FROM sessions WHERE session_key=?",
-                                   (readable_session,)).fetchone()
+                titles = dict(db.execute("SELECT session_key,title FROM sessions WHERE session_key IN (?,?)",
+                                         (readable_session, server.unreadable_session)))
                 events = db.execute(
                     """SELECT json_extract(payload_json,'$.content.data.code'),
                               json_extract(payload_json,'$.type') FROM agent_events
@@ -262,11 +269,14 @@ def exercise(root, work, report):
                            sequence IS NULL
                            OR json_extract(payload_json,'$.type')='turnCompleted')
                        ORDER BY event_seq""", (server.unreadable_session,)).fetchall()
-            assert title == ("Checkpoint effects verified",), title
-            # Product-view corruption cannot suppress Worker-owned Memory or
-            # rewrite its committed outcome; the product notice follows that fact.
-            assert events == [(None, "turnCompleted"), ("conflict", None)], events
-            print("CASE checkpoint_completion_effects PASS title and memory received restored text, unreadable history still committed")
+            assert titles == {session: "Checkpoint effects verified"
+                              for session in (readable_session, server.unreadable_session)}, titles
+            assert server.checkpoint_details["checkpoint-unreadable"]["userStatus"] == "inProgress", server.checkpoint_details
+            # Product-view corruption cannot suppress Worker-owned title/Memory
+            # or rewrite the committed outcome; neither workload needs a product replay.
+            assert events == [(None, "turnCompleted")], events
+            assert all(not details["notices"] for details in server.checkpoint_details.values()), server.checkpoint_details
+            print("CASE checkpoint_completion_effects PASS Worker title and memory ignore corrupted product history")
             assert config.read_bytes() == original
             # Seed an unowned due Loop in the isolated database. The unrelated
             # exec stays alive across scan ticks while the fixture holds its model.

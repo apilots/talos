@@ -1,6 +1,5 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use talos_agent_api::AgentInterruptOutcome;
@@ -12,16 +11,6 @@ use crate::{
 
 /// Object-safe future used only by the outer Agent Harness port.
 pub type AgentFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-/// Invocation-scoped model callback. The control plane owns model selection and usage.
-/// Dream formation consumes only System/User text and response content/token usage.
-pub type DreamMemoryModelCall = Arc<
-    dyn Fn(
-            Vec<talos_llm_provider::ChatMessage>,
-        ) -> AgentFuture<'static, AgentResult<talos_llm_provider::ChatResponse>>
-        + Send
-        + Sync,
->;
 
 /// Provider-neutral execution host resolved and invoked by Coordinator.
 ///
@@ -148,13 +137,34 @@ pub trait AgentHarness: Send + Sync {
         memory_unavailable()
     }
 
+    /// Propose a title from one successful local Turn, retaining its result and actual usage.
+    /// No model routing, prompts or product history cross this boundary. A missing result
+    /// means no title input or retained result exists; product metadata remains caller-owned.
+    fn generate_session_title(
+        &self,
+        _params: crate::AgentSessionTitleParams,
+    ) -> AgentFuture<'_, AgentResult<Option<crate::AgentSessionTitleResult>>> {
+        Box::pin(async {
+            Ok(Some(crate::AgentSessionTitleResult {
+                outcome: crate::AgentSessionTitleOutcome::Failed {
+                    error: talos_error::TalosError::new(
+                        talos_error::ErrorCode::ServiceUnavailable,
+                        "Session title generation is unavailable on this Worker.",
+                    )
+                    .to_api_error(),
+                },
+                model_usage: None,
+            }))
+        })
+    }
+
     /// Form one idle Session's memory using execution-node policy, date and files.
-    /// The caller must exclude concurrent Turn admission and persist model usage.
+    /// The caller excludes Turn admission and idempotently settles returned usage before
+    /// advancing its own consumption cursor. The Worker retains execution facts.
     fn form_dream_memory(
         &self,
-        _context: AgentSessionContext,
-        _model_call: DreamMemoryModelCall,
-    ) -> AgentFuture<'_, AgentResult<Option<u64>>> {
+        _params: crate::DreamMemoryParams,
+    ) -> AgentFuture<'_, AgentResult<crate::DreamMemoryResult>> {
         memory_unavailable()
     }
 

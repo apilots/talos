@@ -98,7 +98,9 @@ async fn execution_survives_restart_with_only_execution_domain_tables() {
         tables,
         [
             "agent_events",
+            "dream_formations",
             "session_history_supplements",
+            "session_title_results",
             "sessions",
             "turn_admissions",
             "turn_checkpoints",
@@ -774,3 +776,12 @@ async fn waiting_private_reference_requires_its_exact_committed_fact_and_survive
 
 #[path = "migration_tests.rs"]
 mod migration;
+
+#[path = "history_window_tests.rs"]
+mod history_window;
+
+#[path = "dream_tests.rs"]
+mod dream;
+
+#[path = "session_title_tests.rs"]
+mod session_title;

@@ -11,15 +11,11 @@ use talos_agent_api::{
 };
 use talos_auth::{AuthService, OpenModeUserService, RequestIdentity};
 use talos_coordinator::CoordinatorImpl;
-use talos_llm_provider::{
-    ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter,
-    ReasoningOutput, Usage,
-};
 use talos_memory::{
     DreamMemoryDate, DreamMemoryDocument, DreamMemoryDocumentContext, DreamMemoryProvenance,
     MemoryAgentId, MemoryTimezone, MemoryUserId,
 };
-use talos_storage::SqliteStorage;
+use talos_storage::{SqliteStorage, Storage};
 use talos_store::file::DatabaseFileStore;
 use talos_store::profile::{MockProfileStore, ProfileUsageUpdate};
 use talos_store::project::StorageProjectStore;
@@ -27,51 +23,35 @@ use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionRec
 
 use talos_types::talos::{SessionSourceProvider, SessionSourceType};
 
-use talos_types::{
-    resolve_default_model_selection, resolve_model_catalog, ModelRef, ModelSelection,
-    ModelUsageKind, SessionConf, TalosConfig,
-};
-use tokio::sync::mpsc;
+use talos_types::{ModelRef, ModelSelection, ModelUsageKind, SessionConf, TalosConfig};
 
-struct TestProvider {
-    responses: Mutex<VecDeque<String>>,
+#[derive(Clone)]
+struct TestModel {
+    responses: Arc<Mutex<VecDeque<String>>>,
+    requests: Arc<Mutex<Vec<serde_json::Value>>>,
 }
 
-#[async_trait]
-impl LlmProvider for TestProvider {
-    fn name(&self) -> &str {
-        "memory-maintenance-test"
-    }
-
-    async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        Ok(ChatResponse {
-            content: self
-                .responses
-                .lock()
-                .expect("provider responses")
-                .pop_front()
-                .expect("queued provider response"),
-            reasoning: ReasoningOutput::default(),
-            model: request.model,
-            usage: Usage::default(),
-            finish_reason: Some("stop".to_string()),
-            tool_calls: None,
-        })
-    }
-
-    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
-        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
-        Ok(ChatStream::new(rx))
-    }
-
-    fn default_model(&self) -> String {
-        "test-model".to_string()
-    }
-}
-
-struct TestRouter {
-    provider: Arc<dyn LlmProvider>,
-    requested_model_refs: Mutex<Vec<ModelRef>>,
+async fn model_completion(
+    axum::extract::State(model): axum::extract::State<TestModel>,
+    headers: axum::http::HeaderMap,
+    axum::Json(request): axum::Json<serde_json::Value>,
+) -> axum::Json<serde_json::Value> {
+    assert_eq!(
+        headers.get("authorization").unwrap(),
+        "Bearer worker-only-credential"
+    );
+    model.requests.lock().unwrap().push(request);
+    let content = model
+        .responses
+        .lock()
+        .unwrap()
+        .pop_front()
+        .expect("queued model response");
+    axum::Json(serde_json::json!({
+        "id":"worker-dream", "object":"chat.completion", "created":1, "model":"worker-inner",
+        "choices":[{"index":0,"message":{"role":"assistant","content":content},"finish_reason":"stop"}],
+        "usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}
+    }))
 }
 
 struct TestAuthService;
@@ -87,23 +67,14 @@ impl AuthService for TestAuthService {
     }
 }
 
-impl LlmProviderRouter for TestRouter {
-    fn provider_for(&self, model_ref: &ModelRef) -> TalosResult<Arc<dyn LlmProvider>> {
-        self.requested_model_refs
-            .lock()
-            .expect("requested model refs")
-            .push(model_ref.clone());
-        Ok(self.provider.clone())
-    }
-}
-
 #[tokio::test]
 async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
-    let workspace = tempfile::tempdir().expect("workspace");
+    let workspace = tempfile::tempdir().expect("Worker workspace");
+    let server_workspace = tempfile::tempdir().expect("Server workspace");
     let mut config =
         TalosConfig::default().with_workspace_definition(talos_config::WorkspaceDefinition::new(
             talos_config::DEFAULT_WORKSPACE_ID,
-            workspace.path().to_path_buf(),
+            server_workspace.path().to_path_buf(),
         ));
     let mut agent_kernel = config.agent.kernel.clone();
     agent_kernel.timezone = "Pacific/Kiritimati".to_string();
@@ -150,8 +121,6 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         provider: "anthropic".to_string(),
         id: "inner-maintenance-model".to_string(),
     });
-    let default_selection =
-        resolve_default_model_selection(&config.llm).expect("default model selection");
     let storage = Arc::new(SqliteStorage::new(":memory:").await.expect("storage"));
     let migration_dir =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite");
@@ -166,6 +135,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     let mut source_events = BTreeMap::new();
     for (session_id, user_id, last_activity) in [("s1", "u1", 2), ("s2", "u2", 1)] {
         let mut record = session_record(session_id, user_id, last_activity);
+        record.workspace_id = "worker-only".into();
         if session_id == "s2" {
             record.conf.model_selection = None;
         }
@@ -183,29 +153,24 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             ),
         );
     }
-    let provider: Arc<dyn LlmProvider> = Arc::new(TestProvider {
-        responses: Mutex::new(VecDeque::from([
+    let model = TestModel {
+        responses: Arc::new(Mutex::new(VecDeque::from([
             candidate_response("first"),
             candidate_response("second"),
             candidate_response("failed-metrics"),
-        ])),
-    });
-    let router = Arc::new(TestRouter {
-        provider,
-        requested_model_refs: Mutex::new(Vec::new()),
+            "invalid formation".into(),
+        ]))),
+        requests: Default::default(),
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let app = axum::Router::new()
+        .route("/chat/completions", axum::routing::post(model_completion))
+        .with_state(model.clone());
+    let model_server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
     });
     let profiles = Arc::new(MockProfileStore::default());
-    let inner_model = Arc::new(
-        talos_service::InnerModelClient::builder()
-            .configured_model(config.agent.inner_model.clone())
-            .agent_default_model(default_selection.model_ref.clone())
-            .model_catalog(resolve_model_catalog(&config.llm))
-            .provider_router(router.clone())
-            .profile_store(profiles.clone())
-            .profile_timezone("UTC".to_string())
-            .build()
-            .expect("inner model client"),
-    );
     use talos_store::node::AgentNodeStore;
     let node_store = Arc::new(talos_store::node::DatabaseAgentNodeStore::new(&storage));
     let nodes = talos_service::ProductNodeAccess::computer(
@@ -243,15 +208,35 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         node_store,
     ));
     let runtime_home = tempfile::tempdir().unwrap();
-    let mut worker_config = config.clone();
+    let mut worker_config =
+        config
+            .clone()
+            .with_workspace_definition(talos_config::WorkspaceDefinition::new(
+                "worker-only",
+                workspace.path(),
+            ));
     worker_config.agent.kernel.timezone = agent_kernel.timezone.clone();
+    worker_config.llm = serde_json::from_value(serde_json::json!({
+        "provider":"worker-local", "model":"worker-default", "custom_providers":{
+            "worker-local":{"name":"Worker local model","protocol":"chat","base_url":endpoint,"api_key":"worker-only-credential",
+            "models":[{"id":"worker-default"},{"id":"worker-inner"}]}
+        }
+    })).unwrap();
+    worker_config.agent.inner_model = Some(ModelRef {
+        provider: "worker-local".into(),
+        id: "worker-inner".into(),
+    });
+    config.llm.anthropic.api_key = None;
+    config.llm.anthropic.base_url = Some("http://127.0.0.1:9".into());
     // The control plane need not instantiate the Agent that owns this Session.
     config.agent.agents.clear();
     config.agent.kernel.timezone = "Pacific/Honolulu".into();
     let worker = talos_worker::TalosWorker::build(
-        worker_config.with_runtime_paths(talos_config::TalosPaths::from_home(
-            runtime_home.path().to_path_buf(),
-        )),
+        worker_config
+            .clone()
+            .with_runtime_paths(talos_config::TalosPaths::from_home(
+                runtime_home.path().to_path_buf(),
+            )),
         talos_worker::TalosWorkerResources {
             attachment_reader: file_service.clone(),
             tool_image_store: Arc::new(crate::tool_images::ToolImages(file_service.clone())),
@@ -285,7 +270,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         seed_worker_turn(
             &worker,
             sessions.as_ref(),
-            &config,
+            &worker_config,
             session_id,
             user,
             &format!("turn-{session_id}"),
@@ -300,6 +285,14 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         )
         .await
         .unwrap();
+    coordinator
+        .register_environment(
+            "embedded".into(),
+            worker
+                .local_environment(&worker_api, worker_auth.clone())
+                .unwrap(),
+        )
+        .await;
     for (id, harness) in worker
         .local_harnesses(
             &worker_api,
@@ -331,8 +324,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         sessions.clone(),
         service,
         coordinator,
-        inner_model,
-        &config,
+        profiles.clone(),
         DreamMemoryMaintenanceConfig {
             batch_size: 1,
             max_batches: 2,
@@ -349,6 +341,8 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             failed_sessions: 0,
         }
     );
+    assert!(!sessions.has_pending_dream_memory("s1").await.unwrap());
+    assert!(!sessions.has_pending_dream_memory("s2").await.unwrap());
     for user_id in ["u1", "u2"] {
         let user_workspace = workspace.path().join(user_id);
         assert!(
@@ -374,6 +368,11 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         ));
     }
 
+    assert_eq!(
+        std::fs::read_dir(server_workspace.path()).unwrap().count(),
+        0,
+        "Dream must not resolve or write the Server workspace"
+    );
     let second_report = maintenance.run().await.expect("second daily maintenance");
 
     assert_eq!(
@@ -383,13 +382,18 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             failed_sessions: 0,
         }
     );
-    let requested_model_refs = router
-        .requested_model_refs
+    let requested_models = model
+        .requests
         .lock()
-        .expect("requested model refs")
-        .clone();
-    assert!(!requested_model_refs.is_empty());
-    let expected_inner_model = config.agent.inner_model.clone().unwrap();
+        .unwrap()
+        .iter()
+        .map(|request| request["model"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(requested_models, vec!["worker-inner", "worker-inner"]);
+    let expected_inner_model = ModelRef {
+        provider: "worker-local".into(),
+        id: "worker-inner".into(),
+    };
     let usage_kinds = profiles
         .updates()
         .into_iter()
@@ -398,9 +402,6 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             ProfileUsageUpdate::Turn(_) => panic!("maintenance must not record Turn usage"),
         })
         .collect::<Vec<_>>();
-    assert!(requested_model_refs
-        .iter()
-        .all(|model_ref| model_ref == &expected_inner_model));
     assert!(usage_kinds
         .iter()
         .any(|(kind, _)| *kind == ModelUsageKind::Dream));
@@ -416,7 +417,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     seed_worker_turn(
         &worker,
         sessions.as_ref(),
-        &config,
+        &worker_config,
         "s1",
         "u1",
         "turn-s1-2",
@@ -428,11 +429,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         ),
     )
     .await;
-    let memory_before_failure = worker
-        .execution_store()
-        .memory_progress("s1")
-        .await
-        .unwrap();
+    let cursor_before_failure = sessions.dream_memory_cursor("s1").await.unwrap();
     let record_before_failure = sessions
         .get_session_record("s1")
         .await
@@ -445,13 +442,140 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         .await
         .expect_err("Dream Memory must fail when usage recording fails");
     assert_eq!(
-        worker
-            .execution_store()
-            .memory_progress("s1")
-            .await
-            .unwrap(),
-        memory_before_failure
+        sessions.dream_memory_cursor("s1").await.unwrap(),
+        cursor_before_failure
     );
+    assert!(sessions.has_pending_dream_memory("s1").await.unwrap());
+    assert_eq!(model.requests.lock().unwrap().len(), 3);
+    profiles.set_record_usage_failure(false);
+    assert!(maintenance
+        .process_session(record_before_failure.clone())
+        .await
+        .unwrap());
+    assert_eq!(
+        model.requests.lock().unwrap().len(),
+        3,
+        "retry must replay Worker usage without another model call"
+    );
+    assert!(!maintenance
+        .process_session(record_before_failure)
+        .await
+        .unwrap());
+    assert_eq!(
+        profiles.updates().len(),
+        3,
+        "consumed Worker usage must not be charged again"
+    );
+    let pending_cursor = sessions.dream_memory_cursor("s1").await.unwrap();
+    seed_worker_turn(
+        &worker,
+        sessions.as_ref(),
+        &worker_config,
+        "s1",
+        "u1",
+        "turn-invalid",
+        completed_history_events(
+            "s1",
+            "turn-invalid",
+            "message-invalid",
+            "invalid formation fixture",
+        ),
+    )
+    .await;
+    let record = sessions.get_session_record("s1").await.unwrap().unwrap();
+    let error = maintenance.process_session(record).await.unwrap_err();
+    assert!(error.is_code(talos_error::ErrorCode::InternalError));
+    assert_ne!(
+        sessions.dream_memory_cursor("s1").await.unwrap(),
+        pending_cursor
+    );
+    assert_eq!(
+        profiles.updates().len(),
+        4,
+        "paid model usage survives formation failure"
+    );
+    let mut empty = session_record("empty-session", "u1", 0);
+    empty.message_count = 0;
+    sessions.insert_session_record(&empty).await.unwrap();
+    assert!(!sessions.has_pending_dream_memory(&empty.id).await.unwrap());
+    assert!(!maintenance.process_session(empty).await.unwrap());
+    storage
+        .execute(
+            "DELETE FROM worker_event_projection WHERE session_id=?",
+            &["s2"],
+        )
+        .await
+        .unwrap();
+    storage
+        .execute(
+            "DELETE FROM worker_projection_cursors WHERE session_id=?",
+            &["s2"],
+        )
+        .await
+        .unwrap();
+    assert!(
+        sessions.has_pending_dream_memory("s2").await.unwrap(),
+        "missing product projections must remain conservative wake candidates"
+    );
+    // Reuse the same real Worker/model fixture for the migrated title path.
+    let context = agent_protocol::AgentSessionContext {
+        agent_id: "dream-agent".into(),
+        session_id: "s1".into(),
+        workspace: worker_config
+            .resolve_workspace("worker-only", "u1")
+            .unwrap(),
+    };
+    let harness = maintenance
+        .coordinator
+        .session_harness(&context)
+        .await
+        .unwrap();
+    let mut title = agent_protocol::AgentSessionTitleParams {
+        session: context,
+        identity: AgentTurnRef::new("s1", "turn-s1"),
+        mode: agent_protocol::AgentSessionTitleMode::Generate,
+    };
+    model
+        .responses
+        .lock()
+        .unwrap()
+        .extend(["Worker-owned title".into(), "  ".into()]);
+    let generated = harness
+        .generate_session_title(title.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        generated.outcome,
+        agent_protocol::AgentSessionTitleOutcome::Generated {
+            title: "Worker-owned title".into(),
+        }
+    );
+    assert_eq!(
+        generated.model_usage.as_ref().unwrap().model_ref,
+        expected_inner_model
+    );
+    let requests_after_title = model.requests.lock().unwrap().len();
+    assert_eq!(
+        harness.generate_session_title(title.clone()).await.unwrap(),
+        Some(generated)
+    );
+    assert_eq!(model.requests.lock().unwrap().len(), requests_after_title);
+    title.identity = AgentTurnRef::new("s1", "turn-s1-2");
+    let failed = harness
+        .generate_session_title(title)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        failed.outcome,
+        agent_protocol::AgentSessionTitleOutcome::Failed { .. }
+    ));
+    assert!(
+        failed.model_usage.is_some(),
+        "Paid malformed title usage must remain replayable"
+    );
+    model_server.abort();
 
     assert!(
         !memory_path.exists(),
@@ -604,7 +728,9 @@ async fn seed_worker_turn(
     let context = agent_protocol::AgentSessionContext {
         agent_id: "dream-agent".into(),
         session_id: session_id.into(),
-        workspace: config.resolve_workspace("default", user_id).unwrap(),
+        workspace: config
+            .resolve_workspace(&config.workspaces.default_workspace_id, user_id)
+            .unwrap(),
     };
     let journal = worker.execution_store();
     journal

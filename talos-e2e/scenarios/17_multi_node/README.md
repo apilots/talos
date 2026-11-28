@@ -34,3 +34,18 @@ fixture 不直接写注册状态或放宽生产权限校验。
 
 每个场景按实际业务结果验收；未执行的分支和已知失败必须明确记录，不能用测试数量
 宣称所有网络故障和 Provider 能力均已覆盖。跨进程未知执行结果的自动恢复不属于本期。
+
+## Dream execution ownership
+
+`05_workspace` configures the Server with an isolated, unreachable model provider
+and keeps the original real model configuration only on the standalone Workers.
+It verifies Worker-local reflection and Dream files, the Worker's date policy,
+retained `dream_formations` call identities, and matching product Profile usage.
+The product `session_dream_cursors` position is consumption metadata; the Worker
+execution database remains the source of formation and model usage facts.
+
+The real-model case requires the existing external model and Cloud Auth fixture.
+It is separate from deterministic hosted regressions in the default
+`talos-base` Dream maintenance test and registered Harness transport tests. Actual
+Docker/Kubernetes IdleSleep and manual-stop acceptance additionally require that
+managed runtime; the Native Worker topology does not claim those lifecycle checks.

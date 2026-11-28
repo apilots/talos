@@ -47,10 +47,10 @@ text { font-family:'PingFang SC','Microsoft YaHei',sans-serif; fill:#eff4f9; fon
 <text x="1225" y="394" class="muted">FileKernelSessionArtifactStore</text>
 <text x="1088" y="432" class="label orange">已下沉</text>
 <text x="1225" y="432" class="muted">执行历史 / 准入输入 / 事件与终态</text>
-<text x="1225" y="465" class="muted">KernelMemoryProgressStore 的本地实现</text>
+<text x="1225" y="465" class="muted">Memory 进度 / 标题结果与用量</text>
 <rect x="1085" y="487" width="750" height="89" rx="17" fill="#20372f" stroke="#334555"/>
 <text x="1107" y="520" class="label">本 Worker 的配置 / 凭证 / Memory 索引 / 执行库</text>
-<text x="1107" y="553" class="muted">Provider 私有产物 / 浏览器状态 / 实际宿主资源</text>
+<text x="1107" y="553" class="muted">Provider 私有产物 / Office 转换 / 实际资源</text>
 <text x="1088" y="592" class="small">同一 Worker 的 lib / WSS / gRPC 共用实例、状态和锁</text>
 <path d="M844 340H1050" class="wire"/>
 <text x="950" y="310" class="small" text-anchor="middle">输入 / 绑定 / 版本</text>
@@ -108,7 +108,7 @@ text { font-family:'PingFang SC','Microsoft YaHei',sans-serif; fill:#eff4f9; fon
 <rect x="40" y="1302" width="1820" height="56" rx="6" fill="#15212b"/>
 <text x="52" y="1338" class="muted">TalosServer</text>
 <text x="287" y="1338" class="muted">云产品服务 / 产品库 / 调度</text>
-<text x="662" y="1338" class="muted">可选内嵌或远端 Worker 绑定</text>
+<text x="662" y="1338" class="muted">远端 Worker / 可选内嵌</text>
 <text x="1027" y="1338" class="muted">装配</text>
 <text x="1252" y="1338" class="muted">自身 Worker 发布时使用</text>
 <text x="1582" y="1338" class="muted">Relay / Sync 独立可选</text>
@@ -127,5 +127,5 @@ text { font-family:'PingFang SC','Microsoft YaHei',sans-serif; fill:#eff4f9; fon
 <text x="1582" y="1456" class="muted">按 runner 配置选择载体</text>
 <line x1="40" y1="1500" x2="1860" y2="1500" stroke="#334555"/>
 <text x="40" y="1533" class="small">WorkerExecutionStore + LocalExecutionHarness 保存执行事实；产品投影按游标读取；Memory 进度本地持久化。</text>
-<text x="40" y="1566" class="small">纯管理 CLI 只装产品服务；执行入口持有 Worker 唯一命名空间 · 原配置 / Provider 文件保留 · 最终验收进行中</text>
+<text x="40" y="1566" class="small">纯 Server 不依赖本机 Worker / 模型 · 个人执行入口持有唯一命名空间 · 原配置 / Provider 文件保留</text>
 </svg>

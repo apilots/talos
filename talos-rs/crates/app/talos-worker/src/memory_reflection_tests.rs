@@ -10,7 +10,7 @@ use talos_memory::{
 use talos_types::MemoryKind;
 
 #[test]
-fn reflection_runs_only_for_successful_end_turn_without_a_successful_memory_tool() {
+fn reflection_requires_a_successful_end_turn() {
     let event = AgentEvent {
         identity: AgentTurnRef::new("session-1", "turn-1"),
         sequence: 4,
@@ -19,24 +19,7 @@ fn reflection_runs_only_for_successful_end_turn_without_a_successful_memory_tool
             stop_reason: AgentStopReason::EndTurn,
         }),
     };
-    let successful_tool = message(AgentMessageBlockContent::ToolResult(AgentToolResult {
-        metrics: None,
-        call_id: "call-1".to_string(),
-        tool_name: MEMORY_TOOL_PUBLIC_NAME.to_string(),
-        content: Vec::new(),
-        is_error: false,
-    }));
-    let failed_tool = message(AgentMessageBlockContent::ToolResult(AgentToolResult {
-        metrics: None,
-        call_id: "call-2".to_string(),
-        tool_name: MEMORY_TOOL_PUBLIC_NAME.to_string(),
-        content: Vec::new(),
-        is_error: true,
-    }));
-
     assert!(reflection_is_eligible(&event));
-    assert!(has_successful_memory_tool_result(&[successful_tool]));
-    assert!(!has_successful_memory_tool_result(&[failed_tool]));
 }
 
 #[test]
@@ -158,7 +141,16 @@ impl talos_llm_provider::LlmProviderRouter for ReflectionRouter {
 }
 
 #[tokio::test]
-async fn reflection_builds_its_prompt_and_usage_from_worker_local_state() {
+async fn reflection_reads_a_large_turn_through_bounded_canonical_windows() {
+    reflect_large_local_turn(/*successful_memory_tool*/ false).await;
+}
+
+#[tokio::test]
+async fn reflection_skips_successful_memory_tools_outside_its_recent_window() {
+    reflect_large_local_turn(/*successful_memory_tool*/ true).await;
+}
+
+async fn reflect_large_local_turn(successful_memory_tool: bool) {
     let directory = tempfile::tempdir().unwrap();
     let history = Arc::new(
         talos_store::execution::WorkerExecutionStore::open(&directory.path().join("worker.sqlite"))
@@ -181,11 +173,61 @@ async fn reflection_builds_its_prompt_and_usage_from_worker_local_state() {
         },
     ));
     input.role = AgentMessageRole::User;
+    let mut messages = vec![input.clone()];
+    if successful_memory_tool {
+        let mut result = message(AgentMessageBlockContent::ToolResult(AgentToolResult {
+            metrics: None,
+            call_id: "remember-call".into(),
+            tool_name: MEMORY_TOOL_PUBLIC_NAME.into(),
+            content: Vec::new(),
+            is_error: false,
+        }));
+        result.message_id = "memory-tool-result".into();
+        messages.push(result);
+    }
+    for index in 0..140 {
+        let mut progress = message(AgentMessageBlockContent::AssistantText(
+            talos_agent_api::AgentAssistantText {
+                phase: AgentAssistantTextPhase::Commentary,
+                text: "x".repeat(128 * 1024),
+            },
+        ));
+        progress.message_id = format!("progress-{index}");
+        progress.role = AgentMessageRole::Agent;
+        messages.push(progress);
+    }
+    let mut final_answer = message(AgentMessageBlockContent::AssistantText(
+        talos_agent_api::AgentAssistantText {
+            phase: AgentAssistantTextPhase::FinalAnswer,
+            text: "LOCAL_WORKER_FINAL_RESPONSE".into(),
+        },
+    ));
+    final_answer.message_id = "final-answer".into();
+    final_answer.role = AgentMessageRole::Agent;
+    messages.push(final_answer);
     let checkpoint = agent_protocol::AgentRunCheckpoint {
-        last_sequence: 1,
-        messages: vec![input.clone()],
+        last_sequence: messages.len() as u64 + 1,
+        messages: messages.clone(),
         metrics: Default::default(),
     };
+    assert!(serde_json::to_vec(&checkpoint).unwrap().len() > 16 * 1024 * 1024);
+    let mut events = vec![AgentEvent {
+        identity: identity.clone(),
+        sequence: 1,
+        occurred_at: 1,
+        payload: AgentEventPayload::TurnStarted(talos_agent_api::AgentTurnStarted {}),
+    }];
+    events.extend(
+        messages
+            .into_iter()
+            .enumerate()
+            .map(|(index, message)| AgentEvent {
+                identity: identity.clone(),
+                sequence: index as u64 + 2,
+                occurred_at: 1,
+                payload: AgentEventPayload::MessageCompleted(message),
+            }),
+    );
     history
         .admit(
             &scope,
@@ -197,16 +239,20 @@ async fn reflection_builds_its_prompt_and_usage_from_worker_local_state() {
                     command: None,
                 }),
             },
-            vec![AgentEvent {
-                identity: identity.clone(),
-                sequence: 1,
-                occurred_at: 1,
-                payload: AgentEventPayload::TurnStarted(talos_agent_api::AgentTurnStarted {}),
-            }],
+            events,
             &checkpoint,
         )
         .await
         .unwrap();
+    let bounded = history
+        .history_messages(&identity, None, 128, 16 * 1024 * 1024)
+        .await
+        .unwrap();
+    assert!(bounded.has_more);
+    assert!(!bounded
+        .messages
+        .iter()
+        .any(|message| message.message_id == "memory-tool-result"));
     let model = talos_types::ModelInfo::from_provider_model(
         "test",
         talos_config::ProviderModelConfig {
@@ -244,6 +290,13 @@ async fn reflection_builds_its_prompt_and_usage_from_worker_local_state() {
         provider: "test".into(),
         id: "worker-inner-model".into(),
     });
+    config.llm = serde_json::from_value(serde_json::json!({
+        "provider":"test", "model":"worker-inner-model", "custom_providers":{
+            "test":{"name":"Test", "protocol":"chat", "base_url":"http://127.0.0.1:9",
+            "models":[{"id":"worker-inner-model"}]}
+        }
+    }))
+    .unwrap();
     let reflection = UserWorkspaceMemoryReflection {
         config: Arc::new(std::sync::RwLock::new(config)),
         provider: Arc::new(ReflectionRouter(provider.clone())),
@@ -252,7 +305,7 @@ async fn reflection_builds_its_prompt_and_usage_from_worker_local_state() {
     };
     let event = AgentEvent {
         identity,
-        sequence: 2,
+        sequence: checkpoint.last_sequence + 1,
         occurred_at: 2,
         payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
             stop_reason: AgentStopReason::EndTurn,
@@ -260,11 +313,19 @@ async fn reflection_builds_its_prompt_and_usage_from_worker_local_state() {
     };
     let usage = reflection.reflect(&context, &event).await;
     let requests = provider.0.lock().unwrap();
+    if successful_memory_tool {
+        assert!(requests.is_empty());
+        assert!(usage.is_empty());
+        return;
+    }
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].model, "worker-inner-model");
     assert!(requests[0].messages[1]
         .content
         .contains("LOCAL_WORKER_HISTORY_ONLY"));
+    assert!(requests[0].messages[1]
+        .content
+        .contains("LOCAL_WORKER_FINAL_RESPONSE"));
     assert_eq!(usage.len(), 1);
     assert_eq!(usage[0].usage.total_tokens, 3);
 }

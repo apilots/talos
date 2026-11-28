@@ -194,7 +194,9 @@ fn invalid() -> TalosError {
     )
 }
 
-fn encode_memory_usage(value: crate::AgentMemoryModelUsage) -> pb::AgentMemoryModelUsage {
+pub(crate) fn encode_memory_usage(
+    value: crate::AgentMemoryModelUsage,
+) -> pb::AgentMemoryModelUsage {
     pb::AgentMemoryModelUsage {
         request_id: value.request_id,
         model_ref: Some(pb::ModelSelection {
@@ -214,7 +216,7 @@ fn encode_memory_usage(value: crate::AgentMemoryModelUsage) -> pb::AgentMemoryMo
         timezone: value.timezone,
     }
 }
-fn decode_memory_usage(
+pub(crate) fn decode_memory_usage(
     value: pb::AgentMemoryModelUsage,
 ) -> TalosResult<crate::AgentMemoryModelUsage> {
     let model = value.model_ref.ok_or_else(invalid)?;

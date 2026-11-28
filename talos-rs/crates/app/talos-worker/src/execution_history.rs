@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use talos_agent::{
-    AgentFuture, AgentResult, SessionHistoryReadParams, SessionHistoryReader, SessionHistoryWindow,
+    AgentFuture, AgentResult, SessionHistoryReadParams, SessionHistoryReadTurn,
+    SessionHistoryReader, SessionHistoryWindow,
 };
 use talos_agent_api::{
     AgentEventPayload, AgentRunFailure, AgentRunOutput, AgentRunResult, SessionHistoryTurn,
@@ -12,7 +13,7 @@ use talos_store::execution::WorkerExecutionStore;
 
 // Local context loading is independent of the RPC page budget. The Kernel
 // applies its configured per-message/tool prompt limits after this bounded read.
-const MAX_LOCAL_HISTORY_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_LOCAL_HISTORY_BYTES: usize = 16 * 1024 * 1024;
 
 /// The same local reader is injected into every Provider on this Worker.
 #[derive(Clone)]
@@ -29,9 +30,9 @@ impl SessionHistoryReader for WorkerExecutionHistory {
     fn read(
         &self,
         params: SessionHistoryReadParams,
-    ) -> AgentFuture<'_, AgentResult<Vec<SessionHistoryTurn>>> {
+    ) -> AgentFuture<'_, AgentResult<Vec<SessionHistoryReadTurn>>> {
         Box::pin(async move {
-            if params.limit == 0 {
+            if params.limit == 0 || params.message_limit == 0 {
                 return Ok(Vec::new());
             }
             let after = match &params.window {
@@ -51,27 +52,51 @@ impl SessionHistoryReader for WorkerExecutionHistory {
             let mut result = Vec::new();
             let mut bytes = 0;
             for (offset, event) in terminals {
-                let checkpoint = self.0.checkpoint(&event.identity).await?.ok_or_else(|| {
-                    TalosError::internal("Worker terminal checkpoint is missing.")
-                })?;
+                let metrics = self.0.history_metrics(&event.identity).await?;
+                let automation_input = self.0.turn_automation_origin(&event.identity).await?;
+                let metadata_budget = serde_json::to_vec(&(&event, &metrics, &automation_input))
+                    .map_err(|error| {
+                        TalosError::internal_with_source("Measure Worker history metadata.", error)
+                    })?
+                    .len()
+                    + 1024;
+                if bytes + metadata_budget + 2 * agent_protocol::MAX_EXECUTION_EVENT_BYTES
+                    >= MAX_LOCAL_HISTORY_BYTES
+                {
+                    break;
+                }
+                let page = self
+                    .0
+                    .history_messages(
+                        &event.identity,
+                        after,
+                        params.message_limit,
+                        MAX_LOCAL_HISTORY_BYTES - bytes - metadata_budget,
+                    )
+                    .await?;
+                let covered_until_event_seq = if page.has_more {
+                    page.covered_until_event_seq
+                } else {
+                    offset
+                };
+                let has_more_messages = page.has_more;
                 let turn_result = match event.payload {
                     AgentEventPayload::TurnCompleted(completion) => {
                         AgentRunResult::Completed(AgentRunOutput {
-                            messages: checkpoint.messages,
-                            metrics: checkpoint.metrics,
+                            messages: page.messages,
+                            metrics,
                             completion,
                         })
                     }
                     AgentEventPayload::TurnFailed(failure) => {
                         AgentRunResult::Failed(AgentRunFailure {
-                            messages: checkpoint.messages,
-                            metrics: checkpoint.metrics,
+                            messages: page.messages,
+                            metrics,
                             failure,
                         })
                     }
                     _ => return Err(TalosError::internal("Worker terminal history is invalid.")),
                 };
-                let automation_input = self.0.turn_automation_origin(&event.identity).await?;
                 let turn = SessionHistoryTurn {
                     automation_input,
                     identity: event.identity,
@@ -80,22 +105,17 @@ impl SessionHistoryReader for WorkerExecutionHistory {
                     completed_event_seq: offset,
                     completed_at: event.occurred_at,
                 };
-                let size = serde_json::to_vec(&turn)
-                    .map_err(|error| {
-                        TalosError::internal_with_source("Measure Worker context history.", error)
-                    })?
-                    .len();
-                if bytes + size > MAX_LOCAL_HISTORY_BYTES {
-                    if result.is_empty() {
-                        return Err(TalosError::new(
-                            ErrorCode::ContextWindowExceeded,
-                            "One Worker Turn exceeds the local context read budget.",
-                        ));
-                    }
+                bytes += page.bytes + metadata_budget;
+                result.push(SessionHistoryReadTurn {
+                    turn,
+                    covered_until_event_seq,
+                    read_after_event_seq: after.unwrap_or_default(),
+                    message_event_sequences: page.message_event_sequences,
+                });
+                // An oldest read must finish this Turn before visiting a later one.
+                if !latest && has_more_messages {
                     break;
                 }
-                bytes += size;
-                result.push(turn);
             }
             if latest {
                 result.reverse();

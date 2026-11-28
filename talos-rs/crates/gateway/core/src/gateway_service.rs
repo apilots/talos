@@ -368,6 +368,14 @@ impl Gateway for ServiceGateway {
         ServiceGateway::clear_session(self, actor, request).await
     }
 
+    async fn rebuild_session_view(
+        &self,
+        actor: &Actor,
+        request: SessionRebuildViewRequest,
+    ) -> TalosResult<SessionRebuildViewResponse> {
+        ServiceGateway::rebuild_session_view(self, actor, request).await
+    }
+
     async fn list_projects(
         &self,
         actor: &Actor,

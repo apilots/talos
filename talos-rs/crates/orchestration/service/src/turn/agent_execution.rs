@@ -122,7 +122,6 @@ pub(crate) struct AgentExecutionDriver {
     pub(super) execution_store: Arc<dyn AgentExecutionStore>,
     event_service: Arc<TimelineEventService>,
     pub(super) sessions: Arc<crate::session::SessionService>,
-    inner_model: Option<Arc<crate::InnerModelClient>>,
     active: Arc<Mutex<HashMap<String, LiveExecution>>>,
     delivery_tasks: tokio_util::task::TaskTracker,
     remote_observation_stop: tokio_util::sync::CancellationToken,
@@ -202,7 +201,6 @@ impl AgentExecutionDriver {
             execution_store,
             event_service,
             sessions,
-            inner_model: None,
             active: Arc::new(Mutex::new(HashMap::new())),
             delivery_tasks: tokio_util::task::TaskTracker::new(),
             remote_observation_stop: tokio_util::sync::CancellationToken::new(),
@@ -212,11 +210,6 @@ impl AgentExecutionDriver {
 
     pub(crate) fn with_message_queue(mut self, queue: SessionMessageQueueService) -> Self {
         self.message_queue = Some(queue);
-        self
-    }
-
-    pub(crate) fn with_inner_model(mut self, inner_model: Arc<crate::InnerModelClient>) -> Self {
-        self.inner_model = Some(inner_model);
         self
     }
 

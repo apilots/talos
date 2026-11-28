@@ -275,7 +275,9 @@ def run(cluster):
             # Correlate the actual read, independent of preparation response order.
             prepared = next((response for response in prepared_responses if data(response.json())['previewId'] == content_request.value.post_data_json['previewId']), None)
             require(prepared is not None, 'Product read a different preview grant')
-            require(prepared.request.post_data_json == {'source': {'kind': 'file', 'fileId': file_id}}, 'Product prepared a different Markdown source')
+            # A fresh Web account selects its sole registered Computer.
+            expect(page.locator(f'aside button[data-computer-id="{computer["node"]["nodeId"]}"]')).to_have_attribute('aria-pressed', 'true')
+            require(prepared.request.post_data_json == {'source': {'kind': 'file', 'fileId': file_id, 'nodeId': computer['node']['nodeId']}}, 'Product prepared a different Markdown source')
             for request in (prepared.request, content_request.value):
                 require(request.headers.get('authorization') == 'Bearer ' + cluster.users['alice']['access_token'], 'Product Markdown preview request omitted owner authentication')
             (REPORT / 'workspace-preview-auth.json').write_text(json.dumps({'preparedGrants': [data(response.json())['previewId'] for response in prepared_responses], 'readGrant': content_request.value.post_data_json['previewId'], 'source': prepared.request.post_data_json['source'], 'ownerAuthenticated': True}, indent=2) + '\n')

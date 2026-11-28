@@ -318,6 +318,13 @@ pub struct SessionClearRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
+pub struct SessionRebuildViewRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionActiveTurnRequest {
     pub session_id: String,
 }
@@ -381,6 +388,13 @@ pub struct SessionCloseResponse {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct SessionClearResponse {
+    pub session: SessionInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct SessionRebuildViewResponse {
     pub session: SessionInfo,
 }
 

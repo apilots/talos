@@ -39,6 +39,28 @@ impl AgentExecutionStore for DatabaseSessionStore {
     ) -> TalosResult<Vec<super::super::WorkerSettlementRecord>> {
         super::super::worker_projection::pending(self, session_id).await
     }
+
+    async fn begin_worker_projection_rebuild(
+        &self,
+        params: crate::session::WorkerProjectionRebuildParams,
+    ) -> TalosResult<String> {
+        super::super::worker_projection::begin_rebuild(self, params).await
+    }
+
+    async fn stage_worker_projection_rebuild(
+        &self,
+        request_id: &str,
+        params: crate::session::WorkerProjectionParams,
+    ) -> TalosResult<()> {
+        super::super::worker_projection::stage_rebuild(self, request_id, params).await
+    }
+
+    async fn finish_worker_projection_rebuild(
+        &self,
+        request_id: &str,
+    ) -> TalosResult<crate::session::WorkerProjectionRebuildResult> {
+        super::super::worker_projection::finish_rebuild(self, request_id).await
+    }
     async fn complete_worker_settlement(
         &self,
         cursor: &agent_protocol::AgentSessionEventCursor,

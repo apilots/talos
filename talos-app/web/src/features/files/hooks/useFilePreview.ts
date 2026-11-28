@@ -9,7 +9,7 @@ export function useFilePreview(source: FilePreviewSource, scope: string, instanc
   const [revision, setRevision] = useState(0);
   const fileId = source.kind === "file" ? source.fileId : null;
   const sessionId = source.kind === "sessionPath" ? source.sessionId : owner.sessionId;
-  const nodeId = sessionId ? undefined : owner.nodeId;
+  const nodeId = source.kind === "file" ? source.nodeId ?? owner.nodeId : undefined;
   const path = source.kind === "sessionPath" ? source.path : null;
   const key = JSON.stringify([scope, instanceKey, fileId, sessionId, path, nodeId, revision]);
   const [state, setState] = useState<{ key: string; descriptor?: FilePreviewDescriptor; error?: unknown }>();
@@ -19,7 +19,7 @@ export function useFilePreview(source: FilePreviewSource, scope: string, instanc
     const prepare = async () => {
       const { files } = await getTalosClient({ service: "files", sessionId, nodeId });
       if (disposed) return;
-      const source: FilePreviewSource = fileId !== null ? { kind: "file", fileId } : { kind: "sessionPath", sessionId: sessionId!, path: path! };
+      const source: FilePreviewSource = fileId !== null ? { kind: "file", fileId, ...(nodeId ? { nodeId } : {}) } : { kind: "sessionPath", sessionId: sessionId!, path: path! };
       const descriptor = await files.preview.prepare({ source });
       release = () => void files.preview.close({ previewId: descriptor.previewId }).catch(error => console.warn("Preview release failed", error));
       if (disposed) release();

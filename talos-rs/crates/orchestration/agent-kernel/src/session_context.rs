@@ -66,6 +66,8 @@ pub struct SessionPromptSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionPromptSourceTurn {
     pub turn_id: String,
+    /// Contiguous consumed canonical position; partial Turn windows may end at
+    /// a message creation fact before the unchanged canonical terminal fact.
     pub completed_event_seq: i64,
     pub completed_at: i64,
 }
@@ -89,6 +91,9 @@ pub enum SessionPromptRecentWindow {
 
 #[derive(Debug, Clone)]
 pub struct SessionPromptContextConfig {
+    /// Optional canonical message-fact window before independent projections.
+    /// Budget adaptation narrows this window without disabling a content class.
+    pub source_message_limit: Option<usize>,
     pub compact_cursor: Option<CompactPromptCursor>,
     pub recent_window: SessionPromptRecentWindow,
     pub recent_messages_limit: usize,

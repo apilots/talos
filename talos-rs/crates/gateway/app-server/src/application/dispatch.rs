@@ -138,6 +138,12 @@ impl TalosApplicationAdapter {
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
+            ClientRequestParams::SessionRebuildView(params) => to_value(
+                self.gateway
+                    .rebuild_session_view(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
             ClientRequestParams::SessionActiveTurn(params) => {
                 let snapshot = self
                     .gateway

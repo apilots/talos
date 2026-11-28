@@ -1,5 +1,6 @@
 //! Native multi-runtime scenarios over the shared controlled fixtures.
 use super::*;
+use talos_coordinator::AgentCoordinator;
 
 #[tokio::test]
 async fn shared_session_continues_on_the_same_worker_and_active_commands_return_to_its_coordinator()

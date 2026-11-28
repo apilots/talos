@@ -14,7 +14,7 @@ use talos_agent::{
 use talos_agent_api::{
     AgentAssistantText, AgentAssistantTextPhase, AgentEventPayload, AgentMessage,
     AgentMessageBlock, AgentMessageBlockContent, AgentMessageBlockStatus, AgentMessageRole,
-    AgentMessageStatus, AgentTurnRef, AgentUserContent, SessionHistoryTurn,
+    AgentMessageStatus, AgentTurnRef, AgentUserContent,
 };
 use talos_agent_kernel::{
     EventAuthor, ExecutionBranch, KernelMemoryProgressStore, KernelSessionArtifactStore,
@@ -94,7 +94,7 @@ impl SessionHistoryReader for EmptyHistory {
     fn read(
         &self,
         _params: SessionHistoryReadParams,
-    ) -> AgentFuture<'_, AgentResult<Vec<SessionHistoryTurn>>> {
+    ) -> AgentFuture<'_, AgentResult<Vec<talos_agent::SessionHistoryReadTurn>>> {
         Box::pin(async { Ok(Vec::new()) })
     }
 }

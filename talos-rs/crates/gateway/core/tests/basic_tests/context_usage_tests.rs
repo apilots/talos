@@ -4,6 +4,7 @@ use talos_agent::{
     create_agent_harness, AgentHarness, AgentUserContentKind, AttachmentReader, ResolvedAttachment,
     TurnFileScope,
 };
+use talos_agent_api::{AgentMessageBlockContent, AgentTurnRef, TimelineEventPayload};
 use talos_agent_kernel::KernelMemoryProgressStore;
 use talos_agent_provider_kernel::{
     empty_skill_roots_resolver, FileKernelSessionArtifactStore, KernelAgentProvider,
@@ -50,7 +51,7 @@ impl talos_agent::SessionHistoryReader for FreshWorkerHistory {
     fn read(
         &self,
         params: talos_agent::SessionHistoryReadParams,
-    ) -> talos_agent::AgentFuture<'_, TalosResult<Vec<talos_agent_api::SessionHistoryTurn>>> {
+    ) -> talos_agent::AgentFuture<'_, TalosResult<Vec<talos_agent::SessionHistoryReadTurn>>> {
         Box::pin(async move {
             assert!(
                 self.0
@@ -285,6 +286,10 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
         "default",
         workspace_root.path(),
     )];
+    let workspace = config
+        .resolve_workspace("default", "user-1")
+        .expect("test user Workspace should resolve");
+    std::fs::create_dir_all(&workspace.root).expect("test user Workspace should be created");
     config.agent.kernel.prompt.bootstrap.enabled = false;
     config.agent.kernel.prompt.window.compaction_buffer_tokens = 8;
     config.agent.kernel.prompt.window.reserved_output_tokens =
@@ -309,7 +314,7 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
     .await;
     let actor = Actor::regular("user-1");
 
-    gateway
+    let started = gateway
         .start_turn(
             &actor,
             super::request_source(),
@@ -362,19 +367,56 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
         )
         .await
         .expect("terminal Timeline should be readable");
-    assert!(
-        matches!(
-            recovery.replay.events.last(),
-            Some(talos_agent_api::TimelineEvent {
-                event: talos_agent_api::TimelineEventPayload::Agent(talos_agent_api::AgentEvent {
-                    payload: talos_agent_api::AgentEventPayload::TurnCompleted(_),
-                    ..
-                }),
-                ..
-            })
-        ),
-        "unexpected terminal trace: {:?}",
-        recovery.replay.events
+    let identity = AgentTurnRef::new(&started.session_id, &started.turn_id);
+    let facts: Vec<_> = recovery
+        .replay
+        .events
+        .iter()
+        .filter_map(|event| match &event.event {
+            TimelineEventPayload::Agent(event) if event.identity == identity => {
+                Some(&event.payload)
+            }
+            _ => None,
+        })
+        .collect();
+    let terminals: Vec<_> = facts
+        .iter()
+        .copied()
+        .filter(|fact| fact.is_terminal())
+        .collect();
+    assert_eq!(
+        terminals,
+        vec![&AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: talos_agent_api::AgentStopReason::EndTurn,
+        })]
+    );
+    let tool_results: Vec<_> = facts
+        .iter()
+        .filter_map(|fact| match fact {
+            AgentEventPayload::MessageCompleted(message) => Some(&message.blocks),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|block| match &block.content {
+            AgentMessageBlockContent::ToolResult(result) => Some((
+                result.call_id.as_str(),
+                result.tool_name.as_str(),
+                result.content.clone(),
+                result.is_error,
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        tool_results,
+        vec![(
+            "call-1",
+            "echo_usage",
+            vec![talos_types::TalosContentItem::Text {
+                text: "echo:ping".to_string(),
+            }],
+            false,
+        )]
     );
 
     let session = gateway

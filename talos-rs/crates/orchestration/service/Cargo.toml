@@ -42,7 +42,6 @@ talos-coordinator = { path = "../coordinator", optional = true }
 talos-control-plane = { workspace = true, optional = true }
 talos-error = { workspace = true }
 talos-fs = { workspace = true }
-talos-llm-provider = { workspace = true }
 talos-knowledge-format = { workspace = true }
 talos-memory = { workspace = true }
 talos-mcp = { workspace = true }

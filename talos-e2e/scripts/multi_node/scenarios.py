@@ -2,6 +2,8 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import sqlite3
+import yaml
 import os
 import subprocess
 import signal
@@ -222,7 +224,7 @@ def workspace(cluster):
     require(not tool_results, 'Model called a tool despite the scenario instruction; automatic reflection not isolated')
     user_id = cluster.users['alice']['user']['user_id']
     server_workspace = cluster.server_home / 'workspace-talos' / user_id
-    node_workspace = cluster.nodes['alice-a']['home'] / 'workspace-talos' / user_id
+    node_workspace = cluster.nodes['alice-a']['home'] / 'worker-workspaces' / user_id
     artifacts = [json.loads(line) for path in (node_workspace / 'sessions' / session).glob('*.jsonl')
                  for line in path.read_text().splitlines() if line.strip()]
     require(any(record.get('kind') == 'transcript' for record in artifacts), f'Worker transcript missing for {session}')
@@ -233,12 +235,38 @@ def workspace(cluster):
     require(any(marker in path.read_text() for path in memories), 'Automatic reflection did not persist MEMORY.md on Worker')
     _, answer, _ = cluster.turn('alice', 'What is my required report identifier? Reply only with the identifier.')
     require(marker in answer, 'New remote Session cannot read Worker Memory')
-    wait_for(lambda: cluster.query('SELECT memory_processed_until_event_seq FROM sessions WHERE session_key=?', (session,))[0][0] > 0,
-             'scheduled Dream Memory commits on bound Worker', 60)
+    wait_for(lambda: cluster.query('SELECT covered_until_source_seq FROM session_dream_cursors WHERE session_id=? AND covered_until_source_seq>0', (session,)),
+             'scheduled Dream Memory commits on bound Worker and product consumes its result', 90)
     dream_files = [path for path in node_workspace.rglob('*.md') if path.name != 'MEMORY.md']
     require(any(marker in path.read_text() for path in dream_files), 'Dream Memory content was not persisted on Worker')
     usage = cluster.query('SELECT DISTINCT usage_kind FROM profile_turn_usage WHERE session_id=?', (session,))
     require({('memory',), ('dream',)} <= set(usage), f'Memory model usage not accounted on control plane: {usage}')
+    worker_config = yaml.safe_load((cluster.nodes['alice-a']['home'] / 'conf/talos.yaml').read_text())
+    selected = worker_config['agent'].get('inner_model') or {
+        'provider': worker_config['llm']['provider'], 'id': worker_config['llm']['model']}
+    recorded = cluster.query(
+        "SELECT model_provider,model_id,last_request_id,total_tokens FROM profile_turn_usage WHERE session_id=? AND usage_kind='dream'",
+        (session,))
+    require(recorded and all(row[:2] == (selected['provider'], selected['id']) for row in recorded),
+            f'Dream usage did not retain the target Worker model: {recorded}')
+    with sqlite3.connect(f"file:{cluster.nodes['alice-a']['home']}/data/worker/execution.sqlite?mode=ro", uri=True) as source:
+        source_calls = {json.loads(row[0])['modelUsage']['requestId'] for row in source.execute(
+            'SELECT formation_json FROM dream_formations WHERE session_id=?', (session,))}
+    require(all(row[2] in source_calls for row in recorded), 'Product Dream accounting lost the Worker call identity')
+    require(not (cluster.server_home / 'data/worker').exists(),
+            'Pure control-plane Server instantiated a local Worker execution namespace')
+    require(cluster.query('SELECT workspace_id FROM sessions WHERE session_key=?', (session,)) == [('remote-team',)],
+            'Session lost the Worker-only Workspace identity')
+    title_usage = cluster.query(
+        "SELECT model_provider,model_id,last_request_id FROM profile_turn_usage WHERE session_id=? AND usage_kind='title'",
+        (session,))
+    require(title_usage and all(row[:2] == (selected['provider'], selected['id']) for row in title_usage),
+            'Title generation did not use the target Worker model')
+    with sqlite3.connect(f"file:{cluster.nodes['alice-a']['home']}/data/worker/execution.sqlite?mode=ro", uri=True) as source:
+        title_calls = {json.loads(row[0])['modelUsage']['requestId'] for row in source.execute(
+            'SELECT result_json FROM session_title_results WHERE session_id=?', (session,))}
+    require(all(row[2] in title_calls for row in title_usage), 'Product title accounting lost the Worker call identity')
+    passed('auxiliary_models_and_workspace_stay_on_target_worker_without_embedded_server_worker')
     unexpected = [str(path.relative_to(server_workspace)) for path in server_workspace.rglob('*') if path.is_file()]
     require(not unexpected, f'Maintenance created remote Workspace files on control plane: {unexpected}')
     passed('scheduled_dream_memory_on_worker_with_control_plane_usage')
@@ -253,6 +281,7 @@ def workspace(cluster):
     require((node_workspace / 'memory' / f'{node_date}.md').is_file(), 'Dream Memory did not use Worker-local date')
     require(not (node_workspace / 'memory' / f'{control_date}.md').exists(), 'Dream Memory used control-plane date')
     passed('worker_policy_and_date_are_independent_of_control_plane_timezone')
+    return session
 
 
 def rpc_boundaries(cluster):

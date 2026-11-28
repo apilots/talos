@@ -38,15 +38,7 @@ describeIntegration("StdioAppServerClient integration", () => {
     const events: AppProtocol.TimelineEvent[] = [];
     const unsubscribe = client.onEvent((event) => events.push(event));
     try {
-      await client.subscribeEvents({
-        sessionId,
-        turnId: null,
-        sinceEventId: null,
-        replayLimit: 50,
-        closeWhenIdle: null,
-        closeOnTerminal: null,
-      });
-      await client.startTurn({
+      const admitted = await client.startTurn({
         sessionId,
         input: { content: [{ type: "text", text: "Answer exactly: ts-sdk-app-server-ok" }] },
         modelSelection: null,
@@ -54,6 +46,15 @@ describeIntegration("StdioAppServerClient integration", () => {
         projectId: null,
         currentDirectory: null,
         clientRequestId: "ts-sdk-app-server-smoke",
+      });
+      // Admission creates the Session; replay covers events emitted before subscribing.
+      await client.subscribeEvents({
+        sessionId,
+        turnId: admitted.turnId,
+        sinceEventId: null,
+        replayLimit: 50,
+        closeWhenIdle: null,
+        closeOnTerminal: null,
       });
       await waitFor(
         () => events.some((event) => event.event.type === "agent" && event.event.data.payload.type === "turnCompleted"),

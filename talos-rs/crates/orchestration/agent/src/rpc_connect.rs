@@ -122,6 +122,9 @@ impl AgentHarnessRpcAdapter {
             Call::CompactSession(value) => {
                 stream!(value, CompactSession, serve_compact_session, Run)
             }
+            Call::GenerateSessionTitle(value) => {
+                unary!(value, generate_session_title, SessionTitle)
+            }
             Call::FormDreamMemory(value) => {
                 stream!(value, FormDreamMemory, serve_dream_memory, DreamMemory)
             }

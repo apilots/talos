@@ -144,7 +144,13 @@ Worker 只按已接受版本推进执行。暂停、停止或中断当前执行�
 
 产品 Timeline 在 Worker 保留的代数内可从已提交事件重建。
 重建只更新派生视图及摄取位置，保留 Server 自己的配置、账本及幂等结算记录。
-遇到保留范围之外、权限失败或过代游标时明确报错，沿用清空/删除生命周期。
+管理入口为 `session/rebuildView`，HTTP 为 `POST /v1/sessions/{sessionId}/rebuild-view`；Rust/TypeScript SDK 与内嵌入口复用同一 Service。调用者须有该 Session 的写权限和原 Worker 产品绑定。复用 Session lease、节点准入 gate 和维护 reservation，拒绝与本进程活动 writer/准入并发；已有 WaitingForInput 事实可以重建，继续使用原 Turn/action 身份续跑，不启动新 Turn。
+
+先按 Worker 原代数从零游标有界分页，将事实暂存到原 SessionStore 的私有 staging 表；暂存期间原视图继续可读。收齐后在单个产品事务内校验来源指纹及已有映射覆盖，再替换派生事件、活动状态及统计，保留原产品事件游标、系统通知、配置、Goal/Loop 当前业务状态、命令身份、已结算账本及 Dream 消费游标。未见过的新来源后缀沿原幂等结算路径处理，不派发后续任务。中断或失败不清空旧视图，重试重新暂存；不增加 ACK、补传或恢复服务。
+
+已映射的 `TurnStarted` 产品行还保存自动化累计记账水位、Loop 决策等业务元数据，属于产品账本。若该行丢失，Worker 源事件不能证明原始业务水位；重建须在替换任何派生行前以类型化 `Conflict` 拒绝，不得用零用量或空决策补造。原起始业务元数据仍在时，等待事件、活动索引及其他派生事件仍可按原规则修复。
+
+Worker 新增后缀可在重建后沿返回游标继续摄取；若暂存期间产品摄取已越过该快照，则明确冲突并重试。保留范围之外、权限失败、映射账本不完整或过代游标明确报错，不能凭空补造已消费记录，也不能通过清空 Worker、变更代数或重建命令来绕过错误。
 
 产品视图落后时展示最后已确认进度和补读状态。调度器不能因旧视图或断线假定 Turn 已失败或完成，
 须关联原 occurrence、结算事实和 Worker gate 检查后再派发后续工作。
@@ -232,6 +238,14 @@ Sync ACK 不作为准入条件，Session 不自动迁移到其他 Worker。
 保留 Goal/Loop 互斥、预算校验、用户队列顺序和取消规则。
 模型/工具内循环、按需压缩和 Session Memory 注入归执行层，User/Workspace Memory 保留资源权限。
 Dream 维护使用已有空闲 Session 维护边界，不创建聊天 Session 或 Goal/Loop Turn。
+Dream 的工作区必须在原维护锁和节点活动保护内，复用正常 Session 的目标 WorkerEnvironment 解析已保存 workspace_id 与持久用户 namespace，不按 Server 工作区配置拼接根路径。
+
+标题生成同样由目标 Worker 通过原 Harness 语义端口读取本地有界终态历史并执行模型；保留原调用身份、结果及用量。产品只写生成标题并通过既有 Profile 幂等归账，不保留可直接调用 provider 的 InnerModel 实例。模型选择随目标 Worker 配置更新生效；辅助失败仍沿原产品 notice／错误处理边界，不改变主 Turn 的执行结果。
+
+Office 预览的转换进程和临时 PDF 在目标 Worker。SessionPath 按已绑定 Session 的节点和资源根授权；产品 File 原件继续归产品 FileStore，转换节点由请求 nodeId 明确指定，省略仅指原本机入口，缺少本机能力时明确拒绝。产品只保存有时限预览票据、授权与描述，读取产物继续经原 Worker handle，关闭／到期复用原清理机制。
+
+Dream 的模型选择、凭证、调用和 Memory 形成均在目标 Worker，复用其 ConfigService、provider router 与既有内置模型策略，不再把 prompt 返回 Server 执行。Worker 保留同代 Dream 调用事实（原 request ID、模型、用量、形成结果/类型化失败和已覆盖来源位置），每次按产品消费游标最多返回一条；产品先以原 request ID 幂等结算，再持久化自身消费游标。结果交付或产品事务失败后，按原游标补读，不重新调用模型、不增加 ACK 或出站投递队列。只有已读尽该游标后的形成事实时，才可将返回的 Worker 处理进度视为已覆盖，避免丢失崩溃前已产生用量的调用。该产品消费游标与派生 Timeline 独立，视图重建保留，Session clear 才随代数清理。
+
 
 Server 产品服务对符合条件 Goal、Loop、Dream 和 Dream run-once，通过控制面 lib 请求唤醒自动 IdleSleep 中托管 Worker。
 并发工作合并唤醒，等待就绪后重新校验资格，每个 occurrence 至多准入一次，活动许可覆盖执行到结算。
@@ -288,6 +302,6 @@ Automation 页面复用 builtinJob/list、builtinJob/control 和 BuiltinJobInfo�
 - WorkerExecutionStore 使用独立执行 schema、连接和事务；LocalExecutionHarness 在发布前提交准入及执行事实。产品只能读取已提交来源，不提供写入 Worker 终态或补造游标的管理 RPC。
 - AgentCommittedEvent 保留原执行用途（Turn/Compaction）、模型、历史补充、事件身份及结算，产品投影在同一产品事务提交来源游标与视图；结算继续使用原业务 owner 的幂等账本。
 - 执行事件捕获预算为 256 KiB，单事件传输上限 512 KiB，每页最多 256 条且不超过 2 MiB。大产物经有界、授权的来源载荷接口读取；不能恢复完整历史 RPC 或静默截断。
-- WorkerExecutionHistory 本地历史读取预算为 16 MiB，按窗口及完整 Turn 选择，超界显式报错；这是本地读取保护，不等同于模型 Prompt 预算。Memory 形成进度由同一执行库管理。
+- WorkerExecutionHistory 在 16 MiB 本地读取预算内，由 SQL 先限制记录数、字段、单项大小及 UTF-8 总字节；大 Turn 可跨窗口读取，不截断落盘历史。窗口和 Worker 本地 Memory／压缩进度按消息的真实创建位置推进：使用 MessageStarted，无开始事件的已准入输入使用其完成事实；最终内容来自对应的 MessageCompleted，canonical Turn 的终态序号保持原值，读完最后一条消息后才推进到该终态。必需的既有输入／工具调用上下文可重复附带，但不重复声明覆盖。各类 Prompt 独立上限（含关闭某类）必须保留实际消费的连续前缀，不能越过未纳入的已启用内容。单条 canonical message 或其必需上下文超出字节、记录或已启用 Prompt 投影预算时，返回类型化上下文超限错误，保留历史且不推进进度；块级分页不在本合同范围内。本地读取预算与模型 Prompt 预算分别生效。 Dream 和压缩复用既有上下文源按实际转录预算选择连续消息前缀；若按 Turn 合并会删空可读历史，则缩小读取窗口并由源重新计算覆盖，不把裁剪后的空输入当作已处理。手动压缩与自动压缩使用同一模型信息预算推导；未知上下文窗口仍保留原无显式预算策略，单消息超出已知预算时显式失败。
 - 常驻 capture 模块复用 resource_revisions，Sync feature 仅决定复制适配器。账号授权、前像、基线及导入缺口栅栏遵守 S1–S6，不改变 wire、Loro、ACK 或密钥协议。
 - 节点资格、发布与托管唤醒经 talos-control-plane 的窄端口；稳定宿主身份由现有本地持久化维护，不依赖 Sync 初始化。最终全组及真实拓扑验收按上述清单执行，实际结果单独记录。

@@ -45,8 +45,8 @@ pub(crate) struct ApplicationHost {
     pub service: Arc<talos_service::TalosService>,
     #[cfg(feature = "sync")]
     pub event_service: Arc<talos_service::TimelineEventService>,
-    pub worker: talos_worker::TalosWorker,
-    pub worker_rpc: Arc<talos_worker::WorkerRpcHost>,
+    pub worker: Option<talos_worker::TalosWorker>,
+    pub worker_rpc: Option<Arc<talos_worker::WorkerRpcHost>>,
     pub worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
     pub worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     pub trusted_local_host: bool,

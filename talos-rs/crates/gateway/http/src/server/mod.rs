@@ -91,6 +91,7 @@ use self::projects::{
 use self::sessions::{
     clear_session_handler, close_session_handler, compact_session_handler, delete_session_handler,
     get_session_handler, get_session_history_handler, list_sessions_handler, patch_session_handler,
+    rebuild_session_view_handler,
 };
 use self::skills::{
     list_skills_handler, read_skill_handler, refresh_skills_handler, resolve_skills_handler,
@@ -370,6 +371,10 @@ impl HttpServer {
             .route(
                 "/v1/sessions/:session_id/clear",
                 post(clear_session_handler),
+            )
+            .route(
+                "/v1/sessions/:session_id/rebuild-view",
+                post(rebuild_session_view_handler),
             )
             .route("/v1/turns/start", post(start_turn_handler))
             .route("/v1/turns/retry", post(retry_turn_handler))

@@ -20,6 +20,15 @@ impl AgentExecutionDriver {
     /// Persistence failure is a separate diagnostic; never fabricate a durable cursor.
     pub(in crate::turn) async fn report_warning(&self, identity: &AgentTurnRef, error: TalosError) {
         talos_logging::report_error(&error);
+        self.publish_warning(identity, error.to_api_error()).await;
+    }
+
+    /// Worker execution already reported its typed source; product only publishes its safe notice.
+    pub(in crate::turn) async fn publish_warning(
+        &self,
+        identity: &AgentTurnRef,
+        error: talos_error::ApiError,
+    ) {
         if let Err(persistence_error) = self
             .event_service
             .publish_notice(TimelineSystemNotice {
@@ -27,7 +36,7 @@ impl AgentExecutionDriver {
                 occurred_at: chrono::Utc::now().timestamp(),
                 notice: AgentSystemNotice {
                     level: talos_types::TalosTimelineNoticeLevel::Warning,
-                    content: SystemNoticeContent::Error(error.to_api_error()),
+                    content: SystemNoticeContent::Error(error),
                 },
             })
             .await

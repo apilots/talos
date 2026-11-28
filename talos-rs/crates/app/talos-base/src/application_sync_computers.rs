@@ -45,7 +45,7 @@ impl ApplicationHost {
         Ok(self
             .local_computer(actor)
             .await?
-            .or_else(|| actor.auth_disabled.then(|| "embedded".into())))
+            .or_else(|| (actor.auth_disabled && self.worker.is_some()).then(|| "embedded".into())))
     }
     pub(crate) async fn gateway_client(&self) -> TalosResult<AgentNodeClient> {
         gateway_client(&self.config).await
@@ -85,7 +85,7 @@ impl ApplicationHost {
         Ok(())
     }
     pub(crate) async fn owns_local_computer(&self, actor: &Actor) -> TalosResult<bool> {
-        if actor.auth_disabled {
+        if self.worker.is_none() || actor.auth_disabled {
             return Ok(false);
         }
         if let Some(owner) = talos_config::YamlConfigStore::new(self.config.source_path())
@@ -125,7 +125,7 @@ impl ApplicationHost {
             }
             return Ok(computer_id.into());
         }
-        if self.local_computer_id().await? == computer_id {
+        if self.worker.is_some() && self.local_computer_id().await? == computer_id {
             if self.owns_local_computer(actor).await? {
                 return Ok("embedded".into());
             }
@@ -142,7 +142,7 @@ impl ApplicationHost {
             return self.local_node(actor, computer_id).await;
         }
         let local = self.local_computer_id().await?;
-        if computer_id == "embedded" || computer_id == local {
+        if self.worker.is_some() && (computer_id == "embedded" || computer_id == local) {
             if self.owns_local_computer(actor).await? {
                 return Ok("embedded".into());
             }
@@ -224,7 +224,9 @@ impl ApplicationHost {
             }
         }
         if info.node_id == "embedded" {
-            info.system_info = Some(self.worker.system_info().clone());
+            if let Some(worker) = &self.worker {
+                info.system_info = Some(worker.system_info().clone());
+            }
         }
         if info.node_id == "embedded" || actor.auth_disabled {
             return Ok(info);
@@ -233,8 +235,10 @@ impl ApplicationHost {
             self.computer_directory.apply(&actor.user_id, &mut info)?;
         }
         if own && info.node_id == local {
-            info.available = true;
-            info.system_info = Some(self.worker.system_info().clone());
+            if let Some(worker) = &self.worker {
+                info.available = true;
+                info.system_info = Some(worker.system_info().clone());
+            }
         }
         Ok(info)
     }

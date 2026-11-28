@@ -87,7 +87,7 @@ pub enum AgentExecutionCommand {
     },
 }
 
-/// Worker-local background Memory model usage, committed with its Turn settlement.
+/// Worker-local auxiliary model usage, retained with its owning execution result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentMemoryModelUsage {

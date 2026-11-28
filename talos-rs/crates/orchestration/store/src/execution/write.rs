@@ -333,6 +333,8 @@ impl WorkerExecutionStore {
             "turn_admissions",
             "turn_checkpoints",
             "session_history_supplements",
+            "dream_formations",
+            "session_title_results",
         ] {
             sqlx::query(&format!("DELETE FROM {table} WHERE session_id = ?"))
                 .bind(&session.session_id)

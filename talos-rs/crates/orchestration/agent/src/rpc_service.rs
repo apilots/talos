@@ -322,6 +322,32 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
         }))
     }
 
+    async fn generate_session_title(
+        &self,
+        request: Request<pb::GenerateSessionTitleRequest>,
+    ) -> Result<Response<pb::GenerateSessionTitleResponse>, Status> {
+        let request = request.into_inner();
+        let result = async {
+            let auth = node_pb::decode_auth(request.auth)?;
+            let lease = self.authorize(&auth)?;
+            let params = agent_protocol::session_title_pb::decode_params(request.params, &self.config.read().expect("Worker config lock poisoned"))?;
+            let peer = self.coordinator_id(request.caller.as_ref(), &params.session)?;
+            let _reservation = self.session_gate.reflection(&params.session, peer)?;
+            let _resources = self.bind_resources(&auth, &params.session, request.caller.as_ref()).await?;
+            let harness = self.harness(&params.session.agent_id)?;
+            tokio::select! { biased; _ = lease.ended() => Err(unauthenticated()), result = harness.generate_session_title(params) => result }
+        }.await;
+        Ok(Response::new(pb::GenerateSessionTitleResponse {
+            result: Some(match result {
+                Ok(Some(value)) => pb::generate_session_title_response::Result::Generated(
+                    agent_protocol::session_title_pb::encode_result(value),
+                ),
+                Ok(None) => pb::generate_session_title_response::Result::NoInput(pb::Empty {}),
+                Err(error) => pb::generate_session_title_response::Result::Failure(failure(&error)),
+            }),
+        }))
+    }
+
     async fn form_dream_memory(
         &self,
         request: Request<Streaming<pb::FormDreamMemoryRequest>>,

@@ -48,7 +48,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         build_application_runtime_with_migration_dir(config.clone(), &test_migrations_dir())
             .await
             .unwrap();
-    let plugins = &runtime.worker.plugin_manager();
+    let plugins = &runtime.worker.as_ref().unwrap().plugin_manager();
     for invalid in [
         json!({"mcpServers": {"one": {"command": "npx"}, "two": {"command": "npx"}}}),
         json!({"name": "old", "type": "sse", "url": url}),
@@ -188,13 +188,18 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     .await
     .unwrap();
     assert!(!runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .is_tool_available("mcp__duplicate_headers__inspect"));
     let normal_owner = McpDefinitionRef::Plugin {
         install_id: normal_headers.install.id.clone(),
     };
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
             node_id: None,
@@ -247,11 +252,17 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     for server in ["normal_headers", "private_http"] {
         super::mcp_tests::available(&runtime, server).await;
         let invocation = runtime
-            .tool_registry
+            .worker
+            .as_ref()
+            .unwrap()
+            .tool_registry()
             .build_function_invocation("call", format!("mcp__{server}__inspect"), json!({}))
             .unwrap();
         runtime
-            .tool_registry
+            .worker
+            .as_ref()
+            .unwrap()
+            .tool_registry()
             .execute_invocation_unchecked_with_context(
                 invocation,
                 talos_tools::ToolContext::new("credentials", "user"),
@@ -286,6 +297,8 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     fs::write(workspace.join("expected"), "replacement-private-value").unwrap();
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
             node_id: None,
@@ -368,6 +381,8 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         .contains("replacement-private-value"));
     runtime
         .worker
+        .as_ref()
+        .unwrap()
         .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
             node_id: None,
@@ -377,7 +392,10 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         .await
         .unwrap();
     assert!(!runtime
-        .tool_registry
+        .worker
+        .as_ref()
+        .unwrap()
+        .tool_registry()
         .is_tool_available("mcp__private_http__inspect"));
     assert!(matches!(
         plugins

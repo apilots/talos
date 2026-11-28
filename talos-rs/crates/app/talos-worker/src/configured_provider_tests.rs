@@ -148,29 +148,31 @@ fn native_config(provider: &str, protocol: &str, url: &str) -> Config {
 
 async fn serve_response(
     status: &str,
+    content_type: &'static str,
     header_delay: Duration,
     chunks: Vec<(Duration, &'static str)>,
-) -> (String, tokio::task::JoinHandle<()>) {
+) -> (String, tokio::task::JoinHandle<(String, serde_json::Value)>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let status = status.to_owned();
     let task = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
-        let (headers, _) = read_request(&mut socket).await;
-        assert!(headers.starts_with("POST "));
+        let request = read_request(&mut socket).await;
+        assert!(request.0.starts_with("POST "));
         tokio::time::sleep(header_delay).await;
         let headers = format!(
-            "HTTP/1.1 {status}\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n"
+            "HTTP/1.1 {status}\r\ncontent-type: {content_type}\r\nconnection: close\r\n\r\n"
         );
         if socket.write_all(headers.as_bytes()).await.is_err() {
-            return;
+            return request;
         }
         for (delay, chunk) in chunks {
             tokio::time::sleep(delay).await;
             if socket.write_all(chunk.as_bytes()).await.is_err() {
-                return;
+                return request;
             }
         }
+        request
     });
     (url, task)
 }
@@ -193,6 +195,7 @@ async fn native_connections_allow_progress_beyond_nonstream_deadline() {
         };
         let (url, task) = serve_response(
             "200 OK",
+            "text/event-stream",
             Duration::ZERO,
             vec![
                 (Duration::from_millis(600), ": heartbeat\n\n"),
@@ -232,8 +235,13 @@ async fn native_connections_keep_request_body_and_idle_timeouts_typed() {
             (Duration::ZERO, false),
             (Duration::ZERO, true),
         ] {
-            let (url, task) =
-                serve_response("200 OK", header_delay, vec![(Duration::from_secs(2), "{}")]).await;
+            let (url, task) = serve_response(
+                "200 OK",
+                "text/event-stream",
+                header_delay,
+                vec![(Duration::from_secs(2), "{}")],
+            )
+            .await;
             let config = native_config(provider, protocol, &url);
             let provider = crate::create_llm_provider(&config).unwrap();
             let request = ChatRequest::new_user("hello", "model");
@@ -262,7 +270,7 @@ async fn native_connections_keep_request_body_and_idle_timeouts_typed() {
 #[tokio::test]
 async fn native_connections_classify_upstream_http_rejections() {
     for &(provider, protocol) in NATIVE_CONNECTIONS {
-        let (url, task) = serve_response("400 Bad Request", Duration::ZERO, vec![
+        let (url, task) = serve_response("400 Bad Request", "application/json", Duration::ZERO, vec![
             (Duration::ZERO, r#"{"error":{"code":"context_length_exceeded","message":"private upstream detail"}}"#),
         ]).await;
         let config = native_config(provider, protocol, &url);
@@ -388,5 +396,57 @@ async fn native_maximum_selections_survive_configuration_and_request_binding() {
             assert_eq!(body["reasoning_effort"], expected);
         }
         assert!(body.get("thinking_budget").is_none());
+    }
+}
+
+#[tokio::test]
+async fn missing_model_configuration_rejects_model_block_requests() {
+    let mut config = Config::default();
+    config.llm.provider = "openai".into();
+    config.llm.model = "missing-model".into();
+    config.llm.openai.api_key = None;
+    let provider = crate::create_llm_provider(&config).unwrap();
+    let error = match provider
+        .stream_model_blocks(ChatRequest::new_user("hello", "missing-model"))
+        .await
+    {
+        Ok(_) => panic!("Unconfigured provider must reject execution"),
+        Err(error) => error,
+    };
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+}
+
+#[tokio::test]
+async fn native_provider_defaults_preserve_identity_and_protocol() {
+    let chat = r#"{"model":"model","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
+    let responses = r#"{"id":"resp_1","model":"model","status":"completed","output_text":"ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
+    for (name, path, body) in [
+        ("openrouter", "/v1/chat/completions", chat),
+        ("openai", "/v1/responses", responses),
+        ("deepseek", "/v1/chat/completions", chat),
+    ] {
+        let (url, server) = serve_response(
+            "200 OK",
+            "application/json",
+            Duration::ZERO,
+            vec![(Duration::ZERO, body)],
+        )
+        .await;
+        let mut config = Config::default();
+        config.llm = serde_json::from_value(serde_json::json!({
+            "provider":name, "model":"model",
+            (name): {"api_key":"loopback-only-key", "base_url":url, "models":[{"id":"model"}]}
+        }))
+        .unwrap();
+        let provider = crate::create_llm_provider(&config).unwrap();
+        assert_eq!(provider.name(), name);
+        assert_eq!(provider.default_model(), "model");
+        let response = provider
+            .chat(ChatRequest::new_user("hello", "model"))
+            .await
+            .unwrap();
+        assert_eq!(response.content, "ok");
+        let (headers, _) = server.await.unwrap();
+        assert!(headers.starts_with(&format!("POST {path} ")));
     }
 }

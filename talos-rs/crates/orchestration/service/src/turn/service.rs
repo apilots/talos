@@ -21,7 +21,7 @@ use tokio::sync::oneshot;
 use {tracing::error, uuid::Uuid};
 
 use crate::message_queue::MessageQueueReservation;
-use crate::{InnerModelClient, SessionMessageQueueService};
+use crate::SessionMessageQueueService;
 
 use super::{
     auto_dispatch_session_from_event, retry_idempotency_key,
@@ -38,6 +38,7 @@ mod input;
 mod interrupt;
 mod managed_wake;
 mod message_queue;
+mod rebuild;
 
 #[path = "service_subagent.rs"]
 mod subagent;
@@ -133,11 +134,6 @@ impl TurnService {
 
     pub(crate) fn with_managed_workers(mut self, nodes: crate::ProductNodeAccess) -> Self {
         self.nodes = Some(nodes);
-        self
-    }
-
-    pub(crate) fn with_inner_model(mut self, inner_model: Arc<InnerModelClient>) -> Self {
-        self.execution = self.execution.with_inner_model(inner_model);
         self
     }
 
@@ -778,3 +774,6 @@ pub(crate) async fn await_admission<T: Send + 'static>(
         )
     })?
 }
+
+#[path = "service/title.rs"]
+mod title;

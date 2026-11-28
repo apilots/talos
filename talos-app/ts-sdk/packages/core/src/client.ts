@@ -114,9 +114,11 @@ import type {
   SkillsSuggestResponse,
   SessionPatchRequest,
   SessionClearRequest,
+  SessionRebuildViewRequest,
   SessionCompactResponse,
   SessionCompactRequest,
   SessionClearResponse,
+  SessionRebuildViewResponse,
   SessionCloseRequest,
   SessionCloseResponse,
   SessionDeleteRequest,
@@ -467,6 +469,10 @@ export class TalosClient {
       }),
     clearById: (sessionId: string): Promise<SessionClearResponse> =>
       this.sessions.clear({ sessionId }),
+    rebuildView: (request: SessionRebuildViewRequest) =>
+      this.http.request<SessionRebuildViewResponse>(this.url(`/v1/sessions/${request.sessionId}/rebuild-view`), {
+        method: "POST",
+      }),
     activeTurn: (request: SessionActiveTurnRequest) =>
       this.http.request<SessionActiveTurnResponse>(this.url(`/v1/sessions/${request.sessionId}/active-turn`)),
     activeTurnById: (sessionId: string): Promise<SessionActiveTurnResponse> =>
@@ -582,7 +588,7 @@ export class TalosClient {
   files = {
     preview: createFilePreviewClient({
       prepare: (request: import("./types").FilePreviewPrepareRequest) =>
-        this.http.request<import("./types").FilePreviewDescriptor>(this.url("/v1/file-previews"), { method: "POST", body: JSON.stringify(request) }),
+        this.http.request<import("./types").FilePreviewDescriptor>(this.url("/v1/file-previews"), { method: "POST", body: JSON.stringify({ ...request, source: request.source.kind === "file" ? this.withComputer(request.source) : request.source }) }),
       read: (request: import("./types").FilePreviewReadRequest) =>
         this.http.request<import("./types").FilePreviewContent>(this.url("/v1/file-previews/read"), { method: "POST", body: JSON.stringify(request) }),
       close: (request: import("./types").FilePreviewCloseRequest, signal?: AbortSignal) =>

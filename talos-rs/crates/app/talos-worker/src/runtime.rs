@@ -40,7 +40,6 @@ pub struct TalosWorker {
     system_info: talos_types::NodeSystemInfo,
     harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
     config: Arc<RwLock<Config>>,
-    provider_router: Arc<ReloadableLlmProviderRouter>,
     tool_registry: Arc<ToolRegistry>,
     plugin_manager: PluginManagerService,
     memory_service: MemoryService,
@@ -288,6 +287,8 @@ impl TalosWorker {
                             })
                         }),
                     ),
+                    model_router: llm_provider_router.clone(),
+                    history: execution_store.clone(),
                     workspace_memory: user_workspace_memory.clone(),
                     execution_gate: plugin_manager.execution_gate(),
                     browser: browser.clone(),
@@ -345,7 +346,6 @@ impl TalosWorker {
             resource_bindings,
             harnesses,
             config: active_config,
-            provider_router,
             tool_registry,
             plugin_manager,
             memory_service,
@@ -411,10 +411,6 @@ impl TalosWorker {
 
     pub fn config(&self) -> Arc<RwLock<Config>> {
         self.config.clone()
-    }
-
-    pub fn provider_router(&self) -> Arc<ReloadableLlmProviderRouter> {
-        self.provider_router.clone()
     }
 
     pub fn tool_registry(&self) -> Arc<ToolRegistry> {

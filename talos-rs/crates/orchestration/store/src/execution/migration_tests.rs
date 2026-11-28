@@ -189,7 +189,11 @@ async fn version_two_upgrade_preserves_waiting_execution_and_command_replay() {
     .unwrap();
     assert_eq!(
         indexes,
-        ["agent_events_replay", "turn_admissions_command_identity"]
+        [
+            "agent_events_replay",
+            "dream_formations_replay",
+            "turn_admissions_command_identity"
+        ]
     );
     let page = store
         .read_events(AgentSessionEventsParams {
