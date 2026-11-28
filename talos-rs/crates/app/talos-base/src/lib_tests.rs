@@ -17,6 +17,9 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::Duration;
 
+#[path = "application_shutdown_tests.rs"]
+mod shutdown_tests;
+
 static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn test_migrations_dir() -> PathBuf {

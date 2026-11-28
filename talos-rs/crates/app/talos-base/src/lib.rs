@@ -18,7 +18,7 @@ use talos_app_server::BackgroundTaskDrain;
 use talos_auth::AuthService;
 use talos_automation::Automation;
 use talos_config::Config;
-use talos_coordinator::{AgentCoordinator, CoordinatorImpl};
+use talos_coordinator::CoordinatorImpl;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::Gateway;
 use talos_logging::LogGuard;
@@ -328,22 +328,20 @@ pub fn exit_with_error(context: &str, error: TalosError) -> ! {
     std::process::exit(1);
 }
 
-/// Drains execution and product delivery before app-server resource cleanup.
-struct CoordinatorDrain {
-    coordinator: Arc<CoordinatorImpl>,
+/// Drains product delivery before subscriptions close; runtime owns execution teardown.
+struct ProductDeliveryDrain {
     service: Arc<TalosService>,
     automation: Automation,
 }
 
 #[async_trait::async_trait]
-impl BackgroundTaskDrain for CoordinatorDrain {
+impl BackgroundTaskDrain for ProductDeliveryDrain {
     async fn drain(&self, timeout: Duration) -> TalosResult<()> {
         let result = self.automation.shutdown().await;
-        let result = application_automation::combine(
+        application_automation::combine(
             result,
             application_automation::drain_product_delivery(&self.service, timeout).await,
-        );
-        application_automation::combine(result, self.coordinator.shutdown(timeout).await)
+        )
     }
 }
 
@@ -398,8 +396,7 @@ async fn run_json_rpc_stdio_after_startup(
     let service = runtime.service.clone();
     let app = Arc::new(
         talos_app_server::TalosApplicationAdapter::new(service.clone(), replay_limit)
-            .with_drain_provider(Box::new(CoordinatorDrain {
-                coordinator: runtime.coordinator.clone(),
+            .with_drain_provider(Box::new(ProductDeliveryDrain {
                 service: service.clone(),
                 automation: runtime.automation.clone(),
             }))
