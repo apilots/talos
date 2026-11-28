@@ -343,11 +343,11 @@ impl AgentHarness for LocalAgentHarness {
     }
     fn form_dream_memory(
         &self,
-        session: agent_protocol::AgentSessionContext,
-        model: agent_protocol::DreamMemoryModelCall,
-    ) -> crate::AgentFuture<'_, TalosResult<Option<u64>>> {
+        mut params: agent_protocol::DreamMemoryParams,
+    ) -> crate::AgentFuture<'_, TalosResult<agent_protocol::DreamMemoryResult>> {
         Box::pin(async move {
-            let session = self.session(session)?;
+            let session = self.session(params.session)?;
+            params.session = session.clone();
             let lease = self.adapter.authorize(&self.auth)?;
             let _reflection = self
                 .adapter
@@ -358,7 +358,7 @@ impl AgentHarness for LocalAgentHarness {
                 .bind_resources(&self.auth, &session, None)
                 .await?;
             let harness = self.adapter.harness(&self.agent_id)?;
-            tokio::select! { biased; _ = lease.ended() => Err(unauthenticated()), result = harness.form_dream_memory(session, model) => result }
+            tokio::select! { biased; _ = lease.ended() => Err(unauthenticated()), result = harness.form_dream_memory(params) => result }
         })
     }
     fn shutdown(&self, timeout: Duration) -> crate::AgentFuture<'_, TalosResult<()>> {

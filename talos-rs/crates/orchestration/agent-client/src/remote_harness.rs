@@ -220,10 +220,9 @@ impl AgentHarness for RemoteAgentClient {
 
     fn form_dream_memory(
         &self,
-        context: AgentSessionContext,
-        model_call: agent_protocol::DreamMemoryModelCall,
-    ) -> AgentFuture<'_, AgentResult<Option<u64>>> {
-        self.run_dream_memory(context, model_call)
+        params: agent_protocol::DreamMemoryParams,
+    ) -> AgentFuture<'_, AgentResult<agent_protocol::DreamMemoryResult>> {
+        self.run_dream_memory(params)
     }
 
     fn shutdown(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {

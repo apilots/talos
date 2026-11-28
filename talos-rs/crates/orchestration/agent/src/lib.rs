@@ -31,7 +31,9 @@ pub use definition::{AgentDefinition, AgentDefinitionLoader};
 pub use error::AgentRunFailure;
 pub use event_handle::{AgentMessageBlockHandle, AgentMessageHandle};
 pub use event_sink::{AgentEventPipeline, AgentEventSink};
-pub use history::{SessionHistoryReadParams, SessionHistoryReader, SessionHistoryWindow};
+pub use history::{
+    SessionHistoryReadParams, SessionHistoryReadTurn, SessionHistoryReader, SessionHistoryWindow,
+};
 pub use provider::{
     AgentOperationControl, AgentProvider, AgentSession, SessionCompactionParams,
     SessionCompactionResult, SessionTurnInputDelivery, SessionTurnInputReceiver, SessionTurnParams,

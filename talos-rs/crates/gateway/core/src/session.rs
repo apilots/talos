@@ -5,7 +5,8 @@ use talos_types::{
     SessionActiveTurnRequest, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
     SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
     SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
-    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
+    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionRebuildViewRequest,
+    SessionRebuildViewResponse, SessionUpdateResponse,
 };
 
 use crate::gateway_service::{require_non_empty, ServiceGateway};
@@ -104,5 +105,17 @@ impl ServiceGateway {
             .clear_session(actor, &request.session_id)
             .await?;
         Ok(SessionClearResponse { session })
+    }
+
+    pub(crate) async fn rebuild_session_view(
+        &self,
+        actor: &Actor,
+        request: SessionRebuildViewRequest,
+    ) -> TalosResult<SessionRebuildViewResponse> {
+        let session = self
+            .service
+            .rebuild_session_view(actor, &request.session_id)
+            .await?;
+        Ok(SessionRebuildViewResponse { session })
     }
 }

@@ -877,6 +877,9 @@ async fn execution_details_upgrade_preserves_main_history_with_null_details() {
         "session_event_retention".to_owned(),
         "worker_event_projection".to_owned(),
         "worker_projection_cursors".to_owned(),
+        "worker_projection_rebuilds".to_owned(),
+        "worker_projection_rebuild_events".to_owned(),
+        "session_dream_cursors".to_owned(),
     ]);
     tables_before.sort();
 

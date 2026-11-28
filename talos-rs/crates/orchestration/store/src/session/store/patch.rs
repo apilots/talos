@@ -1,11 +1,86 @@
 //! Patch persisted Session records atomically in SQLite.
 
 use talos_error::{TalosError, TalosResult};
+use talos_types::{SessionUsage, DEFAULT_SESSION_TITLE};
 
 use super::DatabaseSessionStore;
 use crate::session::{PatchSessionParams, SessionRecord, SessionRecordPatch};
 
 impl DatabaseSessionStore {
+    pub(super) async fn clear_session_history_record(
+        &self,
+        session_id: &str,
+        cleared_at: u64,
+    ) -> TalosResult<bool> {
+        let mut transaction = self.begin_session_transaction(session_id).await?;
+        let active = transaction
+            .query(
+                "SELECT 1 AS active FROM agent_active_turns WHERE session_id = ? LIMIT 1",
+                &[session_id],
+            )
+            .await?;
+        if !active.is_empty() {
+            transaction.rollback().await?;
+            return Err(TalosError::new(
+                talos_error::ErrorCode::ActiveTurnRunning,
+                "cannot clear a Session with an active Agent Turn",
+            ));
+        }
+
+        super::super::worker_projection::ensure_settled(&mut *transaction, &[session_id]).await?;
+
+        transaction
+            .execute(
+                "DELETE FROM agent_command_idempotency WHERE session_id = ?",
+                &[session_id],
+            )
+            .await?;
+        transaction
+            .execute(
+                "DELETE FROM worker_projection_cursors WHERE session_id = ?",
+                &[session_id],
+            )
+            .await?;
+        transaction
+            .execute(
+                "DELETE FROM session_dream_cursors WHERE session_id=?",
+                &[session_id],
+            )
+            .await?;
+        crate::capture::source::retire_history(
+            &mut *transaction,
+            session_id,
+            /*deleted*/ false,
+        )
+        .await?;
+        let usage_json = Self::build_usage_json(&SessionUsage::default())?;
+        let cleared_at = cleared_at.to_string();
+        let affected = transaction
+            .execute(
+                r#"
+                UPDATE sessions
+                SET title = ?, last_activity = ?, message_count = 0,
+                    latest_turn_seq = 0, memory_processed_until_event_seq = 0,
+                    history_generation = history_generation + 1,
+                    usage_json = ?
+                WHERE session_key = ?
+                "#,
+                &[
+                    DEFAULT_SESSION_TITLE,
+                    cleared_at.as_str(),
+                    usage_json.as_str(),
+                    session_id,
+                ],
+            )
+            .await?;
+        if affected == 0 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        transaction.commit().await?;
+        Ok(true)
+    }
+
     pub(super) async fn patch_session_record(
         &self,
         params: PatchSessionParams,

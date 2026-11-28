@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::execution_history::MAX_LOCAL_HISTORY_BYTES;
+
 use serde::{Deserialize, Serialize};
 use talos_agent_api::{
     AgentAssistantTextPhase, AgentEvent, AgentEventPayload, AgentMessage, AgentMessageBlockContent,
@@ -67,17 +69,39 @@ impl UserWorkspaceMemoryReflection {
         {
             return Ok(());
         }
-        let checkpoint = self
+        if self
             .history
-            .checkpoint(&event.identity)
+            .has_successful_tool_result(
+                &event.identity,
+                &[MEMORY_TOOL_PUBLIC_NAME, MEMORY_TOOL_INTERNAL_NAME],
+            )
             .await?
-            .ok_or_else(|| {
-                talos_error::TalosError::internal("Worker reflection checkpoint is missing.")
-            })?;
-        let messages = &checkpoint.messages;
-        if has_successful_memory_tool_result(messages) {
+        {
             return Ok(());
         }
+        let first = self
+            .history
+            .history_messages(&event.identity, Some(0), 1, MAX_LOCAL_HISTORY_BYTES)
+            .await?;
+        let recent = self
+            .history
+            .history_messages(
+                &event.identity,
+                None,
+                128,
+                MAX_LOCAL_HISTORY_BYTES.saturating_sub(first.bytes),
+            )
+            .await?;
+        let mut messages = first.messages;
+        for message in recent.messages {
+            if !messages
+                .iter()
+                .any(|existing| existing.message_id == message.message_id)
+            {
+                messages.push(message);
+            }
+        }
+        let messages = &messages;
         let scope = talos_memory::MemoryScope {
             workspace_id: context.session.workspace.workspace_id.clone(),
             user_id: context.session.workspace.user_id.clone(),
@@ -105,28 +129,15 @@ impl UserWorkspaceMemoryReflection {
                 error,
             )
         })?;
-        let model = {
-            let config = self.config.read().expect("Worker config lock");
-            config
-                .agent
-                .inner_model
-                .clone()
-                .unwrap_or_else(|| talos_types::ModelRef {
-                    provider: config.llm.provider.clone(),
-                    id: config.llm.model.clone(),
-                })
-        };
-        let provider = self.provider.provider_for(&model)?;
-        let call = provider.chat(
-            talos_llm_provider::ChatRequest::builder()
-                .model(model.id.clone())
-                .messages(vec![
-                    ChatMessage::system(REFLECTION_PROMPT),
-                    ChatMessage::user(input),
-                ])
-                .build(),
+        let call = crate::builtin_model::chat(
+            &self.config,
+            &self.provider,
+            vec![
+                ChatMessage::system(REFLECTION_PROMPT),
+                ChatMessage::user(input),
+            ],
         );
-        let response = tokio::time::timeout(REFLECTION_TIMEOUT, call)
+        let (response, call_usage) = tokio::time::timeout(REFLECTION_TIMEOUT, call)
             .await
             .map_err(|error| {
                 talos_error::TalosError::from_source(
@@ -135,23 +146,7 @@ impl UserWorkspaceMemoryReflection {
                     error,
                 )
             })??;
-        usage.push(agent_protocol::AgentMemoryModelUsage {
-            request_id: uuid::Uuid::new_v4().to_string(),
-            model_ref: model,
-            usage: talos_types::TokenUsage::from(&response.usage),
-            completed_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock follows epoch")
-                .as_secs() as i64,
-            timezone: self
-                .config
-                .read()
-                .expect("Worker config lock")
-                .agent
-                .kernel
-                .timezone
-                .clone(),
-        });
+        usage.push(call_usage);
         let Some(update) = parse_reflection_update(&response.content)? else {
             return Ok(());
         };
@@ -177,21 +172,6 @@ fn reflection_is_eligible(event: &AgentEvent) -> bool {
         AgentEventPayload::TurnCompleted(ref completed)
             if completed.stop_reason == AgentStopReason::EndTurn
     )
-}
-
-fn has_successful_memory_tool_result(messages: &[AgentMessage]) -> bool {
-    messages
-        .iter()
-        .flat_map(|message| &message.blocks)
-        .any(|block| {
-            matches!(
-                &block.content,
-                AgentMessageBlockContent::ToolResult(result)
-                    if !result.is_error
-                        && (result.tool_name == MEMORY_TOOL_PUBLIC_NAME
-                            || result.tool_name == MEMORY_TOOL_INTERNAL_NAME)
-            )
-        })
 }
 
 fn user_text(messages: &[AgentMessage]) -> String {

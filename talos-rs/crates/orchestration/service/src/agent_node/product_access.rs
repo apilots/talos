@@ -344,6 +344,20 @@ impl ProductNodeAccess {
         local_only(node_id)?;
         Ok(None)
     }
+    /// Acquire the existing lifecycle permit for already qualified background maintenance.
+    pub async fn acquire_managed_dispatch(
+        &self,
+        owner: &str,
+        node_id: &str,
+    ) -> TalosResult<Option<tokio::sync::OwnedRwLockReadGuard<()>>> {
+        #[cfg(feature = "control-plane")]
+        if let ProductNodes::Server(server) = &self.kind {
+            return server.acquire_managed_dispatch(owner, node_id).await;
+        }
+        let _ = owner;
+        local_only(node_id)?;
+        Ok(None)
+    }
     pub async fn wait_managed_dispatch(&self, owner: &str, node_id: &str) -> TalosResult<()> {
         #[cfg(feature = "control-plane")]
         if let ProductNodes::Server(server) = &self.kind {

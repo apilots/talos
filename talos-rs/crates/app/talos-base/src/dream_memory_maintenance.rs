@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use talos_config::{DreamMemoryMaintenanceConfig, TalosPaths, WorkspaceConfig};
 use talos_error::TalosResult;
-use talos_service::{InnerModelClient, TalosService};
+use talos_service::TalosService;
+use talos_store::profile::{ModelCallUsageUpdate, ProfileStore, ProfileUsageUpdate};
 use talos_store::session::{SessionPageCursor, SessionQuery, SessionStore};
 use talos_types::ModelUsageKind;
 
@@ -19,7 +20,7 @@ pub(super) struct DreamMemoryMaintenance {
     session_store: Arc<dyn SessionStore>,
     service: Arc<TalosService>,
     coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
-    inner_model: Arc<InnerModelClient>,
+    profiles: Arc<dyn ProfileStore>,
     workspaces: WorkspaceConfig,
     workspace_paths: TalosPaths,
     config: DreamMemoryMaintenanceConfig,
@@ -30,7 +31,7 @@ impl DreamMemoryMaintenance {
         session_store: Arc<dyn SessionStore>,
         service: Arc<TalosService>,
         coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
-        inner_model: Arc<InnerModelClient>,
+        profiles: Arc<dyn ProfileStore>,
         runtime_config: &talos_config::Config,
         config: DreamMemoryMaintenanceConfig,
     ) -> Self {
@@ -38,7 +39,7 @@ impl DreamMemoryMaintenance {
             session_store,
             service,
             coordinator,
-            inner_model,
+            profiles,
             workspaces: runtime_config.workspaces.clone(),
             workspace_paths: runtime_config.talos_paths(),
             config,
@@ -95,46 +96,115 @@ impl DreamMemoryMaintenance {
         self.session_store
             .ensure_worker_execution_session(&record.id)
             .await?;
-        let workspace = self.workspaces.resolve(
-            &self.workspace_paths,
-            &record.workspace_id,
-            &record.user_id,
-        )?;
-        let context = talos_agent::AgentSessionContext {
-            agent_id: record.agent_id.clone(),
-            session_id: record.id.clone(),
-            workspace: workspace.clone(),
-        };
-        let harness = self.coordinator.session_harness(&context).await?;
-        let inner_model = self.inner_model.clone();
-        let user_id = record.user_id.clone();
-        let session_id = record.id.clone();
+        if !self
+            .session_store
+            .has_pending_dream_memory(&record.id)
+            .await?
+        {
+            return Ok(false);
+        }
         let result = self
             .service
-            .run_idle_session_maintenance(&record.id, move || async move {
-                harness
-                    .form_dream_memory(
-                        context,
-                        Arc::new(move |messages| {
-                            let inner_model = inner_model.clone();
-                            let user_id = user_id.clone();
-                            let session_id = session_id.clone();
-                            Box::pin(async move {
-                                inner_model
-                                    .chat(talos_service::InnerModelChatParams {
-                                        user_id,
-                                        session_id: Some(session_id),
-                                        usage_kind: ModelUsageKind::Dream,
-                                        messages,
-                                    })
-                                    .await
-                            })
-                        }),
+            .run_idle_worker_maintenance(&record.id, || async {
+                let record = self
+                    .session_store
+                    .get_session_record(&record.id)
+                    .await?
+                    .ok_or_else(|| {
+                        talos_error::TalosError::new(
+                            talos_error::ErrorCode::SessionNotFound,
+                            "Dream Memory Session no longer exists.",
+                        )
+                    })?;
+                self.session_store
+                    .ensure_worker_execution_session(&record.id)
+                    .await?;
+                if !self
+                    .session_store
+                    .has_pending_dream_memory(&record.id)
+                    .await?
+                {
+                    return Ok(false);
+                }
+                let workspace = self.workspaces.resolve(
+                    &self.workspace_paths,
+                    &record.workspace_id,
+                    &record.user_id,
+                )?;
+                let context = talos_agent::AgentSessionContext {
+                    agent_id: record.agent_id.clone(),
+                    session_id: record.id.clone(),
+                    workspace,
+                };
+                let harness = self.coordinator.session_harness(&context).await?;
+                let after = self.session_store.dream_memory_cursor(&record.id).await?;
+                let result = harness
+                    .form_dream_memory(agent_protocol::DreamMemoryParams {
+                        session: context,
+                        after_cursor: after.clone(),
+                    })
+                    .await?;
+                let Some(formation) = result.formation else {
+                    // No retained receipt remains after this cursor, so observing progress
+                    // cannot hide paid usage from an interrupted formation.
+                    if result.processed_until_seq > 0 {
+                        self.session_store
+                            .advance_dream_memory_cursor(
+                                &record.id,
+                                after.as_ref(),
+                                &result.next_cursor,
+                                Some(result.processed_until_seq),
+                            )
+                            .await?;
+                    }
+                    return Ok(false);
+                };
+                let call = formation.model_usage;
+                let completed_at_ms = call.completed_at.checked_mul(1_000).ok_or_else(|| {
+                    talos_error::TalosError::internal(
+                        "Worker Dream usage timestamp exceeds supported range.",
                     )
-                    .await
+                })?;
+                let timezone = talos_config::parse_timezone(&call.timezone)?;
+                let date = chrono::DateTime::from_timestamp_millis(completed_at_ms)
+                    .ok_or_else(|| {
+                        talos_error::TalosError::internal(
+                            "Worker Dream usage timestamp is invalid.",
+                        )
+                    })?
+                    .with_timezone(&timezone)
+                    .date_naive()
+                    .format("%Y-%m-%d")
+                    .to_string();
+                self.profiles
+                    .record_usage(ProfileUsageUpdate::ModelCall(ModelCallUsageUpdate {
+                        user_id: record.user_id.clone(),
+                        session_id: Some(record.id.clone()),
+                        request_id: call.request_id,
+                        kind: ModelUsageKind::Dream,
+                        model_ref: call.model_ref,
+                        usage_available: call.usage.is_available(),
+                        usage: call.usage,
+                        timezone: call.timezone,
+                        completed_at_ms,
+                        usage_date: date,
+                    }))
+                    .await?;
+                self.session_store
+                    .advance_dream_memory_cursor(
+                        &record.id,
+                        after.as_ref(),
+                        &result.next_cursor,
+                        formation.covers_until_seq,
+                    )
+                    .await?;
+                if let Some(error) = formation.failure {
+                    return Err(talos_error::TalosError::from(error));
+                }
+                Ok(formation.covers_until_seq.is_some())
             })
             .await?;
-        Ok(result.flatten().is_some())
+        Ok(result.unwrap_or(false))
     }
 }
 

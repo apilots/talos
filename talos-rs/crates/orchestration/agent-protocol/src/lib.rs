@@ -8,7 +8,9 @@ mod checkpoint;
 pub mod connection_pb;
 mod context;
 pub mod desktop_pb;
+mod dream;
 pub mod dream_pb;
+pub use dream::{DreamMemoryCursor, DreamMemoryFormation, DreamMemoryParams, DreamMemoryResult};
 mod environment;
 mod environment_browser_pb;
 mod environment_config_pb;
@@ -41,7 +43,7 @@ pub use node::{
     NodeHealth, NodeInfo, NodeMode, NodePage, NodeRequest, NodeStatus, RegisterParams,
     Registration, RegistrationAdmission, RotateCredentialRequest, UpdateNodeRequest,
 };
-pub use port::{AgentFuture, AgentHarness, DreamMemoryModelCall};
+pub use port::{AgentFuture, AgentHarness};
 pub use run::{
     AgentAdmission, AgentAdmissionPermit, AgentAdmissionUnconfirmed, AgentCommandIdentity,
     AgentInputParams, AgentInterruptParams, AgentProgressEventReceiver, AgentRunExecution,

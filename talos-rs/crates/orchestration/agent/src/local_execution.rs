@@ -408,10 +408,9 @@ impl AgentHarness for LocalExecutionHarness {
 
     fn form_dream_memory(
         &self,
-        context: AgentSessionContext,
-        model_call: DreamMemoryModelCall,
-    ) -> AgentFuture<'_, AgentResult<Option<u64>>> {
-        self.inner.form_dream_memory(context, model_call)
+        params: agent_protocol::DreamMemoryParams,
+    ) -> AgentFuture<'_, AgentResult<agent_protocol::DreamMemoryResult>> {
+        self.inner.form_dream_memory(params)
     }
 
     fn read_session_execution_state(

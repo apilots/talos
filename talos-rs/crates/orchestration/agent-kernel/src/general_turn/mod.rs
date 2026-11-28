@@ -48,6 +48,7 @@ mod dream_memory_prompt;
 mod finalize;
 mod guard;
 mod loop_run;
+mod memory_context;
 mod memory_summary;
 mod persist;
 mod prepare;

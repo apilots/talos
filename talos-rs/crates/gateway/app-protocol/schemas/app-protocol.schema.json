@@ -4599,6 +4599,24 @@
           "properties": {
             "method": {
               "enum": [
+                "session/rebuildView"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionRebuildViewRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "session/active_turn"
               ],
               "type": "string"
@@ -13367,6 +13385,30 @@
       },
       "type": "object"
     },
+    "SessionRebuildViewRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionRebuildViewResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "$ref": "#/definitions/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ],
+      "type": "object"
+    },
     "SessionSourceProvider": {
       "description": "Concrete source provider.",
       "enum": [
@@ -17294,6 +17336,9 @@
     "session_loop": {
       "$ref": "#/definitions/SessionLoop"
     },
+    "session_rebuild_view_response": {
+      "$ref": "#/definitions/SessionRebuildViewResponse"
+    },
     "start_turn_request": {
       "$ref": "#/definitions/StartTurnRequest"
     },
@@ -17447,6 +17492,7 @@
     "session_history_response",
     "session_list_response",
     "session_loop",
+    "session_rebuild_view_response",
     "start_turn_request",
     "start_turn_response",
     "submit_turn_input_request",

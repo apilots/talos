@@ -114,6 +114,7 @@ async fn rebuild_prompt_assembly(
 ) -> TalosResult<talos_prompt::PromptAssembly> {
     let context = session_prompt_context_source
         .load(SessionPromptContextConfig {
+            source_message_limit: None,
             compact_cursor: load_policy.compact_cursor,
             recent_window: SessionPromptRecentWindow::Latest,
             recent_messages_limit: if load_policy.include_recent_messages {
@@ -269,9 +270,7 @@ async fn compact_session_history_if_needed(
         },
         selected_model,
         llm_provider,
-        MemoryCompactionPolicy::for_compaction().with_compaction_input_budget_tokens(
-            resolve_compaction_input_budget_tokens(&selected_model_info),
-        ),
+        MemoryCompactionPolicy::for_model_compaction(&selected_model_info),
     )
     .await
     {

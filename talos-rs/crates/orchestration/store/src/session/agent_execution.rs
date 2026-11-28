@@ -146,6 +146,40 @@ pub trait AgentExecutionStore: Send + Sync {
         ))
     }
 
+    /// Start a replacement staging area without changing the visible view or receipts.
+    async fn begin_worker_projection_rebuild(
+        &self,
+        _params: super::WorkerProjectionRebuildParams,
+    ) -> TalosResult<String> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Execution view rebuilding is unavailable.",
+        ))
+    }
+
+    /// Stage one bounded source page; the old view remains visible until commit.
+    async fn stage_worker_projection_rebuild(
+        &self,
+        _request_id: &str,
+        _params: super::WorkerProjectionParams,
+    ) -> TalosResult<()> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Execution view rebuilding is unavailable.",
+        ))
+    }
+
+    /// Replace derived rows atomically, retaining source identities and consumed receipts.
+    async fn finish_worker_projection_rebuild(
+        &self,
+        _request_id: &str,
+    ) -> TalosResult<super::WorkerProjectionRebuildResult> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Execution view rebuilding is unavailable.",
+        ))
+    }
+
     async fn pending_worker_settlements(
         &self,
         _session_id: &str,

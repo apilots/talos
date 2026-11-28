@@ -67,6 +67,14 @@ impl MemoryCompactionPolicy {
         }
     }
 
+    /// Apply the existing model-derived input budget to explicit and automatic
+    /// compaction alike; an unknown context window retains the unbounded policy.
+    pub fn for_model_compaction(model: &talos_types::ModelInfo) -> Self {
+        Self::for_compaction().with_compaction_input_budget_tokens(
+            super::prepare_compaction::resolve_compaction_input_budget_tokens(model),
+        )
+    }
+
     pub const fn with_compaction_input_budget_tokens(mut self, budget: Option<usize>) -> Self {
         self.compact_input_budget_tokens = budget;
         self
@@ -107,6 +115,12 @@ pub(super) struct CompactableTranscriptUnit {
     turn_id: Option<String>,
     timestamp: i64,
     rendered: String,
+}
+
+impl CompactableTranscriptUnit {
+    pub(super) fn is_history_turn(&self) -> bool {
+        self.kind == CompactableTranscriptUnitKind::HistoryTurn
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,7 +221,7 @@ fn render_tool_exchange_line(exchange: &crate::SessionToolExchangeContext) -> Op
     Some(rendered)
 }
 
-fn estimate_transcript_tokens(text: &str) -> usize {
+pub(super) fn estimate_transcript_tokens(text: &str) -> usize {
     let chars = text.chars().count();
     if chars == 0 {
         0
@@ -531,8 +545,10 @@ pub async fn compact_session_memory(
     let memory_processed_until_event_seq = memory_progress_store
         .processed_until_event_seq(session_id)
         .await?;
-    let context = session_prompt_context_source
-        .load(SessionPromptContextConfig {
+    let context = super::memory_context::load_memory_context(
+        session_prompt_context_source,
+        SessionPromptContextConfig {
+            source_message_limit: None,
             compact_cursor,
             recent_window: SessionPromptRecentWindow::OldestUncovered,
             recent_messages_limit: kernel_config.compaction.source_recent_messages_limit,
@@ -545,8 +561,17 @@ pub async fn compact_session_memory(
             include_summary: false,
             summary_recent_count: 0,
             summary_max_chars: 0,
-        })
-        .await?;
+        },
+        policy.compact_input_budget_tokens.map(|tokens| {
+            super::memory_context::MemoryContextBudget {
+                tokens,
+                message_max_chars: None,
+                tool_results_keep: kernel_config.compaction.tool_output_keep_last,
+                tool_exchanges_keep: kernel_config.compaction.tool_exchange_keep_last,
+            }
+        }),
+    )
+    .await?;
     if context.recent_messages.is_empty()
         && context.recent_tool_results.is_empty()
         && context.recent_tool_exchanges.is_empty()

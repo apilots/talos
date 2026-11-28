@@ -30,7 +30,7 @@ impl talos_agent::SessionHistoryReader for InvocationHistory {
         params: talos_agent::SessionHistoryReadParams,
     ) -> talos_agent::AgentFuture<
         '_,
-        talos_agent::AgentResult<Vec<talos_agent_api::SessionHistoryTurn>>,
+        talos_agent::AgentResult<Vec<talos_agent::SessionHistoryReadTurn>>,
     > {
         self.history.read(params)
     }
@@ -266,6 +266,7 @@ mod tests {
             session_id: context.session_id.clone(),
             window: SessionHistoryWindow::Latest,
             limit: 10,
+            message_limit: 64,
         };
         let embedded_guard = bindings
             .bind(
@@ -290,11 +291,11 @@ mod tests {
             .unwrap();
         assert_eq!(initial.len(), 1);
         assert_eq!(
-            initial[0].identity,
+            initial[0].turn.identity,
             talos_agent_api::AgentTurnRef::new(&context.session_id, "turn-0")
         );
-        assert_eq!(initial[0].completed_event_seq, 2);
-        let talos_agent_api::AgentRunResult::Completed(output) = &initial[0].result else {
+        assert_eq!(initial[0].turn.completed_event_seq, 4);
+        let talos_agent_api::AgentRunResult::Completed(output) = &initial[0].turn.result else {
             panic!("expected the seeded completed Turn")
         };
         assert_eq!(
@@ -308,7 +309,7 @@ mod tests {
         assert_eq!(
             output.messages,
             store
-                .checkpoint(&initial[0].identity)
+                .checkpoint(&initial[0].turn.identity)
                 .await
                 .unwrap()
                 .unwrap()
@@ -316,7 +317,7 @@ mod tests {
         );
         embedded
             .memory_progress_store
-            .advance_processed_until_event_seq(&context.session_id, 0, 2)
+            .advance_processed_until_event_seq(&context.session_id, 0, 4)
             .await
             .unwrap();
         drop(embedded_guard);
@@ -355,7 +356,7 @@ mod tests {
                 .processed_until_event_seq(&context.session_id)
                 .await
                 .unwrap(),
-            2
+            4
         );
         admit_turn(&store, &context, 1, 24, true).await;
         let evolved = registered
@@ -365,13 +366,13 @@ mod tests {
             .unwrap();
         assert_eq!(evolved.len(), 2);
         assert_eq!(
-            evolved[1].identity,
+            evolved[1].turn.identity,
             talos_agent_api::AgentTurnRef::new(&context.session_id, "turn-1")
         );
-        assert_eq!(evolved[1].completed_event_seq, 4);
+        assert_eq!(evolved[1].turn.completed_event_seq, 8);
         registered
             .memory_progress_store
-            .advance_processed_until_event_seq(&context.session_id, 2, 4)
+            .advance_processed_until_event_seq(&context.session_id, 4, 8)
             .await
             .unwrap();
         assert_eq!(
@@ -384,7 +385,7 @@ mod tests {
                 .processed_until_event_seq(&context.session_id)
                 .await
                 .unwrap(),
-            4
+            8
         );
         assert_eq!(
             embedded.session_history_reader.source_node_id().as_deref(),

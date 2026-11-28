@@ -1,6 +1,5 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use talos_agent_api::AgentInterruptOutcome;
@@ -12,16 +11,6 @@ use crate::{
 
 /// Object-safe future used only by the outer Agent Harness port.
 pub type AgentFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-/// Invocation-scoped model callback. The control plane owns model selection and usage.
-/// Dream formation consumes only System/User text and response content/token usage.
-pub type DreamMemoryModelCall = Arc<
-    dyn Fn(
-            Vec<talos_llm_provider::ChatMessage>,
-        ) -> AgentFuture<'static, AgentResult<talos_llm_provider::ChatResponse>>
-        + Send
-        + Sync,
->;
 
 /// Provider-neutral execution host resolved and invoked by Coordinator.
 ///
@@ -149,12 +138,12 @@ pub trait AgentHarness: Send + Sync {
     }
 
     /// Form one idle Session's memory using execution-node policy, date and files.
-    /// The caller must exclude concurrent Turn admission and persist model usage.
+    /// The caller excludes Turn admission and idempotently settles returned usage before
+    /// advancing its own consumption cursor. The Worker retains execution facts.
     fn form_dream_memory(
         &self,
-        _context: AgentSessionContext,
-        _model_call: DreamMemoryModelCall,
-    ) -> AgentFuture<'_, AgentResult<Option<u64>>> {
+        _params: crate::DreamMemoryParams,
+    ) -> AgentFuture<'_, AgentResult<crate::DreamMemoryResult>> {
         memory_unavailable()
     }
 

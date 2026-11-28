@@ -50,6 +50,7 @@ delegate_gateway! {
         delete_session(SessionDeleteRequest) -> SessionDeleteResponse;
         compact_session(SessionCompactRequest) -> SessionCompactResponse;
         clear_session(SessionClearRequest) -> SessionClearResponse;
+        rebuild_session_view(talos_types::SessionRebuildViewRequest) -> talos_types::SessionRebuildViewResponse;
         recover_timeline(RecoverTimelineRequest) -> RecoverTimelineResponse;
         subscribe_timeline(SubscribeTimelineRequest) -> SubscribeTimelineResponse;
         retry_turn(RetryTurnRequest) -> StartTurnResponse;

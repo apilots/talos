@@ -4,13 +4,14 @@ use std::sync::Arc;
 use talos_agent_api::AgentEventPayload;
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{Row, Storage};
-use talos_types::{AgentPath, ContextUsage, SessionUsage, DEFAULT_SESSION_TITLE};
+use talos_types::{AgentPath, ContextUsage, DEFAULT_SESSION_TITLE};
 
 use super::{
     AccumulateSessionUsageParams, AgentExecutionStore, PatchSessionParams, SessionQuery,
     SessionRecord, SessionSummary, SessionTreeIdentity, SessionTreeScope,
 };
 
+mod dream;
 mod patch;
 mod record;
 mod sync_binding;
@@ -31,6 +32,39 @@ pub trait SessionStore: Send + Sync {
     async fn ensure_worker_execution_session(&self, session_id: &str) -> TalosResult<()>;
 
     async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>>;
+
+    /// Product consumption position for retained Worker Dream execution facts.
+    async fn dream_memory_cursor(
+        &self,
+        _session_id: &str,
+    ) -> TalosResult<Option<agent_protocol::DreamMemoryCursor>> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Dream Memory consumption is unavailable.",
+        ))
+    }
+
+    /// Qualify maintenance from already committed product source mappings before waking.
+    async fn has_pending_dream_memory(&self, _session_id: &str) -> TalosResult<bool> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Dream Memory eligibility is unavailable.",
+        ))
+    }
+
+    /// Advance only after idempotent Profile settlement has succeeded.
+    async fn advance_dream_memory_cursor(
+        &self,
+        _session_id: &str,
+        _expected: Option<&agent_protocol::DreamMemoryCursor>,
+        _next: &agent_protocol::DreamMemoryCursor,
+        _covers_until_seq: Option<u64>,
+    ) -> TalosResult<()> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Dream Memory consumption is unavailable.",
+        ))
+    }
 
     /// Canonical completed Agent sequence; no source DB cursor or execution claim.
     async fn get_history_cursor(
@@ -158,6 +192,27 @@ impl DatabaseSessionStore {
 
 #[async_trait]
 impl SessionStore for DatabaseSessionStore {
+    async fn dream_memory_cursor(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<agent_protocol::DreamMemoryCursor>> {
+        dream::read_cursor(self, session_id).await
+    }
+
+    async fn has_pending_dream_memory(&self, session_id: &str) -> TalosResult<bool> {
+        dream::has_pending(self, session_id).await
+    }
+
+    async fn advance_dream_memory_cursor(
+        &self,
+        session_id: &str,
+        expected: Option<&agent_protocol::DreamMemoryCursor>,
+        next: &agent_protocol::DreamMemoryCursor,
+        covers_until_seq: Option<u64>,
+    ) -> TalosResult<()> {
+        dream::advance_cursor(self, session_id, expected, next, covers_until_seq).await
+    }
+
     async fn claim_local_history(&self, user_id: &str) -> TalosResult<()> {
         DatabaseSessionStore::claim_local_history(self, user_id).await
     }
@@ -652,67 +707,8 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn clear_session_history(&self, session_id: &str, cleared_at: u64) -> TalosResult<bool> {
-        let mut transaction = self.begin_session_transaction(session_id).await?;
-        let active = transaction
-            .query(
-                "SELECT 1 AS active FROM agent_active_turns WHERE session_id = ? LIMIT 1",
-                &[session_id],
-            )
-            .await?;
-        if !active.is_empty() {
-            transaction.rollback().await?;
-            return Err(TalosError::new(
-                talos_error::ErrorCode::ActiveTurnRunning,
-                "cannot clear a Session with an active Agent Turn",
-            ));
-        }
-
-        super::worker_projection::ensure_settled(&mut *transaction, &[session_id]).await?;
-
-        transaction
-            .execute(
-                "DELETE FROM agent_command_idempotency WHERE session_id = ?",
-                &[session_id],
-            )
-            .await?;
-        transaction
-            .execute(
-                "DELETE FROM worker_projection_cursors WHERE session_id = ?",
-                &[session_id],
-            )
-            .await?;
-        crate::capture::source::retire_history(
-            &mut *transaction,
-            session_id,
-            /*deleted*/ false,
-        )
-        .await?;
-        let usage_json = Self::build_usage_json(&SessionUsage::default())?;
-        let cleared_at = cleared_at.to_string();
-        let affected = transaction
-            .execute(
-                r#"
-                UPDATE sessions
-                SET title = ?, last_activity = ?, message_count = 0,
-                    latest_turn_seq = 0, memory_processed_until_event_seq = 0,
-                    history_generation = history_generation + 1,
-                    usage_json = ?
-                WHERE session_key = ?
-                "#,
-                &[
-                    DEFAULT_SESSION_TITLE,
-                    cleared_at.as_str(),
-                    usage_json.as_str(),
-                    session_id,
-                ],
-            )
-            .await?;
-        if affected == 0 {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-        transaction.commit().await?;
-        Ok(true)
+        self.clear_session_history_record(session_id, cleared_at)
+            .await
     }
 
     async fn update_context_usage(

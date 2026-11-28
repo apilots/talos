@@ -9,6 +9,8 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
+mod dream;
+mod history;
 mod read;
 pub(crate) mod supplement_merge;
 mod write;

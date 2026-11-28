@@ -43,6 +43,7 @@ pub struct AppProtocolSchemaRoot {
     pub created_node: talos_types::CreatedNode,
     pub node_credential: talos_types::NodeCredential,
     pub profile_read_response: talos_types::ProfileReadResponse,
+    pub session_rebuild_view_response: talos_types::SessionRebuildViewResponse,
     pub session_get_response: talos_types::SessionGetResponse,
     pub session_list_response: talos_types::SessionListResponse,
     pub start_turn_request: talos_types::StartTurnRequest,
@@ -196,6 +197,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SessionCompactResponse>());
     output.push_str(&export::<talos_types::SessionClearRequest>());
     output.push_str(&export::<talos_types::SessionClearResponse>());
+    output.push_str(&export::<talos_types::SessionRebuildViewRequest>());
+    output.push_str(&export::<talos_types::SessionRebuildViewResponse>());
     output.push_str(&export::<talos_types::SessionInfo>());
     output.push_str(&export::<talos_types::SessionUsage>());
     output.push_str(&export::<talos_types::ContextUsage>());

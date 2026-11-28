@@ -76,7 +76,7 @@ async fn compact_mapped(
             },
             &context.model.model.id,
             llm_provider,
-            MemoryCompactionPolicy::for_compaction(),
+            MemoryCompactionPolicy::for_model_compaction(&context.model),
         ) => result?,
         () = control.cancellation().requested() => {
             return Err(TalosError::new(

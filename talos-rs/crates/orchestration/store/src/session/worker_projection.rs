@@ -1,6 +1,8 @@
 //! Product projections of committed Worker facts, with one transactional source cursor.
 use super::agent_execution::{
-    record::{append_events, load_active_turn, parse_event_record},
+    record::{
+        append_events, load_active_turn, parse_event_record, restore_event, PreservedEventPosition,
+    },
     settlement::{update_compacted_session, update_completed_turn_session},
 };
 use super::{AgentActiveTurnRecord, AgentEventRecord, DatabaseSessionStore};
@@ -15,6 +17,11 @@ use talos_storage::StorageTransaction;
 
 #[path = "worker_projection_metadata.rs"]
 mod metadata;
+
+#[path = "worker_projection_rebuild.rs"]
+mod rebuild;
+pub(super) use rebuild::{begin_rebuild, finish_rebuild, stage_rebuild};
+pub use rebuild::{WorkerProjectionRebuildParams, WorkerProjectionRebuildResult};
 
 pub struct WorkerProjectionParams {
     pub execution_node_id: String,
@@ -97,13 +104,9 @@ pub(super) async fn project(
                 "Worker source mapping has a gap before the product cursor",
             ));
         }
-        let fingerprint = format!("{:x}", Sha256::digest(encode(fact)?.as_bytes()));
-        let event = project_event(tx.as_mut(), fact).await?;
+        let event = project_event(tx.as_mut(), fact, /*preserved_position*/ None).await?;
         metadata::project(tx.as_mut(), fact, &event).await?;
-        let settlement = fact.settlement.as_ref().map(encode).transpose()?;
-        let command = fact.command.as_ref().map(encode).transpose()?;
-        let execution_model = fact.execution_model.as_ref().map(encode).transpose()?;
-        tx.execute("INSERT INTO worker_event_projection(session_id,history_generation,worker_offset,product_event_seq,event_fingerprint,settlement_json,command_json,execution_model_json,execution_purpose) VALUES (?,?,?,?,?,?,?,?,?)", &[&params.session_id, &generation.to_string(), &fact.cursor.offset.to_string(), &event.event_seq.to_string(), &fingerprint, settlement.as_deref().unwrap_or("null"), command.as_deref().unwrap_or("null"), execution_model.as_deref().unwrap_or("null"), &encode(&fact.execution_purpose)?]).await?;
+        map_event(tx.as_mut(), fact, &event).await?;
         output.push(event);
     }
     let offset = current.max(params.page.next_cursor.offset);
@@ -121,6 +124,19 @@ pub(super) async fn project(
     })
 }
 
+async fn map_event(
+    tx: &mut dyn StorageTransaction,
+    fact: &AgentCommittedEvent,
+    event: &AgentEventRecord,
+) -> TalosResult<()> {
+    let fingerprint = format!("{:x}", Sha256::digest(encode(fact)?.as_bytes()));
+    let settlement = fact.settlement.as_ref().map(encode).transpose()?;
+    let command = fact.command.as_ref().map(encode).transpose()?;
+    let execution_model = fact.execution_model.as_ref().map(encode).transpose()?;
+    tx.execute("INSERT INTO worker_event_projection(session_id,history_generation,worker_offset,product_event_seq,product_persisted_at,event_fingerprint,settlement_json,command_json,execution_model_json,execution_purpose) VALUES (?,?,?,?,?,?,?,?,?,?)", &[&fact.cursor.session_id, &fact.cursor.generation.to_string(), &fact.cursor.offset.to_string(), &event.event_seq.to_string(), &event.persisted_at.to_string(), &fingerprint, settlement.as_deref().unwrap_or("null"), command.as_deref().unwrap_or("null"), execution_model.as_deref().unwrap_or("null"), &encode(&fact.execution_purpose)?]).await?;
+    Ok(())
+}
+
 /// Waiting receipts compare public facts after private references leave the wire.
 /// Other source envelopes retain their original immutable fingerprint, including
 /// provenance that a product may later augment independently.
@@ -129,13 +145,12 @@ async fn validate_replayed_fact(
     mapping: &talos_storage::Row,
     fact: &AgentCommittedEvent,
 ) -> TalosResult<()> {
+    let fingerprint = format!("{:x}", Sha256::digest(encode(fact)?.as_bytes()));
+    if mapping.get_string("event_fingerprint").as_deref() == Some(&fingerprint) {
+        return Ok(());
+    }
     if !matches!(fact.event.payload, AgentEventPayload::WaitingForInput(_)) {
-        let fingerprint = format!("{:x}", Sha256::digest(encode(fact)?.as_bytes()));
-        return if mapping.get_string("event_fingerprint").as_deref() == Some(&fingerprint) {
-            Ok(())
-        } else {
-            Err(conflict("An already committed Worker event changed"))
-        };
+        return Err(conflict("An already committed Worker event changed"));
     }
     if fact.command.is_some()
         || fact.automation_input.is_some()
@@ -243,6 +258,7 @@ async fn projection_state(
 async fn project_event(
     tx: &mut dyn StorageTransaction,
     fact: &AgentCommittedEvent,
+    preserved_position: Option<PreservedEventPosition>,
 ) -> TalosResult<AgentEventRecord> {
     let event = &fact.event;
     let rows = tx.query("SELECT event_seq,session_id,turn_id,sequence,occurred_at,persisted_at,payload_json FROM visible_agent_events WHERE session_id=? AND turn_id=? AND sequence=?", &[&event.identity.session_id,&event.identity.turn_id,&event.sequence.to_string()]).await?;
@@ -276,8 +292,14 @@ async fn project_event(
     {
         return Err(conflict("Worker event does not match the active Turn"));
     }
-    let mut appended = append_events(tx, vec![event.clone()]).await?;
-    let record = appended.pop().ok_or_else(corrupt)?;
+    let record = if let Some(position) = preserved_position {
+        restore_event(tx, event.clone(), position).await?
+    } else {
+        append_events(tx, vec![event.clone()])
+            .await?
+            .pop()
+            .ok_or_else(corrupt)?
+    };
     if event.payload.is_terminal() {
         if let (
             AgentEventPayload::TurnCompleted(_),

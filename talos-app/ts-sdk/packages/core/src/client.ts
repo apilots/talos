@@ -114,9 +114,11 @@ import type {
   SkillsSuggestResponse,
   SessionPatchRequest,
   SessionClearRequest,
+  SessionRebuildViewRequest,
   SessionCompactResponse,
   SessionCompactRequest,
   SessionClearResponse,
+  SessionRebuildViewResponse,
   SessionCloseRequest,
   SessionCloseResponse,
   SessionDeleteRequest,
@@ -467,6 +469,10 @@ export class TalosClient {
       }),
     clearById: (sessionId: string): Promise<SessionClearResponse> =>
       this.sessions.clear({ sessionId }),
+    rebuildView: (request: SessionRebuildViewRequest) =>
+      this.http.request<SessionRebuildViewResponse>(this.url(`/v1/sessions/${request.sessionId}/rebuild-view`), {
+        method: "POST",
+      }),
     activeTurn: (request: SessionActiveTurnRequest) =>
       this.http.request<SessionActiveTurnResponse>(this.url(`/v1/sessions/${request.sessionId}/active-turn`)),
     activeTurnById: (sessionId: string): Promise<SessionActiveTurnResponse> =>

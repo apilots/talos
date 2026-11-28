@@ -4,6 +4,7 @@
 //! Network hosts expose the same Harnesses through the authenticated registered transport.
 
 mod browser_host;
+mod builtin_model;
 mod config;
 mod execution_history;
 mod harness;

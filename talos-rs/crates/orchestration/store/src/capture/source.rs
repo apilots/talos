@@ -110,19 +110,20 @@ pub(crate) async fn cut_from_row(
     let command_tail = super::command_tail(tx, session_id, generation).await?;
     let active = tx
         .query(
-            "SELECT active.*, event.payload_json AS active_payload_json FROM agent_active_turns active LEFT JOIN visible_agent_events event ON event.event_seq=active.last_event_seq WHERE active.session_id = ?",
+            "SELECT turn_id,state,last_event_seq,updated_at FROM agent_active_turns WHERE session_id = ?",
             &[session_id],
         )
         .await?
         .first()
-        .map(crate::session::agent_execution::record::parse_active_turn)
-        .transpose()?
-        .map(|record| ActiveState {
-            turn_id: record.identity.turn_id,
-            state: record.state,
-            event_seq: record.last_event_seq,
-            updated_at: record.updated_at,
-        });
+        .map(|row| -> TalosResult<ActiveState> {
+            Ok(ActiveState {
+                turn_id: super::text(row, "turn_id")?,
+                state: crate::session::agent_execution::record::parse_active_turn_state(row)?,
+                event_seq: super::number(row, "last_event_seq")?,
+                updated_at: super::number(row, "updated_at")?,
+            })
+        })
+        .transpose()?;
     Ok(SourceCut {
         fields: Some(row.into()),
         generation,

@@ -403,6 +403,15 @@ impl SessionService {
         self.coordinator.read_execution_payload(params).await
     }
 
+    pub(crate) async fn ensure_worker_execution_session(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<()> {
+        self.session_store
+            .ensure_worker_execution_session(session_id)
+            .await
+    }
+
     pub(crate) async fn load_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
         self.session_store.get_session_record(session_id).await
     }

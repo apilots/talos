@@ -50,7 +50,7 @@ impl talos_agent::SessionHistoryReader for FreshWorkerHistory {
     fn read(
         &self,
         params: talos_agent::SessionHistoryReadParams,
-    ) -> talos_agent::AgentFuture<'_, TalosResult<Vec<talos_agent_api::SessionHistoryTurn>>> {
+    ) -> talos_agent::AgentFuture<'_, TalosResult<Vec<talos_agent::SessionHistoryReadTurn>>> {
         Box::pin(async move {
             assert!(
                 self.0

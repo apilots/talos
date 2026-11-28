@@ -14,7 +14,7 @@ impl SessionHistoryReader for History {
     fn read(
         &self,
         _: SessionHistoryReadParams,
-    ) -> AgentFuture<'_, AgentResult<Vec<talos_agent_api::SessionHistoryTurn>>> {
+    ) -> AgentFuture<'_, AgentResult<Vec<talos_agent::SessionHistoryReadTurn>>> {
         Box::pin(async { Ok(vec![]) })
     }
     fn append_supplement(

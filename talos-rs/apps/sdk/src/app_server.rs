@@ -49,13 +49,14 @@ use talos_types::{
     SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
     SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
     SessionGetResponse, SessionHistoryRequest, SessionListRequest, SessionListResponse,
-    SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
-    SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
-    SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest,
-    StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
-    UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    SessionPatchRequest, SessionRebuildViewRequest, SessionRebuildViewResponse,
+    SessionUpdateResponse, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
+    SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse,
+    SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest, StartTurnResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest, UserCurrentResponse,
+    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
+    WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};

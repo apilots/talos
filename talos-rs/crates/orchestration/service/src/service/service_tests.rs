@@ -73,6 +73,8 @@ mod interrupt_queue_tests;
 mod maintenance_tests;
 #[path = "ownership_boundary_tests.rs"]
 mod ownership_boundary_tests;
+#[path = "view_rebuild_tests.rs"]
+mod view_rebuild_tests;
 
 pub(super) struct TestAgentExecution {
     pub(super) mode: TestAgentExecutionMode,

@@ -288,6 +288,8 @@ impl TalosWorker {
                             })
                         }),
                     ),
+                    model_router: llm_provider_router.clone(),
+                    history: execution_store.clone(),
                     workspace_memory: user_workspace_memory.clone(),
                     execution_gate: plugin_manager.execution_gate(),
                     browser: browser.clone(),

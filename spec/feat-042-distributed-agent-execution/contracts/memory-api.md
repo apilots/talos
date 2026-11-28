@@ -1,80 +1,99 @@
-# 执行节点 Memory 维护端口
+# Execution-node Memory maintenance port
 
-[主方案](../design.md)。控制面拥有维护调度、Session 空闲互斥、模型调用与用量、Session
-cursor；绑定 Worker 拥有形成策略、日期与 Workspace 文件。复用原 Kernel 形成算法、
-`talos-memory` 校验和原子写入，不新增业务模型、文件副本或执行表。
+See the [distributed execution design](../design.md) and the current
+[Worker execution ownership contract](../../refactor-046-worker-session-execution/execution-ownership.md).
+The product owns scheduling, authorization, idle Session exclusion and idempotent
+usage consumption. The target Worker owns model selection and credentials,
+canonical execution history, formation policy, timezone and Workspace files.
 
-## 调用链
+## Call path
 
 ```text
-Turn reflection → bound AgentHarness → Worker UserWorkspaceMemoryService
-Dream scheduler → bound AgentHarness.form_dream_memory
-                → Worker KernelAgentProvider → existing formation algorithm
-                → Worker MemoryService → local files
-                → existing history/cursor ports → control-plane Services
+Completed Turn → Worker built-in Memory reflection → local UserWorkspaceMemoryService
+Dream scheduler/run-once → product idle reservation → managed dispatch readiness/activity
+                        → bound AgentHarness.form_dream_memory
+                        → Worker Config/router + KernelAgentProvider
+                        → existing formation algorithm + local Memory files
+                        → retained Worker formation fact → product Profile settlement/cursor
 ```
 
-Coordinator 查询 Session 固定节点并验证归属/可用性；内嵌直调同一 WorkerHarness，远程由
-RemoteAgentClient 内聚 gRPC。每个网络请求含 NodeAuth；节点验证租约、owner 和 agent_id，
-按自身配置解析 Workspace，不接收控制面的默认根目录。不可用节点明确失败。
+Before waking a managed Worker, the product qualifies known pending work from
+retained source mappings and accepted commands. Missing or incomplete product
+projections remain conservative candidates; an empty Session alone is not work.
+The existing managed dispatch lifecycle coalesces automatic IdleSleep wake and
+preserves manual-stop intent. The product revalidates scope and idleness after
+readiness and retains the existing activity permit through usage settlement.
+Global built-in job management retains its existing execution-Host ownership
+boundary; owning an ordinary cloud Worker does not authorize Server-wide jobs.
 
-## Rust 与 gRPC
+Coordinator resolves the Session's bound Worker and checks ownership and
+availability. Embedded and standalone Workers expose the same protected Harness
+operation, SessionGate and configuration execution gate. Network requests carry
+NodeAuth and coordinator identity. The target resolves Workspace scope using its
+own configuration; product filesystem paths are not execution authority.
 
-[AgentHarness](../../../talos-rs/crates/orchestration/agent-protocol/src/port.rs) 的维护入口：
+## Rust and gRPC
 
-| 方法 | 参数 | 返回（AgentResult） | gRPC |
+The [AgentHarness](../../../talos-rs/crates/orchestration/agent-protocol/src/port.rs)
+Memory operations are:
+
+| Method | Input | AgentResult output | gRPC |
 | --- | --- | --- | --- |
-| read_workspace_memory | AgentSessionContext | UserWorkspaceMemorySnapshot | ReadWorkspaceMemory(SessionRequest) |
-| update_workspace_memory | AgentSessionContext, UserWorkspaceMemoryUpdate | UserWorkspaceMemorySnapshot | UpdateWorkspaceMemory(UpdateWorkspaceMemoryRequest) |
-| form_dream_memory | AgentSessionContext, DreamMemoryModelCall | Option<u64>（已写入的 covers_until_seq） | FormDreamMemory 双向流 |
+| `read_workspace_memory` | `AgentSessionContext` | `UserWorkspaceMemorySnapshot` | `ReadWorkspaceMemory(SessionRequest)` |
+| `update_workspace_memory` | `AgentSessionContext`, `UserWorkspaceMemoryUpdate` | `UserWorkspaceMemorySnapshot` | `UpdateWorkspaceMemory(UpdateWorkspaceMemoryRequest)` |
+| `form_dream_memory` | `DreamMemoryParams` | `DreamMemoryResult` | `FormDreamMemory` |
 
-```rust
-pub type DreamMemoryModelCall = Arc<dyn Fn(Vec<ChatMessage>)
-    -> AgentFuture<'static, AgentResult<ChatResponse>> + Send + Sync>;
-```
+`DreamMemoryParams` contains the authorized Session context and an optional
+`DreamMemoryCursor { generation, offset }` naming the product's consumed position.
+The result contains at most one `DreamMemoryFormation` and the next cursor. A
+formation preserves source coverage, the complete Worker model usage with a
+stable request ID, and an optional typed public failure. The product settles paid
+usage even when formation fails; it then advances its own consumption cursor.
+When no formation remains after that cursor, the result's `processed_until_seq`
+snapshot lets the product reconcile already committed progress after an interrupted
+formation without skipping any retained usage fact. Immediate authorization,
+availability, binding and cursor failures retain the
+unified `TalosError` contract.
 
-这是本次维护调用的依赖，由控制面注入；本地直调，远端 Client 转换流内回调。它不缓存执行结果。
+The Worker first returns the next retained fact after the supplied cursor. Only
+when no unconsumed fact exists does it attempt another bounded formation batch.
+Observed model usage is durable before applying model output to Memory. An
+interrupted invocation therefore retains its observed usage and explicit failure
+for later consumption. The active protected reservation excludes another reader
+until the invocation finishes or is canceled. Consumption does not acknowledge,
+delete or mutate Worker facts; the existing Session generation clear/retirement
+boundary owns their cleanup. Replaying a cursor does not call the model again.
 
-WorkerHarness 组合原执行 Harness、原 Kernel Provider 与文件 owner；七个执行方法原样转发。
-无此维护能力的 Host 明确拒绝。控制面不按 Agent ID 查找内嵌 Provider 来维护远程 Session。
+The [protobuf definitions](../../../talos-rs/crates/orchestration/agent-pb/proto/harness.proto)
+and [typed projection](../../../talos-rs/crates/orchestration/agent-protocol/src/dream_pb.rs)
+carry only formation inputs/results. There is no Server model-prompt/reply
+callback. Direct gRPC and registered transport preserve the same fields and
+errors. The existing streaming RPC carries one request and one bounded result;
+its total budget is 300 seconds and first-frame budget is 30 seconds. Transport
+loss or lease revocation cancels the active operation; later product consumption
+reads retained facts through the same operation and cursor.
 
-唯一 PB 定义：[memory.proto](../../../talos-rs/crates/orchestration/agent-pb/proto/memory.proto)和
-[harness.proto](../../../talos-rs/crates/orchestration/agent-pb/proto/harness.proto)。投影位于
-[memory_pb.rs](../../../talos-rs/crates/orchestration/agent-protocol/src/memory_pb.rs)和
-[dream_pb.rs](../../../talos-rs/crates/orchestration/agent-protocol/src/dream_pb.rs)。
+Workspace Memory preserves Missing/template, Valid/document/version and
+Invalid/raw-content/diagnostic states, six typed update operations, field
+unchanged/set/clear semantics, and MustNotExist/Match revisions. The original
+Markdown parser, validation and atomic file writes remain authoritative. File
+operations retain their ten-second unary deadline and do not retry writes.
 
-WorkspaceMemorySnapshot 保留 Missing 模板、Valid 文档/版本、Invalid 原文/诊断三态；
-WorkspaceMemoryUpdate 保留六种操作、optional 的 unchanged/set/clear、MustNotExist/Match
-版本条件。继续使用原 Markdown parser；文件 unary deadline 10 秒，不重试写入。
+## Execution and settlement
 
-```proto
-message DreamMemoryModelPrompt { string system = 1; string user = 2; }
-message DreamMemoryModelReply { string content = 1; TokenUsage usage = 2; }
-message FormDreamMemoryRequest {
-  NodeAuth auth = 1;
-  oneof body { SessionContext context = 2; DreamMemoryModelReply model_reply = 3; Failure model_failure = 4; }
-}
-message DreamMemoryFormation { optional uint64 covers_until_seq = 1; }
-message FormDreamMemoryResponse {
-  oneof result { DreamMemoryModelPrompt model_prompt = 1; DreamMemoryFormation formed = 2; Failure failure = 3; }
-}
-```
+Built-in Memory reflection runs from the Worker's bounded local completed-Turn
+history using its active built-in model selection and provider router. Its
+best-effort policy and `memory` usage settlement remain on the original Turn
+completion path. Dream uses that same model-selection capability without owning
+product Profile storage or depending on the product-only InnerModelClient.
 
-首帧为 context。Worker 原算法需要模型时发送 model_prompt；Client 调用本次调用附带的
-DreamMemoryModelCall（原 ChatMessage/ChatResponse），回传 model_reply 或 model_failure。
-形成算法只消费 System/User 文本、结果 content 和 token usage，PB 仅投影这些字段；不作为
-通用 LLM 协议，其他消息形态明确拒绝。模型选择、reasoning 与用量处理仍在原 InnerModelClient。
-控制面不接触 Worker 文件或判断日期。形成操作默认整体 300 秒预算，首帧等待 30 秒；
-断流/租约撤销取消本次形成，不自动重放，也不伪造 cursor 成功。
+Dream formation uses Worker Kernel policy and timezone, canonical history and
+the existing oldest-uncovered Memory progress boundary. Successful local file
+formation advances only the Worker's execution progress. Retained formation facts
+are independent of product Timeline events and are never represented as a chat
+Turn or Goal/Loop execution. Product Profile request-ID idempotency plus the
+separate Dream consumption cursor prevent duplicate billing on retries. Product
+view rebuild preserves both accounting and that cursor.
 
-## 业务时序
-
-自动反思仍在成功主 Turn 发布前执行，复用 InnerModelClient、Memory 用量类型及原
-best-effort 策略；快照和更新通过同一 Harness 访问绑定 Worker。
-
-Dream 仍预约空闲 Session；Worker 使用自身 Kernel 配置和 timezone，从 canonical history
-构造原维护输入，不读取 summary。原算法在文件写入成功后，通过原 cursor port 推进控制面
-Session cursor。模型/用量失败不写文件、不推进 cursor；文件成功而 cursor 提交失败时保留
-原重复覆盖校验行为，重跑不制造副本。
-
-本期没有无 Session 的多节点文件浏览接口；文件管理需要显式的节点选择。
+This port does not add cross-Worker migration, general model callbacks, a new
+recovery service, an ACK/outbox protocol, or Session-free multi-node file browsing.

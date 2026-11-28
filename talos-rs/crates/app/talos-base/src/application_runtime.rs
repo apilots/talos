@@ -316,7 +316,7 @@ pub(crate) async fn build_application_runtime_with_policy(
         session_store_impl,
         service.clone(),
         coordinator.clone(),
-        inner_model,
+        profile_store.clone(),
         &config,
         config.automation.dream_memory_maintenance.clone(),
     );

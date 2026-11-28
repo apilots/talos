@@ -355,6 +355,13 @@ impl GatewayClient for AppServerClient {
         self.request_typed("session/clear", request).await
     }
 
+    async fn rebuild_session_view(
+        &mut self,
+        request: SessionRebuildViewRequest,
+    ) -> TalosResult<SessionRebuildViewResponse> {
+        self.request_typed("session/rebuildView", request).await
+    }
+
     async fn recover_timeline(
         &mut self,
         request: RecoverTimelineRequest,

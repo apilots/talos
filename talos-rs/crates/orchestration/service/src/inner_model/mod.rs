@@ -4,11 +4,10 @@
 //! only owns model resolution, Provider routing, and Profile usage recording.
 
 mod client;
-mod resolver;
 mod types;
 
 pub use client::{InnerModelClient, InnerModelClientBuilder};
-pub use resolver::resolve_inner_model_ref;
+pub use talos_types::resolve_inner_model_ref;
 pub use types::InnerModelChatParams;
 
 #[cfg(test)]

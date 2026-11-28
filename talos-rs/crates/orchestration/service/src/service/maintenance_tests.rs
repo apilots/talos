@@ -28,7 +28,7 @@ async fn session_maintenance_excludes_turn_admission_until_it_finishes() {
         let release = release.clone();
         tokio::spawn(async move {
             service
-                .run_idle_session_maintenance(session_id, move || async move {
+                .run_idle_worker_maintenance(session_id, move || async move {
                     entered.notify_one();
                     release.notified().await;
                     Ok(())

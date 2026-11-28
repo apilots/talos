@@ -166,6 +166,14 @@ class Cluster:
         if self.dream_maintenance and 'control_plane' in node_config:
             document.setdefault('automation', {})['dream_memory_maintenance'] = {
                 'cron': '0/15 * * * * *', 'batch_size': 10, 'max_batches': 1}
+            # Remote maintenance must not depend on a Server execution model or credential.
+            document['llm'] = {
+                'provider': 'dream-server-unavailable', 'model': 'server-only-model',
+                'custom_providers': {'dream-server-unavailable': {
+                    'name': 'Unavailable Server model', 'protocol': 'chat',
+                    'base_url': 'http://127.0.0.1:9', 'models': [{'id': 'server-only-model'}]}}}
+            document['agent']['inner_model'] = {
+                'provider': 'dream-server-unavailable', 'id': 'server-only-model'}
         path = conf / 'talos.yaml'
         path.write_text(yaml.safe_dump(document, sort_keys=False))
         env_template = Path(os.environ.get('TALOS_TEST_ENV_TEMPLATE', ROOT / '.env'))

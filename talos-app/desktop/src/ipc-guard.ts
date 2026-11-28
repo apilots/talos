@@ -206,6 +206,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "project/read": projectParams,
   "session/active_turn": sessionParams,
   "session/clear": sessionParams,
+  "session/rebuildView": sessionParams,
   "session/close": sessionParams,
   "session/compact": sessionParams,
   "session/delete": sessionParams,

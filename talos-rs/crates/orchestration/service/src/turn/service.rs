@@ -38,6 +38,7 @@ mod input;
 mod interrupt;
 mod managed_wake;
 mod message_queue;
+mod rebuild;
 
 #[path = "service_subagent.rs"]
 mod subagent;

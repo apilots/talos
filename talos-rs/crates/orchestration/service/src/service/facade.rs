@@ -50,6 +50,8 @@ mod interrupt;
 #[path = "mcp_oauth.rs"]
 mod mcp_oauth;
 pub use mcp_oauth::McpPersonalCallback;
+#[path = "maintenance.rs"]
+mod maintenance;
 #[path = "message_queue.rs"]
 mod message_queue;
 #[path = "plugins.rs"]
@@ -703,24 +705,6 @@ impl TalosService {
             ));
         }
         Ok(())
-    }
-
-    /// Run one process-local maintenance operation only while the Session has no Turn owner.
-    ///
-    /// The reservation blocks new Turn admission for this Session for the operation duration.
-    /// It does not persist maintenance state or expose the execution gate to callers.
-    pub async fn run_idle_session_maintenance<T, F, Fut>(
-        &self,
-        session_id: &str,
-        operation: F,
-    ) -> ServiceResult<Option<T>>
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = ServiceResult<T>>,
-    {
-        self.turns
-            .run_when_session_idle(session_id, operation)
-            .await
     }
 
     pub async fn submit_turn_input(
