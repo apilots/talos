@@ -54,6 +54,9 @@ impl TalosApplicationRuntime {
             None => Ok(()),
         };
         let automation_result = self.automation.shutdown().await;
+        // Cursor recovery still needs the registered Harness until delivery finishes.
+        let delivery_result =
+            drain_product_delivery(&self.service, BACKGROUND_TASK_DRAIN_TIMEOUT).await;
         let drain_result = self
             .coordinator
             .shutdown(BACKGROUND_TASK_DRAIN_TIMEOUT)
@@ -66,6 +69,7 @@ impl TalosApplicationRuntime {
                 Err(error)
             }
         };
+        let result = combine(result, delivery_result);
         let result = combine(result, registration_result);
         let result = combine(result, self.worker.browser().shutdown().await);
         let result = combine(result, self.worker.plugin_manager().shutdown_mcp().await);
@@ -138,13 +142,18 @@ pub(super) async fn start_maintenance(
     Automation::start(jobs).await
 }
 
-pub(super) async fn finish(
-    result: TalosResult<()>,
-    automation: &Automation,
-    plugins: &talos_service::PluginManagerService,
+pub(super) async fn drain_product_delivery(
+    service: &talos_service::TalosService,
+    timeout: Duration,
 ) -> TalosResult<()> {
-    let result = combine(result, automation.shutdown().await);
-    combine(result, plugins.shutdown_mcp().await)
+    tokio::time::timeout(timeout, service.drain_execution_delivery())
+        .await
+        .map_err(|error| {
+            talos_error::TalosError::internal_with_source(
+                "Product execution delivery did not finish during shutdown.",
+                error,
+            )
+        })
 }
 
 pub(super) fn combine(
@@ -165,6 +174,7 @@ pub(super) fn combine(
 pub(super) async fn shutdown_server(
     coordinator: &Arc<CoordinatorImpl>,
     automation: &Automation,
+    service: &talos_service::TalosService,
     lifecycle: &Arc<ServerLifecycle>,
     plugins: &talos_service::PluginManagerService,
 ) -> TalosResult<()> {
@@ -180,10 +190,15 @@ pub(super) async fn shutdown_server(
         timeout_secs = BACKGROUND_TASK_DRAIN_TIMEOUT.as_secs(),
         "draining background tasks before shutdown"
     );
+    let result = automation.shutdown().await;
+    let result = combine(
+        result,
+        drain_product_delivery(service, BACKGROUND_TASK_DRAIN_TIMEOUT).await,
+    );
     if let Err(err) = coordinator.shutdown(BACKGROUND_TASK_DRAIN_TIMEOUT).await {
         warn!(error = %err, "background task drain failed on shutdown");
     }
-    let result = combine(automation.shutdown().await, plugins.shutdown_mcp().await);
+    let result = combine(result, plugins.shutdown_mcp().await);
     lifecycle.store(ServerLifecycleState::Stopped);
     result
 }

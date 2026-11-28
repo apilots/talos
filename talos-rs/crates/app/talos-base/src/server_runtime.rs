@@ -9,6 +9,7 @@ use webui::resolve_packaged_webui_dir;
 
 pub struct TalosServerRuntime {
     auth_service: Arc<dyn AuthService>,
+    service: Arc<TalosService>,
     pub(super) host: Arc<application_host::ApplicationHost>,
     http_server: HttpServer,
     channel_server: Option<ChannelServer>,
@@ -28,8 +29,8 @@ pub struct TalosServerRuntime {
     worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
 }
 
-// Includes coordinator drain (60s), MCP drain/cleanup (130s), and gateway shutdown.
-const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(240);
+// Includes execution/product drains (120s), MCP cleanup (130s), and gateway shutdown.
+const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub async fn run_server() -> TalosResult<()> {
     let _log_guard = startup::prepare_startup(None)?;
@@ -110,6 +111,7 @@ impl TalosServerRuntime {
     pub async fn run(self) -> TalosResult<()> {
         let TalosServerRuntime {
             auth_service,
+            service,
             host,
             http_server,
             channel_server,
@@ -190,6 +192,7 @@ impl TalosServerRuntime {
         let shutdown_result = application_automation::shutdown_server(
             &coordinator,
             &automation,
+            &service,
             &lifecycle,
             &plugins,
         )
@@ -312,6 +315,7 @@ pub(super) async fn start_server_after_startup(
 
     Ok(TalosServerRuntime {
         auth_service: runtime.auth_service,
+        service: runtime.service,
         host: runtime.host,
         coordinator: runtime.coordinator,
         gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),

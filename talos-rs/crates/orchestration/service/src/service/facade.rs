@@ -97,6 +97,12 @@ pub struct TalosService {
 }
 
 impl TalosService {
+    /// The host stops product admissions and scheduling first, keeping the source
+    /// Harness and model resources available until product delivery finishes.
+    pub async fn drain_execution_delivery(&self) {
+        self.turns.drain_execution_delivery().await;
+    }
+
     pub fn set_coordinator_id(&self, peer_id: String) {
         self.sessions.set_coordinator_id(peer_id);
     }

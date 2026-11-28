@@ -236,7 +236,7 @@ impl SessionStore for DatabaseSessionStore {
     ) -> TalosResult<bool> {
         let mut transaction = self.begin_session_transaction(&identity.session_id).await?;
         let affected = transaction.execute(
-            "UPDATE sessions SET title = ? WHERE session_key = ? AND title = ? AND EXISTS (SELECT 1 FROM agent_active_turns WHERE session_id = ? AND turn_id = ? AND state = 'running')",
+            "UPDATE sessions SET title = ? WHERE session_key = ? AND title = ? AND EXISTS (SELECT 1 FROM visible_agent_events WHERE session_id = ? AND turn_id = ? AND sequence IS NOT NULL AND json_extract(payload_json, '$.type') = 'turnCompleted')",
             &[title, &identity.session_id, DEFAULT_SESSION_TITLE, &identity.session_id, &identity.turn_id],
         ).await?;
         transaction.commit().await?;

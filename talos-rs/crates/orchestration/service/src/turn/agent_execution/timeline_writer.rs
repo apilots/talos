@@ -13,7 +13,6 @@ impl AgentExecutionDriver {
         mut inputs: mpsc::Receiver<RunningInputCommit>,
         settlement: AgentRunSettlementReceiver,
         _tail: (i64, u64),
-        purpose: ExecutionPurpose,
     ) -> TalosResult<AgentRunSettlement> {
         if let Err(error) = self.project_worker(&active.session).await {
             return self.recover_failed_execution(&active, 0, &error).await;
@@ -63,22 +62,32 @@ impl AgentExecutionDriver {
             Err(error) => return self.recover_failed_execution(&active, 0, &error).await,
         };
         self.project_worker(&active.session).await?;
-        if let AgentRunSettlement::Finished { event, .. } = &settlement {
+        Ok(settlement)
+    }
+
+    /// The same writer finalizes title delivery after live or recovered settlement.
+    pub(super) async fn finish_product_delivery(
+        &self,
+        active: &ActiveTimelineStream,
+        settlement: &AgentRunSettlement,
+        purpose: &ExecutionPurpose,
+    ) -> TalosResult<()> {
+        if let AgentRunSettlement::Finished { event, .. } = settlement {
             if !purpose.is_compaction()
                 && matches!(event.payload, AgentEventPayload::TurnCompleted(_))
             {
-                let record = self
-                    .execution_store
-                    .get_agent_event_by_sequence(&event.identity, event.sequence)
-                    .await?
-                    .ok_or_else(|| {
-                        TalosError::internal("Projected Worker terminal event is missing.")
-                    })?;
-                let checkpoint = self
-                    .event_service
-                    .turn_checkpoint(&event.identity, record.event_seq)
-                    .await?;
                 if let Some(model) = &self.inner_model {
+                    let record = self
+                        .execution_store
+                        .get_agent_event_by_sequence(&event.identity, event.sequence)
+                        .await?
+                        .ok_or_else(|| {
+                            TalosError::internal("Projected Worker terminal event is missing.")
+                        })?;
+                    let checkpoint = self
+                        .event_service
+                        .turn_checkpoint(&event.identity, record.event_seq)
+                        .await?;
                     if let Err(error) = self
                         .sessions
                         .generate_title(model, event, &checkpoint.messages)
@@ -99,7 +108,7 @@ impl AgentExecutionDriver {
                 "Agent compaction cannot wait for User input.",
             ));
         }
-        Ok(settlement)
+        Ok(())
     }
 
     /// A product/transport failure does not interrupt an admitted Worker or
@@ -113,9 +122,6 @@ impl AgentExecutionDriver {
         let settlement = self
             .recovered_worker_settlement(&active.identity, error)
             .await?;
-        if matches!(settlement, AgentRunSettlement::Finished { .. }) {
-            let _ = active.terminal_commit_tx.send(true);
-        }
         Ok(settlement)
     }
 }

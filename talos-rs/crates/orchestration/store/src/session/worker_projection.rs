@@ -62,7 +62,70 @@ pub(super) async fn project(
     params: WorkerProjectionParams,
 ) -> TalosResult<WorkerProjectionCommit> {
     validate(&params)?;
+    if params.page.events.is_empty()
+        && !params.page.has_more
+        && params.after_cursor.as_ref() == Some(&params.page.next_cursor)
+    {
+        // An unchanged source still receives identical ownership/generation
+        // checks, but local replay must not wait on a concurrent Sync writer.
+        let mut snapshot = store.storage.begin_read_transaction().await?;
+        let (generation, current) = projection_state(snapshot.as_mut(), &params).await?;
+        let active_turn = load_active_turn(snapshot.as_mut(), &params.session_id).await?;
+        snapshot.commit().await?;
+        return Ok(WorkerProjectionCommit {
+            events: Vec::new(),
+            active_turn,
+            cursor: AgentSessionEventCursor {
+                session_id: params.session_id,
+                generation,
+                offset: current,
+            },
+        });
+    }
     let mut tx = store.begin_session_transaction(&params.session_id).await?;
+    let (generation, current) = projection_state(tx.as_mut(), &params).await?;
+    let mut output = Vec::new();
+    for fact in &params.page.events {
+        let fingerprint = format!("{:x}", Sha256::digest(encode(fact)?.as_bytes()));
+        let previous = tx.query("SELECT event_fingerprint FROM worker_event_projection WHERE session_id=? AND history_generation=? AND worker_offset=?", &[&params.session_id, &generation.to_string(), &fact.cursor.offset.to_string()]).await?;
+        if let Some(row) = previous.first() {
+            if row.get_string("event_fingerprint").as_deref() != Some(&fingerprint) {
+                return Err(conflict("An already committed Worker event changed"));
+            }
+            continue;
+        }
+        if fact.cursor.offset <= current {
+            return Err(conflict(
+                "Worker source mapping has a gap before the product cursor",
+            ));
+        }
+        let event = project_event(tx.as_mut(), fact).await?;
+        metadata::project(tx.as_mut(), fact, &event).await?;
+        let settlement = fact.settlement.as_ref().map(encode).transpose()?;
+        let command = fact.command.as_ref().map(encode).transpose()?;
+        let execution_model = fact.execution_model.as_ref().map(encode).transpose()?;
+        tx.execute("INSERT INTO worker_event_projection(session_id,history_generation,worker_offset,product_event_seq,event_fingerprint,settlement_json,command_json,execution_model_json,execution_purpose) VALUES (?,?,?,?,?,?,?,?,?)", &[&params.session_id, &generation.to_string(), &fact.cursor.offset.to_string(), &event.event_seq.to_string(), &fingerprint, settlement.as_deref().unwrap_or("null"), command.as_deref().unwrap_or("null"), execution_model.as_deref().unwrap_or("null"), &encode(&fact.execution_purpose)?]).await?;
+        output.push(event);
+    }
+    let offset = current.max(params.page.next_cursor.offset);
+    tx.execute("INSERT INTO worker_projection_cursors(session_id,execution_node_id,history_generation,worker_offset) VALUES (?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET worker_offset=excluded.worker_offset", &[&params.session_id,&params.execution_node_id,&generation.to_string(),&offset.to_string()]).await?;
+    let active_turn = load_active_turn(tx.as_mut(), &params.session_id).await?;
+    tx.commit().await?;
+    Ok(WorkerProjectionCommit {
+        events: output,
+        active_turn,
+        cursor: AgentSessionEventCursor {
+            session_id: params.session_id,
+            generation,
+            offset,
+        },
+    })
+}
+
+async fn projection_state(
+    tx: &mut dyn StorageTransaction,
+    params: &WorkerProjectionParams,
+) -> TalosResult<(u64, i64)> {
     let sessions = tx
         .query(
             "SELECT execution_node_id, history_generation FROM sessions WHERE session_key=?",
@@ -108,42 +171,7 @@ pub(super) async fn project(
             "Worker event page starts beyond the committed product cursor",
         ));
     }
-    let mut output = Vec::new();
-    for fact in &params.page.events {
-        let fingerprint = format!("{:x}", Sha256::digest(encode(fact)?.as_bytes()));
-        let previous = tx.query("SELECT event_fingerprint FROM worker_event_projection WHERE session_id=? AND history_generation=? AND worker_offset=?", &[&params.session_id, &generation.to_string(), &fact.cursor.offset.to_string()]).await?;
-        if let Some(row) = previous.first() {
-            if row.get_string("event_fingerprint").as_deref() != Some(&fingerprint) {
-                return Err(conflict("An already committed Worker event changed"));
-            }
-            continue;
-        }
-        if fact.cursor.offset <= current {
-            return Err(conflict(
-                "Worker source mapping has a gap before the product cursor",
-            ));
-        }
-        let event = project_event(tx.as_mut(), fact).await?;
-        metadata::project(tx.as_mut(), fact, &event).await?;
-        let settlement = fact.settlement.as_ref().map(encode).transpose()?;
-        let command = fact.command.as_ref().map(encode).transpose()?;
-        let execution_model = fact.execution_model.as_ref().map(encode).transpose()?;
-        tx.execute("INSERT INTO worker_event_projection(session_id,history_generation,worker_offset,product_event_seq,event_fingerprint,settlement_json,command_json,execution_model_json,execution_purpose) VALUES (?,?,?,?,?,?,?,?,?)", &[&params.session_id, &generation.to_string(), &fact.cursor.offset.to_string(), &event.event_seq.to_string(), &fingerprint, settlement.as_deref().unwrap_or("null"), command.as_deref().unwrap_or("null"), execution_model.as_deref().unwrap_or("null"), &encode(&fact.execution_purpose)?]).await?;
-        output.push(event);
-    }
-    let offset = current.max(params.page.next_cursor.offset);
-    tx.execute("INSERT INTO worker_projection_cursors(session_id,execution_node_id,history_generation,worker_offset) VALUES (?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET worker_offset=excluded.worker_offset", &[&params.session_id,&params.execution_node_id,&generation.to_string(),&offset.to_string()]).await?;
-    let active_turn = load_active_turn(tx.as_mut(), &params.session_id).await?;
-    tx.commit().await?;
-    Ok(WorkerProjectionCommit {
-        events: output,
-        active_turn,
-        cursor: AgentSessionEventCursor {
-            session_id: params.session_id,
-            generation,
-            offset,
-        },
-    })
+    Ok((generation, current))
 }
 
 async fn project_event(

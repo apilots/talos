@@ -39,7 +39,7 @@ impl TurnService {
         ownership: Option<talos_agent::SessionLease>,
     ) {
         let turn_service = self.clone();
-        tokio::spawn(async move {
+        self.execution.spawn_delivery(async move {
             let _ownership = ownership;
             let settlement = match completion.await {
                 Ok(Ok(settlement)) => settlement,

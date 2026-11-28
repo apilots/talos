@@ -73,7 +73,7 @@ impl TalosWorker {
                 .try_file_lock(&namespace_lock)?
                 .ok_or_else(|| {
                     TalosError::new(
-                        ErrorCode::Conflict,
+                        ErrorCode::SessionHeld,
                         "Worker execution namespace is already in use.",
                     )
                 })?,

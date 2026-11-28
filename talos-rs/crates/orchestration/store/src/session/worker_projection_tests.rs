@@ -460,3 +460,9 @@ async fn compaction_usage_and_original_purpose_project_once_without_counting_a_t
 
 #[path = "worker_settlement_notice_tests.rs"]
 mod notice_tests;
+
+#[path = "worker_title_tests.rs"]
+mod worker_title_tests;
+
+#[path = "worker_projection_read_tests.rs"]
+mod read_tests;

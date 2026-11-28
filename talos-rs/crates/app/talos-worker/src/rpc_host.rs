@@ -270,4 +270,26 @@ mod tests {
         drop(adapter);
         assert!(talos_fs::std_fs().try_file_lock(&lock).unwrap().is_some());
     }
+    #[tokio::test]
+    async fn another_namespace_owner_is_reported_as_held_and_releases_on_drop() {
+        let home = tempfile::tempdir().unwrap();
+        let config = talos_config::Config::default()
+            .with_runtime_paths(talos_config::TalosPaths::from_home(home.path().to_owned()));
+        let build = || {
+            crate::TalosWorker::build(
+                config.clone(),
+                crate::TalosWorkerResources {
+                    attachment_reader: Arc::new(UnusedFiles),
+                    tool_image_store: Arc::new(UnusedFiles),
+                    agent_control: None,
+                    automation_control: None,
+                },
+            )
+        };
+        let first = build().await.unwrap();
+        assert!(build().await.err().unwrap().is_code(ErrorCode::SessionHeld));
+        drop(first);
+        let reopened = build().await.unwrap();
+        drop(reopened);
+    }
 }

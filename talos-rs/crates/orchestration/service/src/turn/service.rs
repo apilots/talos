@@ -68,6 +68,10 @@ struct TurnSubmission {
 }
 
 impl TurnService {
+    pub(crate) async fn drain_execution_delivery(&self) {
+        self.execution.drain_delivery().await;
+    }
+
     /// Assemble turn policy around the existing execution driver and its shared dependencies.
     pub fn new(
         execution: AgentExecutionDriver,

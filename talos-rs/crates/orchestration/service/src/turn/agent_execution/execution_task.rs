@@ -48,7 +48,6 @@ impl AgentExecutionDriver {
                             input_rx,
                             settlement,
                             (durable_tail, last_sequence),
-                            purpose,
                         )
                         .await
                 }
@@ -60,8 +59,8 @@ impl AgentExecutionDriver {
             }
         });
         let driver = self.clone();
-        tokio::spawn(async move {
-            let result = match task.await {
+        self.spawn_delivery(async move {
+            let mut result = match task.await {
                 Ok(result) => result,
                 Err(source) => {
                     let error = TalosError::internal_with_source(
@@ -86,6 +85,14 @@ impl AgentExecutionDriver {
                     }
                 }
             };
+            if let Ok(settlement) = &result {
+                if let Err(error) = driver
+                    .finish_product_delivery(&active, settlement, &purpose)
+                    .await
+                {
+                    result = Err(error);
+                }
+            }
             driver.remove_live_execution(&identity);
             // A cancelled receiver no longer owns reporting; committed facts remain intact.
             if let Err(result) = completion_tx.send(result) {

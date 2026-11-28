@@ -124,10 +124,23 @@ pub(crate) struct AgentExecutionDriver {
     pub(super) sessions: Arc<crate::session::SessionService>,
     inner_model: Option<Arc<crate::InnerModelClient>>,
     active: Arc<Mutex<HashMap<String, LiveExecution>>>,
+    delivery_tasks: tokio_util::task::TaskTracker,
     message_queue: Option<SessionMessageQueueService>,
 }
 
 impl AgentExecutionDriver {
+    pub(crate) async fn drain_delivery(&self) {
+        self.delivery_tasks.close();
+        self.delivery_tasks.wait().await;
+    }
+
+    pub(crate) fn spawn_delivery(
+        &self,
+        future: impl std::future::Future<Output = ()> + Send + 'static,
+    ) {
+        self.delivery_tasks.spawn(future);
+    }
+
     pub(crate) fn has_live_execution(&self, session_id: &str) -> bool {
         self.active
             .lock()
@@ -151,6 +164,7 @@ impl AgentExecutionDriver {
             sessions,
             inner_model: None,
             active: Arc::new(Mutex::new(HashMap::new())),
+            delivery_tasks: tokio_util::task::TaskTracker::new(),
             message_queue: None,
         }
     }

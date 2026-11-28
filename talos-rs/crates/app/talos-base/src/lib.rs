@@ -328,15 +328,22 @@ pub fn exit_with_error(context: &str, error: TalosError) -> ! {
     std::process::exit(1);
 }
 
-/// Bridges `CoordinatorImpl` to the `BackgroundTaskDrain` trait used by the app-server.
+/// Drains execution and product delivery before app-server resource cleanup.
 struct CoordinatorDrain {
     coordinator: Arc<CoordinatorImpl>,
+    service: Arc<TalosService>,
+    automation: Automation,
 }
 
 #[async_trait::async_trait]
 impl BackgroundTaskDrain for CoordinatorDrain {
     async fn drain(&self, timeout: Duration) -> TalosResult<()> {
-        self.coordinator.shutdown(timeout).await
+        let result = self.automation.shutdown().await;
+        let result = application_automation::combine(
+            result,
+            application_automation::drain_product_delivery(&self.service, timeout).await,
+        );
+        application_automation::combine(result, self.coordinator.shutdown(timeout).await)
     }
 }
 
@@ -387,15 +394,14 @@ async fn run_json_rpc_stdio_after_startup(
     } else {
         None
     };
-    let automation = runtime.automation.clone();
-    let plugins = runtime.worker.plugin_manager();
-    let worker_rpc = runtime.worker_rpc.clone();
     let replay_limit = config.agent.timeline_replay_batch_size.max(1);
     let service = runtime.service.clone();
     let app = Arc::new(
         talos_app_server::TalosApplicationAdapter::new(service.clone(), replay_limit)
             .with_drain_provider(Box::new(CoordinatorDrain {
                 coordinator: runtime.coordinator.clone(),
+                service: service.clone(),
+                automation: runtime.automation.clone(),
             }))
             .with_cloud_api_base_url(config.cloud.api_base_url.clone()),
     );
@@ -441,15 +447,8 @@ async fn run_json_rpc_stdio_after_startup(
             error,
         )
     });
-    let result = application_automation::finish(result, &automation, &plugins).await;
     runtime.host.shutdown_refreshes().await;
-    let registration = match runtime.worker_registration.lock().await.take() {
-        Some(registration) => registration.shutdown().await,
-        None => Ok(()),
-    };
-    let result = application_automation::combine(result, registration);
-    let result = application_automation::combine(result, runtime.worker.browser().shutdown().await);
-    let result = application_automation::combine(result, worker_rpc.shutdown().await);
+    let result = application_automation::combine(result, runtime.shutdown().await);
     let result = application_automation::combine(result, runtime.shutdown_host().await);
     runtime.auth_service.shutdown().await;
     {
